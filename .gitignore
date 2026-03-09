@@ -1,0 +1,19 @@
+node_modules
+.env
+.env.local
+.env*.local
+dist
+.next
+*.log
+
+# IDE / OS
+.DS_Store
+
+# Test coverage
+coverage/
+
+# Secrets / keys
+*.pem
+
+# Tool config (may contain auth tokens)
+.mcp.json
