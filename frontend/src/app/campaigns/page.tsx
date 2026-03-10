@@ -44,8 +44,8 @@ export default function CampaignsPage() {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {campaigns.map((c) => (
             <Link
-              key={c._id}
-              href={`/campaigns/${c._id}`}
+              key={c.id}
+              href={`/campaigns/${c.id}`}
               className="block p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
             >
               <div className="flex items-start justify-between mb-2">

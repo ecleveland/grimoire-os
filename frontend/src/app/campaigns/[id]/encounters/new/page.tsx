@@ -41,7 +41,7 @@ export default function NewEncounterPage() {
         body: JSON.stringify({ campaignId: id, name, combatants }),
       });
       toast.success('Encounter created!');
-      router.push(`/campaigns/${id}/encounters/${encounter._id}`);
+      router.push(`/campaigns/${id}/encounters/${encounter.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create encounter');
       setSubmitting(false);

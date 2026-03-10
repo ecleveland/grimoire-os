@@ -32,9 +32,9 @@ export default function ClassListPage() {
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Classes</h1>
       <div className="space-y-4">
         {classes.map((cls) => (
-          <div key={cls._id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div key={cls.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <button
-              onClick={() => toggle(cls._id)}
+              onClick={() => toggle(cls.id)}
               className="w-full flex items-center justify-between p-4 text-left"
             >
               <div>
@@ -43,9 +43,9 @@ export default function ClassListPage() {
                   Hit Die: {cls.hitDie} &middot; {cls.primaryAbilities.join(', ')}
                 </p>
               </div>
-              <span className="text-gray-400 text-lg">{expanded.has(cls._id) ? '\u2212' : '+'}</span>
+              <span className="text-gray-400 text-lg">{expanded.has(cls.id) ? '\u2212' : '+'}</span>
             </button>
-            {expanded.has(cls._id) && (
+            {expanded.has(cls.id) && (
               <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3 space-y-3">
                 {cls.description && (
                   <p className="text-gray-600 dark:text-gray-400 text-sm">{cls.description}</p>

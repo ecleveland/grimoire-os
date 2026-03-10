@@ -13,7 +13,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/schemas/user.schema';
+import { UserRole } from '../prisma/enums';
 import { UsersService } from '../users/users.service';
 import { AdminUpdateUserDto } from '../users/dto/admin-update-user.dto';
 

@@ -1,5 +1,5 @@
 export interface User {
-  _id: string;
+  id: string;
   username: string;
   displayName?: string;
   email?: string;
@@ -10,7 +10,7 @@ export interface User {
 }
 
 export interface Campaign {
-  _id: string;
+  id: string;
   name: string;
   description?: string;
   ownerId: string;
@@ -73,7 +73,7 @@ export interface Feature {
 }
 
 export interface Character {
-  _id: string;
+  id: string;
   userId: string;
   campaignId?: string;
   name: string;
@@ -115,7 +115,7 @@ export interface Character {
 }
 
 export interface Note {
-  _id: string;
+  id: string;
   campaignId: string;
   authorId: string;
   title: string;
@@ -138,7 +138,7 @@ export interface Combatant {
 }
 
 export interface Encounter {
-  _id: string;
+  id: string;
   campaignId: string;
   createdBy: string;
   name: string;
@@ -151,7 +151,7 @@ export interface Encounter {
 }
 
 export interface SrdSpell {
-  _id: string;
+  id: string;
   name: string;
   level: number;
   school: string;
@@ -166,7 +166,7 @@ export interface SrdSpell {
 }
 
 export interface SrdMonster {
-  _id: string;
+  id: string;
   name: string;
   size: string;
   type: string;
@@ -186,7 +186,7 @@ export interface SrdMonster {
 }
 
 export interface SrdItem {
-  _id: string;
+  id: string;
   name: string;
   category: string;
   cost?: string;
@@ -197,7 +197,7 @@ export interface SrdItem {
 }
 
 export interface SrdClass {
-  _id: string;
+  id: string;
   name: string;
   hitDie: string;
   primaryAbilities: string[];
@@ -210,7 +210,7 @@ export interface SrdClass {
 }
 
 export interface SrdRace {
-  _id: string;
+  id: string;
   name: string;
   speed: number;
   size: string;

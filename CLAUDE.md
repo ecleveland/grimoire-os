@@ -14,7 +14,7 @@ JWT_SECRET=your-secret docker compose up --build
 
 ## Architecture
 
-- **Backend**: NestJS 11 + MongoDB (Mongoose 9) — port 3001
+- **Backend**: NestJS 11 + PostgreSQL 16 (Prisma) — port 3001
 - **Frontend**: Next.js 16 + React 19 + Tailwind v4 — port 3000
 - **Auth**: JWT + Passport + bcryptjs, roles: player / dungeon_master / admin
 
@@ -36,7 +36,7 @@ cd frontend && npm test           # Unit tests
 | Variable | Required | Default |
 |----------|----------|---------|
 | JWT_SECRET | Yes | — |
-| MONGODB_URI | No | mongodb://localhost:27017/grimoire-os |
+| DATABASE_URL | No | postgresql://grimoire:grimoire@localhost:5432/grimoire_os |
 | JWT_EXPIRES_IN | No | 24h |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |

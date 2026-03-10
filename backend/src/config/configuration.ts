@@ -6,7 +6,7 @@ export default () => {
   return {
     port: parseInt(process.env.PORT ?? '3001', 10),
     database: {
-      uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/grimoire-os',
+      url: process.env.DATABASE_URL || 'postgresql://grimoire:grimoire@localhost:5432/grimoire_os',
     },
     auth: {
       jwtSecret: process.env.JWT_SECRET,

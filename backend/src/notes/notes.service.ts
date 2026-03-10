@@ -3,9 +3,8 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
-import { Note, NoteDocument, NoteVisibility } from './schemas/note.schema';
+import { PrismaService } from '../prisma/prisma.service';
+import { NoteVisibility } from '../prisma/enums';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 import { CampaignsService } from '../campaigns/campaigns.service';
@@ -13,102 +12,93 @@ import { CampaignsService } from '../campaigns/campaigns.service';
 @Injectable()
 export class NotesService {
   constructor(
-    @InjectModel(Note.name) private noteModel: Model<NoteDocument>,
+    private prisma: PrismaService,
     private campaignsService: CampaignsService,
   ) {}
 
-  async create(userId: string, dto: CreateNoteDto): Promise<NoteDocument> {
+  async create(userId: string, dto: CreateNoteDto) {
     await this.campaignsService.findOneForUser(dto.campaignId, userId);
-    const note = new this.noteModel({
-      ...dto,
-      campaignId: new Types.ObjectId(dto.campaignId),
-      authorId: new Types.ObjectId(userId),
+    return this.prisma.note.create({
+      data: {
+        ...dto,
+        authorId: userId,
+      },
     });
-    return note.save();
   }
 
-  async findAllForCampaign(
-    campaignId: string,
-    userId: string,
-  ): Promise<NoteDocument[]> {
+  async findAllForCampaign(campaignId: string, userId: string) {
     const campaign = await this.campaignsService.findOneForUser(
       campaignId,
       userId,
     );
-    const isDm = campaign.ownerId.equals(new Types.ObjectId(userId));
-    const oid = new Types.ObjectId(userId);
+    const isDm = campaign.ownerId === userId;
 
-    let filter: Record<string, unknown>;
     if (isDm) {
-      filter = { campaignId: new Types.ObjectId(campaignId) };
-    } else {
-      filter = {
-        campaignId: new Types.ObjectId(campaignId),
-        $or: [
-          { visibility: NoteVisibility.PARTY },
-          { authorId: oid, visibility: NoteVisibility.PRIVATE },
-        ],
-      };
+      return this.prisma.note.findMany({
+        where: { campaignId },
+        orderBy: { updatedAt: 'desc' },
+      });
     }
 
-    return this.noteModel.find(filter).sort({ updatedAt: -1 }).exec();
+    return this.prisma.note.findMany({
+      where: {
+        campaignId,
+        OR: [
+          { visibility: NoteVisibility.PARTY },
+          { authorId: userId, visibility: NoteVisibility.PRIVATE },
+        ],
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
   }
 
-  async findOne(id: string, userId: string): Promise<NoteDocument> {
-    const note = await this.noteModel.findById(id).exec();
+  async findOne(id: string, userId: string) {
+    const note = await this.prisma.note.findUnique({ where: { id } });
     if (!note) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
     const campaign = await this.campaignsService.findOneForUser(
-      note.campaignId.toString(),
+      note.campaignId,
       userId,
     );
-    const isDm = campaign.ownerId.equals(new Types.ObjectId(userId));
-    const isAuthor = note.authorId.equals(new Types.ObjectId(userId));
+    const isDm = campaign.ownerId === userId;
+    const isAuthor = note.authorId === userId;
 
-    if (
-      !isDm &&
-      !isAuthor &&
-      note.visibility !== NoteVisibility.PARTY
-    ) {
+    if (!isDm && !isAuthor && note.visibility !== NoteVisibility.PARTY) {
       throw new ForbiddenException('You do not have access to this note');
     }
 
     return note;
   }
 
-  async update(
-    id: string,
-    userId: string,
-    dto: UpdateNoteDto,
-  ): Promise<NoteDocument> {
-    const note = await this.noteModel.findById(id).exec();
+  async update(id: string, userId: string, dto: UpdateNoteDto) {
+    const note = await this.prisma.note.findUnique({ where: { id } });
     if (!note) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
-    if (!note.authorId.equals(new Types.ObjectId(userId))) {
+    if (note.authorId !== userId) {
       throw new ForbiddenException('Only the author can edit this note');
     }
-    Object.assign(note, dto);
-    return note.save();
+    return this.prisma.note.update({
+      where: { id },
+      data: dto,
+    });
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const note = await this.noteModel.findById(id).exec();
+    const note = await this.prisma.note.findUnique({ where: { id } });
     if (!note) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
-    const campaign = await this.campaignsService.findOne(
-      note.campaignId.toString(),
-    );
-    const isDm = campaign.ownerId.equals(new Types.ObjectId(userId));
-    const isAuthor = note.authorId.equals(new Types.ObjectId(userId));
+    const campaign = await this.campaignsService.findOne(note.campaignId);
+    const isDm = campaign.ownerId === userId;
+    const isAuthor = note.authorId === userId;
 
     if (!isDm && !isAuthor) {
       throw new ForbiddenException('Only the author or DM can delete this note');
     }
-    await this.noteModel.findByIdAndDelete(id).exec();
+    await this.prisma.note.delete({ where: { id } });
   }
 }

@@ -74,7 +74,7 @@ export default function SpellListPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((s) => (
-          <div key={s._id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div key={s.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <h3 className="font-semibold text-gray-900 dark:text-white">{s.name}</h3>
             <div className="flex items-center gap-2 mt-1 text-sm text-gray-500 dark:text-gray-400">
               <span>{s.level === 0 ? 'Cantrip' : `Level ${s.level}`}</span>

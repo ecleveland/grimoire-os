@@ -35,7 +35,7 @@ export default function NewNotePage() {
         }),
       });
       toast.success('Note created!');
-      router.push(`/campaigns/${id}/notes/${note._id}`);
+      router.push(`/campaigns/${id}/notes/${note.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create note');
       setSubmitting(false);

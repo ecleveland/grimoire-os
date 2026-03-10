@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { MongooseModule } from '@nestjs/mongoose';
 import configuration from './config/configuration';
+import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
@@ -19,12 +19,7 @@ import { AdminModule } from './admin/admin.module';
       load: [configuration],
     }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 60 }]),
-    MongooseModule.forRootAsync({
-      useFactory: (configService: ConfigService) => ({
-        uri: configService.get<string>('database.uri'),
-      }),
-      inject: [ConfigService],
-    }),
+    PrismaModule,
     AuthModule,
     UsersModule,
     CampaignsModule,

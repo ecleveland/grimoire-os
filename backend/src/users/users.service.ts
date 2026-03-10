@@ -4,38 +4,34 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import { User, UserDocument, UserRole } from './schemas/user.schema';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(
-    @InjectModel(User.name) private userModel: Model<UserDocument>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
-  async create(createUserDto: CreateUserDto): Promise<UserDocument> {
+  async create(createUserDto: CreateUserDto) {
     const passwordHash = await bcrypt.hash(createUserDto.password, 10);
-    const user = new this.userModel({
-      username: createUserDto.username,
-      passwordHash,
-      displayName: createUserDto.displayName,
-      email: createUserDto.email,
-      avatarUrl: createUserDto.avatarUrl,
-      role: createUserDto.role ?? UserRole.PLAYER,
-    });
-
     try {
-      return await user.save();
+      return await this.prisma.user.create({
+        data: {
+          username: createUserDto.username,
+          passwordHash,
+          displayName: createUserDto.displayName ?? createUserDto.username,
+          email: createUserDto.email,
+          avatarUrl: createUserDto.avatarUrl,
+          role: createUserDto.role ?? 'player',
+        },
+      });
     } catch (error: unknown) {
       if (
-        error instanceof Error &&
-        'code' in error &&
-        (error as { code: number }).code === 11000
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
       ) {
         throw new ConflictException('Username or email already exists');
       }
@@ -43,51 +39,59 @@ export class UsersService {
     }
   }
 
-  async findAll(): Promise<UserDocument[]> {
-    return this.userModel.find().select('-passwordHash').exec();
+  async findAll() {
+    return this.prisma.user.findMany({
+      omit: { passwordHash: true },
+    });
   }
 
-  async findOne(id: string): Promise<UserDocument> {
-    const user = await this.userModel.findById(id).exec();
+  async findOne(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
     return user;
   }
 
-  async findOnePublic(id: string): Promise<UserDocument> {
-    const user = await this.userModel
-      .findById(id)
-      .select('-passwordHash')
-      .exec();
+  async findOnePublic(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      omit: { passwordHash: true },
+    });
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
     return user;
   }
 
-  async findByUsername(username: string): Promise<UserDocument | null> {
-    return this.userModel.findOne({ username: username.toLowerCase() }).exec();
+  async findByUsername(username: string) {
+    return this.prisma.user.findFirst({
+      where: { username: username.toLowerCase() },
+    });
   }
 
-  async findByEmail(email: string): Promise<UserDocument | null> {
-    return this.userModel
-      .findOne({ email: email.toLowerCase() } as Record<string, unknown>)
-      .exec();
+  async findByEmail(email: string) {
+    return this.prisma.user.findFirst({
+      where: { email: email.toLowerCase() },
+    });
   }
 
-  async update(
-    id: string,
-    updateDto: UpdateUserDto | AdminUpdateUserDto,
-  ): Promise<UserDocument> {
-    const user = await this.userModel
-      .findByIdAndUpdate(id, updateDto, { new: true, runValidators: true })
-      .select('-passwordHash')
-      .exec();
-    if (!user) {
-      throw new NotFoundException(`User with ID "${id}" not found`);
+  async update(id: string, updateDto: UpdateUserDto | AdminUpdateUserDto) {
+    try {
+      return await this.prisma.user.update({
+        where: { id },
+        data: updateDto,
+        omit: { passwordHash: true },
+      });
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException(`User with ID "${id}" not found`);
+      }
+      throw error;
     }
-    return user;
   }
 
   async changePassword(
@@ -100,14 +104,24 @@ export class UsersService {
     if (!isValid) {
       throw new UnauthorizedException('Current password is incorrect');
     }
-    user.passwordHash = await bcrypt.hash(newPassword, 10);
-    await user.save();
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash },
+    });
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.userModel.findByIdAndDelete(id).exec();
-    if (!result) {
-      throw new NotFoundException(`User with ID "${id}" not found`);
+    try {
+      await this.prisma.user.delete({ where: { id } });
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
+        throw new NotFoundException(`User with ID "${id}" not found`);
+      }
+      throw error;
     }
   }
 }

@@ -22,7 +22,7 @@ export default function NewCampaignPage() {
         body: JSON.stringify({ name, description, setting }),
       });
       toast.success('Campaign created!');
-      router.push(`/campaigns/${campaign._id}`);
+      router.push(`/campaigns/${campaign.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create campaign');
       setSubmitting(false);

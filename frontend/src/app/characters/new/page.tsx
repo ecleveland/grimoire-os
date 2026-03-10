@@ -53,7 +53,7 @@ export default function NewCharacterPage() {
         }),
       });
       toast.success('Character created!');
-      router.push(`/characters/${character._id}`);
+      router.push(`/characters/${character.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create character');
       setSubmitting(false);

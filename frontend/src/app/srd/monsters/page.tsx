@@ -77,7 +77,7 @@ export default function MonsterListPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((m) => (
-          <div key={m._id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div key={m.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <h3 className="font-semibold text-gray-900 dark:text-white">{m.name}</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {m.size} {m.type} &middot; {m.alignment}

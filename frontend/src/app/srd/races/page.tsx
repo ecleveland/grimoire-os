@@ -32,9 +32,9 @@ export default function RaceListPage() {
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Races</h1>
       <div className="space-y-4">
         {races.map((race) => (
-          <div key={race._id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+          <div key={race.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
             <button
-              onClick={() => toggle(race._id)}
+              onClick={() => toggle(race.id)}
               className="w-full flex items-center justify-between p-4 text-left"
             >
               <div>
@@ -43,9 +43,9 @@ export default function RaceListPage() {
                   Speed: {race.speed} ft &middot; Size: {race.size}
                 </p>
               </div>
-              <span className="text-gray-400 text-lg">{expanded.has(race._id) ? '\u2212' : '+'}</span>
+              <span className="text-gray-400 text-lg">{expanded.has(race.id) ? '\u2212' : '+'}</span>
             </button>
-            {expanded.has(race._id) && (
+            {expanded.has(race.id) && (
               <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3 space-y-3">
                 {race.description && (
                   <p className="text-gray-600 dark:text-gray-400 text-sm">{race.description}</p>

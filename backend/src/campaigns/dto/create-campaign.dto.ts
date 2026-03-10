@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsEnum, IsNumber } from 'class-validator';
-import { CampaignStatus } from '../schemas/campaign.schema';
+import { CampaignStatus } from '../../prisma/enums';
 
 export class CreateCampaignDto {
   @IsString()

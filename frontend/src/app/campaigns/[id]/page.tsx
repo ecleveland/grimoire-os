@@ -194,8 +194,8 @@ export default function CampaignDetailPage() {
             <div className="space-y-3">
               {notes.map((n) => (
                 <Link
-                  key={n._id}
-                  href={`/campaigns/${id}/notes/${n._id}`}
+                  key={n.id}
+                  href={`/campaigns/${id}/notes/${n.id}`}
                   className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
                 >
                   <div className="flex items-center justify-between">
@@ -237,8 +237,8 @@ export default function CampaignDetailPage() {
             <div className="space-y-3">
               {encounters.map((enc) => (
                 <Link
-                  key={enc._id}
-                  href={`/campaigns/${id}/encounters/${enc._id}`}
+                  key={enc.id}
+                  href={`/campaigns/${id}/encounters/${enc.id}`}
                   className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
                 >
                   <div className="flex items-center justify-between">

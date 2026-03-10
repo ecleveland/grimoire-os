@@ -1,11 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { SrdSpell, SrdSpellDocument } from '../srd/schemas/srd-spell.schema';
-import { SrdMonster, SrdMonsterDocument } from '../srd/schemas/srd-monster.schema';
-import { SrdItem, SrdItemDocument } from '../srd/schemas/srd-item.schema';
-import { SrdClass, SrdClassDocument } from '../srd/schemas/srd-class.schema';
-import { SrdRace, SrdRaceDocument } from '../srd/schemas/srd-race.schema';
+import { PrismaService } from '../prisma/prisma.service';
 import { srdSpells } from './data/spells';
 import { srdMonsters } from './data/monsters';
 import { srdItems } from './data/items';
@@ -14,49 +8,53 @@ import { srdRaces } from './data/races';
 
 @Injectable()
 export class SeedService {
-  constructor(
-    @InjectModel(SrdSpell.name) private spellModel: Model<SrdSpellDocument>,
-    @InjectModel(SrdMonster.name) private monsterModel: Model<SrdMonsterDocument>,
-    @InjectModel(SrdItem.name) private itemModel: Model<SrdItemDocument>,
-    @InjectModel(SrdClass.name) private classModel: Model<SrdClassDocument>,
-    @InjectModel(SrdRace.name) private raceModel: Model<SrdRaceDocument>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async seed(): Promise<void> {
     console.log('Seeding SRD data...');
 
     for (const spell of srdSpells) {
-      await this.spellModel
-        .updateOne({ name: spell.name }, { $set: spell }, { upsert: true })
-        .exec();
+      await this.prisma.spell.upsert({
+        where: { name: spell.name },
+        create: spell,
+        update: spell,
+      });
     }
     console.log(`  Spells: ${srdSpells.length} upserted`);
 
     for (const monster of srdMonsters) {
-      await this.monsterModel
-        .updateOne({ name: monster.name }, { $set: monster }, { upsert: true })
-        .exec();
+      await this.prisma.monster.upsert({
+        where: { name: monster.name },
+        create: monster,
+        update: monster,
+      });
     }
     console.log(`  Monsters: ${srdMonsters.length} upserted`);
 
     for (const item of srdItems) {
-      await this.itemModel
-        .updateOne({ name: item.name }, { $set: item }, { upsert: true })
-        .exec();
+      await this.prisma.item.upsert({
+        where: { name: item.name },
+        create: item,
+        update: item,
+      });
     }
     console.log(`  Items: ${srdItems.length} upserted`);
 
     for (const cls of srdClasses) {
-      await this.classModel
-        .updateOne({ name: cls.name }, { $set: cls }, { upsert: true })
-        .exec();
+      await this.prisma.srdClass.upsert({
+        where: { name: cls.name },
+        create: cls,
+        update: cls,
+      });
     }
     console.log(`  Classes: ${srdClasses.length} upserted`);
 
     for (const race of srdRaces) {
-      await this.raceModel
-        .updateOne({ name: race.name }, { $set: race }, { upsert: true })
-        .exec();
+      await this.prisma.race.upsert({
+        where: { name: race.name },
+        create: race,
+        update: race,
+      });
     }
     console.log(`  Races: ${srdRaces.length} upserted`);
 

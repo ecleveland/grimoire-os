@@ -1,12 +1,16 @@
 services:
-  mongo:
-    image: mongo:7
+  postgres:
+    image: postgres:16-alpine
     ports:
-      - '27017:27017'
+      - '5432:5432'
+    environment:
+      - POSTGRES_USER=grimoire
+      - POSTGRES_PASSWORD=grimoire
+      - POSTGRES_DB=grimoire_os
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD', 'mongosh', '--eval', "db.adminCommand('ping')"]
+      test: ['CMD', 'pg_isready', '-U', 'grimoire', '-d', 'grimoire_os']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -20,12 +24,12 @@ services:
       - '3001:3001'
     environment:
       - PORT=3001
-      - MONGODB_URI=mongodb://mongo:27017/grimoire-os
+      - DATABASE_URL=postgresql://grimoire:grimoire@postgres:5432/grimoire_os
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - FRONTEND_URL=http://localhost:3000
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -44,4 +48,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  mongo_data:
+  postgres_data:

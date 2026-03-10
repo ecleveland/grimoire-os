@@ -30,7 +30,7 @@ export default function AdminUsersPage() {
         method: 'PATCH',
         body: JSON.stringify({ role }),
       });
-      setUsers((prev) => prev.map((u) => (u._id === userId ? { ...u, role } : u)));
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role } : u)));
       toast.success('Role updated');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update role');
@@ -41,7 +41,7 @@ export default function AdminUsersPage() {
     if (!confirm(`Are you sure you want to delete user "${username}"? This cannot be undone.`)) return;
     try {
       await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
-      setUsers((prev) => prev.filter((u) => u._id !== userId));
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
       toast.success('User deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete user');
@@ -72,14 +72,14 @@ export default function AdminUsersPage() {
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {users.map((u) => (
-                <tr key={u._id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
                   <td className="px-4 py-3 text-gray-900 dark:text-white font-medium">{u.username}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{u.displayName || '-'}</td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{u.email || '-'}</td>
                   <td className="px-4 py-3">
                     <select
                       value={u.role}
-                      onChange={(e) => updateRole(u._id, e.target.value as User['role'])}
+                      onChange={(e) => updateRole(u.id, e.target.value as User['role'])}
                       className={selectClass}
                     >
                       <option value="player">Player</option>
@@ -89,7 +89,7 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={() => deleteUser(u._id, u.username)}
+                      onClick={() => deleteUser(u.id, u.username)}
                       className="text-sm text-red-600 hover:text-red-700"
                     >
                       Delete

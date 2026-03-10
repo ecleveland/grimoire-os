@@ -3,158 +3,148 @@ import {
   NotFoundException,
   ForbiddenException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
 import * as crypto from 'crypto';
-import { Campaign, CampaignDocument } from './schemas/campaign.schema';
+import { PrismaService } from '../prisma/prisma.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 
+const campaignInclude = {
+  players: true,
+  characters: true,
+} as const;
+
 @Injectable()
 export class CampaignsService {
-  constructor(
-    @InjectModel(Campaign.name) private campaignModel: Model<CampaignDocument>,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
-  async create(
-    userId: string,
-    dto: CreateCampaignDto,
-  ): Promise<CampaignDocument> {
-    const campaign = new this.campaignModel({
-      ...dto,
-      ownerId: new Types.ObjectId(userId),
-      playerIds: [new Types.ObjectId(userId)],
+  async create(userId: string, dto: CreateCampaignDto) {
+    return this.prisma.campaign.create({
+      data: {
+        ...dto,
+        ownerId: userId,
+        players: { create: { userId } },
+      },
+      include: campaignInclude,
     });
-    return campaign.save();
   }
 
-  async findAllForUser(userId: string): Promise<CampaignDocument[]> {
-    const oid = new Types.ObjectId(userId);
-    return this.campaignModel
-      .find({ $or: [{ ownerId: oid }, { playerIds: oid }] })
-      .sort({ updatedAt: -1 })
-      .exec();
+  async findAllForUser(userId: string) {
+    return this.prisma.campaign.findMany({
+      where: {
+        OR: [
+          { ownerId: userId },
+          { players: { some: { userId } } },
+        ],
+      },
+      include: campaignInclude,
+      orderBy: { updatedAt: 'desc' },
+    });
   }
 
-  async findOne(id: string): Promise<CampaignDocument> {
-    const campaign = await this.campaignModel.findById(id).exec();
+  async findOne(id: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: campaignInclude,
+    });
     if (!campaign) {
       throw new NotFoundException(`Campaign "${id}" not found`);
     }
     return campaign;
   }
 
-  async findOneForUser(
-    id: string,
-    userId: string,
-  ): Promise<CampaignDocument> {
+  async findOneForUser(id: string, userId: string) {
     const campaign = await this.findOne(id);
-    const oid = new Types.ObjectId(userId);
     const isMember =
-      campaign.ownerId.equals(oid) ||
-      campaign.playerIds.some((pid) => pid.equals(oid));
+      campaign.ownerId === userId ||
+      campaign.players.some((p) => p.userId === userId);
     if (!isMember) {
       throw new ForbiddenException('You are not a member of this campaign');
     }
     return campaign;
   }
 
-  async update(
-    id: string,
-    userId: string,
-    dto: UpdateCampaignDto,
-  ): Promise<CampaignDocument> {
+  async update(id: string, userId: string, dto: UpdateCampaignDto) {
     const campaign = await this.findOne(id);
-    if (!campaign.ownerId.equals(new Types.ObjectId(userId))) {
+    if (campaign.ownerId !== userId) {
       throw new ForbiddenException('Only the campaign owner can edit');
     }
-    Object.assign(campaign, dto);
-    return campaign.save();
+    return this.prisma.campaign.update({
+      where: { id },
+      data: dto,
+      include: campaignInclude,
+    });
   }
 
   async remove(id: string, userId: string): Promise<void> {
     const campaign = await this.findOne(id);
-    if (!campaign.ownerId.equals(new Types.ObjectId(userId))) {
+    if (campaign.ownerId !== userId) {
       throw new ForbiddenException('Only the campaign owner can delete');
     }
-    await this.campaignModel.findByIdAndDelete(id).exec();
+    await this.prisma.campaign.delete({ where: { id } });
   }
 
-  async generateInviteCode(
-    id: string,
-    userId: string,
-  ): Promise<string> {
+  async generateInviteCode(id: string, userId: string): Promise<string> {
     const campaign = await this.findOne(id);
-    if (!campaign.ownerId.equals(new Types.ObjectId(userId))) {
+    if (campaign.ownerId !== userId) {
       throw new ForbiddenException('Only the campaign owner can generate invite codes');
     }
     const code = crypto.randomBytes(4).toString('hex');
-    campaign.inviteCode = code;
-    await campaign.save();
+    await this.prisma.campaign.update({
+      where: { id },
+      data: { inviteCode: code },
+    });
     return code;
   }
 
-  async joinByInviteCode(
-    code: string,
-    userId: string,
-  ): Promise<CampaignDocument> {
-    const campaign = await this.campaignModel
-      .findOne({ inviteCode: code })
-      .exec();
+  async joinByInviteCode(code: string, userId: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { inviteCode: code },
+      include: campaignInclude,
+    });
     if (!campaign) {
       throw new NotFoundException('Invalid invite code');
     }
-    const oid = new Types.ObjectId(userId);
-    if (!campaign.playerIds.some((pid) => pid.equals(oid))) {
-      campaign.playerIds.push(oid);
-      await campaign.save();
-    }
-    return campaign;
+    await this.prisma.campaignPlayer.upsert({
+      where: {
+        campaignId_userId: { campaignId: campaign.id, userId },
+      },
+      create: { campaignId: campaign.id, userId },
+      update: {},
+    });
+    return this.findOne(campaign.id);
   }
 
-  async addCharacter(
-    campaignId: string,
-    characterId: string,
-    userId: string,
-  ): Promise<CampaignDocument> {
-    const campaign = await this.findOneForUser(campaignId, userId);
-    const cid = new Types.ObjectId(characterId);
-    if (!campaign.characterIds.some((id) => id.equals(cid))) {
-      campaign.characterIds.push(cid);
-      await campaign.save();
-    }
-    return campaign;
+  async addCharacter(campaignId: string, characterId: string, userId: string) {
+    await this.findOneForUser(campaignId, userId);
+    await this.prisma.character.update({
+      where: { id: characterId },
+      data: { campaignId },
+    });
+    return this.findOne(campaignId);
   }
 
-  async removeCharacter(
-    campaignId: string,
-    characterId: string,
-    userId: string,
-  ): Promise<CampaignDocument> {
+  async removeCharacter(campaignId: string, characterId: string, userId: string) {
     const campaign = await this.findOne(campaignId);
-    if (!campaign.ownerId.equals(new Types.ObjectId(userId))) {
+    if (campaign.ownerId !== userId) {
       throw new ForbiddenException('Only the campaign owner can remove characters');
     }
-    campaign.characterIds = campaign.characterIds.filter(
-      (id) => !id.equals(new Types.ObjectId(characterId)),
-    );
-    await campaign.save();
-    return campaign;
+    await this.prisma.character.update({
+      where: { id: characterId },
+      data: { campaignId: null },
+    });
+    return this.findOne(campaignId);
   }
 
-  async removePlayer(
-    campaignId: string,
-    playerId: string,
-    userId: string,
-  ): Promise<CampaignDocument> {
+  async removePlayer(campaignId: string, playerId: string, userId: string) {
     const campaign = await this.findOne(campaignId);
-    if (!campaign.ownerId.equals(new Types.ObjectId(userId))) {
+    if (campaign.ownerId !== userId) {
       throw new ForbiddenException('Only the campaign owner can remove players');
     }
-    campaign.playerIds = campaign.playerIds.filter(
-      (id) => !id.equals(new Types.ObjectId(playerId)),
-    );
-    await campaign.save();
-    return campaign;
+    await this.prisma.campaignPlayer.delete({
+      where: {
+        campaignId_userId: { campaignId, userId: playerId },
+      },
+    });
+    return this.findOne(campaignId);
   }
 }

@@ -38,8 +38,8 @@ export default function CharactersPage() {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {characters.map((c) => (
             <Link
-              key={c._id}
-              href={`/characters/${c._id}`}
+              key={c.id}
+              href={`/characters/${c.id}`}
               className="block p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
             >
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">{c.name}</h2>

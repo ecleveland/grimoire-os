@@ -1,0 +1,256 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ── Enums ──────────────────────────────────────────────
+
+enum Role {
+  player
+  dungeon_master
+  admin
+}
+
+enum CampaignStatus {
+  active
+  paused
+  completed
+  archived
+}
+
+enum NoteVisibility {
+  private
+  party
+  dm_only
+}
+
+// ── Users ──────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  passwordHash String
+  displayName  String
+  email        String?  @unique
+  avatarUrl    String?
+  role         Role     @default(player)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedCampaigns Campaign[]       @relation("CampaignOwner")
+  campaigns      CampaignPlayer[]
+  characters     Character[]
+  notes          Note[]
+  encounters     Encounter[]
+
+  @@map("users")
+}
+
+// ── Campaigns ──────────────────────────────────────────
+
+model Campaign {
+  id             String         @id @default(uuid())
+  name           String
+  description    String?
+  ownerId        String
+  status         CampaignStatus @default(active)
+  setting        String?
+  currentSession Int            @default(0)
+  inviteCode     String?        @unique
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  owner      User             @relation("CampaignOwner", fields: [ownerId], references: [id])
+  players    CampaignPlayer[]
+  characters Character[]
+  notes      Note[]
+  encounters Encounter[]
+
+  @@map("campaigns")
+}
+
+model CampaignPlayer {
+  campaignId String
+  userId     String
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, userId])
+  @@map("campaign_players")
+}
+
+// ── Characters ─────────────────────────────────────────
+
+model Character {
+  id                String   @id @default(uuid())
+  name              String
+  userId            String
+  campaignId        String?
+  race              String?
+  class             String?
+  level             Int      @default(1)
+  subclass          String?
+  background        String?
+  alignment         String?
+  experiencePoints  Int      @default(0)
+  abilityScores     Json?
+  hitPoints         Json?
+  deathSaves        Json?
+  armorClass        Int?
+  speed             Int?
+  initiative        Int?
+  proficiencies     String[]
+  languages         String[]
+  savingThrows      String[]
+  skills            String[]
+  spellcastingAbility String?
+  spellSaveDC       Int?
+  spellAttackBonus  Int?
+  knownSpells       String[]
+  preparedSpells    String[]
+  spellSlots        Json?
+  inventory         Json?
+  currency          Json?
+  features          Json?
+  personalityTraits String?
+  ideals            String?
+  bonds             String?
+  flaws             String?
+  backstory         String?
+  appearance        String?
+  avatarUrl         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  campaign Campaign? @relation(fields: [campaignId], references: [id])
+
+  @@map("characters")
+}
+
+// ── Notes ──────────────────────────────────────────────
+
+model Note {
+  id            String         @id @default(uuid())
+  title         String
+  content       String?
+  campaignId    String
+  authorId      String
+  visibility    NoteVisibility @default(private)
+  sessionNumber Int?
+  tags          String[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+  author   User     @relation(fields: [authorId], references: [id])
+
+  @@map("notes")
+}
+
+// ── Encounters ─────────────────────────────────────────
+
+model Encounter {
+  id          String   @id @default(uuid())
+  name        String
+  campaignId  String
+  createdById String
+  combatants  Json?
+  currentTurn Int      @default(0)
+  round       Int      @default(1)
+  isActive    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign  Campaign @relation(fields: [campaignId], references: [id])
+  createdBy User     @relation(fields: [createdById], references: [id])
+
+  @@map("encounters")
+}
+
+// ── SRD Data ───────────────────────────────────────────
+
+model Spell {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  level         Int
+  school        String
+  castingTime   String
+  range         String
+  components    String
+  duration      String
+  description   String
+  classes       String[]
+  ritual        Boolean  @default(false)
+  concentration Boolean  @default(false)
+
+  @@map("spells")
+}
+
+model Monster {
+  id              String  @id @default(uuid())
+  name            String  @unique
+  size            String
+  type            String
+  alignment       String?
+  armorClass      Int
+  hitPoints       Int
+  speed           String
+  str             Int
+  dex             Int
+  con             Int
+  int             Int
+  wis             Int
+  cha             Int
+  challengeRating Float
+  actions         Json?
+  description     String?
+
+  @@map("monsters")
+}
+
+model Item {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  category    String
+  cost        String?
+  weight      Float?
+  description String?
+  damage      String?
+  properties  String[]
+
+  @@map("items")
+}
+
+model SrdClass {
+  id                   String   @id @default(uuid())
+  name                 String   @unique
+  hitDie               String
+  primaryAbilities     String[]
+  savingThrows         String[]
+  armorProficiencies   String[]
+  weaponProficiencies  String[]
+  skillChoices         String[]
+  description          String?
+  features             Json?
+
+  @@map("srd_classes")
+}
+
+model Race {
+  id             String   @id @default(uuid())
+  name           String   @unique
+  speed          Int
+  size           String
+  abilityBonuses Json?
+  traits         String[]
+  languages      String[]
+  description    String?
+
+  @@map("races")
+}
