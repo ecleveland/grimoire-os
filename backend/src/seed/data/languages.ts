@@ -1,0 +1,97 @@
+export const srdLanguages = [
+  {
+    name: 'Common',
+    type: 'Standard',
+    typicalSpeakers: 'Humans',
+    script: 'Common',
+  },
+  {
+    name: 'Dwarvish',
+    type: 'Standard',
+    typicalSpeakers: 'Dwarves',
+    script: 'Dwarvish',
+  },
+  {
+    name: 'Elvish',
+    type: 'Standard',
+    typicalSpeakers: 'Elves',
+    script: 'Elvish',
+  },
+  {
+    name: 'Giant',
+    type: 'Standard',
+    typicalSpeakers: 'Ogres, Giants',
+    script: 'Dwarvish',
+  },
+  {
+    name: 'Gnomish',
+    type: 'Standard',
+    typicalSpeakers: 'Gnomes',
+    script: 'Dwarvish',
+  },
+  {
+    name: 'Goblin',
+    type: 'Standard',
+    typicalSpeakers: 'Goblinoids',
+    script: 'Dwarvish',
+  },
+  {
+    name: 'Halfling',
+    type: 'Standard',
+    typicalSpeakers: 'Halflings',
+    script: 'Common',
+  },
+  {
+    name: 'Orc',
+    type: 'Standard',
+    typicalSpeakers: 'Orcs',
+    script: 'Dwarvish',
+  },
+  {
+    name: 'Abyssal',
+    type: 'Exotic',
+    typicalSpeakers: 'Demons',
+    script: 'Infernal',
+  },
+  {
+    name: 'Celestial',
+    type: 'Exotic',
+    typicalSpeakers: 'Celestials',
+    script: 'Celestial',
+  },
+  {
+    name: 'Deep Speech',
+    type: 'Exotic',
+    typicalSpeakers: 'Aboleths, Cloakers',
+  },
+  {
+    name: 'Draconic',
+    type: 'Exotic',
+    typicalSpeakers: 'Dragons, Dragonborn',
+    script: 'Draconic',
+  },
+  {
+    name: 'Infernal',
+    type: 'Exotic',
+    typicalSpeakers: 'Devils',
+    script: 'Infernal',
+  },
+  {
+    name: 'Primordial',
+    type: 'Exotic',
+    typicalSpeakers: 'Elementals',
+    script: 'Dwarvish',
+  },
+  {
+    name: 'Sylvan',
+    type: 'Exotic',
+    typicalSpeakers: 'Fey creatures',
+    script: 'Elvish',
+  },
+  {
+    name: 'Undercommon',
+    type: 'Exotic',
+    typicalSpeakers: 'Underworld traders',
+    script: 'Elvish',
+  },
+];

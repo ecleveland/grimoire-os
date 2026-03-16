@@ -188,69 +188,203 @@ model Spell {
   classes       String[]
   ritual        Boolean  @default(false)
   concentration Boolean  @default(false)
+  material      String?
+  higherLevels  String?
+  source        String   @default("SRD 5.2.1")
 
+  @@index([level])
+  @@index([school])
   @@map("spells")
 }
 
 model Monster {
-  id              String  @id @default(uuid())
-  name            String  @unique
-  size            String
-  type            String
-  alignment       String?
-  armorClass      Int
-  hitPoints       Int
-  speed           String
-  str             Int
-  dex             Int
-  con             Int
-  int             Int
-  wis             Int
-  cha             Int
-  challengeRating Float
-  actions         Json?
-  description     String?
+  id                    String   @id @default(uuid())
+  name                  String   @unique
+  size                  String
+  type                  String
+  subtype               String?
+  alignment             String?
+  armorClass            Int
+  armorType             String?
+  hitPoints             Int
+  hitDice               String?
+  speed                 String
+  str                   Int
+  dex                   Int
+  con                   Int
+  int                   Int
+  wis                   Int
+  cha                   Int
+  savingThrows          Json?
+  skills                Json?
+  damageResistances     String[]
+  damageImmunities      String[]
+  damageVulnerabilities String[]
+  conditionImmunities   String[]
+  senses                String?
+  languages             String?
+  challengeRating       Float
+  experiencePoints      Int?
+  specialAbilities      Json?
+  actions               Json?
+  reactions             Json?
+  legendaryActions      Json?
+  description           String?
+  source                String   @default("SRD 5.2.1")
 
+  @@index([type])
+  @@index([challengeRating])
   @@map("monsters")
 }
 
 model Item {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  category    String
-  cost        String?
-  weight      Float?
-  description String?
-  damage      String?
-  properties  String[]
+  id                  String   @id @default(uuid())
+  name                String   @unique
+  category            String
+  cost                String?
+  weight              Float?
+  description         String?
+  damage              String?
+  damageType          String?
+  armorClass          Int?
+  stealthDisadvantage Boolean  @default(false)
+  strengthRequirement Int?
+  properties          String[]
+  rarity              String?
+  requiresAttunement  Boolean  @default(false)
+  isMagic             Boolean  @default(false)
+  source              String   @default("SRD 5.2.1")
 
+  @@index([category])
   @@map("items")
 }
 
 model SrdClass {
-  id                   String   @id @default(uuid())
-  name                 String   @unique
+  id                   String     @id @default(uuid())
+  name                 String     @unique
   hitDie               String
   primaryAbilities     String[]
   savingThrows         String[]
   armorProficiencies   String[]
   weaponProficiencies  String[]
   skillChoices         String[]
+  toolProficiencies    String[]
+  numSkillChoices      Int        @default(2)
   description          String?
   features             Json?
+  spellcasting         Json?
+  equipmentChoices     Json?
+  subclassLevel        Int?
+  source               String     @default("SRD 5.2.1")
+
+  subclasses Subclass[]
 
   @@map("srd_classes")
 }
 
 model Race {
-  id             String   @id @default(uuid())
-  name           String   @unique
-  speed          Int
-  size           String
-  abilityBonuses Json?
-  traits         String[]
-  languages      String[]
-  description    String?
+  id              String    @id @default(uuid())
+  name            String    @unique
+  speed           Int
+  size            String
+  abilityBonuses  Json?
+  traits          Json?
+  languages       String[]
+  description     String?
+  age             String?
+  alignment       String?
+  sizeDescription String?
+  source          String    @default("SRD 5.2.1")
+
+  subraces Subrace[]
 
   @@map("races")
+}
+
+model Subclass {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  classId     String
+  description String?
+  features    Json?
+  spellList   Json?
+  source      String  @default("SRD 5.2.1")
+
+  srdClass SrdClass @relation(fields: [classId], references: [id])
+
+  @@map("subclasses")
+}
+
+model Subrace {
+  id             String  @id @default(uuid())
+  name           String  @unique
+  raceId         String
+  description    String?
+  abilityBonuses Json?
+  traits         Json?
+  source         String  @default("SRD 5.2.1")
+
+  race Race @relation(fields: [raceId], references: [id])
+
+  @@map("subraces")
+}
+
+model Background {
+  id                String   @id @default(uuid())
+  name              String   @unique
+  description       String?
+  skillProficiencies String[]
+  toolProficiencies  String[]
+  languages         Int      @default(0)
+  equipment         String?
+  feature           Json?
+  personalityTraits String[]
+  ideals            String[]
+  bonds             String[]
+  flaws             String[]
+  source            String   @default("SRD 5.2.1")
+
+  @@map("backgrounds")
+}
+
+model Feat {
+  id           String  @id @default(uuid())
+  name         String  @unique
+  description  String?
+  prerequisite String?
+  benefits     Json?
+  source       String  @default("SRD 5.2.1")
+
+  @@map("feats")
+}
+
+model Condition {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  bullets     String[]
+  source      String   @default("SRD 5.2.1")
+
+  @@map("conditions")
+}
+
+model Skill {
+  id          String @id @default(uuid())
+  name        String @unique
+  ability     String
+  description String?
+  source      String @default("SRD 5.2.1")
+
+  @@map("skills")
+}
+
+model Language {
+  id              String  @id @default(uuid())
+  name            String  @unique
+  type            String
+  typicalSpeakers String?
+  script          String?
+  source          String  @default("SRD 5.2.1")
+
+  @@map("languages")
 }

@@ -5,6 +5,7 @@ type MockModel = {
   findFirst: jest.Mock;
   findMany: jest.Mock;
   create: jest.Mock;
+  createMany: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
   upsert: jest.Mock;
@@ -16,6 +17,7 @@ function mockModel(): MockModel {
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
+    createMany: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
     upsert: jest.fn(),
@@ -34,7 +36,16 @@ export type MockPrismaService = {
     | 'monster'
     | 'item'
     | 'srdClass'
-    | 'race']: MockModel;
+    | 'race'
+    | 'subclass'
+    | 'subrace'
+    | 'background'
+    | 'feat'
+    | 'condition'
+    | 'skill'
+    | 'language']: MockModel;
+} & {
+  $transaction: jest.Mock;
 };
 
 export function createMockPrismaService(): MockPrismaService {
@@ -50,6 +61,14 @@ export function createMockPrismaService(): MockPrismaService {
     item: mockModel(),
     srdClass: mockModel(),
     race: mockModel(),
+    subclass: mockModel(),
+    subrace: mockModel(),
+    background: mockModel(),
+    feat: mockModel(),
+    condition: mockModel(),
+    skill: mockModel(),
+    language: mockModel(),
+    $transaction: jest.fn((fn) => fn()),
   };
 }
 
