@@ -21,7 +21,7 @@ export default function CampaignsPage() {
       .then(setCampaigns)
       .catch((err) => {
         console.error('Failed to load campaigns:', err);
-        toast.error('Failed to load campaigns');
+        toast.error('Failed to load campaigns', { id: 'load-campaigns' });
       })
       .finally(() => setLoading(false));
   }, []);

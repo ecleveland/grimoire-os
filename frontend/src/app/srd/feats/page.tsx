@@ -18,7 +18,7 @@ export default function FeatListPage() {
       .then(setFeats)
       .catch((err) => {
         console.error('Failed to load feats:', err);
-        toast.error('Failed to load feats');
+        toast.error('Failed to load feats', { id: 'load-feats' });
       })
       .finally(() => setLoading(false));
   }, []);

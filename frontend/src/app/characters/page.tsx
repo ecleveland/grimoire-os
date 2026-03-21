@@ -15,7 +15,7 @@ export default function CharactersPage() {
       .then(setCharacters)
       .catch((err) => {
         console.error('Failed to load characters:', err);
-        toast.error('Failed to load characters');
+        toast.error('Failed to load characters', { id: 'load-characters' });
       })
       .finally(() => setLoading(false));
   }, []);

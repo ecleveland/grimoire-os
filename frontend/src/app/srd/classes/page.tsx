@@ -15,7 +15,7 @@ export default function ClassListPage() {
       .then(setClasses)
       .catch((err) => {
         console.error('Failed to load classes:', err);
-        toast.error('Failed to load classes');
+        toast.error('Failed to load classes', { id: 'load-classes' });
       })
       .finally(() => setLoading(false));
   }, []);

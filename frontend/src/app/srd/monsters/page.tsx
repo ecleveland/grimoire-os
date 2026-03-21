@@ -17,7 +17,7 @@ export default function MonsterListPage() {
       .then(setMonsters)
       .catch((err) => {
         console.error('Failed to load monsters:', err);
-        toast.error('Failed to load monsters');
+        toast.error('Failed to load monsters', { id: 'load-monsters' });
       })
       .finally(() => setLoading(false));
   }, []);

@@ -44,7 +44,7 @@ export default function CampaignDetailPage() {
         .then(setNotes)
         .catch((err) => {
           console.error('Failed to load notes:', err);
-          toast.error('Failed to load notes');
+          toast.error('Failed to load notes', { id: 'load-notes' });
         });
     }
     if (tab === 'encounters') {
@@ -52,7 +52,7 @@ export default function CampaignDetailPage() {
         .then(setEncounters)
         .catch((err) => {
           console.error('Failed to load encounters:', err);
-          toast.error('Failed to load encounters');
+          toast.error('Failed to load encounters', { id: 'load-encounters' });
         });
     }
   }, [tab, id]);

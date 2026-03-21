@@ -15,7 +15,7 @@ export default function BackgroundListPage() {
       .then(setBackgrounds)
       .catch((err) => {
         console.error('Failed to load backgrounds:', err);
-        toast.error('Failed to load backgrounds');
+        toast.error('Failed to load backgrounds', { id: 'load-backgrounds' });
       })
       .finally(() => setLoading(false));
   }, []);

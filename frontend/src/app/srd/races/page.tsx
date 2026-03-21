@@ -15,7 +15,7 @@ export default function RaceListPage() {
       .then(setRaces)
       .catch((err) => {
         console.error('Failed to load races:', err);
-        toast.error('Failed to load races');
+        toast.error('Failed to load races', { id: 'load-races' });
       })
       .finally(() => setLoading(false));
   }, []);

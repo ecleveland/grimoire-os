@@ -16,7 +16,7 @@ export default function ItemListPage() {
       .then(setItems)
       .catch((err) => {
         console.error('Failed to load items:', err);
-        toast.error('Failed to load items');
+        toast.error('Failed to load items', { id: 'load-items' });
       })
       .finally(() => setLoading(false));
   }, []);

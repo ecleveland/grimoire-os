@@ -17,7 +17,7 @@ export default function SpellListPage() {
       .then(setSpells)
       .catch((err) => {
         console.error('Failed to load spells:', err);
-        toast.error('Failed to load spells');
+        toast.error('Failed to load spells', { id: 'load-spells' });
       })
       .finally(() => setLoading(false));
   }, []);

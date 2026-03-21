@@ -15,7 +15,7 @@ export default function SpeciesListPage() {
       .then(setSpecies)
       .catch((err) => {
         console.error('Failed to load species:', err);
-        toast.error('Failed to load species');
+        toast.error('Failed to load species', { id: 'load-species' });
       })
       .finally(() => setLoading(false));
   }, []);
