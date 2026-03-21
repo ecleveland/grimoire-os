@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { SrdItem } from '@/lib/types';
 
 export default function ItemListPage() {
@@ -13,7 +14,10 @@ export default function ItemListPage() {
   useEffect(() => {
     apiFetch<SrdItem[]>('/srd/items')
       .then(setItems)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load items:', err);
+        toast.error('Failed to load items', { id: 'load-items' });
+      })
       .finally(() => setLoading(false));
   }, []);
 

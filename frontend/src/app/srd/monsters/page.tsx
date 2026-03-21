@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { SrdMonster } from '@/lib/types';
 
 export default function MonsterListPage() {
@@ -14,7 +15,10 @@ export default function MonsterListPage() {
   useEffect(() => {
     apiFetch<SrdMonster[]>('/srd/monsters')
       .then(setMonsters)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load monsters:', err);
+        toast.error('Failed to load monsters', { id: 'load-monsters' });
+      })
       .finally(() => setLoading(false));
   }, []);
 

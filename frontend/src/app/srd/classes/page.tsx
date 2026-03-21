@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { SrdClass } from '@/lib/types';
 
 export default function ClassListPage() {
@@ -12,7 +13,10 @@ export default function ClassListPage() {
   useEffect(() => {
     apiFetch<SrdClass[]>('/srd/classes')
       .then(setClasses)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load classes:', err);
+        toast.error('Failed to load classes', { id: 'load-classes' });
+      })
       .finally(() => setLoading(false));
   }, []);
 

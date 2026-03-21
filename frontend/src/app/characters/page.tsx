@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { Character } from '@/lib/types';
 
 export default function CharactersPage() {
@@ -12,7 +13,10 @@ export default function CharactersPage() {
   useEffect(() => {
     apiFetch<Character[]>('/characters')
       .then(setCharacters)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load characters:', err);
+        toast.error('Failed to load characters', { id: 'load-characters' });
+      })
       .finally(() => setLoading(false));
   }, []);
 

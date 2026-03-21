@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { SrdSpell } from '@/lib/types';
 
 export default function SpellListPage() {
@@ -14,7 +15,10 @@ export default function SpellListPage() {
   useEffect(() => {
     apiFetch<SrdSpell[]>('/srd/spells')
       .then(setSpells)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load spells:', err);
+        toast.error('Failed to load spells', { id: 'load-spells' });
+      })
       .finally(() => setLoading(false));
   }, []);
 

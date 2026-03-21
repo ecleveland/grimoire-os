@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { Campaign } from '@/lib/types';
 
 const statusColors: Record<string, string> = {
@@ -18,7 +19,10 @@ export default function CampaignsPage() {
   useEffect(() => {
     apiFetch<Campaign[]>('/campaigns')
       .then(setCampaigns)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load campaigns:', err);
+        toast.error('Failed to load campaigns', { id: 'load-campaigns' });
+      })
       .finally(() => setLoading(false));
   }, []);
 

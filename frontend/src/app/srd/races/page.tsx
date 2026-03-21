@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { SrdRace } from '@/lib/types';
 
 export default function RaceListPage() {
@@ -12,7 +13,10 @@ export default function RaceListPage() {
   useEffect(() => {
     apiFetch<SrdRace[]>('/srd/races')
       .then(setRaces)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Failed to load races:', err);
+        toast.error('Failed to load races', { id: 'load-races' });
+      })
       .finally(() => setLoading(false));
   }, []);
 
