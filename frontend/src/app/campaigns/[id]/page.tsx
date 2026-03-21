@@ -40,10 +40,20 @@ export default function CampaignDetailPage() {
 
   useEffect(() => {
     if (tab === 'notes') {
-      apiFetch<Note[]>(`/notes?campaignId=${id}`).then(setNotes).catch(() => {});
+      apiFetch<Note[]>(`/notes?campaignId=${id}`)
+        .then(setNotes)
+        .catch((err) => {
+          console.error('Failed to load notes:', err);
+          toast.error('Failed to load notes');
+        });
     }
     if (tab === 'encounters') {
-      apiFetch<Encounter[]>(`/encounters?campaignId=${id}`).then(setEncounters).catch(() => {});
+      apiFetch<Encounter[]>(`/encounters?campaignId=${id}`)
+        .then(setEncounters)
+        .catch((err) => {
+          console.error('Failed to load encounters:', err);
+          toast.error('Failed to load encounters');
+        });
     }
   }, [tab, id]);
 
