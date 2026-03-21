@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import * as cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -33,6 +34,8 @@ async function bootstrap() {
     }),
   );
 
+  app.use(cookieParser());
+
   app.enableCors({
     origin: configService.get<string>('cors.origin'),
     credentials: true,
@@ -42,7 +45,7 @@ async function bootstrap() {
     .setTitle('GrimoireOS API')
     .setDescription('REST API for D&D 5e campaign management')
     .setVersion('1.0')
-    .addBearerAuth()
+    .addCookieAuth('token')
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api/docs', app, document);

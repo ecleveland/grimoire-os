@@ -51,7 +51,16 @@ describe('AuthService', () => {
         username: mockUser.username,
         role: mockUser.role,
       });
-      expect(result).toEqual({ access_token: 'signed.jwt.token' });
+      expect(result).toEqual({
+        access_token: 'signed.jwt.token',
+        user: {
+          userId: mockUser.id,
+          username: mockUser.username,
+          role: mockUser.role,
+          displayName: mockUser.displayName,
+          email: mockUser.email,
+        },
+      });
     });
 
     it('should throw UnauthorizedException when user is not found', async () => {
