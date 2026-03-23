@@ -1,4 +1,4 @@
-const BASE_URL = 'https://www.dnd5eapi.co/api';
+const BASE_URL = "https://www.dnd5eapi.co/api";
 const MAX_CONCURRENCY = 5;
 const MAX_RETRIES = 5;
 const RETRY_BASE_MS = 1000;
@@ -28,7 +28,7 @@ async function fetchJson<T>(url: string): Promise<T> {
     }
   }
 
-  throw lastError ?? new Error('Max retries exceeded');
+  throw lastError ?? new Error("Max retries exceeded");
 }
 
 async function runPool<T>(

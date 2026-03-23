@@ -64,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const router = useRouter();
 
+  /* eslint-disable react-hooks/set-state-in-effect -- Hydrating from localStorage on mount is intentional */
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -79,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setHydrated(true);
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const fetchAndStoreProfile = useCallback(
     async (tokenPayload: { sub: string; username: string; role: string }) => {

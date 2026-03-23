@@ -2,10 +2,10 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateCharacterDto } from './dto/create-character.dto';
-import { UpdateCharacterDto } from './dto/update-character.dto';
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateCharacterDto } from "./dto/create-character.dto";
+import { UpdateCharacterDto } from "./dto/update-character.dto";
 
 @Injectable()
 export class CharactersService {
@@ -23,7 +23,7 @@ export class CharactersService {
   async findAllForUser(userId: string) {
     return this.prisma.character.findMany({
       where: { userId },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { updatedAt: "desc" },
     });
   }
 
@@ -38,7 +38,7 @@ export class CharactersService {
   async findOneForUser(id: string, userId: string) {
     const character = await this.findOne(id);
     if (character.userId !== userId) {
-      throw new ForbiddenException('You do not own this character');
+      throw new ForbiddenException("You do not own this character");
     }
     return character;
   }

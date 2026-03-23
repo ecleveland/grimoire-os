@@ -2,11 +2,11 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-} from '@nestjs/common';
-import * as crypto from 'crypto';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateCampaignDto } from './dto/create-campaign.dto';
-import { UpdateCampaignDto } from './dto/update-campaign.dto';
+} from "@nestjs/common";
+import * as crypto from "crypto";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateCampaignDto } from "./dto/create-campaign.dto";
+import { UpdateCampaignDto } from "./dto/update-campaign.dto";
 
 const campaignInclude = {
   players: true,
@@ -31,13 +31,10 @@ export class CampaignsService {
   async findAllForUser(userId: string) {
     return this.prisma.campaign.findMany({
       where: {
-        OR: [
-          { ownerId: userId },
-          { players: { some: { userId } } },
-        ],
+        OR: [{ ownerId: userId }, { players: { some: { userId } } }],
       },
       include: campaignInclude,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { updatedAt: "desc" },
     });
   }
 
@@ -58,7 +55,7 @@ export class CampaignsService {
       campaign.ownerId === userId ||
       campaign.players.some((p) => p.userId === userId);
     if (!isMember) {
-      throw new ForbiddenException('You are not a member of this campaign');
+      throw new ForbiddenException("You are not a member of this campaign");
     }
     return campaign;
   }
@@ -66,7 +63,7 @@ export class CampaignsService {
   async update(id: string, userId: string, dto: UpdateCampaignDto) {
     const campaign = await this.findOne(id);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can edit');
+      throw new ForbiddenException("Only the campaign owner can edit");
     }
     return this.prisma.campaign.update({
       where: { id },
@@ -78,7 +75,7 @@ export class CampaignsService {
   async remove(id: string, userId: string): Promise<void> {
     const campaign = await this.findOne(id);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can delete');
+      throw new ForbiddenException("Only the campaign owner can delete");
     }
     await this.prisma.campaign.delete({ where: { id } });
   }
@@ -86,9 +83,11 @@ export class CampaignsService {
   async generateInviteCode(id: string, userId: string): Promise<string> {
     const campaign = await this.findOne(id);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can generate invite codes');
+      throw new ForbiddenException(
+        "Only the campaign owner can generate invite codes",
+      );
     }
-    const code = crypto.randomBytes(4).toString('hex');
+    const code = crypto.randomBytes(4).toString("hex");
     await this.prisma.campaign.update({
       where: { id },
       data: { inviteCode: code },
@@ -102,7 +101,7 @@ export class CampaignsService {
       include: campaignInclude,
     });
     if (!campaign) {
-      throw new NotFoundException('Invalid invite code');
+      throw new NotFoundException("Invalid invite code");
     }
     await this.prisma.campaignPlayer.upsert({
       where: {
@@ -123,10 +122,16 @@ export class CampaignsService {
     return this.findOne(campaignId);
   }
 
-  async removeCharacter(campaignId: string, characterId: string, userId: string) {
+  async removeCharacter(
+    campaignId: string,
+    characterId: string,
+    userId: string,
+  ) {
     const campaign = await this.findOne(campaignId);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can remove characters');
+      throw new ForbiddenException(
+        "Only the campaign owner can remove characters",
+      );
     }
     await this.prisma.character.update({
       where: { id: characterId },
@@ -138,7 +143,9 @@ export class CampaignsService {
   async removePlayer(campaignId: string, playerId: string, userId: string) {
     const campaign = await this.findOne(campaignId);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can remove players');
+      throw new ForbiddenException(
+        "Only the campaign owner can remove players",
+      );
     }
     await this.prisma.campaignPlayer.delete({
       where: {

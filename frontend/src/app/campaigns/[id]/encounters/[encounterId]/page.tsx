@@ -5,10 +5,10 @@ import { useParams } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Encounter, Combatant } from '@/lib/types';
+import type { Encounter } from '@/lib/types';
 
 export default function InitiativeTrackerPage() {
-  const { id, encounterId } = useParams<{ id: string; encounterId: string }>();
+  const { encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);

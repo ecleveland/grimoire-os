@@ -2,12 +2,12 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-} from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { NoteVisibility } from '../prisma/enums';
-import { CreateNoteDto } from './dto/create-note.dto';
-import { UpdateNoteDto } from './dto/update-note.dto';
-import { CampaignsService } from '../campaigns/campaigns.service';
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { NoteVisibility } from "../prisma/enums";
+import { CreateNoteDto } from "./dto/create-note.dto";
+import { UpdateNoteDto } from "./dto/update-note.dto";
+import { CampaignsService } from "../campaigns/campaigns.service";
 
 @Injectable()
 export class NotesService {
@@ -36,7 +36,7 @@ export class NotesService {
     if (isDm) {
       return this.prisma.note.findMany({
         where: { campaignId },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: { updatedAt: "desc" },
       });
     }
 
@@ -48,7 +48,7 @@ export class NotesService {
           { authorId: userId, visibility: NoteVisibility.PRIVATE },
         ],
       },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { updatedAt: "desc" },
     });
   }
 
@@ -66,7 +66,7 @@ export class NotesService {
     const isAuthor = note.authorId === userId;
 
     if (!isDm && !isAuthor && note.visibility !== NoteVisibility.PARTY) {
-      throw new ForbiddenException('You do not have access to this note');
+      throw new ForbiddenException("You do not have access to this note");
     }
 
     return note;
@@ -78,7 +78,7 @@ export class NotesService {
       throw new NotFoundException(`Note "${id}" not found`);
     }
     if (note.authorId !== userId) {
-      throw new ForbiddenException('Only the author can edit this note');
+      throw new ForbiddenException("Only the author can edit this note");
     }
     return this.prisma.note.update({
       where: { id },
@@ -97,7 +97,9 @@ export class NotesService {
     const isAuthor = note.authorId === userId;
 
     if (!isDm && !isAuthor) {
-      throw new ForbiddenException('Only the author or DM can delete this note');
+      throw new ForbiddenException(
+        "Only the author or DM can delete this note",
+      );
     }
     await this.prisma.note.delete({ where: { id } });
   }

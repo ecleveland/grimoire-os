@@ -32,7 +32,13 @@ export default function MonsterListPage() {
     const set = new Set<string>();
     monsters.forEach((m) => set.add(m.challengeRating));
     return Array.from(set).sort((a, b) => {
-      const toNum = (v: string) => (v.includes('/') ? eval(v) : Number(v));
+      const toNum = (v: string) => {
+        if (v.includes('/')) {
+          const [num, den] = v.split('/');
+          return Number(num) / Number(den);
+        }
+        return Number(v);
+      };
       return toNum(a) - toNum(b);
     });
   }, [monsters]);

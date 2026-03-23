@@ -1,4 +1,4 @@
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from "../prisma/prisma.service";
 
 type MockModel = {
   findUnique: jest.Mock;
@@ -26,24 +26,24 @@ function mockModel(): MockModel {
 
 export type MockPrismaService = {
   [K in
-    | 'user'
-    | 'campaign'
-    | 'campaignPlayer'
-    | 'character'
-    | 'note'
-    | 'encounter'
-    | 'spell'
-    | 'monster'
-    | 'item'
-    | 'srdClass'
-    | 'race'
-    | 'subclass'
-    | 'subrace'
-    | 'background'
-    | 'feat'
-    | 'condition'
-    | 'skill'
-    | 'language']: MockModel;
+    | "user"
+    | "campaign"
+    | "campaignPlayer"
+    | "character"
+    | "note"
+    | "encounter"
+    | "spell"
+    | "monster"
+    | "item"
+    | "srdClass"
+    | "race"
+    | "subclass"
+    | "subrace"
+    | "background"
+    | "feat"
+    | "condition"
+    | "skill"
+    | "language"]: MockModel;
 } & {
   $transaction: jest.Mock;
 };
