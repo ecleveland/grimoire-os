@@ -66,13 +66,13 @@ export class UsersService {
 
   async findByUsername(username: string) {
     return this.prisma.user.findFirst({
-      where: { username: username.toLowerCase() },
+      where: { username },
     });
   }
 
   async findByEmail(email: string) {
     return this.prisma.user.findFirst({
-      where: { email: email.toLowerCase() },
+      where: { email },
     });
   }
 
