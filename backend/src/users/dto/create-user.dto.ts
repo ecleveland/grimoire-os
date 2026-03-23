@@ -10,11 +10,11 @@ import { UserRole } from "../../prisma/enums";
 
 export class CreateUserDto {
   @IsString()
-  username: string;
+  username!: string;
 
   @IsString()
   @MinLength(8)
-  password: string;
+  password!: string;
 
   @IsOptional()
   @IsString()

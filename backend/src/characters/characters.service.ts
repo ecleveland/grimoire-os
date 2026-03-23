@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateCharacterDto } from "./dto/create-character.dto";
 import { UpdateCharacterDto } from "./dto/update-character.dto";
@@ -14,7 +15,7 @@ export class CharactersService {
   async create(userId: string, dto: CreateCharacterDto) {
     return this.prisma.character.create({
       data: {
-        ...(dto as any),
+        ...(dto as unknown as Prisma.CharacterUncheckedCreateInput),
         userId,
       },
     });
@@ -47,7 +48,7 @@ export class CharactersService {
     await this.findOneForUser(id, userId);
     return this.prisma.character.update({
       where: { id },
-      data: dto as any,
+      data: dto as unknown as Prisma.CharacterUncheckedUpdateInput,
     });
   }
 

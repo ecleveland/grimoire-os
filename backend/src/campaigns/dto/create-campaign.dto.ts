@@ -3,7 +3,7 @@ import { CampaignStatus } from "../../prisma/enums";
 
 export class CreateCampaignDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()

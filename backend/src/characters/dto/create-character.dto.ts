@@ -24,13 +24,13 @@ class HitPointsDto {
 }
 
 class SpellSlotDto {
-  @IsNumber() level: number;
+  @IsNumber() level!: number;
   @IsOptional() @IsNumber() total?: number;
   @IsOptional() @IsNumber() used?: number;
 }
 
 class InventoryItemDto {
-  @IsString() name: string;
+  @IsString() name!: string;
   @IsOptional() @IsNumber() quantity?: number;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsNumber() weight?: number;
@@ -46,13 +46,13 @@ class CurrencyDto {
 }
 
 class FeatureDto {
-  @IsString() name: string;
+  @IsString() name!: string;
   @IsOptional() @IsString() source?: string;
   @IsOptional() @IsString() description?: string;
 }
 
 export class CreateCharacterDto {
-  @IsString() name: string;
+  @IsString() name!: string;
 
   @IsOptional() @IsString() race?: string;
   @IsOptional() @IsString() class?: string;

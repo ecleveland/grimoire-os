@@ -1,6 +1,6 @@
 // ── API response types (partial, only fields we use) ──
 
-interface ApiSpell {
+export interface ApiSpell {
   name: string;
   level: number;
   school: { name: string };
@@ -16,7 +16,7 @@ interface ApiSpell {
   classes: { name: string }[];
 }
 
-interface ApiMonster {
+export interface ApiMonster {
   name: string;
   size: string;
   type: string;
@@ -48,7 +48,7 @@ interface ApiMonster {
   desc?: string;
 }
 
-interface ApiEquipment {
+export interface ApiEquipment {
   name: string;
   equipment_category: { name: string };
   weapon_category?: string;
@@ -67,14 +67,14 @@ interface ApiEquipment {
   special?: string[];
 }
 
-interface ApiMagicItem {
+export interface ApiMagicItem {
   name: string;
   equipment_category: { name: string };
   rarity: { name: string };
   desc: string[];
 }
 
-interface ApiBackground {
+export interface ApiBackground {
   name: string;
   starting_proficiencies: { name: string }[];
   language_options?: { choose: number };
@@ -89,7 +89,7 @@ interface ApiBackground {
   flaws: { from: { options: { string?: string; option_type: string }[] } };
 }
 
-interface ApiFeat {
+export interface ApiFeat {
   name: string;
   desc: string[];
   prerequisites: {
