@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { fetchAllDetails } from "./srd-api.fetcher";
 import {
@@ -8,6 +9,12 @@ import {
   transformMagicItem,
   transformBackground,
   transformFeat,
+  type ApiSpell,
+  type ApiMonster,
+  type ApiEquipment,
+  type ApiMagicItem,
+  type ApiBackground,
+  type ApiFeat,
 } from "./srd-api.transformers";
 import { srdSpells as fallbackSpells } from "./data/spells";
 import { srdMonsters as fallbackMonsters } from "./data/monsters";
@@ -28,40 +35,49 @@ export class SeedService {
     const useApi = process.env.SEED_FROM_API !== "false";
 
     // ── Phase A: Fetch from API ────────────────────────
-    // Using `any` for seed data arrays since Prisma's strict JSON null types
-    // (NullableJsonNullValueInput) don't accept plain `null` from transformers
-    let spells: any[] = fallbackSpells as any;
-    let monsters: any[] = fallbackMonsters as any;
-    let items: any[] = fallbackItems as any;
-    let backgrounds: any[] = [];
-    let feats: any[] = [];
+    // Cast to Prisma input types since transformer return types use plain `null`
+    // for JSON fields, while Prisma expects `NullableJsonNullValueInput`
+    let spells = fallbackSpells as unknown as Prisma.SpellCreateManyInput[];
+    let monsters =
+      fallbackMonsters as unknown as Prisma.MonsterCreateManyInput[];
+    let items = fallbackItems as unknown as Prisma.ItemCreateManyInput[];
+    let backgrounds: Prisma.BackgroundCreateManyInput[] = [];
+    let feats: Prisma.FeatCreateManyInput[] = [];
 
     if (useApi) {
       try {
         console.log("Fetching SRD data from D&D 5e API...");
 
         // Fetch sequentially to avoid overwhelming the API with rate limits
-        const apiSpells = await fetchAllDetails("spells");
-        spells = (apiSpells as any[]).map(transformSpell);
+        const apiSpells = await fetchAllDetails<ApiSpell>("spells");
+        spells =
+          apiSpells.map(transformSpell) as unknown as Prisma.SpellCreateManyInput[];
 
-        const apiMonsters = await fetchAllDetails("monsters");
-        monsters = (apiMonsters as any[]).map(transformMonster);
+        const apiMonsters = await fetchAllDetails<ApiMonster>("monsters");
+        monsters =
+          apiMonsters.map(transformMonster) as unknown as Prisma.MonsterCreateManyInput[];
 
-        const apiEquipment = await fetchAllDetails("equipment");
-        const equipmentItems = (apiEquipment as any[]).map(transformEquipment);
+        const apiEquipment = await fetchAllDetails<ApiEquipment>("equipment");
+        const equipmentItems =
+          apiEquipment.map(transformEquipment) as unknown as Prisma.ItemCreateManyInput[];
 
-        const apiMagicItems = await fetchAllDetails("magic-items");
-        const magicItems = (apiMagicItems as any[]).map(transformMagicItem);
+        const apiMagicItems =
+          await fetchAllDetails<ApiMagicItem>("magic-items");
+        const magicItems =
+          apiMagicItems.map(transformMagicItem) as unknown as Prisma.ItemCreateManyInput[];
         items = [...equipmentItems, ...magicItems];
 
-        const apiBackgrounds = await fetchAllDetails("backgrounds");
-        backgrounds = (apiBackgrounds as any[]).map(transformBackground);
+        const apiBackgrounds =
+          await fetchAllDetails<ApiBackground>("backgrounds");
+        backgrounds =
+          apiBackgrounds.map(transformBackground) as unknown as Prisma.BackgroundCreateManyInput[];
 
-        const apiFeats = await fetchAllDetails("feats");
-        feats = (apiFeats as any[]).map(transformFeat);
+        const apiFeats = await fetchAllDetails<ApiFeat>("feats");
+        feats =
+          apiFeats.map(transformFeat) as unknown as Prisma.FeatCreateManyInput[];
 
         console.log("API fetch complete.");
-      } catch (error) {
+      } catch (error: unknown) {
         console.warn(
           "API fetch failed, falling back to static data:",
           (error as Error).message,

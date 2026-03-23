@@ -9,10 +9,10 @@ import { NoteVisibility } from "../../prisma/enums";
 
 export class CreateNoteDto {
   @IsString()
-  campaignId: string;
+  campaignId!: string;
 
   @IsString()
-  title: string;
+  title!: string;
 
   @IsOptional()
   @IsString()

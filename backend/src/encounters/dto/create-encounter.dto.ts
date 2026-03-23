@@ -9,7 +9,7 @@ import {
 import { Type } from "class-transformer";
 
 class CombatantDto {
-  @IsString() name: string;
+  @IsString() name!: string;
   @IsOptional() @IsNumber() initiative?: number;
   @IsOptional() @IsNumber() hp?: number;
   @IsOptional() @IsNumber() maxHp?: number;
@@ -20,10 +20,10 @@ class CombatantDto {
 
 export class CreateEncounterDto {
   @IsString()
-  campaignId: string;
+  campaignId!: string;
 
   @IsString()
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsArray()
