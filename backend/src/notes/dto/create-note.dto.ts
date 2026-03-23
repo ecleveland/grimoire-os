@@ -1,5 +1,11 @@
-import { IsString, IsOptional, IsEnum, IsNumber, IsArray } from 'class-validator';
-import { NoteVisibility } from '../../prisma/enums';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsNumber,
+  IsArray,
+} from "class-validator";
+import { NoteVisibility } from "../../prisma/enums";
 
 export class CreateNoteDto {
   @IsString()

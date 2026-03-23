@@ -5,8 +5,8 @@ import {
   IsArray,
   ValidateNested,
   IsBoolean,
-} from 'class-validator';
-import { Type } from 'class-transformer';
+} from "class-validator";
+import { Type } from "class-transformer";
 
 class AbilityScoresDto {
   @IsOptional() @IsNumber() strength?: number;
@@ -62,10 +62,14 @@ export class CreateCharacterDto {
   @IsOptional() @IsString() alignment?: string;
   @IsOptional() @IsNumber() experiencePoints?: number;
 
-  @IsOptional() @ValidateNested() @Type(() => AbilityScoresDto)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AbilityScoresDto)
   abilityScores?: AbilityScoresDto;
 
-  @IsOptional() @ValidateNested() @Type(() => HitPointsDto)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HitPointsDto)
   hitPoints?: HitPointsDto;
 
   @IsOptional() @IsNumber() armorClass?: number;
@@ -83,16 +87,27 @@ export class CreateCharacterDto {
   @IsOptional() @IsArray() @IsString({ each: true }) knownSpells?: string[];
   @IsOptional() @IsArray() @IsString({ each: true }) preparedSpells?: string[];
 
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SpellSlotDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SpellSlotDto)
   spellSlots?: SpellSlotDto[];
 
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => InventoryItemDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => InventoryItemDto)
   inventory?: InventoryItemDto[];
 
-  @IsOptional() @ValidateNested() @Type(() => CurrencyDto)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CurrencyDto)
   currency?: CurrencyDto;
 
-  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => FeatureDto)
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FeatureDto)
   features?: FeatureDto[];
 
   @IsOptional() @IsString() personalityTraits?: string;

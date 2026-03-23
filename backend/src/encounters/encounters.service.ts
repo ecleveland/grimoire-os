@@ -2,12 +2,12 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { CreateEncounterDto } from './dto/create-encounter.dto';
-import { UpdateEncounterDto } from './dto/update-encounter.dto';
-import { CampaignsService } from '../campaigns/campaigns.service';
+} from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { CreateEncounterDto } from "./dto/create-encounter.dto";
+import { UpdateEncounterDto } from "./dto/update-encounter.dto";
+import { CampaignsService } from "../campaigns/campaigns.service";
 
 @Injectable()
 export class EncountersService {
@@ -22,7 +22,7 @@ export class EncountersService {
       userId,
     );
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the DM can create encounters');
+      throw new ForbiddenException("Only the DM can create encounters");
     }
     const { combatants, ...rest } = dto;
     return this.prisma.encounter.create({
@@ -38,7 +38,7 @@ export class EncountersService {
     await this.campaignsService.findOneForUser(campaignId, userId);
     return this.prisma.encounter.findMany({
       where: { campaignId },
-      orderBy: { updatedAt: 'desc' },
+      orderBy: { updatedAt: "desc" },
     });
   }
 
@@ -62,7 +62,7 @@ export class EncountersService {
     }
     const campaign = await this.campaignsService.findOne(encounter.campaignId);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the DM can update encounters');
+      throw new ForbiddenException("Only the DM can update encounters");
     }
     const { combatants, ...rest } = dto;
     return this.prisma.encounter.update({
@@ -85,7 +85,7 @@ export class EncountersService {
     }
     const campaign = await this.campaignsService.findOne(encounter.campaignId);
     if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the DM can delete encounters');
+      throw new ForbiddenException("Only the DM can delete encounters");
     }
     await this.prisma.encounter.delete({ where: { id } });
   }

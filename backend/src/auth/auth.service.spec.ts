@@ -1,18 +1,18 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { AuthService } from './auth.service';
-import { UsersService } from '../users/users.service';
-import { mockUser } from '../test/fixtures';
+import { Test, TestingModule } from "@nestjs/testing";
+import { UnauthorizedException } from "@nestjs/common";
+import { JwtService } from "@nestjs/jwt";
+import { AuthService } from "./auth.service";
+import { UsersService } from "../users/users.service";
+import { mockUser } from "../test/fixtures";
 
-jest.mock('bcryptjs', () => ({
+jest.mock("bcryptjs", () => ({
   hash: jest.fn(),
   compare: jest.fn(),
 }));
 
-import * as bcrypt from 'bcryptjs';
+import * as bcrypt from "bcryptjs";
 
-describe('AuthService', () => {
+describe("AuthService", () => {
   let service: AuthService;
   let usersService: { findByUsername: jest.Mock };
   let jwtService: { sign: jest.Mock };
@@ -33,17 +33,17 @@ describe('AuthService', () => {
     jest.clearAllMocks();
   });
 
-  describe('login', () => {
-    it('should return an access_token on valid credentials', async () => {
+  describe("login", () => {
+    it("should return an access_token on valid credentials", async () => {
       usersService.findByUsername.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      jwtService.sign.mockReturnValue('signed.jwt.token');
+      jwtService.sign.mockReturnValue("signed.jwt.token");
 
-      const result = await service.login('testuser', 'correctpassword');
+      const result = await service.login("testuser", "correctpassword");
 
-      expect(usersService.findByUsername).toHaveBeenCalledWith('testuser');
+      expect(usersService.findByUsername).toHaveBeenCalledWith("testuser");
       expect(bcrypt.compare).toHaveBeenCalledWith(
-        'correctpassword',
+        "correctpassword",
         mockUser.passwordHash,
       );
       expect(jwtService.sign).toHaveBeenCalledWith({
@@ -51,32 +51,32 @@ describe('AuthService', () => {
         username: mockUser.username,
         role: mockUser.role,
       });
-      expect(result).toEqual({ access_token: 'signed.jwt.token' });
+      expect(result).toEqual({ access_token: "signed.jwt.token" });
     });
 
-    it('should throw UnauthorizedException when user is not found', async () => {
+    it("should throw UnauthorizedException when user is not found", async () => {
       usersService.findByUsername.mockResolvedValue(null);
 
-      await expect(
-        service.login('nonexistent', 'password'),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.login("nonexistent", "password")).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
-    it('should throw UnauthorizedException when password is wrong', async () => {
+    it("should throw UnauthorizedException when password is wrong", async () => {
       usersService.findByUsername.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      await expect(
-        service.login('testuser', 'wrongpassword'),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.login("testuser", "wrongpassword")).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
-    it('should include sub, username, and role in JWT payload', async () => {
+    it("should include sub, username, and role in JWT payload", async () => {
       usersService.findByUsername.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
-      jwtService.sign.mockReturnValue('token');
+      jwtService.sign.mockReturnValue("token");
 
-      await service.login('testuser', 'password');
+      await service.login("testuser", "password");
 
       const payload = jwtService.sign.mock.calls[0][0];
       expect(payload).toEqual({
