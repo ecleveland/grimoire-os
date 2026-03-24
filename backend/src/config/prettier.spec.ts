@@ -16,4 +16,15 @@ describe('Prettier configuration', () => {
     expect(config).toHaveProperty('printWidth');
     expect(config).toHaveProperty('tabWidth');
   });
+
+  it('should have a .prettierignore file that excludes build artifacts', () => {
+    const ignorePath = resolve(ROOT, '.prettierignore');
+    expect(existsSync(ignorePath)).toBe(true);
+
+    const content = readFileSync(ignorePath, 'utf-8');
+    expect(content).toContain('node_modules');
+    expect(content).toContain('dist');
+    expect(content).toContain('.next');
+    expect(content).toContain('coverage');
+  });
 });
