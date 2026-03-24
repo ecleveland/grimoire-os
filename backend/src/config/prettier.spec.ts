@@ -17,6 +17,14 @@ describe('Prettier configuration', () => {
     expect(config).toHaveProperty('tabWidth');
   });
 
+  it('should have format and format:check scripts in backend package.json', () => {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, 'backend', 'package.json'), 'utf-8'));
+    expect(pkg.scripts.format).toBeDefined();
+    expect(pkg.scripts['format:check']).toBeDefined();
+    expect(pkg.scripts.format).toContain('prettier');
+    expect(pkg.scripts['format:check']).toContain('prettier');
+  });
+
   it('should have a .prettierignore file that excludes build artifacts', () => {
     const ignorePath = resolve(ROOT, '.prettierignore');
     expect(existsSync(ignorePath)).toBe(true);
