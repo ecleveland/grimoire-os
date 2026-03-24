@@ -30,7 +30,7 @@ export default function CampaignDetailPage() {
 
   useEffect(() => {
     apiFetch<Campaign>(`/campaigns/${id}`)
-      .then((c) => {
+      .then(c => {
         setCampaign(c);
         if (c.inviteCode) setInviteCode(c.inviteCode);
       })
@@ -42,7 +42,7 @@ export default function CampaignDetailPage() {
     if (tab === 'notes') {
       apiFetch<Note[]>(`/notes?campaignId=${id}`)
         .then(setNotes)
-        .catch((err) => {
+        .catch(err => {
           console.error('Failed to load notes:', err);
           toast.error('Failed to load notes', { id: 'load-notes' });
         });
@@ -50,7 +50,7 @@ export default function CampaignDetailPage() {
     if (tab === 'encounters') {
       apiFetch<Encounter[]>(`/encounters?campaignId=${id}`)
         .then(setEncounters)
-        .catch((err) => {
+        .catch(err => {
           console.error('Failed to load encounters:', err);
           toast.error('Failed to load encounters', { id: 'load-encounters' });
         });
@@ -59,7 +59,9 @@ export default function CampaignDetailPage() {
 
   const generateInviteCode = async () => {
     try {
-      const res = await apiFetch<{ inviteCode: string }>(`/campaigns/${id}/invite`, { method: 'POST' });
+      const res = await apiFetch<{ inviteCode: string }>(`/campaigns/${id}/invite`, {
+        method: 'POST',
+      });
       setInviteCode(res.inviteCode);
       toast.success('Invite code generated!');
     } catch (err) {
@@ -82,14 +84,18 @@ export default function CampaignDetailPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{campaign.name}</h1>
           <div className="flex items-center gap-3 mt-2">
-            <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[campaign.status] || ''}`}>
+            <span
+              className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[campaign.status] || ''}`}
+            >
               {campaign.status}
             </span>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               {campaign.playerIds.length} player{campaign.playerIds.length !== 1 ? 's' : ''}
             </span>
             {campaign.currentSession != null && (
-              <span className="text-sm text-gray-500 dark:text-gray-400">Session {campaign.currentSession}</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                Session {campaign.currentSession}
+              </span>
             )}
           </div>
         </div>
@@ -144,7 +150,7 @@ export default function CampaignDetailPage() {
       {/* Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700 mb-6">
         <nav className="flex gap-6">
-          {tabs.map((t) => (
+          {tabs.map(t => (
             <button
               key={t.key}
               onClick={() => setTab(t.key)}
@@ -163,7 +169,9 @@ export default function CampaignDetailPage() {
       {/* Tab Content */}
       {tab === 'overview' && (
         <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Campaign Details</h2>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+            Campaign Details
+          </h2>
           <dl className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <dt className="text-gray-500 dark:text-gray-400">Status</dt>
@@ -202,7 +210,7 @@ export default function CampaignDetailPage() {
             <p className="text-gray-500 dark:text-gray-400">No notes yet.</p>
           ) : (
             <div className="space-y-3">
-              {notes.map((n) => (
+              {notes.map(n => (
                 <Link
                   key={n.id}
                   href={`/campaigns/${id}/notes/${n.id}`}
@@ -216,8 +224,11 @@ export default function CampaignDetailPage() {
                   </div>
                   {n.tags.length > 0 && (
                     <div className="flex gap-1 mt-2">
-                      {n.tags.map((t) => (
-                        <span key={t} className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded">
+                      {n.tags.map(t => (
+                        <span
+                          key={t}
+                          className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
+                        >
                           {t}
                         </span>
                       ))}
@@ -245,7 +256,7 @@ export default function CampaignDetailPage() {
             <p className="text-gray-500 dark:text-gray-400">No encounters yet.</p>
           ) : (
             <div className="space-y-3">
-              {encounters.map((enc) => (
+              {encounters.map(enc => (
                 <Link
                   key={enc.id}
                   href={`/campaigns/${id}/encounters/${enc.id}`}
@@ -253,12 +264,15 @@ export default function CampaignDetailPage() {
                 >
                   <div className="flex items-center justify-between">
                     <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${enc.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded-full ${enc.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}
+                    >
                       {enc.isActive ? 'Active' : 'Inactive'}
                     </span>
                   </div>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''} &middot; Round {enc.round}
+                    {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
+                    &middot; Round {enc.round}
                   </p>
                 </Link>
               ))}

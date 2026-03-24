@@ -35,20 +35,43 @@ export default function NewCampaignPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Create Campaign</h1>
-      <form onSubmit={handleSubmit} className="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700"
+      >
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Name <span className="text-red-500">*</span>
           </label>
-          <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+          <input
+            type="text"
+            required
+            value={name}
+            onChange={e => setName(e.target.value)}
+            className={inputClass}
+          />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-          <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} className={inputClass} />
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Description
+          </label>
+          <textarea
+            rows={3}
+            value={description}
+            onChange={e => setDescription(e.target.value)}
+            className={inputClass}
+          />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Setting</label>
-          <input type="text" value={setting} onChange={(e) => setSetting(e.target.value)} className={inputClass} />
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Setting
+          </label>
+          <input
+            type="text"
+            value={setting}
+            onChange={e => setSetting(e.target.value)}
+            className={inputClass}
+          />
         </div>
         <div className="flex gap-3">
           <button
@@ -58,7 +81,11 @@ export default function NewCampaignPage() {
           >
             {submitting ? 'Creating...' : 'Create Campaign'}
           </button>
-          <button type="button" onClick={() => router.back()} className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
             Cancel
           </button>
         </div>

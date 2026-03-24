@@ -39,7 +39,7 @@ export default function InitiativeTrackerPage() {
   const nextTurn = () => {
     if (!encounter) return;
     const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
-    const activeCombatants = sorted.filter((c) => c.hp > 0);
+    const activeCombatants = sorted.filter(c => c.hp > 0);
     if (activeCombatants.length === 0) return;
 
     let nextIndex = encounter.currentTurn + 1;
@@ -64,7 +64,8 @@ export default function InitiativeTrackerPage() {
   };
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
-  if (!encounter) return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
+  if (!encounter)
+    return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
 
   const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
   const isController = isDm || (user && encounter.createdBy === user.userId);
@@ -75,10 +76,14 @@ export default function InitiativeTrackerPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{encounter.name}</h1>
           <div className="flex items-center gap-3 mt-2">
-            <span className={`px-2 py-1 text-xs font-medium rounded-full ${encounter.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}>
+            <span
+              className={`px-2 py-1 text-xs font-medium rounded-full ${encounter.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}
+            >
               {encounter.isActive ? 'Active' : 'Inactive'}
             </span>
-            <span className="text-sm text-gray-500 dark:text-gray-400">Round {encounter.round}</span>
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              Round {encounter.round}
+            </span>
           </div>
         </div>
         {isController && (
@@ -115,7 +120,9 @@ export default function InitiativeTrackerPage() {
               }`}
             >
               {isCurrent && (
-                <span className="text-indigo-600 dark:text-indigo-400 text-lg font-bold">&raquo;</span>
+                <span className="text-indigo-600 dark:text-indigo-400 text-lg font-bold">
+                  &raquo;
+                </span>
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -130,7 +137,9 @@ export default function InitiativeTrackerPage() {
               <div className="flex items-center gap-4 text-sm">
                 <div className="text-center">
                   <div className="text-xs text-gray-500 dark:text-gray-400">Init</div>
-                  <div className="font-mono font-medium text-gray-900 dark:text-white">{c.initiative}</div>
+                  <div className="font-mono font-medium text-gray-900 dark:text-white">
+                    {c.initiative}
+                  </div>
                 </div>
                 <div className="text-center">
                   <div className="text-xs text-gray-500 dark:text-gray-400">AC</div>
@@ -142,7 +151,7 @@ export default function InitiativeTrackerPage() {
                     <input
                       type="number"
                       value={c.hp}
-                      onChange={(e) => updateCombatantHp(i, Number(e.target.value))}
+                      onChange={e => updateCombatantHp(i, Number(e.target.value))}
                       className="w-16 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
                   ) : (
@@ -151,9 +160,7 @@ export default function InitiativeTrackerPage() {
                     </div>
                   )}
                 </div>
-                {isController && (
-                  <div className="text-xs text-gray-400">/{c.maxHp}</div>
-                )}
+                {isController && <div className="text-xs text-gray-400">/{c.maxHp}</div>}
               </div>
             </div>
           );

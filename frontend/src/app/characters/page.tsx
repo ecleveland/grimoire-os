@@ -13,7 +13,7 @@ export default function CharactersPage() {
   useEffect(() => {
     apiFetch<Character[]>('/characters')
       .then(setCharacters)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load characters:', err);
         toast.error('Failed to load characters', { id: 'load-characters' });
       })
@@ -37,10 +37,12 @@ export default function CharactersPage() {
       </div>
 
       {characters.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">No characters yet. Create one to get started!</p>
+        <p className="text-gray-500 dark:text-gray-400">
+          No characters yet. Create one to get started!
+        </p>
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {characters.map((c) => (
+          {characters.map(c => (
             <Link
               key={c.id}
               href={`/characters/${c.id}`}

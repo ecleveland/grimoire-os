@@ -15,7 +15,7 @@ export default function MonsterListPage() {
   useEffect(() => {
     apiFetch<SrdMonster[]>('/srd/monsters')
       .then(setMonsters)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load monsters:', err);
         toast.error('Failed to load monsters', { id: 'load-monsters' });
       })
@@ -24,13 +24,13 @@ export default function MonsterListPage() {
 
   const types = useMemo(() => {
     const set = new Set<string>();
-    monsters.forEach((m) => set.add(m.type));
+    monsters.forEach(m => set.add(m.type));
     return Array.from(set).sort();
   }, [monsters]);
 
   const crs = useMemo(() => {
     const set = new Set<string>();
-    monsters.forEach((m) => set.add(m.challengeRating));
+    monsters.forEach(m => set.add(m.challengeRating));
     return Array.from(set).sort((a, b) => {
       const toNum = (v: string) => {
         if (v.includes('/')) {
@@ -44,7 +44,7 @@ export default function MonsterListPage() {
   }, [monsters]);
 
   const filtered = useMemo(() => {
-    return monsters.filter((m) => {
+    return monsters.filter(m => {
       if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false;
       if (typeFilter && m.type !== typeFilter) return false;
       if (crFilter && m.challengeRating !== crFilter) return false;
@@ -66,28 +66,41 @@ export default function MonsterListPage() {
           type="text"
           placeholder="Search monsters..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={e => setSearch(e.target.value)}
           className={inputClass}
         />
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={inputClass}>
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          className={inputClass}
+        >
           <option value="">All Types</option>
-          {types.map((t) => (
-            <option key={t} value={t}>{t}</option>
+          {types.map(t => (
+            <option key={t} value={t}>
+              {t}
+            </option>
           ))}
         </select>
-        <select value={crFilter} onChange={(e) => setCrFilter(e.target.value)} className={inputClass}>
+        <select value={crFilter} onChange={e => setCrFilter(e.target.value)} className={inputClass}>
           <option value="">All CRs</option>
-          {crs.map((cr) => (
-            <option key={cr} value={cr}>CR {cr}</option>
+          {crs.map(cr => (
+            <option key={cr} value={cr}>
+              CR {cr}
+            </option>
           ))}
         </select>
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{filtered.length} monster{filtered.length !== 1 ? 's' : ''} found</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        {filtered.length} monster{filtered.length !== 1 ? 's' : ''} found
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((m) => (
-          <div key={m.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        {filtered.map(m => (
+          <div
+            key={m.id}
+            className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+          >
             <h3 className="font-semibold text-gray-900 dark:text-white">{m.name}</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               {m.size} {m.type} &middot; {m.alignment}

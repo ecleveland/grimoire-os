@@ -30,7 +30,7 @@ export default function AdminUsersPage() {
         method: 'PATCH',
         body: JSON.stringify({ role }),
       });
-      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, role } : u)));
+      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, role } : u)));
       toast.success('Role updated');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update role');
@@ -38,10 +38,11 @@ export default function AdminUsersPage() {
   };
 
   const deleteUser = async (userId: string, username: string) => {
-    if (!confirm(`Are you sure you want to delete user "${username}"? This cannot be undone.`)) return;
+    if (!confirm(`Are you sure you want to delete user "${username}"? This cannot be undone.`))
+      return;
     try {
       await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      setUsers(prev => prev.filter(u => u.id !== userId));
       toast.success('User deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete user');
@@ -64,22 +65,28 @@ export default function AdminUsersPage() {
             <thead className="bg-gray-50 dark:bg-gray-700/50">
               <tr>
                 <th className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300">Username</th>
-                <th className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300">Display Name</th>
+                <th className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300">
+                  Display Name
+                </th>
                 <th className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300">Email</th>
                 <th className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300">Role</th>
                 <th className="px-4 py-3 font-medium text-gray-700 dark:text-gray-300">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {users.map((u) => (
+              {users.map(u => (
                 <tr key={u.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-4 py-3 text-gray-900 dark:text-white font-medium">{u.username}</td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{u.displayName || '-'}</td>
+                  <td className="px-4 py-3 text-gray-900 dark:text-white font-medium">
+                    {u.username}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                    {u.displayName || '-'}
+                  </td>
                   <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{u.email || '-'}</td>
                   <td className="px-4 py-3">
                     <select
                       value={u.role}
-                      onChange={(e) => updateRole(u.id, e.target.value as User['role'])}
+                      onChange={e => updateRole(u.id, e.target.value as User['role'])}
                       className={selectClass}
                     >
                       <option value="player">Player</option>

@@ -19,7 +19,7 @@ export default function CampaignsPage() {
   useEffect(() => {
     apiFetch<Campaign[]>('/campaigns')
       .then(setCampaigns)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load campaigns:', err);
         toast.error('Failed to load campaigns', { id: 'load-campaigns' });
       })
@@ -43,10 +43,12 @@ export default function CampaignsPage() {
       </div>
 
       {campaigns.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">No campaigns yet. Create one to get started!</p>
+        <p className="text-gray-500 dark:text-gray-400">
+          No campaigns yet. Create one to get started!
+        </p>
       ) : (
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {campaigns.map((c) => (
+          {campaigns.map(c => (
             <Link
               key={c.id}
               href={`/campaigns/${c.id}`}
@@ -54,12 +56,16 @@ export default function CampaignsPage() {
             >
               <div className="flex items-start justify-between mb-2">
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{c.name}</h2>
-                <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[c.status] || ''}`}>
+                <span
+                  className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[c.status] || ''}`}
+                >
                   {c.status}
                 </span>
               </div>
               {c.description && (
-                <p className="text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">{c.description}</p>
+                <p className="text-gray-600 dark:text-gray-400 mb-3 line-clamp-2">
+                  {c.description}
+                </p>
               )}
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {c.playerIds.length} player{c.playerIds.length !== 1 ? 's' : ''}

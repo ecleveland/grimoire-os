@@ -15,7 +15,7 @@ export default function SpellListPage() {
   useEffect(() => {
     apiFetch<SrdSpell[]>('/srd/spells')
       .then(setSpells)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load spells:', err);
         toast.error('Failed to load spells', { id: 'load-spells' });
       })
@@ -24,18 +24,18 @@ export default function SpellListPage() {
 
   const classes = useMemo(() => {
     const set = new Set<string>();
-    spells.forEach((s) => s.classes.forEach((c) => set.add(c)));
+    spells.forEach(s => s.classes.forEach(c => set.add(c)));
     return Array.from(set).sort();
   }, [spells]);
 
   const levels = useMemo(() => {
     const set = new Set<number>();
-    spells.forEach((s) => set.add(s.level));
+    spells.forEach(s => set.add(s.level));
     return Array.from(set).sort((a, b) => a - b);
   }, [spells]);
 
   const filtered = useMemo(() => {
-    return spells.filter((s) => {
+    return spells.filter(s => {
       if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false;
       if (classFilter && !s.classes.includes(classFilter)) return false;
       if (levelFilter !== '' && s.level !== Number(levelFilter)) return false;
@@ -57,28 +57,45 @@ export default function SpellListPage() {
           type="text"
           placeholder="Search spells..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={e => setSearch(e.target.value)}
           className={inputClass}
         />
-        <select value={classFilter} onChange={(e) => setClassFilter(e.target.value)} className={inputClass}>
+        <select
+          value={classFilter}
+          onChange={e => setClassFilter(e.target.value)}
+          className={inputClass}
+        >
           <option value="">All Classes</option>
-          {classes.map((c) => (
-            <option key={c} value={c}>{c}</option>
+          {classes.map(c => (
+            <option key={c} value={c}>
+              {c}
+            </option>
           ))}
         </select>
-        <select value={levelFilter} onChange={(e) => setLevelFilter(e.target.value)} className={inputClass}>
+        <select
+          value={levelFilter}
+          onChange={e => setLevelFilter(e.target.value)}
+          className={inputClass}
+        >
           <option value="">All Levels</option>
-          {levels.map((l) => (
-            <option key={l} value={l}>{l === 0 ? 'Cantrip' : `Level ${l}`}</option>
+          {levels.map(l => (
+            <option key={l} value={l}>
+              {l === 0 ? 'Cantrip' : `Level ${l}`}
+            </option>
           ))}
         </select>
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{filtered.length} spell{filtered.length !== 1 ? 's' : ''} found</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        {filtered.length} spell{filtered.length !== 1 ? 's' : ''} found
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((s) => (
-          <div key={s.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        {filtered.map(s => (
+          <div
+            key={s.id}
+            className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+          >
             <h3 className="font-semibold text-gray-900 dark:text-white">{s.name}</h3>
             <div className="flex items-center gap-2 mt-1 text-sm text-gray-500 dark:text-gray-400">
               <span>{s.level === 0 ? 'Cantrip' : `Level ${s.level}`}</span>

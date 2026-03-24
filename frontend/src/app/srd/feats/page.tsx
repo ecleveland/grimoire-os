@@ -16,7 +16,7 @@ export default function FeatListPage() {
   useEffect(() => {
     apiFetch<SrdFeat[]>('/srd/feats')
       .then(setFeats)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load feats:', err);
         toast.error('Failed to load feats', { id: 'load-feats' });
       })
@@ -24,12 +24,12 @@ export default function FeatListPage() {
   }, []);
 
   const filtered = useMemo(
-    () => (categoryFilter === 'All' ? feats : feats.filter((f) => f.category === categoryFilter)),
-    [feats, categoryFilter],
+    () => (categoryFilter === 'All' ? feats : feats.filter(f => f.category === categoryFilter)),
+    [feats, categoryFilter]
   );
 
   const toggle = (id: string) => {
-    setExpanded((prev) => {
+    setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -43,7 +43,7 @@ export default function FeatListPage() {
     <div>
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Feats</h1>
       <div className="flex gap-2 mb-4 flex-wrap">
-        {CATEGORIES.map((cat) => (
+        {CATEGORIES.map(cat => (
           <button
             key={cat}
             onClick={() => setCategoryFilter(cat)}
@@ -58,8 +58,11 @@ export default function FeatListPage() {
         ))}
       </div>
       <div className="space-y-4">
-        {filtered.map((feat) => (
-          <div key={feat.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        {filtered.map(feat => (
+          <div
+            key={feat.id}
+            className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+          >
             <button
               onClick={() => toggle(feat.id)}
               className="w-full flex items-center justify-between p-4 text-left"
@@ -78,11 +81,15 @@ export default function FeatListPage() {
                   {feat.prerequisite && <> &middot; {feat.prerequisite}</>}
                 </p>
               </div>
-              <span className="text-gray-400 text-lg">{expanded.has(feat.id) ? '\u2212' : '+'}</span>
+              <span className="text-gray-400 text-lg">
+                {expanded.has(feat.id) ? '\u2212' : '+'}
+              </span>
             </button>
             {expanded.has(feat.id) && (
               <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3">
-                <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">{feat.description}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
+                  {feat.description}
+                </p>
               </div>
             )}
           </div>
