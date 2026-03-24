@@ -1,4 +1,4 @@
-const BASE_URL = "https://www.dnd5eapi.co/api";
+const BASE_URL = 'https://www.dnd5eapi.co/api';
 const MAX_CONCURRENCY = 5;
 const MAX_RETRIES = 5;
 const RETRY_BASE_MS = 1000;
@@ -12,7 +12,7 @@ async function fetchJson<T>(url: string): Promise<T> {
       if (res.status === 429) {
         // Rate limited — wait longer before retry
         const delay = RETRY_BASE_MS * Math.pow(2, attempt);
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise(r => setTimeout(r, delay));
         continue;
       }
       if (!res.ok) {
@@ -23,18 +23,18 @@ async function fetchJson<T>(url: string): Promise<T> {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < MAX_RETRIES) {
         const delay = RETRY_BASE_MS * Math.pow(2, attempt - 1);
-        await new Promise((r) => setTimeout(r, delay));
+        await new Promise(r => setTimeout(r, delay));
       }
     }
   }
 
-  throw lastError ?? new Error("Max retries exceeded");
+  throw lastError ?? new Error('Max retries exceeded');
 }
 
 async function runPool<T>(
   tasks: (() => Promise<T>)[],
   concurrency: number,
-  label?: string,
+  label?: string
 ): Promise<T[]> {
   const results: T[] = [];
   let index = 0;
@@ -52,10 +52,7 @@ async function runPool<T>(
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(concurrency, tasks.length) },
-    () => runNext(),
-  );
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => runNext());
   await Promise.all(workers);
   return results;
 }
@@ -70,7 +67,7 @@ export async function fetchAllDetails<T>(endpoint: string): Promise<T[]> {
   console.log(`  Found ${list.count} ${endpoint} in API`);
 
   const tasks = list.results.map(
-    (item) => () => fetchJson<T>(`${BASE_URL}/${endpoint}/${item.index}`),
+    item => () => fetchJson<T>(`${BASE_URL}/${endpoint}/${item.index}`)
   );
 
   return runPool(tasks, MAX_CONCURRENCY, endpoint);

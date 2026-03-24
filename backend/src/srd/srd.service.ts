@@ -1,5 +1,5 @@
-import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class SrdService {
@@ -7,23 +7,18 @@ export class SrdService {
 
   // ── Spells ──────────────────────────────────────────
 
-  async searchSpells(
-    query?: string,
-    classFilter?: string,
-    level?: number,
-    school?: string,
-  ) {
+  async searchSpells(query?: string, classFilter?: string, level?: number, school?: string) {
     const where: Record<string, unknown> = {};
     if (query) {
       where.OR = [
-        { name: { contains: query, mode: "insensitive" } },
-        { description: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
       ];
     }
     if (classFilter) where.classes = { has: classFilter };
     if (level !== undefined) where.level = level;
     if (school) where.school = school;
-    return this.prisma.spell.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.spell.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findSpell(id: string) {
@@ -38,13 +33,13 @@ export class SrdService {
     cr?: string,
     size?: string,
     minCr?: string,
-    maxCr?: string,
+    maxCr?: string
   ) {
     const where: Record<string, unknown> = {};
     if (query) {
       where.OR = [
-        { name: { contains: query, mode: "insensitive" } },
-        { description: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
       ];
     }
     if (type) where.type = type;
@@ -56,7 +51,7 @@ export class SrdService {
         ...(maxCr ? { lte: parseFloat(maxCr) } : {}),
       };
     }
-    return this.prisma.monster.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.monster.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findMonster(id: string) {
@@ -65,23 +60,18 @@ export class SrdService {
 
   // ── Items ───────────────────────────────────────────
 
-  async searchItems(
-    query?: string,
-    category?: string,
-    rarity?: string,
-    isMagic?: string,
-  ) {
+  async searchItems(query?: string, category?: string, rarity?: string, isMagic?: string) {
     const where: Record<string, unknown> = {};
     if (query) {
       where.OR = [
-        { name: { contains: query, mode: "insensitive" } },
-        { description: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
       ];
     }
     if (category) where.category = category;
     if (rarity) where.rarity = rarity;
-    if (isMagic !== undefined) where.isMagic = isMagic === "true";
-    return this.prisma.item.findMany({ where, orderBy: { name: "asc" } });
+    if (isMagic !== undefined) where.isMagic = isMagic === 'true';
+    return this.prisma.item.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findItem(id: string) {
@@ -91,7 +81,7 @@ export class SrdService {
   // ── Classes ─────────────────────────────────────────
 
   async findAllClasses() {
-    return this.prisma.srdClass.findMany({ orderBy: { name: "asc" } });
+    return this.prisma.srdClass.findMany({ orderBy: { name: 'asc' } });
   }
 
   async findClass(id: string) {
@@ -104,7 +94,7 @@ export class SrdService {
   // ── Races ───────────────────────────────────────────
 
   async findAllRaces() {
-    return this.prisma.race.findMany({ orderBy: { name: "asc" } });
+    return this.prisma.race.findMany({ orderBy: { name: 'asc' } });
   }
 
   async findRace(id: string) {
@@ -119,7 +109,7 @@ export class SrdService {
   async searchSubclasses(classId?: string) {
     const where: Record<string, unknown> = {};
     if (classId) where.classId = classId;
-    return this.prisma.subclass.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.subclass.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findSubclass(id: string) {
@@ -131,7 +121,7 @@ export class SrdService {
   async searchSubraces(raceId?: string) {
     const where: Record<string, unknown> = {};
     if (raceId) where.raceId = raceId;
-    return this.prisma.subrace.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.subrace.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findSubrace(id: string) {
@@ -144,11 +134,11 @@ export class SrdService {
     const where: Record<string, unknown> = {};
     if (query) {
       where.OR = [
-        { name: { contains: query, mode: "insensitive" } },
-        { description: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
       ];
     }
-    return this.prisma.background.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.background.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findBackground(id: string) {
@@ -161,11 +151,11 @@ export class SrdService {
     const where: Record<string, unknown> = {};
     if (query) {
       where.OR = [
-        { name: { contains: query, mode: "insensitive" } },
-        { description: { contains: query, mode: "insensitive" } },
+        { name: { contains: query, mode: 'insensitive' } },
+        { description: { contains: query, mode: 'insensitive' } },
       ];
     }
-    return this.prisma.feat.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.feat.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findFeat(id: string) {
@@ -175,7 +165,7 @@ export class SrdService {
   // ── Conditions ──────────────────────────────────────
 
   async findAllConditions() {
-    return this.prisma.condition.findMany({ orderBy: { name: "asc" } });
+    return this.prisma.condition.findMany({ orderBy: { name: 'asc' } });
   }
 
   async findCondition(id: string) {
@@ -187,7 +177,7 @@ export class SrdService {
   async searchSkills(ability?: string) {
     const where: Record<string, unknown> = {};
     if (ability) where.ability = ability;
-    return this.prisma.skill.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.skill.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findSkill(id: string) {
@@ -199,7 +189,7 @@ export class SrdService {
   async searchLanguages(type?: string) {
     const where: Record<string, unknown> = {};
     if (type) where.type = type;
-    return this.prisma.language.findMany({ where, orderBy: { name: "asc" } });
+    return this.prisma.language.findMany({ where, orderBy: { name: 'asc' } });
   }
 
   async findLanguage(id: string) {

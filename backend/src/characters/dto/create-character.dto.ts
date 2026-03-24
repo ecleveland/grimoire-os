@@ -5,8 +5,8 @@ import {
   IsArray,
   ValidateNested,
   IsBoolean,
-} from "class-validator";
-import { Type } from "class-transformer";
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 class AbilityScoresDto {
   @IsOptional() @IsNumber() strength?: number;

@@ -1,7 +1,7 @@
-import { Injectable } from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import { PrismaService } from "../prisma/prisma.service";
-import { fetchAllDetails } from "./srd-api.fetcher";
+import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { fetchAllDetails } from './srd-api.fetcher';
 import {
   transformSpell,
   transformMonster,
@@ -15,82 +15,76 @@ import {
   type ApiMagicItem,
   type ApiBackground,
   type ApiFeat,
-} from "./srd-api.transformers";
-import { srdSpells as fallbackSpells } from "./data/spells";
-import { srdMonsters as fallbackMonsters } from "./data/monsters";
-import { srdItems as fallbackItems } from "./data/items";
-import { srdClasses } from "./data/classes";
-import { srdRaces } from "./data/races";
-import { srdSubclasses } from "./data/subclasses";
-import { srdSubraces } from "./data/subraces";
-import { srdConditions } from "./data/conditions";
-import { srdSkills } from "./data/skills";
-import { srdLanguages } from "./data/languages";
+} from './srd-api.transformers';
+import { srdSpells as fallbackSpells } from './data/spells';
+import { srdMonsters as fallbackMonsters } from './data/monsters';
+import { srdItems as fallbackItems } from './data/items';
+import { srdClasses } from './data/classes';
+import { srdRaces } from './data/races';
+import { srdSubclasses } from './data/subclasses';
+import { srdSubraces } from './data/subraces';
+import { srdConditions } from './data/conditions';
+import { srdSkills } from './data/skills';
+import { srdLanguages } from './data/languages';
 
 @Injectable()
 export class SeedService {
   constructor(private prisma: PrismaService) {}
 
   async seed(): Promise<void> {
-    const useApi = process.env.SEED_FROM_API !== "false";
+    const useApi = process.env.SEED_FROM_API !== 'false';
 
     // ── Phase A: Fetch from API ────────────────────────
     // Cast to Prisma input types since transformer return types use plain `null`
     // for JSON fields, while Prisma expects `NullableJsonNullValueInput`
     let spells = fallbackSpells as unknown as Prisma.SpellCreateManyInput[];
-    let monsters =
-      fallbackMonsters as unknown as Prisma.MonsterCreateManyInput[];
+    let monsters = fallbackMonsters as unknown as Prisma.MonsterCreateManyInput[];
     let items = fallbackItems as unknown as Prisma.ItemCreateManyInput[];
     let backgrounds: Prisma.BackgroundCreateManyInput[] = [];
     let feats: Prisma.FeatCreateManyInput[] = [];
 
     if (useApi) {
       try {
-        console.log("Fetching SRD data from D&D 5e API...");
+        console.log('Fetching SRD data from D&D 5e API...');
 
         // Fetch sequentially to avoid overwhelming the API with rate limits
-        const apiSpells = await fetchAllDetails<ApiSpell>("spells");
-        spells =
-          apiSpells.map(transformSpell) as unknown as Prisma.SpellCreateManyInput[];
+        const apiSpells = await fetchAllDetails<ApiSpell>('spells');
+        spells = apiSpells.map(transformSpell) as unknown as Prisma.SpellCreateManyInput[];
 
-        const apiMonsters = await fetchAllDetails<ApiMonster>("monsters");
-        monsters =
-          apiMonsters.map(transformMonster) as unknown as Prisma.MonsterCreateManyInput[];
+        const apiMonsters = await fetchAllDetails<ApiMonster>('monsters');
+        monsters = apiMonsters.map(transformMonster) as unknown as Prisma.MonsterCreateManyInput[];
 
-        const apiEquipment = await fetchAllDetails<ApiEquipment>("equipment");
-        const equipmentItems =
-          apiEquipment.map(transformEquipment) as unknown as Prisma.ItemCreateManyInput[];
+        const apiEquipment = await fetchAllDetails<ApiEquipment>('equipment');
+        const equipmentItems = apiEquipment.map(
+          transformEquipment
+        ) as unknown as Prisma.ItemCreateManyInput[];
 
-        const apiMagicItems =
-          await fetchAllDetails<ApiMagicItem>("magic-items");
-        const magicItems =
-          apiMagicItems.map(transformMagicItem) as unknown as Prisma.ItemCreateManyInput[];
+        const apiMagicItems = await fetchAllDetails<ApiMagicItem>('magic-items');
+        const magicItems = apiMagicItems.map(
+          transformMagicItem
+        ) as unknown as Prisma.ItemCreateManyInput[];
         items = [...equipmentItems, ...magicItems];
 
-        const apiBackgrounds =
-          await fetchAllDetails<ApiBackground>("backgrounds");
-        backgrounds =
-          apiBackgrounds.map(transformBackground) as unknown as Prisma.BackgroundCreateManyInput[];
+        const apiBackgrounds = await fetchAllDetails<ApiBackground>('backgrounds');
+        backgrounds = apiBackgrounds.map(
+          transformBackground
+        ) as unknown as Prisma.BackgroundCreateManyInput[];
 
-        const apiFeats = await fetchAllDetails<ApiFeat>("feats");
-        feats =
-          apiFeats.map(transformFeat) as unknown as Prisma.FeatCreateManyInput[];
+        const apiFeats = await fetchAllDetails<ApiFeat>('feats');
+        feats = apiFeats.map(transformFeat) as unknown as Prisma.FeatCreateManyInput[];
 
-        console.log("API fetch complete.");
+        console.log('API fetch complete.');
       } catch (error: unknown) {
-        console.warn(
-          "API fetch failed, falling back to static data:",
-          (error as Error).message,
-        );
+        console.warn('API fetch failed, falling back to static data:', (error as Error).message);
       }
     } else {
-      console.log("SEED_FROM_API=false, using static fallback data.");
+      console.log('SEED_FROM_API=false, using static fallback data.');
     }
 
     // ── Phase B: Write to database ─────────────────────
-    console.log("Seeding SRD data...");
+    console.log('Seeding SRD data...');
 
-    await this.prisma.$transaction(async (tx) => {
+    await this.prisma.$transaction(async tx => {
       // Independent tables (no FK dependencies)
       await tx.spell.createMany({ data: spells, skipDuplicates: true });
       console.log(`  Spells: ${spells.length} entries`);
@@ -142,9 +136,7 @@ export class SeedService {
           where: { name: sc.className },
         });
         if (!parent) {
-          console.warn(
-            `  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`,
-          );
+          console.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
           continue;
         }
         await tx.subclass.upsert({
@@ -171,9 +163,7 @@ export class SeedService {
           where: { name: sr.raceName },
         });
         if (!parent) {
-          console.warn(
-            `  WARNING: Race "${sr.raceName}" not found for subrace "${sr.name}"`,
-          );
+          console.warn(`  WARNING: Race "${sr.raceName}" not found for subrace "${sr.name}"`);
           continue;
         }
         await tx.subrace.upsert({
@@ -196,6 +186,6 @@ export class SeedService {
       console.log(`  Subraces: ${srdSubraces.length} entries`);
     });
 
-    console.log("SRD seed complete.");
+    console.log('SRD seed complete.');
   }
 }
