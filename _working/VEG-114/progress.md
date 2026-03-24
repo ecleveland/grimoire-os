@@ -5,6 +5,7 @@
 - **Title:** Add Prettier configuration
 - **Branch:** VEG-114/add-prettier-configuration
 - **Milestone:** M2: Developer Experience & Quality Foundation
+- **Selected Approach:** A — Per-package Prettier with shared root `.prettierrc` JSON
 
 ## Acceptance Criteria
 
