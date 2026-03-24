@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'fs';
+import { execSync } from 'child_process';
 import { resolve } from 'path';
 
 const ROOT = resolve(__dirname, '..', '..', '..');
@@ -31,6 +32,12 @@ describe('Prettier configuration', () => {
     expect(pkg.scripts['format:check']).toBeDefined();
     expect(pkg.scripts.format).toContain('prettier');
     expect(pkg.scripts['format:check']).toContain('prettier');
+  });
+
+  it('should pass format:check on backend (all files formatted)', () => {
+    expect(() => {
+      execSync('npm run format:check', { cwd: resolve(ROOT, 'backend'), stdio: 'pipe' });
+    }).not.toThrow();
   });
 
   it('should have a .prettierignore file that excludes build artifacts', () => {
