@@ -15,7 +15,9 @@
     "seed": "ts-node -r tsconfig-paths/register src/seed/run-seed.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "format": "prettier --write \"{src,test}/**/*.ts\"",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\""
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
