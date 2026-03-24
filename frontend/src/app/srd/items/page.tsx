@@ -14,7 +14,7 @@ export default function ItemListPage() {
   useEffect(() => {
     apiFetch<SrdItem[]>('/srd/items')
       .then(setItems)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load items:', err);
         toast.error('Failed to load items', { id: 'load-items' });
       })
@@ -23,12 +23,12 @@ export default function ItemListPage() {
 
   const categories = useMemo(() => {
     const set = new Set<string>();
-    items.forEach((i) => set.add(i.category));
+    items.forEach(i => set.add(i.category));
     return Array.from(set).sort();
   }, [items]);
 
   const filtered = useMemo(() => {
-    return items.filter((i) => {
+    return items.filter(i => {
       if (search && !i.name.toLowerCase().includes(search.toLowerCase())) return false;
       if (categoryFilter && i.category !== categoryFilter) return false;
       return true;
@@ -49,22 +49,33 @@ export default function ItemListPage() {
           type="text"
           placeholder="Search items..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={e => setSearch(e.target.value)}
           className={inputClass}
         />
-        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={inputClass}>
+        <select
+          value={categoryFilter}
+          onChange={e => setCategoryFilter(e.target.value)}
+          className={inputClass}
+        >
           <option value="">All Categories</option>
-          {categories.map((c) => (
-            <option key={c} value={c}>{c}</option>
+          {categories.map(c => (
+            <option key={c} value={c}>
+              {c}
+            </option>
           ))}
         </select>
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{filtered.length} item{filtered.length !== 1 ? 's' : ''} found</p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        {filtered.length} item{filtered.length !== 1 ? 's' : ''} found
+      </p>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((item) => (
-          <div key={item.id} className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        {filtered.map(item => (
+          <div
+            key={item.id}
+            className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+          >
             <h3 className="font-semibold text-gray-900 dark:text-white">{item.name}</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{item.category}</p>
             <div className="flex gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
@@ -76,8 +87,11 @@ export default function ItemListPage() {
             )}
             {item.properties.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
-                {item.properties.map((p) => (
-                  <span key={p} className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded">
+                {item.properties.map(p => (
+                  <span
+                    key={p}
+                    className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
+                  >
                     {p}
                   </span>
                 ))}

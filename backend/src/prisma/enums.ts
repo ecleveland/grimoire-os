@@ -2,7 +2,7 @@ import {
   Role,
   CampaignStatus as PrismaCampaignStatus,
   NoteVisibility as PrismaNoteVisibility,
-} from "@prisma/client";
+} from '@prisma/client';
 
 // Re-export Prisma Role enum as UserRole with uppercase keys
 // for backward compatibility with DTOs, guards, and decorators.

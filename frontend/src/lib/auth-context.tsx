@@ -52,8 +52,8 @@ function parseJwt(token: string): {
   const jsonPayload = decodeURIComponent(
     atob(base64)
       .split('')
-      .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-      .join(''),
+      .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+      .join('')
   );
   return JSON.parse(jsonPayload);
 }
@@ -106,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(userInfo);
       }
     },
-    [],
+    []
   );
 
   const login = useCallback(
@@ -130,16 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fetchAndStoreProfile(payload);
       router.push('/');
     },
-    [router, fetchAndStoreProfile],
+    [router, fetchAndStoreProfile]
   );
 
   const register = useCallback(
-    async (data: {
-      username: string;
-      password: string;
-      displayName?: string;
-      email?: string;
-    }) => {
+    async (data: { username: string; password: string; displayName?: string; email?: string }) => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -160,14 +155,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await fetchAndStoreProfile(payload);
       router.push('/');
     },
-    [router, fetchAndStoreProfile],
+    [router, fetchAndStoreProfile]
   );
 
   const logout = useCallback(() => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    document.cookie =
-      'auth-flag=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    document.cookie = 'auth-flag=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     setIsAuthenticated(false);
     setUser(null);
     router.push('/login');
@@ -191,16 +185,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshProfile,
     }),
-    [isAuthenticated, user, login, register, logout, refreshProfile],
+    [isAuthenticated, user, login, register, logout, refreshProfile]
   );
 
   if (!hydrated) {
     return null;
   }
 
-  return (
-    <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

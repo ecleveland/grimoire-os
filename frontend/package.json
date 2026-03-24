@@ -9,7 +9,9 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:cov": "vitest run --coverage"
+    "test:cov": "vitest run --coverage",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {
     "next": "16.1.6",
@@ -29,6 +31,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jsdom": "^28.0.0",
+    "prettier": "^3.8.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.0.18"

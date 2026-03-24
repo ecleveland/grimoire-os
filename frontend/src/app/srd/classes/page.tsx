@@ -13,7 +13,7 @@ export default function ClassListPage() {
   useEffect(() => {
     apiFetch<SrdClass[]>('/srd/classes')
       .then(setClasses)
-      .catch((err) => {
+      .catch(err => {
         console.error('Failed to load classes:', err);
         toast.error('Failed to load classes', { id: 'load-classes' });
       })
@@ -21,7 +21,7 @@ export default function ClassListPage() {
   }, []);
 
   const toggle = (id: string) => {
-    setExpanded((prev) => {
+    setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -35,8 +35,11 @@ export default function ClassListPage() {
     <div>
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Classes</h1>
       <div className="space-y-4">
-        {classes.map((cls) => (
-          <div key={cls.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+        {classes.map(cls => (
+          <div
+            key={cls.id}
+            className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+          >
             <button
               onClick={() => toggle(cls.id)}
               className="w-full flex items-center justify-between p-4 text-left"
@@ -55,31 +58,50 @@ export default function ClassListPage() {
                   <p className="text-gray-600 dark:text-gray-400 text-sm">{cls.description}</p>
                 )}
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Saving Throws</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{cls.savingThrows.join(', ')}</p>
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Saving Throws
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {cls.savingThrows.join(', ')}
+                  </p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Armor Proficiencies</h3>
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Armor Proficiencies
+                  </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
                     {cls.armorProficiencies.length > 0 ? cls.armorProficiencies.join(', ') : 'None'}
                   </p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Weapon Proficiencies</h3>
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Weapon Proficiencies
+                  </h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {cls.weaponProficiencies.length > 0 ? cls.weaponProficiencies.join(', ') : 'None'}
+                    {cls.weaponProficiencies.length > 0
+                      ? cls.weaponProficiencies.join(', ')
+                      : 'None'}
                   </p>
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Skill Choices</h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">{cls.skillChoices.join(', ')}</p>
+                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Skill Choices
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {cls.skillChoices.join(', ')}
+                  </p>
                 </div>
                 {cls.features.length > 0 && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Features
+                    </h3>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {cls.features.map((f) => (
-                        <span key={f} className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded">
+                      {cls.features.map(f => (
+                        <span
+                          key={f}
+                          className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
+                        >
                           {f}
                         </span>
                       ))}

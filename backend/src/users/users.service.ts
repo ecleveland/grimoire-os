@@ -3,13 +3,13 @@ import {
   ConflictException,
   NotFoundException,
   UnauthorizedException,
-} from "@nestjs/common";
-import { Prisma } from "@prisma/client";
-import * as bcrypt from "bcryptjs";
-import { PrismaService } from "../prisma/prisma.service";
-import { CreateUserDto } from "./dto/create-user.dto";
-import { UpdateUserDto } from "./dto/update-user.dto";
-import { AdminUpdateUserDto } from "./dto/admin-update-user.dto";
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -25,15 +25,12 @@ export class UsersService {
           displayName: createUserDto.displayName ?? createUserDto.username,
           email: createUserDto.email,
           avatarUrl: createUserDto.avatarUrl,
-          role: createUserDto.role ?? "player",
+          role: createUserDto.role ?? 'player',
         },
       });
     } catch (error: unknown) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
-      ) {
-        throw new ConflictException("Username or email already exists");
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Username or email already exists');
       }
       throw error;
     }
@@ -84,25 +81,18 @@ export class UsersService {
         omit: { passwordHash: true },
       });
     } catch (error: unknown) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);
       }
       throw error;
     }
   }
 
-  async changePassword(
-    id: string,
-    currentPassword: string,
-    newPassword: string,
-  ): Promise<void> {
+  async changePassword(id: string, currentPassword: string, newPassword: string): Promise<void> {
     const user = await this.findOne(id);
     const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) {
-      throw new UnauthorizedException("Current password is incorrect");
+      throw new UnauthorizedException('Current password is incorrect');
     }
     const passwordHash = await bcrypt.hash(newPassword, 10);
     await this.prisma.user.update({
@@ -115,10 +105,7 @@ export class UsersService {
     try {
       await this.prisma.user.delete({ where: { id } });
     } catch (error: unknown) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2025"
-      ) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);
       }
       throw error;

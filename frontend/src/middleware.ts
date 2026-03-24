@@ -7,7 +7,7 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get('auth-flag');
   const { pathname } = request.nextUrl;
 
-  const isPublicPath = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+  const isPublicPath = PUBLIC_PATHS.some(p => pathname.startsWith(p));
 
   if (!token && !isPublicPath) {
     return NextResponse.redirect(new URL('/login', request.url));

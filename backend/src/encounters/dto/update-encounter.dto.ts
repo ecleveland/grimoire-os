@@ -1,9 +1,9 @@
-import { OmitType, PartialType } from "@nestjs/mapped-types";
-import { CreateEncounterDto } from "./create-encounter.dto";
-import { IsOptional, IsNumber, IsBoolean } from "class-validator";
+import { OmitType, PartialType } from '@nestjs/mapped-types';
+import { CreateEncounterDto } from './create-encounter.dto';
+import { IsOptional, IsNumber, IsBoolean } from 'class-validator';
 
 export class UpdateEncounterDto extends PartialType(
-  OmitType(CreateEncounterDto, ["campaignId"] as const),
+  OmitType(CreateEncounterDto, ['campaignId'] as const)
 ) {
   @IsOptional()
   @IsNumber()

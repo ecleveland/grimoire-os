@@ -30,7 +30,7 @@ export default function NewNotePage() {
           sessionNumber: sessionNumber ? Number(sessionNumber) : undefined,
           tags: tags
             .split(',')
-            .map((t) => t.trim())
+            .map(t => t.trim())
             .filter(Boolean),
         }),
       });
@@ -48,34 +48,70 @@ export default function NewNotePage() {
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Create Note</h1>
-      <form onSubmit={handleSubmit} className="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700"
+      >
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Title <span className="text-red-500">*</span>
           </label>
-          <input type="text" required value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
+          <input
+            type="text"
+            required
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            className={inputClass}
+          />
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Content <span className="text-red-500">*</span>
           </label>
-          <textarea rows={8} required value={content} onChange={(e) => setContent(e.target.value)} className={inputClass} />
+          <textarea
+            rows={8}
+            required
+            value={content}
+            onChange={e => setContent(e.target.value)}
+            className={inputClass}
+          />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Visibility</label>
-          <select value={visibility} onChange={(e) => setVisibility(e.target.value as Note['visibility'])} className={inputClass}>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Visibility
+          </label>
+          <select
+            value={visibility}
+            onChange={e => setVisibility(e.target.value as Note['visibility'])}
+            className={inputClass}
+          >
             <option value="private">Private</option>
             <option value="party">Party</option>
             <option value="dm_only">DM Only</option>
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Session Number</label>
-          <input type="number" value={sessionNumber} onChange={(e) => setSessionNumber(e.target.value)} className={inputClass} />
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Session Number
+          </label>
+          <input
+            type="number"
+            value={sessionNumber}
+            onChange={e => setSessionNumber(e.target.value)}
+            className={inputClass}
+          />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tags (comma-separated)</label>
-          <input type="text" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="lore, quest, npc" className={inputClass} />
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Tags (comma-separated)
+          </label>
+          <input
+            type="text"
+            value={tags}
+            onChange={e => setTags(e.target.value)}
+            placeholder="lore, quest, npc"
+            className={inputClass}
+          />
         </div>
         <div className="flex gap-3">
           <button
@@ -85,7 +121,11 @@ export default function NewNotePage() {
           >
             {submitting ? 'Creating...' : 'Create Note'}
           </button>
-          <button type="button" onClick={() => router.back()} className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
             Cancel
           </button>
         </div>
