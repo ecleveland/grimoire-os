@@ -56,6 +56,17 @@ describe('CharactersService', () => {
   });
 
   describe('findOne', () => {
+    it('should return character when found', async () => {
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      expect(prisma.character.findUnique).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+      });
+      expect(result).toEqual(mockCharacter);
+    });
+
     it('should throw NotFoundException when character not found', async () => {
       prisma.character.findUnique.mockResolvedValue(null);
 
@@ -64,6 +75,14 @@ describe('CharactersService', () => {
   });
 
   describe('findOneForUser', () => {
+    it('should return character when user is owner', async () => {
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
+
+      expect(result).toEqual(mockCharacter);
+    });
+
     it('should throw ForbiddenException when user does not own character', async () => {
       prisma.character.findUnique.mockResolvedValue(mockCharacter);
 
@@ -90,6 +109,22 @@ describe('CharactersService', () => {
       });
       expect(result.level).toBe(6);
     });
+
+    it('should throw ForbiddenException when non-owner tries to update', async () => {
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+
+      await expect(service.update(CHARACTER_ID, USER_ID_2, { level: 6 })).rejects.toThrow(
+        ForbiddenException
+      );
+    });
+
+    it('should throw NotFoundException when character does not exist', async () => {
+      prisma.character.findUnique.mockResolvedValue(null);
+
+      await expect(service.update(CHARACTER_ID, USER_ID, { level: 6 })).rejects.toThrow(
+        NotFoundException
+      );
+    });
   });
 
   describe('remove', () => {
@@ -105,6 +140,18 @@ describe('CharactersService', () => {
       expect(prisma.character.delete).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
       });
+    });
+
+    it('should throw ForbiddenException when non-owner tries to delete', async () => {
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+
+      await expect(service.remove(CHARACTER_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should throw NotFoundException when character does not exist', async () => {
+      prisma.character.findUnique.mockResolvedValue(null);
+
+      await expect(service.remove(CHARACTER_ID, USER_ID)).rejects.toThrow(NotFoundException);
     });
   });
 });
