@@ -40,6 +40,12 @@ describe('Prettier configuration', () => {
     }).not.toThrow();
   });
 
+  it('should pass format:check on frontend (all files formatted)', () => {
+    expect(() => {
+      execSync('npm run format:check', { cwd: resolve(ROOT, 'frontend'), stdio: 'pipe' });
+    }).not.toThrow();
+  });
+
   it('should have a .prettierignore file that excludes build artifacts', () => {
     const ignorePath = resolve(ROOT, '.prettierignore');
     expect(existsSync(ignorePath)).toBe(true);
