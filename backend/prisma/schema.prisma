@@ -28,6 +28,12 @@ enum NoteVisibility {
   dm_only
 }
 
+enum AuditAction {
+  create
+  update
+  delete
+}
+
 // ── Users ──────────────────────────────────────────────
 
 model User {
@@ -387,4 +393,24 @@ model Language {
   source          String  @default("SRD 5.2.1")
 
   @@map("languages")
+}
+
+// ── Audit Log ─────────────────────────────────────────
+
+model AuditLog {
+  id        String      @id @default(uuid())
+  userId    String
+  username  String
+  action    AuditAction
+  entity    String
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime    @default(now())
+
+  @@index([userId])
+  @@index([entity])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

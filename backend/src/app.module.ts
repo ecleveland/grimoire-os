@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
@@ -11,6 +12,8 @@ import { NotesModule } from './notes/notes.module';
 import { EncountersModule } from './encounters/encounters.module';
 import { SrdModule } from './srd/srd.module';
 import { AdminModule } from './admin/admin.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { AuditLogInterceptor } from './audit-log/audit-log.interceptor';
 
 @Module({
   imports: [
@@ -28,6 +31,13 @@ import { AdminModule } from './admin/admin.module';
     EncountersModule,
     SrdModule,
     AdminModule,
+    AuditLogModule,
+  ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: AuditLogInterceptor,
+    },
   ],
 })
 export class AppModule {}
