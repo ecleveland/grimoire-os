@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { NotesService } from './notes.service';
 import { CampaignsService } from '../campaigns/campaigns.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -136,22 +136,85 @@ describe('NotesService', () => {
   });
 
   describe('findOne', () => {
+    it('throws NotFoundException when note does not exist', async () => {
+      prisma.note.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOne(NOTE_ID, USER_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('DM can access any note including private', async () => {
+      prisma.note.findUnique.mockResolvedValue(mockPrivateNote);
+      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+
+      const result = await service.findOne(mockPrivateNote.id, USER_ID);
+
+      expect(result).toEqual(mockPrivateNote);
+    });
+
+    it('author can access their own private note', async () => {
+      const playerPrivateNote = { ...mockPrivateNote, authorId: USER_ID_2 };
+      prisma.note.findUnique.mockResolvedValue(playerPrivateNote);
+      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+
+      const result = await service.findOne(playerPrivateNote.id, USER_ID_2);
+
+      expect(result).toEqual(playerPrivateNote);
+    });
+
+    it('any member can access party-visible notes', async () => {
+      prisma.note.findUnique.mockResolvedValue(mockNote); // visibility: 'party'
+      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+
+      const result = await service.findOne(NOTE_ID, USER_ID_2);
+
+      expect(result).toEqual(mockNote);
+    });
+
     it('throws ForbiddenException for non-author non-DM on private note', async () => {
       const privateNoteByOwner = {
         ...mockPrivateNote,
         authorId: USER_ID,
       };
       prisma.note.findUnique.mockResolvedValue(privateNoteByOwner);
-      // USER_ID_2 is a member but not DM and not author
       campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
 
       await expect(service.findOne(privateNoteByOwner.id, USER_ID_2)).rejects.toThrow(
         ForbiddenException
       );
     });
+
+    it('throws ForbiddenException for non-author non-DM on dm_only note', async () => {
+      const dmOnlyNote = { ...mockNote, visibility: 'dm_only', authorId: USER_ID };
+      prisma.note.findUnique.mockResolvedValue(dmOnlyNote);
+      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+
+      await expect(service.findOne(dmOnlyNote.id, USER_ID_2)).rejects.toThrow(ForbiddenException);
+    });
   });
 
   describe('update', () => {
+    it('author can update their own note', async () => {
+      const updatedNote = { ...mockNote, title: 'Updated Title' };
+      prisma.note.findUnique.mockResolvedValue(mockNote);
+      prisma.note.update.mockResolvedValue(updatedNote);
+
+      const result = await service.update(NOTE_ID, USER_ID, { title: 'Updated Title' });
+
+      expect(prisma.note.update).toHaveBeenCalledWith({
+        where: { id: NOTE_ID },
+        data: { title: 'Updated Title' },
+      });
+      expect(result).toEqual(updatedNote);
+    });
+
+    it('throws NotFoundException when note does not exist', async () => {
+      prisma.note.findUnique.mockResolvedValue(null);
+
+      await expect(service.update(NOTE_ID, USER_ID, { title: 'New' })).rejects.toThrow(
+        NotFoundException
+      );
+    });
+
     it('throws ForbiddenException for non-author', async () => {
       prisma.note.findUnique.mockResolvedValue(mockNote);
 
@@ -162,6 +225,18 @@ describe('NotesService', () => {
   });
 
   describe('remove', () => {
+    it('author can delete their own note', async () => {
+      prisma.note.findUnique.mockResolvedValue(mockNote);
+      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      prisma.note.delete.mockResolvedValue(mockNote);
+
+      await service.remove(NOTE_ID, USER_ID);
+
+      expect(prisma.note.delete).toHaveBeenCalledWith({
+        where: { id: NOTE_ID },
+      });
+    });
+
     it('DM can delete any note', async () => {
       // Note authored by USER_ID_2, campaign owned by USER_ID (DM)
       const playerNote = { ...mockNote, authorId: USER_ID_2 };
@@ -174,6 +249,12 @@ describe('NotesService', () => {
       expect(prisma.note.delete).toHaveBeenCalledWith({
         where: { id: NOTE_ID },
       });
+    });
+
+    it('throws NotFoundException when note does not exist', async () => {
+      prisma.note.findUnique.mockResolvedValue(null);
+
+      await expect(service.remove(NOTE_ID, USER_ID)).rejects.toThrow(NotFoundException);
     });
 
     it('throws ForbiddenException for non-author non-DM', async () => {
