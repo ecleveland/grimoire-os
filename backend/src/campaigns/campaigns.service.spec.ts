@@ -3,7 +3,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
-import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
+import { USER_ID, USER_ID_2, CHARACTER_ID, CAMPAIGN_ID } from '../test/fixtures';
 
 jest.mock('crypto', () => ({
   ...jest.requireActual('crypto'),
@@ -119,6 +119,19 @@ describe('CampaignsService', () => {
 
       expect(result).toEqual(mockCampaign);
     });
+
+    it('returns campaign for non-owner player member', async () => {
+      const campaignWithPlayer = {
+        ...mockCampaign,
+        ownerId: 'someone-else',
+        players: [{ campaignId: CAMPAIGN_ID, userId: USER_ID }],
+      };
+      prisma.campaign.findUnique.mockResolvedValue(campaignWithPlayer);
+
+      const result = await service.findOneForUser(CAMPAIGN_ID, USER_ID);
+
+      expect(result).toEqual(campaignWithPlayer);
+    });
   });
 
   describe('update', () => {
@@ -128,6 +141,22 @@ describe('CampaignsService', () => {
       await expect(service.update(CAMPAIGN_ID, USER_ID_2, { name: 'New Name' })).rejects.toThrow(
         ForbiddenException
       );
+    });
+
+    it('updates campaign when called by owner', async () => {
+      const dto = { name: 'Updated Name', description: 'Updated desc' };
+      const updatedCampaign = { ...mockCampaign, ...dto };
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      prisma.campaign.update.mockResolvedValue(updatedCampaign);
+
+      const result = await service.update(CAMPAIGN_ID, USER_ID, dto);
+
+      expect(prisma.campaign.update).toHaveBeenCalledWith({
+        where: { id: CAMPAIGN_ID },
+        data: dto,
+        include: { players: true, characters: true },
+      });
+      expect(result).toEqual(updatedCampaign);
     });
   });
 
@@ -185,6 +214,79 @@ describe('CampaignsService', () => {
     });
   });
 
+  describe('remove', () => {
+    it('throws ForbiddenException for non-owner', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+
+      await expect(service.remove(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('deletes campaign when called by owner', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      prisma.campaign.delete.mockResolvedValue(mockCampaign);
+
+      await service.remove(CAMPAIGN_ID, USER_ID);
+
+      expect(prisma.campaign.delete).toHaveBeenCalledWith({ where: { id: CAMPAIGN_ID } });
+    });
+
+    it('throws NotFoundException for nonexistent campaign', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(null);
+
+      await expect(service.remove('nonexistent', USER_ID)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('addCharacter', () => {
+    it('adds character to campaign for a member', async () => {
+      prisma.campaign.findUnique
+        .mockResolvedValueOnce(mockCampaign) // findOneForUser -> findOne
+        .mockResolvedValueOnce(mockCampaign); // final findOne
+      prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: CAMPAIGN_ID });
+
+      const result = await service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID);
+
+      expect(prisma.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: { campaignId: CAMPAIGN_ID },
+      });
+      expect(result).toEqual(mockCampaign);
+    });
+
+    it('throws ForbiddenException for non-member', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+
+      await expect(
+        service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('removeCharacter', () => {
+    it('removes character from campaign when called by owner', async () => {
+      prisma.campaign.findUnique
+        .mockResolvedValueOnce(mockCampaign) // ownership check
+        .mockResolvedValueOnce(mockCampaign); // final findOne
+      prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: null });
+
+      const result = await service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID);
+
+      expect(prisma.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: { campaignId: null },
+      });
+      expect(result).toEqual(mockCampaign);
+    });
+
+    it('throws ForbiddenException for non-owner', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+
+      await expect(
+        service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
   describe('removePlayer', () => {
     it('throws ForbiddenException for non-owner', async () => {
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
@@ -192,6 +294,22 @@ describe('CampaignsService', () => {
       await expect(service.removePlayer(CAMPAIGN_ID, 'some-player-id', USER_ID_2)).rejects.toThrow(
         ForbiddenException
       );
+    });
+
+    it('deletes campaignPlayer record when called by owner', async () => {
+      prisma.campaign.findUnique
+        .mockResolvedValueOnce(mockCampaign) // ownership check
+        .mockResolvedValueOnce(mockCampaign); // final findOne
+      prisma.campaignPlayer.delete.mockResolvedValue({});
+
+      const result = await service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID);
+
+      expect(prisma.campaignPlayer.delete).toHaveBeenCalledWith({
+        where: {
+          campaignId_userId: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
+        },
+      });
+      expect(result).toEqual(mockCampaign);
     });
   });
 });
