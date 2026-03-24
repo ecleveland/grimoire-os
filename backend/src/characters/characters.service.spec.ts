@@ -140,7 +140,7 @@ describe('CharactersService', () => {
         whitelist: true,
         forbidNonWhitelisted: true,
       });
-      const hasCampaignIdError = errors.some((e) => e.property === 'campaignId');
+      const hasCampaignIdError = errors.some(e => e.property === 'campaignId');
       expect(hasCampaignIdError).toBe(true);
     });
 
