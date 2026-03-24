@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import { CharactersService } from './characters.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateCharacterDto } from './dto/update-character.dto';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import {
   USER_ID,
@@ -124,6 +127,34 @@ describe('CharactersService', () => {
       await expect(service.update(CHARACTER_ID, USER_ID, { level: 6 })).rejects.toThrow(
         NotFoundException
       );
+    });
+  });
+
+  describe('UpdateCharacterDto mass assignment protection', () => {
+    it('should reject campaignId as a non-whitelisted property', async () => {
+      const dto = plainToInstance(UpdateCharacterDto, {
+        name: 'Test',
+        campaignId: 'malicious-campaign-id',
+      });
+      const errors = await validate(dto, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      const hasCampaignIdError = errors.some((e) => e.property === 'campaignId');
+      expect(hasCampaignIdError).toBe(true);
+    });
+
+    it('should allow legitimate character fields', async () => {
+      const dto = plainToInstance(UpdateCharacterDto, {
+        name: 'Updated Name',
+        level: 10,
+        race: 'Elf',
+      });
+      const errors = await validate(dto, {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+      expect(errors).toHaveLength(0);
     });
   });
 
