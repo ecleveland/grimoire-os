@@ -9,6 +9,7 @@ type MockModel = {
   update: jest.Mock;
   delete: jest.Mock;
   upsert: jest.Mock;
+  count: jest.Mock;
 };
 
 function mockModel(): MockModel {
@@ -21,6 +22,7 @@ function mockModel(): MockModel {
     update: jest.fn(),
     delete: jest.fn(),
     upsert: jest.fn(),
+    count: jest.fn(),
   };
 }
 
@@ -43,7 +45,8 @@ export type MockPrismaService = {
     | 'feat'
     | 'condition'
     | 'skill'
-    | 'language']: MockModel;
+    | 'language'
+    | 'auditLog']: MockModel;
 } & {
   $transaction: jest.Mock;
 };
@@ -68,6 +71,7 @@ export function createMockPrismaService(): MockPrismaService {
     condition: mockModel(),
     skill: mockModel(),
     language: mockModel(),
+    auditLog: mockModel(),
     $transaction: jest.fn(fn => fn()),
   };
 }

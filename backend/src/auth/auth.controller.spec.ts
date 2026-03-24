@@ -1,10 +1,10 @@
-import { Test, TestingModule } from "@nestjs/testing";
-import { AuthController } from "./auth.controller";
-import { AuthService } from "./auth.service";
-import { UsersService } from "../users/users.service";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { Test, TestingModule } from '@nestjs/testing';
+import { AuthController } from './auth.controller';
+import { AuthService } from './auth.service';
+import { UsersService } from '../users/users.service';
+import { ThrottlerModule } from '@nestjs/throttler';
 
-describe("AuthController", () => {
+describe('AuthController', () => {
   let controller: AuthController;
   let authService: { login: jest.Mock };
   let usersService: { create: jest.Mock };
@@ -26,79 +26,76 @@ describe("AuthController", () => {
     jest.clearAllMocks();
   });
 
-  describe("login", () => {
-    it("should delegate to authService.login and return the result", async () => {
-      authService.login.mockResolvedValue({ access_token: "jwt-token" });
+  describe('login', () => {
+    it('should delegate to authService.login and return the result', async () => {
+      authService.login.mockResolvedValue({ access_token: 'jwt-token' });
 
       const result = await controller.login({
-        username: "testuser",
-        password: "password123",
+        username: 'testuser',
+        password: 'password123',
       });
 
-      expect(authService.login).toHaveBeenCalledWith("testuser", "password123");
-      expect(result).toEqual({ access_token: "jwt-token" });
+      expect(authService.login).toHaveBeenCalledWith('testuser', 'password123');
+      expect(result).toEqual({ access_token: 'jwt-token' });
     });
 
-    it("should propagate UnauthorizedException from authService", async () => {
-      authService.login.mockRejectedValue(new Error("Invalid credentials"));
+    it('should propagate UnauthorizedException from authService', async () => {
+      authService.login.mockRejectedValue(new Error('Invalid credentials'));
 
-      await expect(
-        controller.login({ username: "bad", password: "bad" }),
-      ).rejects.toThrow("Invalid credentials");
+      await expect(controller.login({ username: 'bad', password: 'bad' })).rejects.toThrow(
+        'Invalid credentials'
+      );
     });
   });
 
-  describe("register", () => {
-    it("should create user then login and return access token", async () => {
+  describe('register', () => {
+    it('should create user then login and return access token', async () => {
       usersService.create.mockResolvedValue(undefined);
-      authService.login.mockResolvedValue({ access_token: "new-jwt" });
+      authService.login.mockResolvedValue({ access_token: 'new-jwt' });
 
       const result = await controller.register({
-        username: "newuser",
-        password: "securepass123",
-        displayName: "New User",
-        email: "new@example.com",
+        username: 'newuser',
+        password: 'securepass123',
+        displayName: 'New User',
+        email: 'new@example.com',
       });
 
       expect(usersService.create).toHaveBeenCalledWith({
-        username: "newuser",
-        password: "securepass123",
-        displayName: "New User",
-        email: "new@example.com",
+        username: 'newuser',
+        password: 'securepass123',
+        displayName: 'New User',
+        email: 'new@example.com',
       });
-      expect(authService.login).toHaveBeenCalledWith(
-        "newuser",
-        "securepass123",
-      );
-      expect(result).toEqual({ access_token: "new-jwt" });
+      expect(authService.login).toHaveBeenCalledWith('newuser', 'securepass123');
+      expect(result).toEqual({ access_token: 'new-jwt' });
     });
 
-    it("should pass optional fields as undefined when not provided", async () => {
+    it('should pass optional fields as undefined when not provided', async () => {
       usersService.create.mockResolvedValue(undefined);
-      authService.login.mockResolvedValue({ access_token: "token" });
+      authService.login.mockResolvedValue({ access_token: 'token' });
 
       await controller.register({
-        username: "minuser",
-        password: "securepass123",
+        username: 'minuser',
+        password: 'securepass123',
       });
 
       expect(usersService.create).toHaveBeenCalledWith({
-        username: "minuser",
-        password: "securepass123",
+        username: 'minuser',
+        password: 'securepass123',
         displayName: undefined,
         email: undefined,
       });
     });
 
-    it("should propagate errors from usersService.create", async () => {
-      usersService.create.mockRejectedValue(new Error("Username taken"));
+    it('should propagate errors from usersService.create', async () => {
+      usersService.create.mockRejectedValue(new Error('Username taken'));
 
       await expect(
         controller.register({
-          username: "taken",
-          password: "securepass123",
-        }),
-      ).rejects.toThrow("Username taken");
+          username: 'taken',
+          password: 'securepass123',
+        })
+      ).rejects.toThrow('Username taken');
 
       expect(authService.login).not.toHaveBeenCalled();
     });

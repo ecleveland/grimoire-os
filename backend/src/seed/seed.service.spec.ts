@@ -49,6 +49,10 @@ describe('SeedService', () => {
     prisma.subclass.upsert.mockResolvedValue({});
     prisma.subrace.upsert.mockResolvedValue({});
 
+    // Dev admin user lookup returns null (user doesn't exist yet)
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.user.create.mockResolvedValue({});
+
     // $transaction executes the callback
     prisma.$transaction.mockImplementation(fn => fn(prisma));
 

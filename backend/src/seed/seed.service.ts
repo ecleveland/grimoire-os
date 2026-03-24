@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { fetchAllDetails } from './srd-api.fetcher';
 import {
@@ -187,5 +188,32 @@ export class SeedService {
     });
 
     console.log('SRD seed complete.');
+
+    // ── Dev-only admin user ────────────────────────────
+    if (process.env.NODE_ENV !== 'production') {
+      await this.seedDevAdmin();
+    }
+  }
+
+  private async seedDevAdmin(): Promise<void> {
+    const username = 'admin';
+    const existing = await this.prisma.user.findUnique({
+      where: { username },
+    });
+    if (existing) {
+      console.log('Dev admin user already exists, skipping.');
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash('admin', 10);
+    await this.prisma.user.create({
+      data: {
+        username,
+        passwordHash,
+        displayName: 'Admin (Dev)',
+        role: 'admin',
+      },
+    });
+    console.log('Dev admin user created (username: "admin", password: "admin").');
   }
 }
