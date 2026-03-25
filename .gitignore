@@ -15,5 +15,8 @@ coverage/
 # Secrets / keys
 *.pem
 
+# TDD working artifacts
+_working/
+
 # Tool config (may contain auth tokens)
 .mcp.json
