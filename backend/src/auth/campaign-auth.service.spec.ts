@@ -100,4 +100,42 @@ describe('CampaignAuthService', () => {
       );
     });
   });
+
+  describe('assertAuthorOrDm', () => {
+    it('passes when userId equals authorId', () => {
+      expect(() =>
+        service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID),
+      ).not.toThrow();
+    });
+
+    it('passes when userId equals campaignOwnerId', () => {
+      expect(() =>
+        service.assertAuthorOrDm('some-author-id', USER_ID, USER_ID),
+      ).not.toThrow();
+    });
+
+    it('throws ForbiddenException when userId is neither author nor DM', () => {
+      expect(() =>
+        service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID_2),
+      ).toThrow(ForbiddenException);
+    });
+  });
+
+  describe('findCampaignOrFail', () => {
+    it('returns campaign when found', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+
+      const result = await service.findCampaignOrFail(CAMPAIGN_ID);
+
+      expect(result).toEqual(mockCampaign);
+    });
+
+    it('throws NotFoundException when not found', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(null);
+
+      await expect(service.findCampaignOrFail('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
 });

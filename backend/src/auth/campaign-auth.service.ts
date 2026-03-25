@@ -28,6 +28,12 @@ export class CampaignAuthService {
     return campaign;
   }
 
+  assertAuthorOrDm(authorId: string, campaignOwnerId: string, userId: string): void {
+    if (userId !== authorId && userId !== campaignOwnerId) {
+      throw new ForbiddenException('Only the author or DM can delete this note');
+    }
+  }
+
   async findCampaignOrFail(id: string) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },
