@@ -18,6 +18,16 @@ export class CampaignAuthService {
     return campaign;
   }
 
+  async assertCampaignMember(campaignId: string, userId: string) {
+    const campaign = await this.findCampaignOrFail(campaignId);
+    const isMember = campaign.ownerId === userId ||
+      campaign.players.some(p => p.userId === userId);
+    if (!isMember) {
+      throw new ForbiddenException('You are not a member of this campaign');
+    }
+    return campaign;
+  }
+
   async findCampaignOrFail(id: string) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },

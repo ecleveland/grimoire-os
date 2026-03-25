@@ -61,4 +61,43 @@ describe('CampaignAuthService', () => {
       );
     });
   });
+
+  describe('assertCampaignMember', () => {
+    it('returns campaign when userId matches ownerId', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+
+      const result = await service.assertCampaignMember(CAMPAIGN_ID, USER_ID);
+
+      expect(result).toEqual(mockCampaign);
+    });
+
+    it('returns campaign when userId is in players', async () => {
+      const campaignWithPlayer = {
+        ...mockCampaign,
+        ownerId: 'someone-else',
+        players: [{ campaignId: CAMPAIGN_ID, userId: USER_ID_2 }],
+      };
+      prisma.campaign.findUnique.mockResolvedValue(campaignWithPlayer);
+
+      const result = await service.assertCampaignMember(CAMPAIGN_ID, USER_ID_2);
+
+      expect(result).toEqual(campaignWithPlayer);
+    });
+
+    it('throws ForbiddenException when userId is neither owner nor player', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+
+      await expect(service.assertCampaignMember(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('throws NotFoundException when campaign does not exist', async () => {
+      prisma.campaign.findUnique.mockResolvedValue(null);
+
+      await expect(service.assertCampaignMember('nonexistent', USER_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
 });
