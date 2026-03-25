@@ -10,6 +10,9 @@ export class CharactersService {
 
   async create(userId: string, dto: CreateCharacterDto) {
     return this.prisma.character.create({
+      // Cast needed: class-validator DTOs aren't structurally compatible with
+      // Prisma's InputJsonValue for JSON fields (abilityScores, hitPoints, etc.).
+      // Safe because CreateCharacterDto only declares whitelisted fields.
       data: {
         ...(dto as unknown as Prisma.CharacterUncheckedCreateInput),
         userId,
@@ -44,6 +47,8 @@ export class CharactersService {
     await this.findOneForUser(id, userId);
     return this.prisma.character.update({
       where: { id },
+      // Cast needed for JSON field compatibility (see create method comment).
+      // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
       data: dto as unknown as Prisma.CharacterUncheckedUpdateInput,
     });
   }
