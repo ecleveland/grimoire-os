@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 
@@ -11,7 +12,10 @@ const campaignInclude = {
 
 @Injectable()
 export class CampaignsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private campaignAuth: CampaignAuthService,
+  ) {}
 
   async create(userId: string, dto: CreateCampaignDto) {
     return this.prisma.campaign.create({
@@ -46,19 +50,11 @@ export class CampaignsService {
   }
 
   async findOneForUser(id: string, userId: string) {
-    const campaign = await this.findOne(id);
-    const isMember = campaign.ownerId === userId || campaign.players.some(p => p.userId === userId);
-    if (!isMember) {
-      throw new ForbiddenException('You are not a member of this campaign');
-    }
-    return campaign;
+    return this.campaignAuth.assertCampaignMember(id, userId);
   }
 
   async update(id: string, userId: string, dto: UpdateCampaignDto) {
-    const campaign = await this.findOne(id);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can edit');
-    }
+    await this.campaignAuth.assertCampaignOwner(id, userId);
     return this.prisma.campaign.update({
       where: { id },
       data: dto,
@@ -67,18 +63,12 @@ export class CampaignsService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const campaign = await this.findOne(id);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can delete');
-    }
+    await this.campaignAuth.assertCampaignOwner(id, userId);
     await this.prisma.campaign.delete({ where: { id } });
   }
 
   async generateInviteCode(id: string, userId: string): Promise<string> {
-    const campaign = await this.findOne(id);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can generate invite codes');
-    }
+    await this.campaignAuth.assertCampaignOwner(id, userId);
     const code = crypto.randomBytes(4).toString('hex');
     await this.prisma.campaign.update({
       where: { id },
@@ -115,10 +105,7 @@ export class CampaignsService {
   }
 
   async removeCharacter(campaignId: string, characterId: string, userId: string) {
-    const campaign = await this.findOne(campaignId);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can remove characters');
-    }
+    await this.campaignAuth.assertCampaignOwner(campaignId, userId);
     await this.prisma.character.update({
       where: { id: characterId },
       data: { campaignId: null },
@@ -127,10 +114,7 @@ export class CampaignsService {
   }
 
   async removePlayer(campaignId: string, playerId: string, userId: string) {
-    const campaign = await this.findOne(campaignId);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the campaign owner can remove players');
-    }
+    await this.campaignAuth.assertCampaignOwner(campaignId, userId);
     await this.prisma.campaignPlayer.delete({
       where: {
         campaignId_userId: { campaignId, userId: playerId },
