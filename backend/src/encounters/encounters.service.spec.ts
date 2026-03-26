@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EncountersService } from './encounters.service';
-import { CampaignsService } from '../campaigns/campaigns.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
@@ -9,7 +9,10 @@ import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
 describe('EncountersService', () => {
   let service: EncountersService;
   let prisma: MockPrismaService;
-  let campaignsService: { findOneForUser: jest.Mock; findOne: jest.Mock };
+  let campaignAuth: {
+    assertCampaignOwner: jest.Mock;
+    assertCampaignMember: jest.Mock;
+  };
 
   const ENCOUNTER_ID = 'enc-1111-2222-3333-444444444444';
 
@@ -48,19 +51,16 @@ describe('EncountersService', () => {
   };
 
   beforeEach(async () => {
-    campaignsService = {
-      findOneForUser: jest.fn(),
-      findOne: jest.fn(),
+    campaignAuth = {
+      assertCampaignOwner: jest.fn(),
+      assertCampaignMember: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EncountersService,
         prismaMockProvider(),
-        {
-          provide: CampaignsService,
-          useValue: campaignsService,
-        },
+        { provide: CampaignAuthService, useValue: campaignAuth },
       ],
     }).compile();
 
@@ -89,18 +89,20 @@ describe('EncountersService', () => {
     };
 
     it('throws ForbiddenException when non-DM tries to create', async () => {
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.create(USER_ID_2, createDto)).rejects.toThrow(ForbiddenException);
     });
 
     it('creates encounter with combatants as InputJsonValue', async () => {
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       prisma.encounter.create.mockResolvedValue(mockEncounter);
 
       const result = await service.create(USER_ID, createDto);
 
-      expect(campaignsService.findOneForUser).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.create).toHaveBeenCalledWith({
         data: {
           campaignId: CAMPAIGN_ID,
@@ -115,12 +117,12 @@ describe('EncountersService', () => {
 
   describe('findAllForCampaign', () => {
     it('verifies membership and returns encounters', async () => {
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.encounter.findMany.mockResolvedValue([mockEncounter]);
 
       const result = await service.findAllForCampaign(CAMPAIGN_ID, USER_ID);
 
-      expect(campaignsService.findOneForUser).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
         orderBy: { updatedAt: 'desc' },
@@ -132,14 +134,14 @@ describe('EncountersService', () => {
   describe('findOne', () => {
     it('returns encounter and verifies membership', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       const result = await service.findOne(ENCOUNTER_ID, USER_ID);
 
       expect(prisma.encounter.findUnique).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
       });
-      expect(campaignsService.findOneForUser).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(result).toEqual(mockEncounter);
     });
 
@@ -153,12 +155,13 @@ describe('EncountersService', () => {
   describe('update', () => {
     it('DM can update encounter fields', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       const updated = { ...mockEncounter, name: 'Dragon Fight' };
       prisma.encounter.update.mockResolvedValue(updated);
 
       const result = await service.update(ENCOUNTER_ID, USER_ID, { name: 'Dragon Fight' });
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
         data: { name: 'Dragon Fight' },
@@ -168,7 +171,7 @@ describe('EncountersService', () => {
 
     it('DM can update combatants as InputJsonValue', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       const newCombatants = [
         { name: 'Dragon', initiative: 20, hp: 200, maxHp: 200, ac: 19, isNpc: true },
       ];
@@ -196,7 +199,9 @@ describe('EncountersService', () => {
 
     it('throws ForbiddenException when non-DM tries to update', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.update(ENCOUNTER_ID, USER_ID_2, { name: 'Renamed' })).rejects.toThrow(
         ForbiddenException
@@ -213,18 +218,21 @@ describe('EncountersService', () => {
 
     it('throws ForbiddenException when non-DM tries to delete', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.remove(ENCOUNTER_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
     });
 
     it('DM can delete encounter', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       prisma.encounter.delete.mockResolvedValue(mockEncounter);
 
       await service.remove(ENCOUNTER_ID, USER_ID);
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.delete).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
       });

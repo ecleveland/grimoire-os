@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CHARACTER_ID, CAMPAIGN_ID } from '../test/fixtures';
@@ -15,6 +16,10 @@ import * as crypto from 'crypto';
 describe('CampaignsService', () => {
   let service: CampaignsService;
   let prisma: MockPrismaService;
+  let campaignAuth: {
+    assertCampaignOwner: jest.Mock;
+    assertCampaignMember: jest.Mock;
+  };
 
   const mockCampaign = {
     id: CAMPAIGN_ID,
@@ -38,9 +43,33 @@ describe('CampaignsService', () => {
     characters: [],
   };
 
+  const serializedMockCampaign = {
+    id: CAMPAIGN_ID,
+    name: 'Dragon Campaign',
+    description: 'A test campaign',
+    ownerId: USER_ID,
+    status: 'active',
+    setting: null,
+    currentSession: 1,
+    inviteCode: null,
+    createdAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    playerIds: [USER_ID],
+    characterIds: [],
+  };
+
   beforeEach(async () => {
+    campaignAuth = {
+      assertCampaignOwner: jest.fn(),
+      assertCampaignMember: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CampaignsService, prismaMockProvider()],
+      providers: [
+        CampaignsService,
+        prismaMockProvider(),
+        { provide: CampaignAuthService, useValue: campaignAuth },
+      ],
     }).compile();
 
     service = module.get<CampaignsService>(CampaignsService);
@@ -66,7 +95,7 @@ describe('CampaignsService', () => {
         },
         include: { players: true, characters: true },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
   });
 
@@ -83,7 +112,7 @@ describe('CampaignsService', () => {
         include: { players: true, characters: true },
         orderBy: { updatedAt: 'desc' },
       });
-      expect(result).toEqual([mockCampaign]);
+      expect(result).toEqual([serializedMockCampaign]);
     });
   });
 
@@ -93,7 +122,7 @@ describe('CampaignsService', () => {
 
       const result = await service.findOne(CAMPAIGN_ID);
 
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws NotFoundException when not found', async () => {
@@ -104,39 +133,31 @@ describe('CampaignsService', () => {
   });
 
   describe('findOneForUser', () => {
+    it('delegates to campaignAuth.assertCampaignMember', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+
+      const result = await service.findOneForUser(CAMPAIGN_ID, USER_ID);
+
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(result).toEqual(serializedMockCampaign);
+    });
+
     it('throws ForbiddenException for non-member', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignMember.mockRejectedValue(
+        new ForbiddenException('You are not a member of this campaign')
+      );
 
       await expect(service.findOneForUser(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
         ForbiddenException
       );
     });
-
-    it('returns campaign for owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
-
-      const result = await service.findOneForUser(CAMPAIGN_ID, USER_ID);
-
-      expect(result).toEqual(mockCampaign);
-    });
-
-    it('returns campaign for non-owner player member', async () => {
-      const campaignWithPlayer = {
-        ...mockCampaign,
-        ownerId: 'someone-else',
-        players: [{ campaignId: CAMPAIGN_ID, userId: USER_ID }],
-      };
-      prisma.campaign.findUnique.mockResolvedValue(campaignWithPlayer);
-
-      const result = await service.findOneForUser(CAMPAIGN_ID, USER_ID);
-
-      expect(result).toEqual(campaignWithPlayer);
-    });
   });
 
   describe('update', () => {
     it('throws ForbiddenException for non-owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.update(CAMPAIGN_ID, USER_ID_2, { name: 'New Name' })).rejects.toThrow(
         ForbiddenException
@@ -146,23 +167,26 @@ describe('CampaignsService', () => {
     it('updates campaign when called by owner', async () => {
       const dto = { name: 'Updated Name', description: 'Updated desc' };
       const updatedCampaign = { ...mockCampaign, ...dto };
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.update.mockResolvedValue(updatedCampaign);
 
       const result = await service.update(CAMPAIGN_ID, USER_ID, dto);
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.campaign.update).toHaveBeenCalledWith({
         where: { id: CAMPAIGN_ID },
         data: dto,
         include: { players: true, characters: true },
       });
-      expect(result).toEqual(updatedCampaign);
+      expect(result).toEqual({ ...serializedMockCampaign, ...dto });
     });
   });
 
   describe('generateInviteCode', () => {
     it('throws ForbiddenException for non-owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.generateInviteCode(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
         ForbiddenException
@@ -170,7 +194,7 @@ describe('CampaignsService', () => {
     });
 
     it('generates code using crypto.randomBytes', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.update.mockResolvedValue(mockCampaign);
 
       const mockBuffer = Buffer.from('abcd1234', 'hex');
@@ -178,6 +202,7 @@ describe('CampaignsService', () => {
 
       const code = await service.generateInviteCode(CAMPAIGN_ID, USER_ID);
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(crypto.randomBytes).toHaveBeenCalledWith(4);
       expect(code).toBe('abcd1234');
       expect(prisma.campaign.update).toHaveBeenCalledWith({
@@ -216,22 +241,27 @@ describe('CampaignsService', () => {
 
   describe('remove', () => {
     it('throws ForbiddenException for non-owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.remove(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
     });
 
     it('deletes campaign when called by owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.delete.mockResolvedValue(mockCampaign);
 
       await service.remove(CAMPAIGN_ID, USER_ID);
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.campaign.delete).toHaveBeenCalledWith({ where: { id: CAMPAIGN_ID } });
     });
 
     it('throws NotFoundException for nonexistent campaign', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(null);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new NotFoundException(`Campaign "nonexistent" not found`)
+      );
 
       await expect(service.remove('nonexistent', USER_ID)).rejects.toThrow(NotFoundException);
     });
@@ -239,57 +269,63 @@ describe('CampaignsService', () => {
 
   describe('addCharacter', () => {
     it('adds character to campaign for a member', async () => {
-      prisma.campaign.findUnique
-        .mockResolvedValueOnce(mockCampaign) // findOneForUser -> findOne
-        .mockResolvedValueOnce(mockCampaign); // final findOne
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: CAMPAIGN_ID });
 
       const result = await service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID);
 
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
         data: { campaignId: CAMPAIGN_ID },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws ForbiddenException for non-member', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignMember.mockRejectedValue(
+        new ForbiddenException('You are not a member of this campaign')
+      );
 
-      await expect(
-        service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException
+      );
     });
   });
 
   describe('removeCharacter', () => {
     it('removes character from campaign when called by owner', async () => {
-      prisma.campaign.findUnique
-        .mockResolvedValueOnce(mockCampaign) // ownership check
-        .mockResolvedValueOnce(mockCampaign); // final findOne
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: null });
 
       const result = await service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID);
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
         data: { campaignId: null },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws ForbiddenException for non-owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
-      await expect(
-        service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException
+      );
     });
   });
 
   describe('removePlayer', () => {
     it('throws ForbiddenException for non-owner', async () => {
-      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
 
       await expect(service.removePlayer(CAMPAIGN_ID, 'some-player-id', USER_ID_2)).rejects.toThrow(
         ForbiddenException
@@ -297,19 +333,19 @@ describe('CampaignsService', () => {
     });
 
     it('deletes campaignPlayer record when called by owner', async () => {
-      prisma.campaign.findUnique
-        .mockResolvedValueOnce(mockCampaign) // ownership check
-        .mockResolvedValueOnce(mockCampaign); // final findOne
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.campaignPlayer.delete.mockResolvedValue({});
 
       const result = await service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID);
 
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.campaignPlayer.delete).toHaveBeenCalledWith({
         where: {
           campaignId_userId: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
         },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
   });
 });

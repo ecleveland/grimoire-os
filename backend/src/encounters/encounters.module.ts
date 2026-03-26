@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { EncountersController } from './encounters.controller';
 import { EncountersService } from './encounters.service';
-import { CampaignsModule } from '../campaigns/campaigns.module';
+import { CampaignAuthModule } from '../auth/campaign-auth.module';
 
 @Module({
-  imports: [CampaignsModule],
+  imports: [CampaignAuthModule],
   controllers: [EncountersController],
   providers: [EncountersService],
   exports: [EncountersService],

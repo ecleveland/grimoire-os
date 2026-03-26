@@ -1,22 +1,19 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
-import { CampaignsService } from '../campaigns/campaigns.service';
 
 @Injectable()
 export class EncountersService {
   constructor(
     private prisma: PrismaService,
-    private campaignsService: CampaignsService
+    private campaignAuth: CampaignAuthService
   ) {}
 
   async create(userId: string, dto: CreateEncounterDto) {
-    const campaign = await this.campaignsService.findOneForUser(dto.campaignId, userId);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the DM can create encounters');
-    }
+    await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
     const { combatants, ...rest } = dto;
     return this.prisma.encounter.create({
       data: {
@@ -28,7 +25,7 @@ export class EncountersService {
   }
 
   async findAllForCampaign(campaignId: string, userId: string) {
-    await this.campaignsService.findOneForUser(campaignId, userId);
+    await this.campaignAuth.assertCampaignMember(campaignId, userId);
     return this.prisma.encounter.findMany({
       where: { campaignId },
       orderBy: { updatedAt: 'desc' },
@@ -42,7 +39,7 @@ export class EncountersService {
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    await this.campaignsService.findOneForUser(encounter.campaignId, userId);
+    await this.campaignAuth.assertCampaignMember(encounter.campaignId, userId);
     return encounter;
   }
 
@@ -53,10 +50,7 @@ export class EncountersService {
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    const campaign = await this.campaignsService.findOne(encounter.campaignId);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the DM can update encounters');
-    }
+    await this.campaignAuth.assertCampaignOwner(encounter.campaignId, userId);
     const { combatants, ...rest } = dto;
     return this.prisma.encounter.update({
       where: { id },
@@ -76,10 +70,7 @@ export class EncountersService {
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    const campaign = await this.campaignsService.findOne(encounter.campaignId);
-    if (campaign.ownerId !== userId) {
-      throw new ForbiddenException('Only the DM can delete encounters');
-    }
+    await this.campaignAuth.assertCampaignOwner(encounter.campaignId, userId);
     await this.prisma.encounter.delete({ where: { id } });
   }
 }

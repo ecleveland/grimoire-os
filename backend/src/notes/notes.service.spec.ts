@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { NotesService } from './notes.service';
-import { CampaignsService } from '../campaigns/campaigns.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
@@ -9,7 +9,11 @@ import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
 describe('NotesService', () => {
   let service: NotesService;
   let prisma: MockPrismaService;
-  let campaignsService: { findOneForUser: jest.Mock; findOne: jest.Mock };
+  let campaignAuth: {
+    assertCampaignMember: jest.Mock;
+    findCampaignOrFail: jest.Mock;
+    assertAuthorOrDm: jest.Mock;
+  };
 
   const NOTE_ID = 'note-1111-2222-3333-444444444444';
 
@@ -56,19 +60,17 @@ describe('NotesService', () => {
   };
 
   beforeEach(async () => {
-    campaignsService = {
-      findOneForUser: jest.fn(),
-      findOne: jest.fn(),
+    campaignAuth = {
+      assertCampaignMember: jest.fn(),
+      findCampaignOrFail: jest.fn(),
+      assertAuthorOrDm: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NotesService,
         prismaMockProvider(),
-        {
-          provide: CampaignsService,
-          useValue: campaignsService,
-        },
+        { provide: CampaignAuthService, useValue: campaignAuth },
       ],
     }).compile();
 
@@ -82,7 +84,7 @@ describe('NotesService', () => {
 
   describe('create', () => {
     it('verifies membership and sets authorId', async () => {
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.note.create.mockResolvedValue(mockNote);
 
       const dto = {
@@ -94,7 +96,7 @@ describe('NotesService', () => {
 
       const result = await service.create(USER_ID, dto);
 
-      expect(campaignsService.findOneForUser).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.note.create).toHaveBeenCalledWith({
         data: {
           ...dto,
@@ -107,7 +109,7 @@ describe('NotesService', () => {
 
   describe('findAllForCampaign', () => {
     it('DM sees all notes (no visibility filter)', async () => {
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.note.findMany.mockResolvedValue([mockNote, mockPrivateNote]);
 
       await service.findAllForCampaign(CAMPAIGN_ID, USER_ID);
@@ -120,7 +122,7 @@ describe('NotesService', () => {
 
     it('player sees PARTY notes and own PRIVATE notes only', async () => {
       // USER_ID_2 is a player, not the owner
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.note.findMany.mockResolvedValue([mockNote]);
 
       await service.findAllForCampaign(CAMPAIGN_ID, USER_ID_2);
@@ -144,7 +146,7 @@ describe('NotesService', () => {
 
     it('DM can access any note including private', async () => {
       prisma.note.findUnique.mockResolvedValue(mockPrivateNote);
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       const result = await service.findOne(mockPrivateNote.id, USER_ID);
 
@@ -154,7 +156,7 @@ describe('NotesService', () => {
     it('author can access their own private note', async () => {
       const playerPrivateNote = { ...mockPrivateNote, authorId: USER_ID_2 };
       prisma.note.findUnique.mockResolvedValue(playerPrivateNote);
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       const result = await service.findOne(playerPrivateNote.id, USER_ID_2);
 
@@ -163,7 +165,7 @@ describe('NotesService', () => {
 
     it('any member can access party-visible notes', async () => {
       prisma.note.findUnique.mockResolvedValue(mockNote); // visibility: 'party'
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       const result = await service.findOne(NOTE_ID, USER_ID_2);
 
@@ -176,7 +178,7 @@ describe('NotesService', () => {
         authorId: USER_ID,
       };
       prisma.note.findUnique.mockResolvedValue(privateNoteByOwner);
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       await expect(service.findOne(privateNoteByOwner.id, USER_ID_2)).rejects.toThrow(
         ForbiddenException
@@ -186,7 +188,7 @@ describe('NotesService', () => {
     it('throws ForbiddenException for non-author non-DM on dm_only note', async () => {
       const dmOnlyNote = { ...mockNote, visibility: 'dm_only', authorId: USER_ID };
       prisma.note.findUnique.mockResolvedValue(dmOnlyNote);
-      campaignsService.findOneForUser.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       await expect(service.findOne(dmOnlyNote.id, USER_ID_2)).rejects.toThrow(ForbiddenException);
     });
@@ -227,11 +229,17 @@ describe('NotesService', () => {
   describe('remove', () => {
     it('author can delete their own note', async () => {
       prisma.note.findUnique.mockResolvedValue(mockNote);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.findCampaignOrFail.mockResolvedValue(mockCampaignOwned);
       prisma.note.delete.mockResolvedValue(mockNote);
 
       await service.remove(NOTE_ID, USER_ID);
 
+      expect(campaignAuth.findCampaignOrFail).toHaveBeenCalledWith(CAMPAIGN_ID);
+      expect(campaignAuth.assertAuthorOrDm).toHaveBeenCalledWith(
+        USER_ID, // authorId
+        USER_ID, // campaignOwnerId
+        USER_ID // userId
+      );
       expect(prisma.note.delete).toHaveBeenCalledWith({
         where: { id: NOTE_ID },
       });
@@ -241,11 +249,16 @@ describe('NotesService', () => {
       // Note authored by USER_ID_2, campaign owned by USER_ID (DM)
       const playerNote = { ...mockNote, authorId: USER_ID_2 };
       prisma.note.findUnique.mockResolvedValue(playerNote);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.findCampaignOrFail.mockResolvedValue(mockCampaignOwned);
       prisma.note.delete.mockResolvedValue(playerNote);
 
       await service.remove(NOTE_ID, USER_ID);
 
+      expect(campaignAuth.assertAuthorOrDm).toHaveBeenCalledWith(
+        USER_ID_2, // authorId
+        USER_ID, // campaignOwnerId
+        USER_ID // userId (DM)
+      );
       expect(prisma.note.delete).toHaveBeenCalledWith({
         where: { id: NOTE_ID },
       });
@@ -259,7 +272,10 @@ describe('NotesService', () => {
 
     it('throws ForbiddenException for non-author non-DM', async () => {
       prisma.note.findUnique.mockResolvedValue(mockNote);
-      campaignsService.findOne.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.findCampaignOrFail.mockResolvedValue(mockCampaignOwned);
+      campaignAuth.assertAuthorOrDm.mockImplementation(() => {
+        throw new ForbiddenException('Only the author or DM can delete this note');
+      });
 
       // USER_ID_2 is not the author (USER_ID) and not the DM (USER_ID)
       await expect(service.remove(NOTE_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);

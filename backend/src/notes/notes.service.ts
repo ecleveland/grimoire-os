@@ -1,19 +1,19 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoteVisibility } from '../prisma/enums';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
-import { CampaignsService } from '../campaigns/campaigns.service';
 
 @Injectable()
 export class NotesService {
   constructor(
     private prisma: PrismaService,
-    private campaignsService: CampaignsService
+    private campaignAuth: CampaignAuthService
   ) {}
 
   async create(userId: string, dto: CreateNoteDto) {
-    await this.campaignsService.findOneForUser(dto.campaignId, userId);
+    await this.campaignAuth.assertCampaignMember(dto.campaignId, userId);
     return this.prisma.note.create({
       data: {
         ...dto,
@@ -23,7 +23,7 @@ export class NotesService {
   }
 
   async findAllForCampaign(campaignId: string, userId: string) {
-    const campaign = await this.campaignsService.findOneForUser(campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
     const isDm = campaign.ownerId === userId;
 
     if (isDm) {
@@ -51,7 +51,7 @@ export class NotesService {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
-    const campaign = await this.campaignsService.findOneForUser(note.campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(note.campaignId, userId);
     const isDm = campaign.ownerId === userId;
     const isAuthor = note.authorId === userId;
 
@@ -82,13 +82,8 @@ export class NotesService {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
-    const campaign = await this.campaignsService.findOne(note.campaignId);
-    const isDm = campaign.ownerId === userId;
-    const isAuthor = note.authorId === userId;
-
-    if (!isDm && !isAuthor) {
-      throw new ForbiddenException('Only the author or DM can delete this note');
-    }
+    const campaign = await this.campaignAuth.findCampaignOrFail(note.campaignId);
+    this.campaignAuth.assertAuthorOrDm(note.authorId, campaign.ownerId, userId);
     await this.prisma.note.delete({ where: { id } });
   }
 }
