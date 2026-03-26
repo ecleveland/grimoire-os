@@ -43,6 +43,21 @@ describe('CampaignsService', () => {
     characters: [],
   };
 
+  const serializedMockCampaign = {
+    id: CAMPAIGN_ID,
+    name: 'Dragon Campaign',
+    description: 'A test campaign',
+    ownerId: USER_ID,
+    status: 'active',
+    setting: null,
+    currentSession: 1,
+    inviteCode: null,
+    createdAt: new Date('2025-01-01T00:00:00Z'),
+    updatedAt: new Date('2025-01-01T00:00:00Z'),
+    playerIds: [USER_ID],
+    characterIds: [],
+  };
+
   beforeEach(async () => {
     campaignAuth = {
       assertCampaignOwner: jest.fn(),
@@ -80,7 +95,7 @@ describe('CampaignsService', () => {
         },
         include: { players: true, characters: true },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
   });
 
@@ -97,7 +112,7 @@ describe('CampaignsService', () => {
         include: { players: true, characters: true },
         orderBy: { updatedAt: 'desc' },
       });
-      expect(result).toEqual([mockCampaign]);
+      expect(result).toEqual([serializedMockCampaign]);
     });
   });
 
@@ -107,7 +122,7 @@ describe('CampaignsService', () => {
 
       const result = await service.findOne(CAMPAIGN_ID);
 
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws NotFoundException when not found', async () => {
@@ -124,7 +139,7 @@ describe('CampaignsService', () => {
       const result = await service.findOneForUser(CAMPAIGN_ID, USER_ID);
 
       expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws ForbiddenException for non-member', async () => {
@@ -163,7 +178,7 @@ describe('CampaignsService', () => {
         data: dto,
         include: { players: true, characters: true },
       });
-      expect(result).toEqual(updatedCampaign);
+      expect(result).toEqual({ ...serializedMockCampaign, ...dto });
     });
   });
 
@@ -265,7 +280,7 @@ describe('CampaignsService', () => {
         where: { id: CHARACTER_ID },
         data: { campaignId: CAMPAIGN_ID },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws ForbiddenException for non-member', async () => {
@@ -292,7 +307,7 @@ describe('CampaignsService', () => {
         where: { id: CHARACTER_ID },
         data: { campaignId: null },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
 
     it('throws ForbiddenException for non-owner', async () => {
@@ -330,7 +345,7 @@ describe('CampaignsService', () => {
           campaignId_userId: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
         },
       });
-      expect(result).toEqual(mockCampaign);
+      expect(result).toEqual(serializedMockCampaign);
     });
   });
 });

@@ -10,6 +10,15 @@ const campaignInclude = {
   characters: true,
 } as const;
 
+function serialize(campaign: any) {
+  const { players, characters, ...rest } = campaign;
+  return {
+    ...rest,
+    playerIds: players?.map((p: any) => p.userId) ?? [],
+    characterIds: characters?.map((c: any) => c.id) ?? [],
+  };
+}
+
 @Injectable()
 export class CampaignsService {
   constructor(
@@ -18,7 +27,7 @@ export class CampaignsService {
   ) {}
 
   async create(userId: string, dto: CreateCampaignDto) {
-    return this.prisma.campaign.create({
+    const campaign = await this.prisma.campaign.create({
       data: {
         ...dto,
         ownerId: userId,
@@ -26,16 +35,18 @@ export class CampaignsService {
       },
       include: campaignInclude,
     });
+    return serialize(campaign);
   }
 
   async findAllForUser(userId: string) {
-    return this.prisma.campaign.findMany({
+    const campaigns = await this.prisma.campaign.findMany({
       where: {
         OR: [{ ownerId: userId }, { players: { some: { userId } } }],
       },
       include: campaignInclude,
       orderBy: { updatedAt: 'desc' },
     });
+    return campaigns.map(serialize);
   }
 
   async findOne(id: string) {
@@ -46,20 +57,22 @@ export class CampaignsService {
     if (!campaign) {
       throw new NotFoundException(`Campaign "${id}" not found`);
     }
-    return campaign;
+    return serialize(campaign);
   }
 
   async findOneForUser(id: string, userId: string) {
-    return this.campaignAuth.assertCampaignMember(id, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(id, userId);
+    return serialize(campaign);
   }
 
   async update(id: string, userId: string, dto: UpdateCampaignDto) {
     await this.campaignAuth.assertCampaignOwner(id, userId);
-    return this.prisma.campaign.update({
+    const campaign = await this.prisma.campaign.update({
       where: { id },
       data: dto,
       include: campaignInclude,
     });
+    return serialize(campaign);
   }
 
   async remove(id: string, userId: string): Promise<void> {
