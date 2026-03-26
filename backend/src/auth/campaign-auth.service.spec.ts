@@ -13,9 +13,7 @@ describe('CampaignAuthService', () => {
     id: CAMPAIGN_ID,
     name: 'Test Campaign',
     ownerId: USER_ID,
-    players: [
-      { campaignId: CAMPAIGN_ID, userId: USER_ID },
-    ],
+    players: [{ campaignId: CAMPAIGN_ID, userId: USER_ID }],
     characters: [],
   };
 
@@ -49,7 +47,7 @@ describe('CampaignAuthService', () => {
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
 
       await expect(service.assertCampaignOwner(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
 
@@ -57,7 +55,7 @@ describe('CampaignAuthService', () => {
       prisma.campaign.findUnique.mockResolvedValue(null);
 
       await expect(service.assertCampaignOwner('nonexistent', USER_ID)).rejects.toThrow(
-        NotFoundException,
+        NotFoundException
       );
     });
   });
@@ -88,7 +86,7 @@ describe('CampaignAuthService', () => {
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
 
       await expect(service.assertCampaignMember(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
 
@@ -96,28 +94,24 @@ describe('CampaignAuthService', () => {
       prisma.campaign.findUnique.mockResolvedValue(null);
 
       await expect(service.assertCampaignMember('nonexistent', USER_ID)).rejects.toThrow(
-        NotFoundException,
+        NotFoundException
       );
     });
   });
 
   describe('assertAuthorOrDm', () => {
     it('passes when userId equals authorId', () => {
-      expect(() =>
-        service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID),
-      ).not.toThrow();
+      expect(() => service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID)).not.toThrow();
     });
 
     it('passes when userId equals campaignOwnerId', () => {
-      expect(() =>
-        service.assertAuthorOrDm('some-author-id', USER_ID, USER_ID),
-      ).not.toThrow();
+      expect(() => service.assertAuthorOrDm('some-author-id', USER_ID, USER_ID)).not.toThrow();
     });
 
     it('throws ForbiddenException when userId is neither author nor DM', () => {
-      expect(() =>
-        service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID_2),
-      ).toThrow(ForbiddenException);
+      expect(() => service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID_2)).toThrow(
+        ForbiddenException
+      );
     });
   });
 
@@ -133,9 +127,7 @@ describe('CampaignAuthService', () => {
     it('throws NotFoundException when not found', async () => {
       prisma.campaign.findUnique.mockResolvedValue(null);
 
-      await expect(service.findCampaignOrFail('nonexistent')).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(service.findCampaignOrFail('nonexistent')).rejects.toThrow(NotFoundException);
     });
   });
 });

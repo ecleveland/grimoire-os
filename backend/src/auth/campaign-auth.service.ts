@@ -20,8 +20,7 @@ export class CampaignAuthService {
 
   async assertCampaignMember(campaignId: string, userId: string) {
     const campaign = await this.findCampaignOrFail(campaignId);
-    const isMember = campaign.ownerId === userId ||
-      campaign.players.some(p => p.userId === userId);
+    const isMember = campaign.ownerId === userId || campaign.players.some(p => p.userId === userId);
     if (!isMember) {
       throw new ForbiddenException('You are not a member of this campaign');
     }

@@ -9,7 +9,7 @@ import { UpdateNoteDto } from './dto/update-note.dto';
 export class NotesService {
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService,
+    private campaignAuth: CampaignAuthService
   ) {}
 
   async create(userId: string, dto: CreateNoteDto) {

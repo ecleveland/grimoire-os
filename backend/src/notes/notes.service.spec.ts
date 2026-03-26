@@ -181,7 +181,7 @@ describe('NotesService', () => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
 
       await expect(service.findOne(privateNoteByOwner.id, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
 
@@ -213,7 +213,7 @@ describe('NotesService', () => {
       prisma.note.findUnique.mockResolvedValue(null);
 
       await expect(service.update(NOTE_ID, USER_ID, { title: 'New' })).rejects.toThrow(
-        NotFoundException,
+        NotFoundException
       );
     });
 
@@ -221,7 +221,7 @@ describe('NotesService', () => {
       prisma.note.findUnique.mockResolvedValue(mockNote);
 
       await expect(service.update(NOTE_ID, USER_ID_2, { title: 'Hacked Title' })).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
   });
@@ -238,7 +238,7 @@ describe('NotesService', () => {
       expect(campaignAuth.assertAuthorOrDm).toHaveBeenCalledWith(
         USER_ID, // authorId
         USER_ID, // campaignOwnerId
-        USER_ID, // userId
+        USER_ID // userId
       );
       expect(prisma.note.delete).toHaveBeenCalledWith({
         where: { id: NOTE_ID },
@@ -256,8 +256,8 @@ describe('NotesService', () => {
 
       expect(campaignAuth.assertAuthorOrDm).toHaveBeenCalledWith(
         USER_ID_2, // authorId
-        USER_ID,   // campaignOwnerId
-        USER_ID,   // userId (DM)
+        USER_ID, // campaignOwnerId
+        USER_ID // userId (DM)
       );
       expect(prisma.note.delete).toHaveBeenCalledWith({
         where: { id: NOTE_ID },

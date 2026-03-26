@@ -129,11 +129,11 @@ describe('CampaignsService', () => {
 
     it('throws ForbiddenException for non-member', async () => {
       campaignAuth.assertCampaignMember.mockRejectedValue(
-        new ForbiddenException('You are not a member of this campaign'),
+        new ForbiddenException('You are not a member of this campaign')
       );
 
       await expect(service.findOneForUser(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
   });
@@ -141,11 +141,11 @@ describe('CampaignsService', () => {
   describe('update', () => {
     it('throws ForbiddenException for non-owner', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.update(CAMPAIGN_ID, USER_ID_2, { name: 'New Name' })).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
 
@@ -170,11 +170,11 @@ describe('CampaignsService', () => {
   describe('generateInviteCode', () => {
     it('throws ForbiddenException for non-owner', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.generateInviteCode(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
 
@@ -227,7 +227,7 @@ describe('CampaignsService', () => {
   describe('remove', () => {
     it('throws ForbiddenException for non-owner', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.remove(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
@@ -245,7 +245,7 @@ describe('CampaignsService', () => {
 
     it('throws NotFoundException for nonexistent campaign', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new NotFoundException(`Campaign "nonexistent" not found`),
+        new NotFoundException(`Campaign "nonexistent" not found`)
       );
 
       await expect(service.remove('nonexistent', USER_ID)).rejects.toThrow(NotFoundException);
@@ -270,11 +270,11 @@ describe('CampaignsService', () => {
 
     it('throws ForbiddenException for non-member', async () => {
       campaignAuth.assertCampaignMember.mockRejectedValue(
-        new ForbiddenException('You are not a member of this campaign'),
+        new ForbiddenException('You are not a member of this campaign')
       );
 
       await expect(service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
   });
@@ -297,11 +297,11 @@ describe('CampaignsService', () => {
 
     it('throws ForbiddenException for non-owner', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
   });
@@ -309,11 +309,11 @@ describe('CampaignsService', () => {
   describe('removePlayer', () => {
     it('throws ForbiddenException for non-owner', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.removePlayer(CAMPAIGN_ID, 'some-player-id', USER_ID_2)).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
 

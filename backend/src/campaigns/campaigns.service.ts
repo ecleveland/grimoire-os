@@ -14,7 +14,7 @@ const campaignInclude = {
 export class CampaignsService {
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService,
+    private campaignAuth: CampaignAuthService
   ) {}
 
   async create(userId: string, dto: CreateCampaignDto) {

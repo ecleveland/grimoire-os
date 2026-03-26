@@ -9,7 +9,7 @@ import { UpdateEncounterDto } from './dto/update-encounter.dto';
 export class EncountersService {
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService,
+    private campaignAuth: CampaignAuthService
   ) {}
 
   async create(userId: string, dto: CreateEncounterDto) {

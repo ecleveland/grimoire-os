@@ -90,7 +90,7 @@ describe('EncountersService', () => {
 
     it('throws ForbiddenException when non-DM tries to create', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.create(USER_ID_2, createDto)).rejects.toThrow(ForbiddenException);
@@ -193,18 +193,18 @@ describe('EncountersService', () => {
       prisma.encounter.findUnique.mockResolvedValue(null);
 
       await expect(service.update(ENCOUNTER_ID, USER_ID, { name: 'Renamed' })).rejects.toThrow(
-        NotFoundException,
+        NotFoundException
       );
     });
 
     it('throws ForbiddenException when non-DM tries to update', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.update(ENCOUNTER_ID, USER_ID_2, { name: 'Renamed' })).rejects.toThrow(
-        ForbiddenException,
+        ForbiddenException
       );
     });
   });
@@ -219,7 +219,7 @@ describe('EncountersService', () => {
     it('throws ForbiddenException when non-DM tries to delete', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
       campaignAuth.assertCampaignOwner.mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action'),
+        new ForbiddenException('Only the campaign owner can perform this action')
       );
 
       await expect(service.remove(ENCOUNTER_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
