@@ -7,24 +7,54 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 class CombatantDto {
-  @IsString() name!: string;
-  @IsOptional() @IsNumber() initiative?: number;
-  @IsOptional() @IsNumber() hp?: number;
-  @IsOptional() @IsNumber() maxHp?: number;
-  @IsOptional() @IsNumber() ac?: number;
-  @IsOptional() @IsBoolean() isNpc?: boolean;
-  @IsOptional() @IsString() notes?: string;
-}
-
-export class CreateEncounterDto {
-  @IsString()
-  campaignId!: string;
-
+  @ApiProperty({ example: 'Goblin' })
   @IsString()
   name!: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  initiative?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  hp?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  maxHp?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  ac?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isNpc?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+export class CreateEncounterDto {
+  @ApiProperty()
+  @IsString()
+  campaignId!: string;
+
+  @ApiProperty({ example: 'Ambush at the Bridge' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional({ type: [CombatantDto] })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })

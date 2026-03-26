@@ -7,115 +7,324 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 class AbilityScoresDto {
-  @IsOptional() @IsNumber() strength?: number;
-  @IsOptional() @IsNumber() dexterity?: number;
-  @IsOptional() @IsNumber() constitution?: number;
-  @IsOptional() @IsNumber() intelligence?: number;
-  @IsOptional() @IsNumber() wisdom?: number;
-  @IsOptional() @IsNumber() charisma?: number;
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @IsNumber()
+  strength?: number;
+
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @IsNumber()
+  dexterity?: number;
+
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @IsNumber()
+  constitution?: number;
+
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @IsNumber()
+  intelligence?: number;
+
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @IsNumber()
+  wisdom?: number;
+
+  @ApiPropertyOptional({ example: 10 })
+  @IsOptional()
+  @IsNumber()
+  charisma?: number;
 }
 
 class HitPointsDto {
-  @IsOptional() @IsNumber() max?: number;
-  @IsOptional() @IsNumber() current?: number;
-  @IsOptional() @IsNumber() temporary?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  max?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  current?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  temporary?: number;
 }
 
 class SpellSlotDto {
-  @IsNumber() level!: number;
-  @IsOptional() @IsNumber() total?: number;
-  @IsOptional() @IsNumber() used?: number;
+  @ApiProperty({ example: 1 })
+  @IsNumber()
+  level!: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  total?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  used?: number;
 }
 
 class InventoryItemDto {
-  @IsString() name!: string;
-  @IsOptional() @IsNumber() quantity?: number;
-  @IsOptional() @IsString() description?: string;
-  @IsOptional() @IsNumber() weight?: number;
-  @IsOptional() @IsBoolean() equipped?: boolean;
+  @ApiProperty({ example: 'Longsword' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsNumber()
+  quantity?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  weight?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  equipped?: boolean;
 }
 
 class CurrencyDto {
-  @IsOptional() @IsNumber() cp?: number;
-  @IsOptional() @IsNumber() sp?: number;
-  @IsOptional() @IsNumber() ep?: number;
-  @IsOptional() @IsNumber() gp?: number;
-  @IsOptional() @IsNumber() pp?: number;
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  cp?: number;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  sp?: number;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  ep?: number;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  gp?: number;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  pp?: number;
 }
 
 class FeatureDto {
-  @IsString() name!: string;
-  @IsOptional() @IsString() source?: string;
-  @IsOptional() @IsString() description?: string;
+  @ApiProperty({ example: 'Darkvision' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  source?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  description?: string;
 }
 
 export class CreateCharacterDto {
-  @IsString() name!: string;
+  @ApiProperty({ example: 'Thorin Ironforge' })
+  @IsString()
+  name!: string;
 
-  @IsOptional() @IsString() race?: string;
-  @IsOptional() @IsString() class?: string;
-  @IsOptional() @IsNumber() level?: number;
-  @IsOptional() @IsString() subclass?: string;
-  @IsOptional() @IsString() background?: string;
-  @IsOptional() @IsString() alignment?: string;
-  @IsOptional() @IsNumber() experiencePoints?: number;
+  @ApiPropertyOptional({ example: 'Dwarf' })
+  @IsOptional()
+  @IsString()
+  race?: string;
 
+  @ApiPropertyOptional({ example: 'Fighter' })
+  @IsOptional()
+  @IsString()
+  class?: string;
+
+  @ApiPropertyOptional({ example: 1 })
+  @IsOptional()
+  @IsNumber()
+  level?: number;
+
+  @ApiPropertyOptional({ example: 'Champion' })
+  @IsOptional()
+  @IsString()
+  subclass?: string;
+
+  @ApiPropertyOptional({ example: 'Soldier' })
+  @IsOptional()
+  @IsString()
+  background?: string;
+
+  @ApiPropertyOptional({ example: 'Lawful Good' })
+  @IsOptional()
+  @IsString()
+  alignment?: string;
+
+  @ApiPropertyOptional({ example: 0 })
+  @IsOptional()
+  @IsNumber()
+  experiencePoints?: number;
+
+  @ApiPropertyOptional({ type: AbilityScoresDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => AbilityScoresDto)
   abilityScores?: AbilityScoresDto;
 
+  @ApiPropertyOptional({ type: HitPointsDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => HitPointsDto)
   hitPoints?: HitPointsDto;
 
-  @IsOptional() @IsNumber() armorClass?: number;
-  @IsOptional() @IsNumber() speed?: number;
-  @IsOptional() @IsNumber() initiative?: number;
+  @ApiPropertyOptional({ example: 16 })
+  @IsOptional()
+  @IsNumber()
+  armorClass?: number;
 
-  @IsOptional() @IsArray() @IsString({ each: true }) proficiencies?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) languages?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) savingThrows?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) skills?: string[];
+  @ApiPropertyOptional({ example: 30 })
+  @IsOptional()
+  @IsNumber()
+  speed?: number;
 
-  @IsOptional() @IsString() spellcastingAbility?: string;
-  @IsOptional() @IsNumber() spellSaveDC?: number;
-  @IsOptional() @IsNumber() spellAttackBonus?: number;
-  @IsOptional() @IsArray() @IsString({ each: true }) knownSpells?: string[];
-  @IsOptional() @IsArray() @IsString({ each: true }) preparedSpells?: string[];
+  @ApiPropertyOptional({ example: 2 })
+  @IsOptional()
+  @IsNumber()
+  initiative?: number;
 
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  proficiencies?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  languages?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  savingThrows?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  skills?: string[];
+
+  @ApiPropertyOptional({ example: 'Intelligence' })
+  @IsOptional()
+  @IsString()
+  spellcastingAbility?: string;
+
+  @ApiPropertyOptional({ example: 13 })
+  @IsOptional()
+  @IsNumber()
+  spellSaveDC?: number;
+
+  @ApiPropertyOptional({ example: 5 })
+  @IsOptional()
+  @IsNumber()
+  spellAttackBonus?: number;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  knownSpells?: string[];
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  preparedSpells?: string[];
+
+  @ApiPropertyOptional({ type: [SpellSlotDto] })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => SpellSlotDto)
   spellSlots?: SpellSlotDto[];
 
+  @ApiPropertyOptional({ type: [InventoryItemDto] })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => InventoryItemDto)
   inventory?: InventoryItemDto[];
 
+  @ApiPropertyOptional({ type: CurrencyDto })
   @IsOptional()
   @ValidateNested()
   @Type(() => CurrencyDto)
   currency?: CurrencyDto;
 
+  @ApiPropertyOptional({ type: [FeatureDto] })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FeatureDto)
   features?: FeatureDto[];
 
-  @IsOptional() @IsString() personalityTraits?: string;
-  @IsOptional() @IsString() ideals?: string;
-  @IsOptional() @IsString() bonds?: string;
-  @IsOptional() @IsString() flaws?: string;
-  @IsOptional() @IsString() backstory?: string;
-  @IsOptional() @IsString() appearance?: string;
-  @IsOptional() @IsString() avatarUrl?: string;
-  @IsOptional() @IsString() campaignId?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  personalityTraits?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  ideals?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  bonds?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  flaws?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  backstory?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  appearance?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  avatarUrl?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  campaignId?: string;
 }
