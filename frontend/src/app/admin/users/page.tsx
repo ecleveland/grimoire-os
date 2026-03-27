@@ -5,12 +5,18 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { User } from '@/lib/types';
+import Pagination from '@/components/Pagination';
+import type { User, PaginatedResponse } from '@/lib/types';
+
+const LIMIT = 20;
 
 export default function AdminUsersPage() {
   const { isAdmin } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [lastPage, setLastPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -18,11 +24,16 @@ export default function AdminUsersPage() {
       router.replace('/');
       return;
     }
-    apiFetch<User[]>('/admin/users')
-      .then(setUsers)
+    setLoading(true);
+    apiFetch<PaginatedResponse<User>>(`/admin/users?page=${page}&limit=${LIMIT}`)
+      .then(res => {
+        setUsers(res.data);
+        setTotal(res.total);
+        setLastPage(res.lastPage);
+      })
       .catch(() => toast.error('Failed to load users'))
       .finally(() => setLoading(false));
-  }, [isAdmin, router]);
+  }, [isAdmin, router, page]);
 
   const updateRole = async (userId: string, role: User['role']) => {
     try {
@@ -43,6 +54,7 @@ export default function AdminUsersPage() {
     try {
       await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
       setUsers(prev => prev.filter(u => u.id !== userId));
+      setTotal(prev => prev - 1);
       toast.success('User deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete user');
@@ -50,7 +62,8 @@ export default function AdminUsersPage() {
   };
 
   if (!isAdmin) return null;
-  if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading users...</div>;
+  if (loading && users.length === 0)
+    return <div className="text-gray-500 dark:text-gray-400">Loading users...</div>;
 
   const selectClass =
     'px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -108,6 +121,13 @@ export default function AdminUsersPage() {
           </table>
         </div>
       </div>
+      <Pagination
+        page={page}
+        lastPage={lastPage}
+        total={total}
+        limit={LIMIT}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

@@ -4,23 +4,34 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import type { Character } from '@/lib/types';
+import Pagination from '@/components/Pagination';
+import type { Character, PaginatedResponse } from '@/lib/types';
+
+const LIMIT = 20;
 
 export default function CharactersPage() {
   const [characters, setCharacters] = useState<Character[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [lastPage, setLastPage] = useState(1);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<Character[]>('/characters')
-      .then(setCharacters)
+    setLoading(true);
+    apiFetch<PaginatedResponse<Character>>(`/characters?page=${page}&limit=${LIMIT}`)
+      .then(res => {
+        setCharacters(res.data);
+        setTotal(res.total);
+        setLastPage(res.lastPage);
+      })
       .catch(err => {
         console.error('Failed to load characters:', err);
         toast.error('Failed to load characters', { id: 'load-characters' });
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [page]);
 
-  if (loading) {
+  if (loading && characters.length === 0) {
     return <div className="text-gray-500 dark:text-gray-400">Loading characters...</div>;
   }
 
@@ -41,21 +52,32 @@ export default function CharactersPage() {
           No characters yet. Create one to get started!
         </p>
       ) : (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {characters.map(c => (
-            <Link
-              key={c.id}
-              href={`/characters/${c.id}`}
-              className="block p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
-            >
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">{c.name}</h2>
-              <p className="text-gray-600 dark:text-gray-400 text-sm">
-                {c.race} {c.class}
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Level {c.level}</p>
-            </Link>
-          ))}
-        </div>
+        <>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {characters.map(c => (
+              <Link
+                key={c.id}
+                href={`/characters/${c.id}`}
+                className="block p-6 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+              >
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
+                  {c.name}
+                </h2>
+                <p className="text-gray-600 dark:text-gray-400 text-sm">
+                  {c.race} {c.class}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Level {c.level}</p>
+              </Link>
+            ))}
+          </div>
+          <Pagination
+            page={page}
+            lastPage={lastPage}
+            total={total}
+            limit={LIMIT}
+            onPageChange={setPage}
+          />
+        </>
       )}
     </div>
   );

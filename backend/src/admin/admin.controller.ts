@@ -4,6 +4,7 @@ import {
   Patch,
   Delete,
   Param,
+  Query,
   Body,
   UseGuards,
   HttpCode,
@@ -14,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../prisma/enums';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { UsersService } from '../users/users.service';
 import { AdminUpdateUserDto } from '../users/dto/admin-update-user.dto';
 
@@ -27,8 +29,8 @@ export class AdminController {
 
   @Get('users')
   @ApiOperation({ summary: 'List all users (admin only)' })
-  findAllUsers() {
-    return this.usersService.findAll();
+  findAllUsers(@Query() pagination: PaginationDto) {
+    return this.usersService.findAll(pagination);
   }
 
   @Patch('users/:id')

@@ -7,6 +7,8 @@ import {
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
@@ -36,10 +38,21 @@ export class UsersService {
     }
   }
 
-  async findAll() {
-    return this.prisma.user.findMany({
-      omit: { passwordHash: true },
-    });
+  async findAll(pagination: PaginationDto) {
+    const page = pagination.page ?? 1;
+    const limit = pagination.limit ?? 20;
+
+    const [data, total] = await Promise.all([
+      this.prisma.user.findMany({
+        omit: { passwordHash: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.user.count(),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
   async findOne(id: string) {

@@ -1,7 +1,10 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoteVisibility } from '../prisma/enums';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 
@@ -22,27 +25,33 @@ export class NotesService {
     });
   }
 
-  async findAllForCampaign(campaignId: string, userId: string) {
+  async findAllForCampaign(campaignId: string, userId: string, pagination: PaginationDto) {
+    const page = pagination.page ?? 1;
+    const limit = pagination.limit ?? 20;
     const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
     const isDm = campaign.ownerId === userId;
 
-    if (isDm) {
-      return this.prisma.note.findMany({
-        where: { campaignId },
-        orderBy: { updatedAt: 'desc' },
-      });
-    }
+    const where: Prisma.NoteWhereInput = isDm
+      ? { campaignId }
+      : {
+          campaignId,
+          OR: [
+            { visibility: NoteVisibility.PARTY },
+            { authorId: userId, visibility: NoteVisibility.PRIVATE },
+          ],
+        };
 
-    return this.prisma.note.findMany({
-      where: {
-        campaignId,
-        OR: [
-          { visibility: NoteVisibility.PARTY },
-          { authorId: userId, visibility: NoteVisibility.PRIVATE },
-        ],
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const [data, total] = await Promise.all([
+      this.prisma.note.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.note.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
   async findOne(id: string, userId: string) {

@@ -1,30 +1,19 @@
 import {
-  Role,
+  Role as PrismaRole,
   CampaignStatus as PrismaCampaignStatus,
   NoteVisibility as PrismaNoteVisibility,
 } from '@prisma/client';
 
-// Re-export Prisma Role enum as UserRole with uppercase keys
-// for backward compatibility with DTOs, guards, and decorators.
+// Re-export shared types for use across the backend.
+// The const objects provide uppercase key access (e.g., UserRole.ADMIN)
+// while the types match Prisma's enum values.
+export { Role, CampaignStatus, NoteVisibility, AuditAction } from '@grimoire-os/shared';
+
+// Keep backward-compatible aliases used by guards and decorators.
 export const UserRole = {
-  PLAYER: Role.player,
-  DUNGEON_MASTER: Role.dungeon_master,
-  ADMIN: Role.admin,
+  PLAYER: PrismaRole.player,
+  DUNGEON_MASTER: PrismaRole.dungeon_master,
+  ADMIN: PrismaRole.admin,
 } as const;
 
-export type UserRole = Role;
-
-export const CampaignStatus = {
-  ACTIVE: PrismaCampaignStatus.active,
-  PAUSED: PrismaCampaignStatus.paused,
-  COMPLETED: PrismaCampaignStatus.completed,
-  ARCHIVED: PrismaCampaignStatus.archived,
-} as const;
-export type CampaignStatus = PrismaCampaignStatus;
-
-export const NoteVisibility = {
-  PRIVATE: PrismaNoteVisibility.private,
-  PARTY: PrismaNoteVisibility.party,
-  DM_ONLY: PrismaNoteVisibility.dm_only,
-} as const;
-export type NoteVisibility = PrismaNoteVisibility;
+export type UserRole = PrismaRole;

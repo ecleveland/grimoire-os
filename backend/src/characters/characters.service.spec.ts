@@ -45,16 +45,25 @@ describe('CharactersService', () => {
   });
 
   describe('findAllForUser', () => {
-    it('should return characters filtered by userId', async () => {
+    it('should return paginated characters filtered by userId', async () => {
       prisma.character.findMany.mockResolvedValue([mockCharacter]);
+      prisma.character.count.mockResolvedValue(1);
 
-      const result = await service.findAllForUser(USER_ID);
+      const result = await service.findAllForUser(USER_ID, { page: 1, limit: 20 });
 
       expect(prisma.character.findMany).toHaveBeenCalledWith({
         where: { userId: USER_ID },
         orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
-      expect(result).toEqual([mockCharacter]);
+      expect(prisma.character.count).toHaveBeenCalledWith({ where: { userId: USER_ID } });
+      expect(result).toEqual({
+        data: [mockCharacter],
+        total: 1,
+        page: 1,
+        lastPage: 1,
+      });
     });
   });
 

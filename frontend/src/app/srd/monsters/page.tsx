@@ -1,56 +1,117 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import type { SrdMonster } from '@/lib/types';
+import type { SrdMonster, PaginatedResponse } from '@/lib/types';
+import Pagination from '@/components/Pagination';
+
+const LIMIT = 20;
+
+const MONSTER_TYPES = [
+  'Aberration',
+  'Beast',
+  'Celestial',
+  'Construct',
+  'Dragon',
+  'Elemental',
+  'Fey',
+  'Fiend',
+  'Giant',
+  'Humanoid',
+  'Monstrosity',
+  'Ooze',
+  'Plant',
+  'Undead',
+];
+
+const CHALLENGE_RATINGS = [
+  '0',
+  '1/8',
+  '1/4',
+  '1/2',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+  '10',
+  '11',
+  '12',
+  '13',
+  '14',
+  '15',
+  '16',
+  '17',
+  '18',
+  '19',
+  '20',
+  '21',
+  '22',
+  '23',
+  '24',
+  '25',
+  '26',
+  '27',
+  '28',
+  '29',
+  '30',
+];
 
 export default function MonsterListPage() {
   const [monsters, setMonsters] = useState<SrdMonster[]>([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [lastPage, setLastPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [crFilter, setCrFilter] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Debounce search input
   useEffect(() => {
-    apiFetch<SrdMonster[]>('/srd/monsters')
-      .then(setMonsters)
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setSearch(searchInput);
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchInput]);
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [search, typeFilter, crFilter]);
+
+  // Fetch monsters from API
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('limit', String(LIMIT));
+    if (search) params.set('q', search);
+    if (typeFilter) params.set('type', typeFilter);
+    if (crFilter) params.set('cr', crFilter);
+
+    apiFetch<PaginatedResponse<SrdMonster>>(`/srd/monsters?${params.toString()}`)
+      .then(res => {
+        setMonsters(res.data);
+        setTotal(res.total);
+        setLastPage(res.lastPage);
+      })
       .catch(err => {
         console.error('Failed to load monsters:', err);
         toast.error('Failed to load monsters', { id: 'load-monsters' });
       })
       .finally(() => setLoading(false));
-  }, []);
-
-  const types = useMemo(() => {
-    const set = new Set<string>();
-    monsters.forEach(m => set.add(m.type));
-    return Array.from(set).sort();
-  }, [monsters]);
-
-  const crs = useMemo(() => {
-    const set = new Set<string>();
-    monsters.forEach(m => set.add(m.challengeRating));
-    return Array.from(set).sort((a, b) => {
-      const toNum = (v: string) => {
-        if (v.includes('/')) {
-          const [num, den] = v.split('/');
-          return Number(num) / Number(den);
-        }
-        return Number(v);
-      };
-      return toNum(a) - toNum(b);
-    });
-  }, [monsters]);
-
-  const filtered = useMemo(() => {
-    return monsters.filter(m => {
-      if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false;
-      if (typeFilter && m.type !== typeFilter) return false;
-      if (crFilter && m.challengeRating !== crFilter) return false;
-      return true;
-    });
-  }, [monsters, search, typeFilter, crFilter]);
+  }, [page, search, typeFilter, crFilter]);
 
   const inputClass =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -65,8 +126,8 @@ export default function MonsterListPage() {
         <input
           type="text"
           placeholder="Search monsters..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
           className={inputClass}
         />
         <select
@@ -75,7 +136,7 @@ export default function MonsterListPage() {
           className={inputClass}
         >
           <option value="">All Types</option>
-          {types.map(t => (
+          {MONSTER_TYPES.map(t => (
             <option key={t} value={t}>
               {t}
             </option>
@@ -83,7 +144,7 @@ export default function MonsterListPage() {
         </select>
         <select value={crFilter} onChange={e => setCrFilter(e.target.value)} className={inputClass}>
           <option value="">All CRs</option>
-          {crs.map(cr => (
+          {CHALLENGE_RATINGS.map(cr => (
             <option key={cr} value={cr}>
               CR {cr}
             </option>
@@ -92,11 +153,11 @@ export default function MonsterListPage() {
       </div>
 
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        {filtered.length} monster{filtered.length !== 1 ? 's' : ''} found
+        {total} monster{total !== 1 ? 's' : ''} found
       </p>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map(m => (
+        {monsters.map(m => (
           <div
             key={m.id}
             className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
@@ -122,6 +183,14 @@ export default function MonsterListPage() {
           </div>
         ))}
       </div>
+
+      <Pagination
+        page={page}
+        lastPage={lastPage}
+        total={total}
+        limit={LIMIT}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

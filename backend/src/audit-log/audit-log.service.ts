@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AuditAction, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QueryAuditLogDto } from './dto/query-audit-log.dto';
 
 export interface AuditLogEntry {
@@ -50,7 +51,7 @@ export class AuditLogService {
     }
 
     const page = filters.page ?? 1;
-    const limit = filters.limit ?? 50;
+    const limit = filters.limit ?? 20;
 
     const [data, total] = await Promise.all([
       this.prisma.auditLog.findMany({
@@ -62,6 +63,6 @@ export class AuditLogService {
       this.prisma.auditLog.count({ where }),
     ]);
 
-    return { data, total, page, limit };
+    return buildPaginatedResponse(data, total, page, limit);
   }
 }

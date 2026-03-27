@@ -18,6 +18,7 @@ import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interf
 import { EncountersService } from './encounters.service';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
+import { QueryEncountersDto } from './dto/query-encounters.dto';
 
 @ApiTags('Encounters')
 @ApiBearerAuth()
@@ -34,8 +35,8 @@ export class EncountersController {
 
   @Get()
   @ApiOperation({ summary: 'List encounters for a campaign' })
-  findAll(@Query('campaignId') campaignId: string, @Req() req: AuthenticatedRequest) {
-    return this.encountersService.findAllForCampaign(campaignId, req.user.userId);
+  findAll(@Query() query: QueryEncountersDto, @Req() req: AuthenticatedRequest) {
+    return this.encountersService.findAllForCampaign(query.campaignId, req.user.userId, query);
   }
 
   @Get(':id')

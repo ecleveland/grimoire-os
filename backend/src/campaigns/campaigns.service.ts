@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 
@@ -38,15 +40,25 @@ export class CampaignsService {
     return serialize(campaign);
   }
 
-  async findAllForUser(userId: string) {
-    const campaigns = await this.prisma.campaign.findMany({
-      where: {
-        OR: [{ ownerId: userId }, { players: { some: { userId } } }],
-      },
-      include: campaignInclude,
-      orderBy: { updatedAt: 'desc' },
-    });
-    return campaigns.map(serialize);
+  async findAllForUser(userId: string, pagination: PaginationDto) {
+    const page = pagination.page ?? 1;
+    const limit = pagination.limit ?? 20;
+    const where = {
+      OR: [{ ownerId: userId }, { players: { some: { userId } } }],
+    };
+
+    const [campaigns, total] = await Promise.all([
+      this.prisma.campaign.findMany({
+        where,
+        include: campaignInclude,
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.campaign.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(campaigns.map(serialize), total, page, limit);
   }
 
   async findOne(id: string) {

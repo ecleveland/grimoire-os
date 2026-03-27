@@ -100,10 +100,11 @@ describe('CampaignsService', () => {
   });
 
   describe('findAllForUser', () => {
-    it('uses OR condition with ownerId and players.some', async () => {
+    it('uses OR condition with ownerId and players.some, with pagination', async () => {
       prisma.campaign.findMany.mockResolvedValue([mockCampaign]);
+      prisma.campaign.count.mockResolvedValue(1);
 
-      const result = await service.findAllForUser(USER_ID);
+      const result = await service.findAllForUser(USER_ID, { page: 1, limit: 20 });
 
       expect(prisma.campaign.findMany).toHaveBeenCalledWith({
         where: {
@@ -111,8 +112,16 @@ describe('CampaignsService', () => {
         },
         include: { players: true, characters: true },
         orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
-      expect(result).toEqual([serializedMockCampaign]);
+      expect(prisma.campaign.count).toHaveBeenCalled();
+      expect(result).toEqual({
+        data: [serializedMockCampaign],
+        total: 1,
+        page: 1,
+        lastPage: 1,
+      });
     });
   });
 

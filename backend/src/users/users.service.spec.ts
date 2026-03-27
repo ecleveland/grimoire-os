@@ -66,15 +66,24 @@ describe('UsersService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all users without passwordHash', async () => {
+    it('should return paginated users without passwordHash', async () => {
       prisma.user.findMany.mockResolvedValue([mockUserPublic]);
+      prisma.user.count.mockResolvedValue(1);
 
-      const result = await service.findAll();
+      const result = await service.findAll({ page: 1, limit: 20 });
 
       expect(prisma.user.findMany).toHaveBeenCalledWith({
         omit: { passwordHash: true },
+        orderBy: { createdAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
-      expect(result).toEqual([mockUserPublic]);
+      expect(result).toEqual({
+        data: [mockUserPublic],
+        total: 1,
+        page: 1,
+        lastPage: 1,
+      });
     });
   });
 

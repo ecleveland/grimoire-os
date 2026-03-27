@@ -25,19 +25,24 @@ describe('SrdService', () => {
   describe('searchSpells', () => {
     it('passes empty where when no filters provided', async () => {
       prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
 
-      await service.searchSpells();
+      const result = await service.searchSpells({});
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {},
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
+      expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
     });
 
     it('builds OR contains insensitive when query provided', async () => {
       prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
 
-      await service.searchSpells('fire');
+      await service.searchSpells({ q: 'fire' });
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
@@ -47,32 +52,40 @@ describe('SrdService', () => {
           ],
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
 
     it('adds classes has filter when classFilter provided', async () => {
       prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
 
-      await service.searchSpells(undefined, 'Wizard');
+      await service.searchSpells({ class: 'Wizard' });
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
           classes: { has: 'Wizard' },
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
 
     it('adds school filter when school provided', async () => {
       prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
 
-      await service.searchSpells(undefined, undefined, undefined, 'Evocation');
+      await service.searchSpells({ school: 'Evocation' });
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
           school: 'Evocation',
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
   });
@@ -82,40 +95,49 @@ describe('SrdService', () => {
   describe('searchMonsters', () => {
     it('applies parseFloat on cr filter', async () => {
       prisma.monster.findMany.mockResolvedValue([]);
+      prisma.monster.count.mockResolvedValue(0);
 
-      await service.searchMonsters(undefined, undefined, '0.25');
+      await service.searchMonsters({ cr: '0.25' });
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
           challengeRating: 0.25,
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
 
     it('adds size filter when provided', async () => {
       prisma.monster.findMany.mockResolvedValue([]);
+      prisma.monster.count.mockResolvedValue(0);
 
-      await service.searchMonsters(undefined, undefined, undefined, 'Large');
+      await service.searchMonsters({ size: 'Large' });
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
           size: 'Large',
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
 
     it('adds minCr and maxCr range filter', async () => {
       prisma.monster.findMany.mockResolvedValue([]);
+      prisma.monster.count.mockResolvedValue(0);
 
-      await service.searchMonsters(undefined, undefined, undefined, undefined, '5', '10');
+      await service.searchMonsters({ minCr: '5', maxCr: '10' });
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
           challengeRating: { gte: 5, lte: 10 },
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
   });
@@ -125,40 +147,49 @@ describe('SrdService', () => {
   describe('searchItems', () => {
     it('adds category filter when provided', async () => {
       prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
 
-      await service.searchItems(undefined, 'Potion');
+      await service.searchItems({ category: 'Potion' });
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
           category: 'Potion',
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
 
     it('adds rarity filter when provided', async () => {
       prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
 
-      await service.searchItems(undefined, undefined, 'Rare');
+      await service.searchItems({ rarity: 'Rare' });
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
           rarity: 'Rare',
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
 
     it('adds isMagic filter when provided', async () => {
       prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
 
-      await service.searchItems(undefined, undefined, undefined, 'true');
+      await service.searchItems({ isMagic: 'true' });
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
           isMagic: true,
         },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
     });
   });

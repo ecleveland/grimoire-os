@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   Req,
   HttpCode,
@@ -14,6 +15,7 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { CampaignsService } from './campaigns.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
@@ -34,8 +36,8 @@ export class CampaignsController {
 
   @Get()
   @ApiOperation({ summary: 'List campaigns for current user' })
-  findAll(@Req() req: AuthenticatedRequest) {
-    return this.campaignsService.findAllForUser(req.user.userId);
+  findAll(@Req() req: AuthenticatedRequest, @Query() pagination: PaginationDto) {
+    return this.campaignsService.findAllForUser(req.user.userId, pagination);
   }
 
   @Get(':id')

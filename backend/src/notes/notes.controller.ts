@@ -18,6 +18,7 @@ import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interf
 import { NotesService } from './notes.service';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
+import { QueryNotesDto } from './dto/query-notes.dto';
 
 @ApiTags('Notes')
 @ApiBearerAuth()
@@ -34,8 +35,8 @@ export class NotesController {
 
   @Get()
   @ApiOperation({ summary: 'List notes for a campaign' })
-  findAll(@Query('campaignId') campaignId: string, @Req() req: AuthenticatedRequest) {
-    return this.notesService.findAllForCampaign(campaignId, req.user.userId);
+  findAll(@Query() query: QueryNotesDto, @Req() req: AuthenticatedRequest) {
+    return this.notesService.findAllForCampaign(query.campaignId, req.user.userId, query);
   }
 
   @Get(':id')
