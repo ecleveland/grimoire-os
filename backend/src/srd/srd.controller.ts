@@ -1,6 +1,9 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
+import { QuerySpellsDto } from './dto/query-spells.dto';
+import { QueryMonstersDto } from './dto/query-monsters.dto';
+import { QueryItemsDto } from './dto/query-items.dto';
 
 @ApiTags('SRD')
 @Controller('srd')
@@ -11,13 +14,8 @@ export class SrdController {
 
   @Get('spells')
   @ApiOperation({ summary: 'Search SRD spells' })
-  searchSpells(
-    @Query('q') query?: string,
-    @Query('class') classFilter?: string,
-    @Query('level') level?: number,
-    @Query('school') school?: string
-  ) {
-    return this.srdService.searchSpells(query, classFilter, level, school);
+  searchSpells(@Query() query: QuerySpellsDto) {
+    return this.srdService.searchSpells(query);
   }
 
   @Get('spells/:id')
@@ -30,15 +28,8 @@ export class SrdController {
 
   @Get('monsters')
   @ApiOperation({ summary: 'Search SRD monsters' })
-  searchMonsters(
-    @Query('q') query?: string,
-    @Query('type') type?: string,
-    @Query('cr') cr?: string,
-    @Query('size') size?: string,
-    @Query('minCr') minCr?: string,
-    @Query('maxCr') maxCr?: string
-  ) {
-    return this.srdService.searchMonsters(query, type, cr, size, minCr, maxCr);
+  searchMonsters(@Query() query: QueryMonstersDto) {
+    return this.srdService.searchMonsters(query);
   }
 
   @Get('monsters/:id')
@@ -51,13 +42,8 @@ export class SrdController {
 
   @Get('items')
   @ApiOperation({ summary: 'Search SRD items' })
-  searchItems(
-    @Query('q') query?: string,
-    @Query('category') category?: string,
-    @Query('rarity') rarity?: string,
-    @Query('isMagic') isMagic?: string
-  ) {
-    return this.srdService.searchItems(query, category, rarity, isMagic);
+  searchItems(@Query() query: QueryItemsDto) {
+    return this.srdService.searchItems(query);
   }
 
   @Get('items/:id')

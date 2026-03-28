@@ -49,13 +49,15 @@ describe('CampaignsController', () => {
   });
 
   describe('findAll', () => {
-    it('delegates to service with userId', async () => {
-      service.findAllForUser.mockResolvedValue([mockCampaign]);
+    it('delegates to service with userId and pagination', async () => {
+      const paginatedResult = { data: [mockCampaign], total: 1, page: 1, lastPage: 1 };
+      service.findAllForUser.mockResolvedValue(paginatedResult);
 
-      const result = await controller.findAll(mockReq);
+      const pagination = { page: 1, limit: 20 };
+      const result = await controller.findAll(mockReq, pagination);
 
-      expect(service.findAllForUser).toHaveBeenCalledWith(USER_ID);
-      expect(result).toEqual([mockCampaign]);
+      expect(service.findAllForUser).toHaveBeenCalledWith(USER_ID, pagination);
+      expect(result).toEqual(paginatedResult);
     });
   });
 

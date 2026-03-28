@@ -1,0 +1,20 @@
+{
+  "name": "@grimoire-os/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

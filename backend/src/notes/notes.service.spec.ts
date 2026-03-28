@@ -108,24 +108,35 @@ describe('NotesService', () => {
   });
 
   describe('findAllForCampaign', () => {
+    const pagination = { page: 1, limit: 20 };
+
     it('DM sees all notes (no visibility filter)', async () => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.note.findMany.mockResolvedValue([mockNote, mockPrivateNote]);
+      prisma.note.count.mockResolvedValue(2);
 
-      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID);
+      const result = await service.findAllForCampaign(CAMPAIGN_ID, USER_ID, pagination);
 
       expect(prisma.note.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
         orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 20,
+      });
+      expect(result).toEqual({
+        data: [mockNote, mockPrivateNote],
+        total: 2,
+        page: 1,
+        lastPage: 1,
       });
     });
 
     it('player sees PARTY notes and own PRIVATE notes only', async () => {
-      // USER_ID_2 is a player, not the owner
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.note.findMany.mockResolvedValue([mockNote]);
+      prisma.note.count.mockResolvedValue(1);
 
-      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID_2);
+      const result = await service.findAllForCampaign(CAMPAIGN_ID, USER_ID_2, pagination);
 
       expect(prisma.note.findMany).toHaveBeenCalledWith({
         where: {
@@ -133,6 +144,14 @@ describe('NotesService', () => {
           OR: [{ visibility: 'party' }, { authorId: USER_ID_2, visibility: 'private' }],
         },
         orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 20,
+      });
+      expect(result).toEqual({
+        data: [mockNote],
+        total: 1,
+        page: 1,
+        lastPage: 1,
       });
     });
   });

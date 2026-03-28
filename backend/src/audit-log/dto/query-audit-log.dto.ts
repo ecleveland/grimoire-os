@@ -1,17 +1,9 @@
-import {
-  IsOptional,
-  IsUUID,
-  IsString,
-  IsEnum,
-  IsDateString,
-  IsInt,
-  Min,
-  Max,
-} from 'class-validator';
+import { IsOptional, IsUUID, IsString, IsEnum, IsDateString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { AuditAction } from '@prisma/client';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 
-export class QueryAuditLogDto {
+export class QueryAuditLogDto extends PaginationDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()
@@ -41,17 +33,4 @@ export class QueryAuditLogDto {
   @IsOptional()
   @IsDateString()
   endDate?: string;
-
-  @ApiPropertyOptional({ default: 1 })
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  page?: number;
-
-  @ApiPropertyOptional({ default: 50 })
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  limit?: number;
 }

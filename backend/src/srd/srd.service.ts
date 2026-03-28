@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { QuerySpellsDto } from './dto/query-spells.dto';
+import { QueryMonstersDto } from './dto/query-monsters.dto';
+import { QueryItemsDto } from './dto/query-items.dto';
 
 @Injectable()
 export class SrdService {
@@ -7,18 +11,31 @@ export class SrdService {
 
   // ── Spells ──────────────────────────────────────────
 
-  async searchSpells(query?: string, classFilter?: string, level?: number, school?: string) {
+  async searchSpells(dto: QuerySpellsDto) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
     const where: Record<string, unknown> = {};
-    if (query) {
+    if (dto.q) {
       where.OR = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { description: { contains: query, mode: 'insensitive' } },
+        { name: { contains: dto.q, mode: 'insensitive' } },
+        { description: { contains: dto.q, mode: 'insensitive' } },
       ];
     }
-    if (classFilter) where.classes = { has: classFilter };
-    if (level !== undefined) where.level = level;
-    if (school) where.school = school;
-    return this.prisma.spell.findMany({ where, orderBy: { name: 'asc' } });
+    if (dto.class) where.classes = { has: dto.class };
+    if (dto.level !== undefined) where.level = dto.level;
+    if (dto.school) where.school = dto.school;
+
+    const [data, total] = await Promise.all([
+      this.prisma.spell.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.spell.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
   async findSpell(id: string) {
@@ -27,31 +44,37 @@ export class SrdService {
 
   // ── Monsters ────────────────────────────────────────
 
-  async searchMonsters(
-    query?: string,
-    type?: string,
-    cr?: string,
-    size?: string,
-    minCr?: string,
-    maxCr?: string
-  ) {
+  async searchMonsters(dto: QueryMonstersDto) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
     const where: Record<string, unknown> = {};
-    if (query) {
+    if (dto.q) {
       where.OR = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { description: { contains: query, mode: 'insensitive' } },
+        { name: { contains: dto.q, mode: 'insensitive' } },
+        { description: { contains: dto.q, mode: 'insensitive' } },
       ];
     }
-    if (type) where.type = type;
-    if (cr) where.challengeRating = parseFloat(cr);
-    if (size) where.size = size;
-    if (minCr || maxCr) {
+    if (dto.type) where.type = dto.type;
+    if (dto.cr) where.challengeRating = parseFloat(dto.cr);
+    if (dto.size) where.size = dto.size;
+    if (dto.minCr || dto.maxCr) {
       where.challengeRating = {
-        ...(minCr ? { gte: parseFloat(minCr) } : {}),
-        ...(maxCr ? { lte: parseFloat(maxCr) } : {}),
+        ...(dto.minCr ? { gte: parseFloat(dto.minCr) } : {}),
+        ...(dto.maxCr ? { lte: parseFloat(dto.maxCr) } : {}),
       };
     }
-    return this.prisma.monster.findMany({ where, orderBy: { name: 'asc' } });
+
+    const [data, total] = await Promise.all([
+      this.prisma.monster.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.monster.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
   async findMonster(id: string) {
@@ -60,18 +83,31 @@ export class SrdService {
 
   // ── Items ───────────────────────────────────────────
 
-  async searchItems(query?: string, category?: string, rarity?: string, isMagic?: string) {
+  async searchItems(dto: QueryItemsDto) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
     const where: Record<string, unknown> = {};
-    if (query) {
+    if (dto.q) {
       where.OR = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { description: { contains: query, mode: 'insensitive' } },
+        { name: { contains: dto.q, mode: 'insensitive' } },
+        { description: { contains: dto.q, mode: 'insensitive' } },
       ];
     }
-    if (category) where.category = category;
-    if (rarity) where.rarity = rarity;
-    if (isMagic !== undefined) where.isMagic = isMagic === 'true';
-    return this.prisma.item.findMany({ where, orderBy: { name: 'asc' } });
+    if (dto.category) where.category = dto.category;
+    if (dto.rarity) where.rarity = dto.rarity;
+    if (dto.isMagic !== undefined) where.isMagic = dto.isMagic === 'true';
+
+    const [data, total] = await Promise.all([
+      this.prisma.item.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.item.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
   async findItem(id: string) {

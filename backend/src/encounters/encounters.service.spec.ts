@@ -116,18 +116,27 @@ describe('EncountersService', () => {
   });
 
   describe('findAllForCampaign', () => {
-    it('verifies membership and returns encounters', async () => {
+    it('verifies membership and returns paginated encounters', async () => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaignOwned);
       prisma.encounter.findMany.mockResolvedValue([mockEncounter]);
+      prisma.encounter.count.mockResolvedValue(1);
 
-      const result = await service.findAllForCampaign(CAMPAIGN_ID, USER_ID);
+      const pagination = { page: 1, limit: 20 };
+      const result = await service.findAllForCampaign(CAMPAIGN_ID, USER_ID, pagination);
 
       expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
         orderBy: { updatedAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
-      expect(result).toEqual([mockEncounter]);
+      expect(result).toEqual({
+        data: [mockEncounter],
+        total: 1,
+        page: 1,
+        lastPage: 1,
+      });
     });
   });
 

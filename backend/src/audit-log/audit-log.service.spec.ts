@@ -83,12 +83,12 @@ describe('AuditLogService', () => {
 
       const result = await service.findAll({});
 
-      expect(result).toEqual({ data: mockLogs, total: 1, page: 1, limit: 50 });
+      expect(result).toEqual({ data: mockLogs, total: 1, page: 1, lastPage: 1 });
       expect(prisma.auditLog.findMany).toHaveBeenCalledWith({
         where: {},
         orderBy: { createdAt: 'desc' },
         skip: 0,
-        take: 50,
+        take: 20,
       });
     });
 
@@ -148,7 +148,7 @@ describe('AuditLogService', () => {
 
       const result = await service.findAll({ page: 3, limit: 10 });
 
-      expect(result).toEqual({ data: [], total: 100, page: 3, limit: 10 });
+      expect(result).toEqual({ data: [], total: 100, page: 3, lastPage: 10 });
       expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 20, take: 10 })
       );

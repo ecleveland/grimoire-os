@@ -2,6 +2,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
 
@@ -24,12 +26,23 @@ export class EncountersService {
     });
   }
 
-  async findAllForCampaign(campaignId: string, userId: string) {
+  async findAllForCampaign(campaignId: string, userId: string, pagination: PaginationDto) {
+    const page = pagination.page ?? 1;
+    const limit = pagination.limit ?? 20;
     await this.campaignAuth.assertCampaignMember(campaignId, userId);
-    return this.prisma.encounter.findMany({
-      where: { campaignId },
-      orderBy: { updatedAt: 'desc' },
-    });
+    const where = { campaignId };
+
+    const [data, total] = await Promise.all([
+      this.prisma.encounter.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.encounter.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
   async findOne(id: string, userId: string) {

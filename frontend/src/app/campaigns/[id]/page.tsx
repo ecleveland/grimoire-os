@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Campaign, Note, Encounter } from '@/lib/types';
+import Pagination from '@/components/Pagination';
+import type { Campaign, Note, Encounter, PaginatedResponse } from '@/lib/types';
 
 const statusColors: Record<string, string> = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
@@ -16,12 +17,20 @@ const statusColors: Record<string, string> = {
 
 type Tab = 'overview' | 'notes' | 'encounters';
 
+const LIMIT = 20;
+
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [notesTotal, setNotesTotal] = useState(0);
+  const [notesLastPage, setNotesLastPage] = useState(1);
+  const [notesPage, setNotesPage] = useState(1);
   const [encounters, setEncounters] = useState<Encounter[]>([]);
+  const [encountersTotal, setEncountersTotal] = useState(0);
+  const [encountersLastPage, setEncountersLastPage] = useState(1);
+  const [encountersPage, setEncountersPage] = useState(1);
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
@@ -40,22 +49,40 @@ export default function CampaignDetailPage() {
 
   useEffect(() => {
     if (tab === 'notes') {
-      apiFetch<Note[]>(`/notes?campaignId=${id}`)
-        .then(setNotes)
+      apiFetch<PaginatedResponse<Note>>(`/notes?campaignId=${id}&page=${notesPage}&limit=${LIMIT}`)
+        .then(res => {
+          setNotes(res.data);
+          setNotesTotal(res.total);
+          setNotesLastPage(res.lastPage);
+        })
         .catch(err => {
           console.error('Failed to load notes:', err);
           toast.error('Failed to load notes', { id: 'load-notes' });
         });
     }
     if (tab === 'encounters') {
-      apiFetch<Encounter[]>(`/encounters?campaignId=${id}`)
-        .then(setEncounters)
+      apiFetch<PaginatedResponse<Encounter>>(
+        `/encounters?campaignId=${id}&page=${encountersPage}&limit=${LIMIT}`
+      )
+        .then(res => {
+          setEncounters(res.data);
+          setEncountersTotal(res.total);
+          setEncountersLastPage(res.lastPage);
+        })
         .catch(err => {
           console.error('Failed to load encounters:', err);
           toast.error('Failed to load encounters', { id: 'load-encounters' });
         });
     }
-  }, [tab, id]);
+  }, [tab, id, notesPage, encountersPage]);
+
+  const handleTabChange = (newTab: Tab) => {
+    if (newTab !== tab) {
+      if (newTab === 'notes') setNotesPage(1);
+      if (newTab === 'encounters') setEncountersPage(1);
+      setTab(newTab);
+    }
+  };
 
   const generateInviteCode = async () => {
     try {
@@ -153,7 +180,7 @@ export default function CampaignDetailPage() {
           {tabs.map(t => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key)}
+              onClick={() => handleTabChange(t.key)}
               className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
                 tab === t.key
                   ? 'border-indigo-600 text-indigo-600'
@@ -209,34 +236,43 @@ export default function CampaignDetailPage() {
           {notes.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400">No notes yet.</p>
           ) : (
-            <div className="space-y-3">
-              {notes.map(n => (
-                <Link
-                  key={n.id}
-                  href={`/campaigns/${id}/notes/${n.id}`}
-                  className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-gray-900 dark:text-white">{n.title}</h3>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-                      {n.visibility}
-                    </span>
-                  </div>
-                  {n.tags.length > 0 && (
-                    <div className="flex gap-1 mt-2">
-                      {n.tags.map(t => (
-                        <span
-                          key={t}
-                          className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-                        >
-                          {t}
-                        </span>
-                      ))}
+            <>
+              <div className="space-y-3">
+                {notes.map(n => (
+                  <Link
+                    key={n.id}
+                    href={`/campaigns/${id}/notes/${n.id}`}
+                    className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium text-gray-900 dark:text-white">{n.title}</h3>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                        {n.visibility}
+                      </span>
                     </div>
-                  )}
-                </Link>
-              ))}
-            </div>
+                    {n.tags.length > 0 && (
+                      <div className="flex gap-1 mt-2">
+                        {n.tags.map(t => (
+                          <span
+                            key={t}
+                            className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </Link>
+                ))}
+              </div>
+              <Pagination
+                page={notesPage}
+                lastPage={notesLastPage}
+                total={notesTotal}
+                limit={LIMIT}
+                onPageChange={setNotesPage}
+              />
+            </>
           )}
         </div>
       )}
@@ -255,28 +291,37 @@ export default function CampaignDetailPage() {
           {encounters.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400">No encounters yet.</p>
           ) : (
-            <div className="space-y-3">
-              {encounters.map(enc => (
-                <Link
-                  key={enc.id}
-                  href={`/campaigns/${id}/encounters/${enc.id}`}
-                  className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full ${enc.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}
-                    >
-                      {enc.isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
-                    &middot; Round {enc.round}
-                  </p>
-                </Link>
-              ))}
-            </div>
+            <>
+              <div className="space-y-3">
+                {encounters.map(enc => (
+                  <Link
+                    key={enc.id}
+                    href={`/campaigns/${id}/encounters/${enc.id}`}
+                    className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+                  >
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full ${enc.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}
+                      >
+                        {enc.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
+                      &middot; Round {enc.round}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+              <Pagination
+                page={encountersPage}
+                lastPage={encountersLastPage}
+                total={encountersTotal}
+                limit={LIMIT}
+                onPageChange={setEncountersPage}
+              />
+            </>
           )}
         </div>
       )}
