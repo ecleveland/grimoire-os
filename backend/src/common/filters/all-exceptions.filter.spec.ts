@@ -88,4 +88,21 @@ describe('AllExceptionsFilter', () => {
       path: '/api/test',
     });
   });
+
+  it('returns 400 for Prisma P2003 foreign key constraint', () => {
+    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+      code: 'P2003',
+      clientVersion: '1.0.0',
+    });
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(400);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: 400,
+      message: 'Foreign key constraint failed',
+      error: 'Bad Request',
+      timestamp: expect.any(String),
+      path: '/api/test',
+    });
+  });
 });
