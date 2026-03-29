@@ -1,0 +1,192 @@
+(node:46354) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/users/users.service.spec.ts
+(node:46352) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/audit-log/audit-log.service.spec.ts
+(node:46353) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/srd/srd.service.spec.ts
+(node:46351) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/audit-log/audit-log.controller.spec.ts
+PASS src/auth/auth.controller.spec.ts
+(node:46349) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/campaigns/campaigns.controller.spec.ts
+PASS src/auth/auth.integration.spec.ts
+PASS src/characters/characters.service.spec.ts
+PASS src/campaigns/campaigns.service.spec.ts
+PASS src/encounters/encounters.service.spec.ts
+PASS src/auth/auth.service.spec.ts
+PASS src/auth/guards/roles.guard.spec.ts
+PASS src/auth/strategies/jwt.strategy.spec.ts
+PASS src/auth/campaign-auth.service.spec.ts
+PASS src/seed/srd-api.transformers.spec.ts
+PASS src/notes/notes.service.spec.ts
+PASS src/audit-log/audit-log.interceptor.spec.ts
+(node:46350) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/common/filters/all-exceptions.filter.spec.ts
+(node:46348) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/seed/seed.service.spec.ts
+(node:46347) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/config/prettier.spec.ts
+(node:46346) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/seed/srd-api.fetcher.spec.ts (16.465 s)
+-------------------------------|---------|----------|---------|---------|----------------------------------------------------------------------------------------
+File                           | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s                                                                      
+-------------------------------|---------|----------|---------|---------|----------------------------------------------------------------------------------------
+All files                      |   87.33 |    73.34 |   61.26 |   87.18 |                                                                                        
+ src                           |   52.63 |        0 |       0 |      50 |                                                                                        
+  app.module.ts                |     100 |      100 |     100 |     100 |                                                                                        
+  main.ts                      |       0 |        0 |       0 |       0 | 1-53                                                                                   
+ src/admin                     |      84 |       75 |       0 |   80.95 |                                                                                        
+  admin.controller.ts          |   78.94 |       75 |       0 |   76.47 | 28,33,39,46                                                                            
+  admin.module.ts              |     100 |      100 |     100 |     100 |                                                                                        
+ src/audit-log                 |   95.83 |    81.08 |     100 |     100 |                                                                                        
+  audit-log.controller.ts      |     100 |       75 |     100 |     100 | 16-20                                                                                  
+  audit-log.interceptor.ts     |   93.47 |    80.95 |     100 |     100 | 29,43,52,79-84,90                                                                      
+  audit-log.module.ts          |     100 |      100 |     100 |     100 |                                                                                        
+  audit-log.service.ts         |   96.55 |    83.33 |     100 |     100 | 19,44,49-50                                                                            
+ src/audit-log/dto             |     100 |       75 |     100 |     100 |                                                                                        
+  query-audit-log.dto.ts       |     100 |       75 |     100 |     100 | 25                                                                                     
+ src/auth                      |     100 |     82.6 |     100 |     100 |                                                                                        
+  auth.controller.ts           |     100 |       75 |     100 |     100 | 15-42                                                                                  
+  auth.module.ts               |     100 |       50 |     100 |     100 | 18                                                                                     
+  auth.service.ts              |     100 |    83.33 |     100 |     100 | 9                                                                                      
+  campaign-auth.module.ts      |     100 |      100 |     100 |     100 |                                                                                        
+  campaign-auth.service.ts     |     100 |    93.75 |     100 |     100 | 11                                                                                     
+ src/auth/decorators           |      50 |      100 |      50 |      50 |                                                                                        
+  public.decorator.ts          |       0 |      100 |       0 |       0 | 1-4                                                                                    
+  roles.decorator.ts           |     100 |      100 |     100 |     100 |                                                                                        
+ src/auth/dto                  |     100 |      100 |     100 |     100 |                                                                                        
+  access-token-response.dto.ts |     100 |      100 |     100 |     100 |                                                                                        
+  login.dto.ts                 |     100 |      100 |     100 |     100 |                                                                                        
+  register.dto.ts              |     100 |      100 |     100 |     100 |                                                                                        
+ src/auth/guards               |     100 |    83.33 |     100 |     100 |                                                                                        
+  jwt-auth.guard.ts            |     100 |      100 |     100 |     100 |                                                                                        
+  roles.guard.ts               |     100 |    83.33 |     100 |     100 | 9                                                                                      
+ src/auth/strategies           |     100 |    83.33 |     100 |     100 |                                                                                        
+  jwt.strategy.ts              |     100 |    83.33 |     100 |     100 | 9                                                                                      
+ src/campaigns                 |   98.88 |    72.22 |   96.29 |    98.8 |                                                                                        
+  campaigns.controller.ts      |     100 |       75 |     100 |     100 | 28-54                                                                                  
+  campaigns.module.ts          |     100 |      100 |     100 |     100 |                                                                                        
+  campaigns.service.ts         |   98.03 |       70 |   93.33 |   97.95 | 20                                                                                     
+ src/campaigns/dto             |     100 |       75 |     100 |     100 |                                                                                        
+  create-campaign.dto.ts       |     100 |       75 |     100 |     100 | 18                                                                                     
+  update-campaign.dto.ts       |     100 |      100 |     100 |     100 |                                                                                        
+ src/characters                |   88.46 |       75 |   53.84 |   86.95 |                                                                                        
+  characters.controller.ts     |   71.42 |       75 |       0 |   68.42 | 28,34,40,46,56,63                                                                      
+  characters.module.ts         |     100 |      100 |     100 |     100 |                                                                                        
+  characters.service.ts        |     100 |       75 |     100 |     100 | 11-27                                                                                  
+ src/characters/dto            |   91.66 |      100 |       0 |   91.66 |                                                                                        
+  create-character.dto.ts      |    91.3 |      100 |       0 |    91.3 | 189,195,268,275,281,288                                                                
+  update-character.dto.ts      |     100 |      100 |     100 |     100 |                                                                                        
+ src/common/dto                |   71.42 |      100 |     100 |     100 |                                                                                        
+  pagination.dto.ts            |   71.42 |      100 |     100 |     100 |                                                                                        
+ src/common/filters            |   96.55 |    76.19 |     100 |   96.29 |                                                                                        
+  all-exceptions.filter.ts     |   96.55 |    76.19 |     100 |   96.29 | 21                                                                                     
+ src/common/helpers            |     100 |      100 |     100 |     100 |                                                                                        
+  paginate.ts                  |     100 |      100 |     100 |     100 |                                                                                        
+ src/config                    |      25 |        0 |       0 |      25 |                                                                                        
+  configuration.ts             |      25 |        0 |       0 |      25 | 2-6                                                                                    
+ src/encounters                |   90.32 |    77.77 |      50 |   89.28 |                                                                                        
+  encounters.controller.ts     |   71.42 |       75 |       0 |   68.42 | 28,33,39,45,55,62                                                                      
+  encounters.module.ts         |     100 |      100 |     100 |     100 |                                                                                        
+  encounters.service.ts        |     100 |       80 |     100 |     100 | 13-31                                                                                  
+ src/encounters/dto            |   96.29 |      100 |       0 |   96.29 |                                                                                        
+  create-encounter.dto.ts      |   93.33 |      100 |       0 |   93.33 | 61                                                                                     
+  query-encounters.dto.ts      |     100 |      100 |     100 |     100 |                                                                                        
+  update-encounter.dto.ts      |     100 |      100 |     100 |     100 |                                                                                        
+ src/notes                     |   91.17 |    81.39 |      50 |   90.32 |                                                                                        
+  notes.controller.ts          |   71.42 |       75 |       0 |   68.42 | 28,33,39,45,51,58                                                                      
+  notes.module.ts              |     100 |      100 |     100 |     100 |                                                                                        
+  notes.service.ts             |     100 |    85.18 |     100 |     100 | 14-30                                                                                  
+ src/notes/dto                 |     100 |       75 |     100 |     100 |                                                                                        
+  create-note.dto.ts           |     100 |       75 |     100 |     100 | 22                                                                                     
+  query-notes.dto.ts           |     100 |      100 |     100 |     100 |                                                                                        
+  update-note.dto.ts           |     100 |      100 |     100 |     100 |                                                                                        
+ src/prisma                    |   89.47 |      100 |   33.33 |   81.81 |                                                                                        
+  enums.ts                     |     100 |      100 |      50 |     100 |                                                                                        
+  prisma.module.ts             |     100 |      100 |     100 |     100 |                                                                                        
+  prisma.service.ts            |   71.42 |      100 |       0 |      60 | 7-11                                                                                   
+ src/seed                      |   85.18 |    68.75 |   87.17 |   86.06 |                                                                                        
+  run-seed.ts                  |       0 |      100 |       0 |       0 | 1-12                                                                                   
+  seed.module.ts               |       0 |      100 |     100 |       0 | 1-11                                                                                   
+  seed.service.ts              |   93.54 |    72.22 |     100 |    93.4 | 140-141,167-168,204-205                                                                
+  srd-api.fetcher.ts           |   86.04 |    64.28 |   88.88 |   86.84 | 14-16,19,50                                                                            
+  srd-api.transformers.ts      |   93.75 |    68.75 |      88 |   94.82 | 188-190,269                                                                            
+ src/seed/data                 |   76.92 |      100 |     100 |   76.92 |                                                                                        
+  backgrounds.ts               |       0 |      100 |     100 |       0 | 1                                                                                      
+  classes.ts                   |     100 |      100 |     100 |     100 |                                                                                        
+  conditions.ts                |     100 |      100 |     100 |     100 |                                                                                        
+  feats.ts                     |       0 |      100 |     100 |       0 | 1                                                                                      
+  items.ts                     |     100 |      100 |     100 |     100 |                                                                                        
+  languages.ts                 |     100 |      100 |     100 |     100 |                                                                                        
+  monsters.ts                  |     100 |      100 |     100 |     100 |                                                                                        
+  races.ts                     |     100 |      100 |     100 |     100 |                                                                                        
+  skills.ts                    |     100 |      100 |     100 |     100 |                                                                                        
+  species.ts                   |       0 |      100 |     100 |       0 | 1                                                                                      
+  spells.ts                    |     100 |      100 |     100 |     100 |                                                                                        
+  subclasses.ts                |     100 |      100 |     100 |     100 |                                                                                        
+  subraces.ts                  |     100 |      100 |     100 |     100 |                                                                                        
+ src/srd                       |   71.52 |    78.94 |      26 |   68.93 |                                                                                        
+  srd.controller.ts            |   56.89 |       75 |       0 |   55.35 | 11,18,24,32,38,46,52,60,66,74,80,88,94,102,108,116,122,130,136,144,150,158,164,172,178 
+  srd.module.ts                |     100 |      100 |     100 |     100 |                                                                                        
+  srd.service.ts               |   79.31 |       80 |      52 |   77.77 | 42,52,81,91,114-120,133,152,164,172,181,189,198,208,220,232                            
+ src/srd/dto                   |     100 |      100 |     100 |     100 |                                                                                        
+  query-items.dto.ts           |     100 |      100 |     100 |     100 |                                                                                        
+  query-monsters.dto.ts        |     100 |      100 |     100 |     100 |                                                                                        
+  query-spells.dto.ts          |     100 |      100 |     100 |     100 |                                                                                        
+ src/test                      |   93.75 |      100 |      75 |   93.75 |                                                                                        
+  fixtures.ts                  |     100 |      100 |     100 |     100 |                                                                                        
+  prisma-mock.factory.ts       |   85.71 |      100 |      75 |   85.71 | 75                                                                                     
+ src/users                     |   74.62 |    64.28 |   57.14 |   72.13 |                                                                                        
+  users.controller.ts          |   81.25 |       75 |      25 |   78.57 | 31,39,48                                                                               
+  users.module.ts              |     100 |      100 |     100 |     100 |                                                                                        
+  users.service.ts             |   68.88 |       60 |      70 |   67.44 | 37,67-74,84-100,110-111,124                                                            
+ src/users/dto                 |     100 |       75 |     100 |     100 |                                                                                        
+  admin-update-user.dto.ts     |     100 |      100 |     100 |     100 |                                                                                        
+  change-password.dto.ts       |     100 |      100 |     100 |     100 |                                                                                        
+  create-user.dto.ts           |     100 |       75 |     100 |     100 | 33                                                                                     
+  update-user.dto.ts           |     100 |      100 |     100 |     100 |                                                                                        
+-------------------------------|---------|----------|---------|---------|----------------------------------------------------------------------------------------
+
+        Failed to write coverage reports:
+        ERROR: Error: Cannot find module 'src/common/filters/all-exceptions.filter.spec.ts'
+Require stack:
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/istanbul-reports/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/@jest/reporters/build/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/@jest/core/build/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/jest-cli/build/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/jest-cli/bin/jest.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/jest/bin/jest.js
+        STACK: Error: Cannot find module 'src/common/filters/all-exceptions.filter.spec.ts'
+Require stack:
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/istanbul-reports/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/@jest/reporters/build/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/@jest/core/build/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/jest-cli/build/index.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/jest-cli/bin/jest.js
+- /Users/picardvega/Projects/grimoire-os/backend/node_modules/jest/bin/jest.js
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1475:15)
+    at wrapResolveFilename (node:internal/modules/cjs/loader:1048:27)
+    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1072:10)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1093:12)
+    at Module._load (node:internal/modules/cjs/loader:1261:25)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+    at Module.require (node:internal/modules/cjs/loader:1575:12)
+    at require (node:internal/modules/helpers:191:16)
+    at Object.create (/Users/picardvega/Projects/grimoire-os/backend/node_modules/istanbul-reports/index.js:19:20)
+    at CoverageReporter.onRunComplete (/Users/picardvega/Projects/grimoire-os/backend/node_modules/@jest/reporters/build/index.js:229:36)
+      
+
+Test Suites: 21 passed, 21 total
+Tests:       198 passed, 198 total
+Snapshots:   0 total
+Time:        17.409 s
+Ran all test suites.

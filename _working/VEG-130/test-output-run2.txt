@@ -1,0 +1,45 @@
+(node:45965) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/audit-log/audit-log.service.spec.ts
+PASS src/users/users.service.spec.ts
+(node:45966) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:45967) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/srd/srd.service.spec.ts
+(node:45964) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/audit-log/audit-log.controller.spec.ts
+(node:45963) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/common/filters/all-exceptions.filter.spec.ts
+PASS src/campaigns/campaigns.controller.spec.ts
+PASS src/auth/auth.controller.spec.ts
+PASS src/characters/characters.service.spec.ts
+(node:45962) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/auth/auth.integration.spec.ts
+PASS src/notes/notes.service.spec.ts
+PASS src/campaigns/campaigns.service.spec.ts
+PASS src/encounters/encounters.service.spec.ts
+PASS src/auth/auth.service.spec.ts
+PASS src/auth/strategies/jwt.strategy.spec.ts
+PASS src/seed/srd-api.transformers.spec.ts
+PASS src/audit-log/audit-log.interceptor.spec.ts
+PASS src/auth/campaign-auth.service.spec.ts
+PASS src/auth/guards/roles.guard.spec.ts
+(node:45961) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/seed/seed.service.spec.ts
+(node:45960) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/config/prettier.spec.ts
+(node:45959) Warning: `--localstorage-file` was provided without a valid path
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS src/seed/srd-api.fetcher.spec.ts (16.191 s)
+
+Test Suites: 21 passed, 21 total
+Tests:       198 passed, 198 total
+Snapshots:   0 total
+Time:        16.593 s, estimated 17 s
+Ran all test suites.
