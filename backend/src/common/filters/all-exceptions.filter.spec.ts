@@ -1,6 +1,5 @@
 import { ArgumentsHost, NotFoundException } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
-import { Test } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import { AppModule } from '../../app.module';
 import { AllExceptionsFilter } from './all-exceptions.filter';
@@ -112,7 +111,7 @@ describe('AllExceptionsFilter', () => {
   it('does not leak internal details for unrecognized Prisma errors', () => {
     const error = new Prisma.PrismaClientKnownRequestError(
       'Raw query failed. Code: `42P01`. Message: relation "users" does not exist',
-      { code: 'P2010', clientVersion: '1.0.0' },
+      { code: 'P2010', clientVersion: '1.0.0' }
     );
     filter.catch(error, createHost());
 
@@ -126,15 +125,11 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
-  it('is registered as a global filter in AppModule', async () => {
-    const module = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    const filters = module.get<AllExceptionsFilter[]>(APP_FILTER);
-    const hasFilter = Array.isArray(filters)
-      ? filters.some((f) => f instanceof AllExceptionsFilter)
-      : filters instanceof AllExceptionsFilter;
+  it('is registered as a global filter in AppModule', () => {
+    const providers: any[] = Reflect.getMetadata('providers', AppModule) ?? [];
+    const hasFilter = providers.some(
+      p => p.provide === APP_FILTER && p.useClass === AllExceptionsFilter
+    );
     expect(hasFilter).toBe(true);
   });
 });
