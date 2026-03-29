@@ -13,20 +13,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let error = 'Internal Server Error';
 
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
-      if (exception.code === 'P2025') {
-        statusCode = HttpStatus.NOT_FOUND;
-        message = 'Record not found';
-        error = 'Not Found';
-      } else if (exception.code === 'P2002') {
-        statusCode = HttpStatus.CONFLICT;
-        const target = (exception.meta?.target as string[]) ?? [];
-        message = `Unique constraint violation on: ${target.join(', ')}`;
-        error = 'Conflict';
-      } else if (exception.code === 'P2003' || exception.code === 'P2006') {
-        statusCode = HttpStatus.BAD_REQUEST;
-        message = exception.message.replace(/\n/g, ' ').trim();
-        error = 'Bad Request';
-      }
+      ({ statusCode, message, error } = this.handlePrismaError(exception));
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const res = exception.getResponse();
@@ -46,5 +33,41 @@ export class AllExceptionsFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
     });
+  }
+
+  private handlePrismaError(exception: Prisma.PrismaClientKnownRequestError): {
+    statusCode: number;
+    message: string;
+    error: string;
+  } {
+    switch (exception.code) {
+      case 'P2025':
+        return {
+          statusCode: HttpStatus.NOT_FOUND,
+          message: 'Record not found',
+          error: 'Not Found',
+        };
+      case 'P2002': {
+        const target = (exception.meta?.target as string[]) ?? [];
+        return {
+          statusCode: HttpStatus.CONFLICT,
+          message: `Unique constraint violation on: ${target.join(', ')}`,
+          error: 'Conflict',
+        };
+      }
+      case 'P2003':
+      case 'P2006':
+        return {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: exception.message.replace(/\n/g, ' ').trim(),
+          error: 'Bad Request',
+        };
+      default:
+        return {
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Internal server error',
+          error: 'Internal Server Error',
+        };
+    }
   }
 }
