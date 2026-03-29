@@ -17,6 +17,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
         statusCode = HttpStatus.NOT_FOUND;
         message = 'Record not found';
         error = 'Not Found';
+      } else if (exception.code === 'P2002') {
+        statusCode = HttpStatus.CONFLICT;
+        const target = (exception.meta?.target as string[]) ?? [];
+        message = `Unique constraint violation on: ${target.join(', ')}`;
+        error = 'Conflict';
       }
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
