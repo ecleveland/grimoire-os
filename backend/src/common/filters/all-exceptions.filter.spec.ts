@@ -70,4 +70,22 @@ describe('AllExceptionsFilter', () => {
       path: '/api/test',
     });
   });
+
+  it('returns 409 for Prisma P2002 unique constraint with conflicting fields', () => {
+    const error = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: '1.0.0',
+      meta: { target: ['email'] },
+    });
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(409);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: 409,
+      message: 'Unique constraint violation on: email',
+      error: 'Conflict',
+      timestamp: expect.any(String),
+      path: '/api/test',
+    });
+  });
 });
