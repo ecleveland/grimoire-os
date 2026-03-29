@@ -16,6 +16,9 @@
 - [ ] Unknown/unexpected errors return 500 without leaking internal details (stack trace, query, etc.)
 - [ ] Filter is registered globally in the NestJS app module
 
+## Selected Approach
+**Approach A: Single Global ExceptionFilter** — one `AllExceptionsFilter` registered via `APP_FILTER` in `app.module.ts`.
+
 ## TDD Cycle Log
 
 | Cycle | Criterion | RED | GREEN | REFACTOR | Status |
