@@ -105,4 +105,21 @@ describe('AllExceptionsFilter', () => {
       path: '/api/test',
     });
   });
+
+  it('does not leak internal details for unrecognized Prisma errors', () => {
+    const error = new Prisma.PrismaClientKnownRequestError(
+      'Raw query failed. Code: `42P01`. Message: relation "users" does not exist',
+      { code: 'P2010', clientVersion: '1.0.0' },
+    );
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(500);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: 500,
+      message: 'Internal server error',
+      error: 'Internal Server Error',
+      timestamp: expect.any(String),
+      path: '/api/test',
+    });
+  });
 });
