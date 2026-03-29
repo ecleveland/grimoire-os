@@ -1,4 +1,5 @@
 import { ArgumentsHost, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
 describe('AllExceptionsFilter', () => {
@@ -47,6 +48,23 @@ describe('AllExceptionsFilter', () => {
     expect(mockJson).toHaveBeenCalledWith({
       statusCode: 404,
       message: 'Campaign not found',
+      error: 'Not Found',
+      timestamp: expect.any(String),
+      path: '/api/test',
+    });
+  });
+
+  it('returns 404 for Prisma P2025 record not found', () => {
+    const error = new Prisma.PrismaClientKnownRequestError('Record not found', {
+      code: 'P2025',
+      clientVersion: '1.0.0',
+    });
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(404);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: 404,
+      message: 'Record not found',
       error: 'Not Found',
       timestamp: expect.any(String),
       path: '/api/test',
