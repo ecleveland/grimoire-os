@@ -22,6 +22,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
         const target = (exception.meta?.target as string[]) ?? [];
         message = `Unique constraint violation on: ${target.join(', ')}`;
         error = 'Conflict';
+      } else if (exception.code === 'P2003' || exception.code === 'P2006') {
+        statusCode = HttpStatus.BAD_REQUEST;
+        message = exception.message.replace(/\n/g, ' ').trim();
+        error = 'Bad Request';
       }
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
