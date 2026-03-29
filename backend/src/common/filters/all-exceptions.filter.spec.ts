@@ -1,4 +1,4 @@
-import { ArgumentsHost } from '@nestjs/common';
+import { ArgumentsHost, NotFoundException } from '@nestjs/common';
 import { AllExceptionsFilter } from './all-exceptions.filter';
 
 describe('AllExceptionsFilter', () => {
@@ -34,6 +34,20 @@ describe('AllExceptionsFilter', () => {
       statusCode: 500,
       message: 'Internal server error',
       error: 'Internal Server Error',
+      timestamp: expect.any(String),
+      path: '/api/test',
+    });
+  });
+
+  it('forwards HttpException with original status and message', () => {
+    const error = new NotFoundException('Campaign not found');
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(404);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: 404,
+      message: 'Campaign not found',
+      error: 'Not Found',
       timestamp: expect.any(String),
       path: '/api/test',
     });
