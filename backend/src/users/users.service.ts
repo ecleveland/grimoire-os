@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { Role } from '../common/enums';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -27,7 +28,7 @@ export class UsersService {
           displayName: createUserDto.displayName ?? createUserDto.username,
           email: createUserDto.email,
           avatarUrl: createUserDto.avatarUrl,
-          role: createUserDto.role ?? 'player',
+          role: createUserDto.role ?? Role.PLAYER,
         },
       });
     } catch (error: unknown) {
