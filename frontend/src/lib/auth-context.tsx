@@ -12,7 +12,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { apiFetch } from './api';
 import { Role } from './types';
-import type { User } from './types';
+import type { AccessTokenResponse, User } from './types';
 
 interface UserInfo {
   userId: string;
@@ -122,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('Invalid credentials');
       }
 
-      const data = await res.json();
+      const data: AccessTokenResponse = await res.json();
       localStorage.setItem('token', data.access_token);
       document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
       setIsAuthenticated(true);
@@ -147,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(body.message || 'Registration failed');
       }
 
-      const responseData = await res.json();
+      const responseData: AccessTokenResponse = await res.json();
       localStorage.setItem('token', responseData.access_token);
       document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
       setIsAuthenticated(true);
