@@ -76,6 +76,7 @@ model Campaign {
   notes      Note[]
   encounters Encounter[]
 
+  @@index([ownerId])
   @@map("campaigns")
 }
 
@@ -136,6 +137,8 @@ model Character {
   user     User      @relation(fields: [userId], references: [id])
   campaign Campaign? @relation(fields: [campaignId], references: [id])
 
+  @@index([userId])
+  @@index([campaignId])
   @@map("characters")
 }
 
@@ -156,6 +159,8 @@ model Note {
   campaign Campaign @relation(fields: [campaignId], references: [id])
   author   User     @relation(fields: [authorId], references: [id])
 
+  @@index([campaignId])
+  @@index([authorId])
   @@map("notes")
 }
 
@@ -176,6 +181,7 @@ model Encounter {
   campaign  Campaign @relation(fields: [campaignId], references: [id])
   createdBy User     @relation(fields: [createdById], references: [id])
 
+  @@index([campaignId])
   @@map("encounters")
 }
 
