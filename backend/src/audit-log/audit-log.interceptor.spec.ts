@@ -2,7 +2,7 @@ import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of } from 'rxjs';
 import { AuditLogInterceptor } from './audit-log.interceptor';
 import { AuditLogService } from './audit-log.service';
-import { Role } from '../common/enums';
+import { AuditAction, Role } from '../common/enums';
 
 describe('AuditLogInterceptor', () => {
   let interceptor: AuditLogInterceptor;
@@ -57,7 +57,7 @@ describe('AuditLogInterceptor', () => {
       expect(auditLogService.log).toHaveBeenCalledWith({
         userId: 'user-1',
         username: 'testuser',
-        action: 'create',
+        action: AuditAction.CREATE,
         entity: 'Campaign',
         entityId: 'new-entity-id',
         metadata: { name: 'Test Campaign' },
@@ -77,7 +77,7 @@ describe('AuditLogInterceptor', () => {
     interceptor.intercept(context, next).subscribe(() => {
       expect(auditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: 'update',
+          action: AuditAction.UPDATE,
           entity: 'Character',
           entityId: 'char-123',
         })
@@ -97,7 +97,7 @@ describe('AuditLogInterceptor', () => {
     interceptor.intercept(context, next2).subscribe(() => {
       expect(auditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: 'delete',
+          action: AuditAction.DELETE,
           entity: 'Note',
           entityId: 'note-456',
         })
@@ -197,7 +197,7 @@ describe('AuditLogInterceptor', () => {
         expect.objectContaining({
           entity: 'User',
           entityId: 'user-456',
-          action: 'update',
+          action: AuditAction.UPDATE,
         })
       );
       done();
