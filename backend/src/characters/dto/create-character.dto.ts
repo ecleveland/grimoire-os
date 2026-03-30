@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Feature } from '@grimoire-os/shared';
 
 class AbilityScoresDto {
   @ApiPropertyOptional({ example: 10 })
@@ -127,7 +128,7 @@ class CurrencyDto {
   pp?: number;
 }
 
-class FeatureDto {
+class FeatureDto implements Feature {
   @ApiProperty({ example: 'Darkvision' })
   @IsString()
   name!: string;
