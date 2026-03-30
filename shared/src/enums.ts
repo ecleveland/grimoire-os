@@ -38,3 +38,12 @@ export const AuditAction = {
 } as const;
 
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
+
+// ── CombatantType ──────────────────────────────────
+
+export const CombatantType = {
+  PC: 'pc',
+  NPC: 'npc',
+} as const;
+
+export type CombatantType = (typeof CombatantType)[keyof typeof CombatantType];
