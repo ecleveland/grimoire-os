@@ -1,3 +1,5 @@
+import { Role } from '../common/enums';
+
 export const USER_ID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 export const USER_ID_2 = 'b2c3d4e5-f6a7-8901-bcde-f12345678901';
 export const CHARACTER_ID = 'c3d4e5f6-a7b8-9012-cdef-123456789012';
@@ -10,7 +12,7 @@ export const mockUser = {
   displayName: 'Test User',
   email: 'test@example.com',
   avatarUrl: null,
-  role: 'player' as const,
+  role: Role.PLAYER,
   createdAt: new Date('2025-01-01T00:00:00Z'),
   updatedAt: new Date('2025-01-01T00:00:00Z'),
 };

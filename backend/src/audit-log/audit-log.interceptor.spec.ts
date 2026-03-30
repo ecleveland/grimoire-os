@@ -1,8 +1,8 @@
 import { ExecutionContext, CallHandler } from '@nestjs/common';
 import { of } from 'rxjs';
-import { AuditAction } from '@prisma/client';
 import { AuditLogInterceptor } from './audit-log.interceptor';
 import { AuditLogService } from './audit-log.service';
+import { Role } from '../common/enums';
 
 describe('AuditLogInterceptor', () => {
   let interceptor: AuditLogInterceptor;
@@ -31,7 +31,7 @@ describe('AuditLogInterceptor', () => {
           : {
               userId: 'user-1',
               username: 'testuser',
-              role: 'player',
+              role: Role.PLAYER,
             },
     };
 
@@ -57,7 +57,7 @@ describe('AuditLogInterceptor', () => {
       expect(auditLogService.log).toHaveBeenCalledWith({
         userId: 'user-1',
         username: 'testuser',
-        action: AuditAction.create,
+        action: 'create',
         entity: 'Campaign',
         entityId: 'new-entity-id',
         metadata: { name: 'Test Campaign' },
@@ -77,7 +77,7 @@ describe('AuditLogInterceptor', () => {
     interceptor.intercept(context, next).subscribe(() => {
       expect(auditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.update,
+          action: 'update',
           entity: 'Character',
           entityId: 'char-123',
         })
@@ -97,7 +97,7 @@ describe('AuditLogInterceptor', () => {
     interceptor.intercept(context, next2).subscribe(() => {
       expect(auditLogService.log).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: AuditAction.delete,
+          action: 'delete',
           entity: 'Note',
           entityId: 'note-456',
         })
@@ -197,7 +197,7 @@ describe('AuditLogInterceptor', () => {
         expect.objectContaining({
           entity: 'User',
           entityId: 'user-456',
-          action: AuditAction.update,
+          action: 'update',
         })
       );
       done();
