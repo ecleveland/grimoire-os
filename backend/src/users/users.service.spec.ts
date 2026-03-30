@@ -5,6 +5,7 @@ import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { USER_ID, mockUser, mockUserPublic, createUserDto } from '../test/fixtures';
+import { Role } from '../common/enums';
 
 jest.mock('bcryptjs', () => ({
   hash: jest.fn(),
@@ -50,6 +51,16 @@ describe('UsersService', () => {
         },
       });
       expect(result.passwordHash).toBe('hashed_pw');
+    });
+
+    it('should default to Role.PLAYER when no role is provided', async () => {
+      (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_pw');
+      prisma.user.create.mockResolvedValue({ ...mockUser, passwordHash: 'hashed_pw' });
+
+      await service.create(createUserDto);
+
+      const callData = prisma.user.create.mock.calls[0][0].data;
+      expect(callData.role).toBe(Role.PLAYER);
     });
 
     it('should throw ConflictException on duplicate username/email (P2002)', async () => {

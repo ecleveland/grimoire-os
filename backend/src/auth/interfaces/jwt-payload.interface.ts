@@ -1,9 +1,10 @@
 import { Request } from 'express';
+import { Role } from '../../common/enums';
 
 export interface JwtUser {
   userId: string;
   username: string;
-  role: string;
+  role: Role;
 }
 
 export interface AuthenticatedRequest extends Request {

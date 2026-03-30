@@ -1,6 +1,7 @@
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { RolesGuard } from './roles.guard';
+import { Role, UserRole } from '../../common/enums';
 
 function createMockContext(user: { role: string }): ExecutionContext {
   return {
@@ -23,28 +24,32 @@ describe('RolesGuard', () => {
 
   it('should allow access when no roles are required', () => {
     jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(undefined);
-    const context = createMockContext({ role: 'player' });
+    const context = createMockContext({ role: Role.PLAYER });
 
     expect(guard.canActivate(context)).toBe(true);
   });
 
   it('should allow access when user has a required role', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['admin']);
-    const context = createMockContext({ role: 'admin' });
+    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.ADMIN]);
+    const context = createMockContext({ role: Role.ADMIN });
 
     expect(guard.canActivate(context)).toBe(true);
   });
 
   it('should deny access when user does not have a required role', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['admin', 'dungeon_master']);
-    const context = createMockContext({ role: 'player' });
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue([UserRole.ADMIN, UserRole.DUNGEON_MASTER]);
+    const context = createMockContext({ role: Role.PLAYER });
 
     expect(guard.canActivate(context)).toBe(false);
   });
 
   it('should allow access when user has one of multiple required roles', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue(['admin', 'dungeon_master']);
-    const context = createMockContext({ role: 'dungeon_master' });
+    jest
+      .spyOn(reflector, 'getAllAndOverride')
+      .mockReturnValue([UserRole.ADMIN, UserRole.DUNGEON_MASTER]);
+    const context = createMockContext({ role: Role.DUNGEON_MASTER });
 
     expect(guard.canActivate(context)).toBe(true);
   });

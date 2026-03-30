@@ -5,6 +5,7 @@ import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
+import { NoteVisibility } from '../common/enums';
 
 describe('NotesService', () => {
   let service: NotesService;
@@ -44,7 +45,7 @@ describe('NotesService', () => {
     authorId: USER_ID,
     title: 'Session 1 Notes',
     content: 'The party entered the dungeon.',
-    visibility: 'party',
+    visibility: NoteVisibility.PARTY,
     sessionNumber: 1,
     tags: ['session'],
     createdAt: new Date('2025-02-01T00:00:00Z'),
@@ -54,7 +55,7 @@ describe('NotesService', () => {
   const mockPrivateNote = {
     ...mockNote,
     id: 'note-priv-2222-3333-444444444444',
-    visibility: 'private',
+    visibility: NoteVisibility.PRIVATE,
     authorId: USER_ID,
     title: 'DM Secret Note',
   };

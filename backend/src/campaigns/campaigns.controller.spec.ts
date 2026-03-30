@@ -3,13 +3,14 @@ import { CampaignsController } from './campaigns.controller';
 import { CampaignsService } from './campaigns.service';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { USER_ID, CAMPAIGN_ID, CHARACTER_ID } from '../test/fixtures';
+import { Role } from '../common/enums';
 
 describe('CampaignsController', () => {
   let controller: CampaignsController;
   let service: Record<string, jest.Mock>;
 
   const mockReq = {
-    user: { userId: USER_ID, username: 'testuser', role: 'player' },
+    user: { userId: USER_ID, username: 'testuser', role: Role.PLAYER },
   } as AuthenticatedRequest;
 
   const mockCampaign = { id: CAMPAIGN_ID, name: 'Dragon Campaign', ownerId: USER_ID };

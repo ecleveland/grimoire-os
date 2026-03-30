@@ -5,6 +5,7 @@ import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CHARACTER_ID, CAMPAIGN_ID } from '../test/fixtures';
+import { CampaignStatus } from '../common/enums';
 
 jest.mock('crypto', () => ({
   ...jest.requireActual('crypto'),
@@ -26,7 +27,7 @@ describe('CampaignsService', () => {
     name: 'Dragon Campaign',
     description: 'A test campaign',
     ownerId: USER_ID,
-    status: 'active',
+    status: CampaignStatus.ACTIVE,
     setting: null,
     currentSession: 1,
     inviteCode: null,
@@ -48,7 +49,7 @@ describe('CampaignsService', () => {
     name: 'Dragon Campaign',
     description: 'A test campaign',
     ownerId: USER_ID,
-    status: 'active',
+    status: CampaignStatus.ACTIVE,
     setting: null,
     currentSession: 1,
     inviteCode: null,

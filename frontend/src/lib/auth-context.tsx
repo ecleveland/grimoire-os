@@ -11,12 +11,13 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from './api';
+import { Role } from './types';
 import type { User } from './types';
 
 interface UserInfo {
   userId: string;
   username: string;
-  role: 'player' | 'dungeon_master' | 'admin';
+  role: Role;
   displayName?: string;
   email?: string;
   avatarUrl?: string;
@@ -178,8 +179,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       isAuthenticated,
       user,
-      isAdmin: user?.role === 'admin',
-      isDm: user?.role === 'dungeon_master' || user?.role === 'admin',
+      isAdmin: user?.role === Role.ADMIN,
+      isDm: user?.role === Role.DUNGEON_MASTER || user?.role === Role.ADMIN,
       login,
       register,
       logout,

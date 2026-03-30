@@ -1,6 +1,6 @@
 import { IsOptional, IsUUID, IsString, IsEnum, IsDateString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { AuditAction } from '@prisma/client';
+import { AuditAction } from '../../common/enums';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 
 export class QueryAuditLogDto extends PaginationDto {

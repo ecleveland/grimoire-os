@@ -239,4 +239,11 @@ describe('SeedService', () => {
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
   });
+
+  it('creates dev admin user with admin role', async () => {
+    await service.seed();
+
+    const createCall = prisma.user.create.mock.calls[0][0].data;
+    expect(createCall.role).toBe('admin');
+  });
 });
