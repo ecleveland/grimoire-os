@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { Role } from '../common/enums';
 import { fetchAllDetails } from './srd-api.fetcher';
 import {
   transformSpell,
@@ -211,7 +212,7 @@ export class SeedService {
         username,
         passwordHash,
         displayName: 'Admin (Dev)',
-        role: 'admin',
+        role: Role.ADMIN,
       },
     });
     console.log('Dev admin user created (username: "admin", password: "admin").');
