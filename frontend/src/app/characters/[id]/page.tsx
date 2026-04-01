@@ -136,7 +136,7 @@ export default function CharacterSheetPage() {
       </div>
 
       {/* Proficiencies */}
-      {character.proficiencies.length > 0 && (
+      {character.proficiencies?.length > 0 && (
         <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
             Proficiencies
@@ -155,7 +155,7 @@ export default function CharacterSheetPage() {
       )}
 
       {/* Languages */}
-      {character.languages.length > 0 && (
+      {character.languages?.length > 0 && (
         <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Languages</h2>
           <p className="text-gray-700 dark:text-gray-300">{character.languages.join(', ')}</p>
@@ -163,7 +163,7 @@ export default function CharacterSheetPage() {
       )}
 
       {/* Features */}
-      {character.features.length > 0 && (
+      {character.features?.length > 0 && (
         <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
             Features & Traits
