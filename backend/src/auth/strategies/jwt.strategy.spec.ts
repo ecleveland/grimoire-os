@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtStrategy } from './jwt.strategy';
+import { Role } from '../../common/enums';
 
 describe('JwtStrategy', () => {
   describe('constructor', () => {
@@ -37,7 +38,7 @@ describe('JwtStrategy', () => {
       const payload = {
         sub: 'user-123',
         username: 'testuser',
-        role: 'player',
+        role: Role.PLAYER,
       };
 
       const result = strategy.validate(payload);
@@ -53,7 +54,7 @@ describe('JwtStrategy', () => {
       const payload = {
         sub: 'abc-def',
         username: 'admin',
-        role: 'admin',
+        role: Role.ADMIN,
       };
 
       const result = strategy.validate(payload);

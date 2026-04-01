@@ -34,6 +34,9 @@ export type {
   Encounter,
   // Pagination
   PaginatedResponse,
+  // Response types
+  AccessTokenResponse,
+  InviteCodeResponse,
   // SRD types
   SrdSpell,
   SrdMonster,

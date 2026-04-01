@@ -7,7 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
-import type { Campaign, Note, Encounter, PaginatedResponse } from '@/lib/types';
+import type { Campaign, Note, Encounter, PaginatedResponse, InviteCodeResponse } from '@/lib/types';
 
 const statusColors: Record<string, string> = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
@@ -86,7 +86,7 @@ export default function CampaignDetailPage() {
 
   const generateInviteCode = async () => {
     try {
-      const res = await apiFetch<{ inviteCode: string }>(`/campaigns/${id}/invite`, {
+      const res = await apiFetch<InviteCodeResponse>(`/campaigns/${id}/invite`, {
         method: 'POST',
       });
       setInviteCode(res.inviteCode);
