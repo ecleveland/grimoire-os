@@ -6,4 +6,5 @@ const eslintFor = project => files => {
 export default {
   'backend/**/*.{ts,tsx}': eslintFor('backend'),
   'frontend/**/*.{ts,tsx}': eslintFor('frontend'),
+  '*.{ts,tsx,js,jsx,json,md,css}': 'prettier --write',
 };
