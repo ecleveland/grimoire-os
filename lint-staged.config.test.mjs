@@ -1,5 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Dynamic import so the RED test fails with a clear "module not found" error
 const configPath = new URL('./lint-staged.config.mjs', import.meta.url).pathname;
@@ -55,5 +60,19 @@ describe('lint-staged config', () => {
       assert.ok(pattern.includes(ext), `Prettier pattern should cover .${ext} files`);
     }
     assert.ok(command.includes('--write'), 'Prettier command should use --write flag');
+  });
+});
+
+describe('husky pre-commit hook', () => {
+  it('exists at .husky/pre-commit, is executable, and runs npx lint-staged', () => {
+    const hookPath = join(__dirname, '.husky', 'pre-commit');
+    assert.ok(existsSync(hookPath), '.husky/pre-commit should exist');
+
+    const stat = statSync(hookPath);
+    const isExecutable = (stat.mode & 0o111) !== 0;
+    assert.ok(isExecutable, '.husky/pre-commit should be executable');
+
+    const content = readFileSync(hookPath, 'utf-8');
+    assert.ok(content.includes('npx lint-staged'), 'pre-commit hook should run npx lint-staged');
   });
 });
