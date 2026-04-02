@@ -39,4 +39,21 @@ describe('lint-staged config', () => {
     assert.ok(result.includes('src/app/page.tsx'), 'Paths should be remapped relative to frontend/');
     assert.ok(!result.includes('frontend/src/app/page.tsx'), 'Paths should NOT contain frontend/ prefix');
   });
+
+  it('exports a Prettier rule covering ts, tsx, js, jsx, json, md, and css files', async () => {
+    const config = (await import(configPath)).default;
+
+    // Find a key that is a string command (not a function) and includes prettier
+    const prettierEntry = Object.entries(config).find(
+      ([, v]) => typeof v === 'string' && v.includes('prettier')
+    );
+    assert.ok(prettierEntry, 'Expected a Prettier command in the config');
+
+    const [pattern, command] = prettierEntry;
+    // Pattern should cover common file types
+    for (const ext of ['ts', 'tsx', 'js', 'json', 'md', 'css']) {
+      assert.ok(pattern.includes(ext), `Prettier pattern should cover .${ext} files`);
+    }
+    assert.ok(command.includes('--write'), 'Prettier command should use --write flag');
+  });
 });
