@@ -23,4 +23,20 @@ describe('lint-staged config', () => {
     assert.ok(result.includes('src/app.module.ts'), 'Paths should be remapped relative to backend/');
     assert.ok(!result.includes('backend/src/app.module.ts'), 'Paths should NOT contain backend/ prefix');
   });
+
+  it('exports a frontend ESLint rule that remaps paths and runs eslint --fix', async () => {
+    const config = (await import(configPath)).default;
+
+    const frontendKey = Object.keys(config).find(k => k.includes('frontend') && k.includes('ts'));
+    assert.ok(frontendKey, 'Expected a glob pattern matching frontend .ts/.tsx files');
+
+    const handler = config[frontendKey];
+    assert.equal(typeof handler, 'function', 'Frontend handler should be a function (for path remapping)');
+
+    const result = handler(['frontend/src/app/page.tsx', 'frontend/src/lib/api.ts']);
+    assert.ok(result.includes('eslint'), 'Command should invoke eslint');
+    assert.ok(result.includes('--fix'), 'Command should use --fix flag');
+    assert.ok(result.includes('src/app/page.tsx'), 'Paths should be remapped relative to frontend/');
+    assert.ok(!result.includes('frontend/src/app/page.tsx'), 'Paths should NOT contain frontend/ prefix');
+  });
 });
