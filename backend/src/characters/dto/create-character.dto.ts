@@ -128,6 +128,43 @@ class CurrencyDto {
   pp?: number;
 }
 
+class HitDiceDto {
+  @ApiProperty({ example: 'd10' })
+  @IsString()
+  dieType!: string;
+
+  @ApiProperty({ example: 8 })
+  @IsNumber()
+  total!: number;
+
+  @ApiProperty({ example: 2 })
+  @IsNumber()
+  spent!: number;
+}
+
+class WeaponDto {
+  @ApiProperty({ example: 'Longsword' })
+  @IsString()
+  name!: string;
+
+  @ApiProperty({ example: '+5' })
+  @IsString()
+  attackBonus!: string;
+
+  @ApiProperty({ example: '1d8+3' })
+  @IsString()
+  damage!: string;
+
+  @ApiProperty({ example: 'slashing' })
+  @IsString()
+  damageType!: string;
+
+  @ApiPropertyOptional({ example: 'Versatile (1d10)' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
 class FeatureDto implements Feature {
   @ApiProperty({ example: 'Darkvision' })
   @IsString()
@@ -323,6 +360,35 @@ export class CreateCharacterDto {
   @IsOptional()
   @IsString()
   avatarUrl?: string;
+
+  @ApiPropertyOptional({ example: 'Medium' })
+  @IsOptional()
+  @IsString()
+  size?: string;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  heroicInspiration?: boolean;
+
+  @ApiPropertyOptional({ type: HitDiceDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HitDiceDto)
+  hitDice?: HitDiceDto;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  armorTraining?: string[];
+
+  @ApiPropertyOptional({ type: [WeaponDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WeaponDto)
+  weapons?: WeaponDto[];
 
   @ApiPropertyOptional()
   @IsOptional()
