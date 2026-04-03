@@ -55,3 +55,17 @@ export interface Combatant {
   isNpc: boolean;
   notes?: string;
 }
+
+export interface HitDice {
+  dieType: string;
+  total: number;
+  spent: number;
+}
+
+export interface Weapon {
+  name: string;
+  attackBonus: string;
+  damage: string;
+  damageType: string;
+  notes?: string;
+}
