@@ -55,3 +55,20 @@ export interface Combatant {
   isNpc: boolean;
   notes?: string;
 }
+
+export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
+export type DieType = (typeof DIE_TYPES)[number];
+
+export interface HitDice {
+  dieType: DieType;
+  total: number;
+  spent: number;
+}
+
+export interface Weapon {
+  name: string;
+  attackBonus: string;
+  damage: string;
+  damageType: string;
+  notes?: string;
+}

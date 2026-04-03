@@ -131,6 +131,11 @@ model Character {
   backstory         String?
   appearance        String?
   avatarUrl         String?
+  size              String?
+  heroicInspiration Boolean  @default(false)
+  hitDice           Json?
+  armorTraining     String[]
+  weapons           Json?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 

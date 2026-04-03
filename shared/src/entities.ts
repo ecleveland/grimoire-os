@@ -5,9 +5,11 @@ import type {
   Currency,
   DeathSaves,
   Feature,
+  HitDice,
   HitPoints,
   InventoryItem,
   SpellSlot,
+  Weapon,
 } from './embedded';
 
 export interface User {
@@ -74,6 +76,11 @@ export interface Character {
   backstory?: string;
   appearance?: string;
   avatarUrl?: string;
+  size?: string;
+  heroicInspiration?: boolean;
+  hitDice?: HitDice;
+  armorTraining?: string[];
+  weapons?: Weapon[];
   createdAt: string;
   updatedAt: string;
 }

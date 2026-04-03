@@ -5,10 +5,11 @@ import {
   IsArray,
   ValidateNested,
   IsBoolean,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Feature } from '@grimoire-os/shared';
+import { DIE_TYPES, Feature } from '@grimoire-os/shared';
 
 class AbilityScoresDto {
   @ApiPropertyOptional({ example: 10 })
@@ -126,6 +127,43 @@ class CurrencyDto {
   @IsOptional()
   @IsNumber()
   pp?: number;
+}
+
+class HitDiceDto {
+  @ApiProperty({ example: 'd10', enum: DIE_TYPES })
+  @IsIn(DIE_TYPES)
+  dieType!: string;
+
+  @ApiProperty({ example: 8 })
+  @IsNumber()
+  total!: number;
+
+  @ApiProperty({ example: 2 })
+  @IsNumber()
+  spent!: number;
+}
+
+class WeaponDto {
+  @ApiProperty({ example: 'Longsword' })
+  @IsString()
+  name!: string;
+
+  @ApiProperty({ example: '+5' })
+  @IsString()
+  attackBonus!: string;
+
+  @ApiProperty({ example: '1d8+3' })
+  @IsString()
+  damage!: string;
+
+  @ApiProperty({ example: 'slashing' })
+  @IsString()
+  damageType!: string;
+
+  @ApiPropertyOptional({ example: 'Versatile (1d10)' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 class FeatureDto implements Feature {
@@ -323,6 +361,35 @@ export class CreateCharacterDto {
   @IsOptional()
   @IsString()
   avatarUrl?: string;
+
+  @ApiPropertyOptional({ example: 'Medium' })
+  @IsOptional()
+  @IsString()
+  size?: string;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  heroicInspiration?: boolean;
+
+  @ApiPropertyOptional({ type: HitDiceDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => HitDiceDto)
+  hitDice?: HitDiceDto;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  armorTraining?: string[];
+
+  @ApiPropertyOptional({ type: [WeaponDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WeaponDto)
+  weapons?: WeaponDto[];
 
   @ApiPropertyOptional()
   @IsOptional()
