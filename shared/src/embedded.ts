@@ -56,8 +56,11 @@ export interface Combatant {
   notes?: string;
 }
 
+export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
+export type DieType = (typeof DIE_TYPES)[number];
+
 export interface HitDice {
-  dieType: string;
+  dieType: DieType;
   total: number;
   spent: number;
 }

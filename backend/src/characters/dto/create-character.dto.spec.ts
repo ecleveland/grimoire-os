@@ -44,6 +44,22 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       expect(errors.filter(e => e.property === 'hitDice')).toHaveLength(0);
     });
 
+    it.each(['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'])(
+      'accepts %s as a valid dieType',
+      async dieType => {
+        const dto = toDto({ ...baseDto, hitDice: { dieType, total: 1, spent: 0 } });
+        const errors = await validate(dto);
+        expect(errors.filter(e => e.property === 'hitDice')).toHaveLength(0);
+      }
+    );
+
+    it('rejects an invalid dieType string', async () => {
+      const dto = toDto({ ...baseDto, hitDice: { dieType: 'd3', total: 1, spent: 0 } });
+      const errors = await validate(dto);
+      const hitDiceError = errors.find(e => e.property === 'hitDice');
+      expect(hitDiceError).toBeDefined();
+    });
+
     it('rejects hitDice with invalid nested fields', async () => {
       const dto = toDto({ ...baseDto, hitDice: { dieType: 123, total: 'bad', spent: 'bad' } });
       const errors = await validate(dto);

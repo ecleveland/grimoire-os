@@ -5,10 +5,11 @@ import {
   IsArray,
   ValidateNested,
   IsBoolean,
+  IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Feature } from '@grimoire-os/shared';
+import { DIE_TYPES, Feature } from '@grimoire-os/shared';
 
 class AbilityScoresDto {
   @ApiPropertyOptional({ example: 10 })
@@ -129,8 +130,8 @@ class CurrencyDto {
 }
 
 class HitDiceDto {
-  @ApiProperty({ example: 'd10' })
-  @IsString()
+  @ApiProperty({ example: 'd10', enum: DIE_TYPES })
+  @IsIn(DIE_TYPES)
   dieType!: string;
 
   @ApiProperty({ example: 8 })
