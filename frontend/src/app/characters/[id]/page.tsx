@@ -6,29 +6,8 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Character, AbilityScores } from '@/lib/types';
-
-const abilityKeys: (keyof AbilityScores)[] = [
-  'strength',
-  'dexterity',
-  'constitution',
-  'intelligence',
-  'wisdom',
-  'charisma',
-];
-const abilityLabels: Record<keyof AbilityScores, string> = {
-  strength: 'STR',
-  dexterity: 'DEX',
-  constitution: 'CON',
-  intelligence: 'INT',
-  wisdom: 'WIS',
-  charisma: 'CHA',
-};
-
-function modifier(score: number): string {
-  const mod = Math.floor((score - 10) / 2);
-  return mod >= 0 ? `+${mod}` : `${mod}`;
-}
+import type { Character } from '@/lib/types';
+import { abilityModifier, formatModifier, ABILITY_KEYS, ABILITY_LABELS } from './_components/utils';
 
 export default function CharacterSheetPage() {
   const { id } = useParams<{ id: string }>();
@@ -76,19 +55,19 @@ export default function CharacterSheetPage() {
 
       {/* Ability Scores */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
-        {abilityKeys.map(key => (
+        {ABILITY_KEYS.map(key => (
           <div
             key={key}
             className="text-center p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
           >
             <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-              {abilityLabels[key]}
+              {ABILITY_LABELS[key]}
             </div>
             <div className="text-2xl font-bold text-gray-900 dark:text-white">
               {character.abilityScores[key]}
             </div>
             <div className="text-sm text-indigo-600 dark:text-indigo-400 font-medium">
-              {modifier(character.abilityScores[key])}
+              {formatModifier(abilityModifier(character.abilityScores[key]))}
             </div>
           </div>
         ))}
@@ -130,7 +109,7 @@ export default function CharacterSheetPage() {
             Initiative
           </div>
           <div className="text-2xl font-bold text-gray-900 dark:text-white">
-            {modifier(character.abilityScores.dexterity)}
+            {formatModifier(abilityModifier(character.abilityScores.dexterity))}
           </div>
         </div>
       </div>
