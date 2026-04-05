@@ -1,3 +1,32 @@
+import type { AbilityScores } from '@/lib/types';
+
+export const ABILITY_KEYS: (keyof AbilityScores)[] = [
+  'strength',
+  'dexterity',
+  'constitution',
+  'intelligence',
+  'wisdom',
+  'charisma',
+];
+
+export const ABILITY_LABELS: Record<keyof AbilityScores, string> = {
+  strength: 'STR',
+  dexterity: 'DEX',
+  constitution: 'CON',
+  intelligence: 'INT',
+  wisdom: 'WIS',
+  charisma: 'CHA',
+};
+
+export const ABILITY_KEY_TO_NAME: Record<keyof AbilityScores, string> = {
+  strength: 'Strength',
+  dexterity: 'Dexterity',
+  constitution: 'Constitution',
+  intelligence: 'Intelligence',
+  wisdom: 'Wisdom',
+  charisma: 'Charisma',
+};
+
 export function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }
