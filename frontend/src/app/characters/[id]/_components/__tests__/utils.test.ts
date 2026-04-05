@@ -7,7 +7,7 @@ import {
   skillBonus,
   SKILL_ABILITY_MAP,
   ABILITY_SKILLS_MAP,
-} from './utils';
+} from '../utils';
 
 describe('abilityModifier', () => {
   it.each([
