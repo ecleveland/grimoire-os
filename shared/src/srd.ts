@@ -83,7 +83,7 @@ export interface SrdClass {
   toolProficiencies: string[];
   numSkillChoices: number;
   description?: string;
-  features: string[];
+  features: { name: string; level?: number; description?: string }[];
   spellcasting?: unknown;
   equipmentChoices?: unknown[];
   subclassLevel?: number;
@@ -96,7 +96,7 @@ export interface SrdRace {
   speed: number;
   size: string;
   abilityBonuses: Record<string, number>;
-  traits: string[];
+  traits: { name: string; description?: string }[];
   languages: string[];
   description?: string;
   age?: string;
