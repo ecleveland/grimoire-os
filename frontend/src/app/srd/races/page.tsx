@@ -80,10 +80,10 @@ export default function RaceListPage() {
                     <div className="flex flex-wrap gap-1 mt-1">
                       {race.traits.map(t => (
                         <span
-                          key={t}
+                          key={t.name}
                           className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
                         >
-                          {t}
+                          {t.name}
                         </span>
                       ))}
                     </div>
