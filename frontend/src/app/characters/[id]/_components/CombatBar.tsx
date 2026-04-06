@@ -12,7 +12,8 @@ function hpBarColor(current: number, max: number): string {
 }
 
 export default function CombatBar({ character }: CombatBarProps) {
-  const { hitPoints, deathSaves, hitDice } = character;
+  const { hitPoints, hitDice } = character;
+  const deathSaves = character.deathSaves ?? { successes: 0, failures: 0 };
   const hpPct = hitPoints.max > 0 ? (hitPoints.current / hitPoints.max) * 100 : 0;
 
   return (
