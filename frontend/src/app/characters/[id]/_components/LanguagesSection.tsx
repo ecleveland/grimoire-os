@@ -5,7 +5,7 @@ interface LanguagesSectionProps {
 }
 
 export default function LanguagesSection({ character }: LanguagesSectionProps) {
-  if (character.languages.length === 0) return null;
+  if (!character.languages?.length) return null;
 
   return (
     <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">

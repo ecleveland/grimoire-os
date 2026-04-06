@@ -17,8 +17,11 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
 
   const abilityScore = getAbilityScore(character.abilityScores, character.spellcastingAbility);
   const modifier = abilityModifier(abilityScore);
-  const hasSpellSlots = character.spellSlots.length > 0;
-  const hasSpells = character.knownSpells.length > 0 || character.preparedSpells.length > 0;
+  const spellSlots = character.spellSlots ?? [];
+  const knownSpells = character.knownSpells ?? [];
+  const preparedSpells = character.preparedSpells ?? [];
+  const hasSpellSlots = spellSlots.length > 0;
+  const hasSpells = knownSpells.length > 0 || preparedSpells.length > 0;
 
   return (
     <div className="space-y-4">
@@ -59,7 +62,7 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
             Spell Slots
           </h3>
           <div className="grid grid-cols-3 gap-3">
-            {character.spellSlots.map((slot) => (
+            {spellSlots.map((slot) => (
               <div key={slot.level} data-testid={`spell-slots-level-${slot.level}`} className="flex items-center gap-2">
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14">
                   Level {slot.level}
@@ -90,12 +93,12 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
             Cantrips & Prepared Spells
           </h3>
           <div className="space-y-1">
-            {character.knownSpells.map((spell) => (
+            {knownSpells.map((spell) => (
               <div key={spell} className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
                 {spell}
               </div>
             ))}
-            {character.preparedSpells.map((spell) => (
+            {preparedSpells.map((spell) => (
               <div key={spell} className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
                 {spell}
               </div>

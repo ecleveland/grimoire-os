@@ -5,7 +5,7 @@ interface ClassFeaturesProps {
 }
 
 export default function ClassFeatures({ character }: ClassFeaturesProps) {
-  const allFeatures = character.features;
+  const allFeatures = character.features ?? [];
 
   if (allFeatures.length === 0) return null;
 

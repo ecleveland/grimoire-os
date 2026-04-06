@@ -14,8 +14,10 @@ const DENOMINATION_LABELS: Record<string, string> = {
 };
 
 export default function InventorySection({ character }: InventorySectionProps) {
-  const hasInventory = character.inventory.length > 0;
-  const hasCurrency = Object.values(character.currency).some((v) => v > 0);
+  const inventory = character.inventory ?? [];
+  const currency = character.currency ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  const hasInventory = inventory.length > 0;
+  const hasCurrency = Object.values(currency).some((v) => v > 0);
 
   if (!hasInventory && !hasCurrency) return null;
 
@@ -37,7 +39,7 @@ export default function InventorySection({ character }: InventorySectionProps) {
               </tr>
             </thead>
             <tbody>
-              {character.inventory.map((item) => (
+              {inventory.map((item) => (
                 <tr key={item.name} className="border-b border-gray-100 dark:border-gray-700 last:border-0">
                   <td className="py-1.5 text-gray-900 dark:text-gray-100 font-medium">{item.name}</td>
                   <td className="py-1.5 text-gray-700 dark:text-gray-300">{item.quantity}</td>
@@ -69,7 +71,7 @@ export default function InventorySection({ character }: InventorySectionProps) {
                 className="p-2 border border-gray-200 dark:border-gray-600 rounded"
               >
                 <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                  {character.currency[denom]}
+                  {currency[denom]}
                 </div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">
                   {DENOMINATION_LABELS[denom]}

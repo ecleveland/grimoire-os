@@ -5,8 +5,9 @@ interface SpeciesTraitsAndFeatsProps {
 }
 
 export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFeatsProps) {
-  const speciesTraits = character.features.filter((f) => f.source === character.race);
-  const feats = character.features.filter(
+  const features = character.features ?? [];
+  const speciesTraits = features.filter((f) => f.source === character.race);
+  const feats = features.filter(
     (f) => f.source !== character.class && f.source !== character.race,
   );
 

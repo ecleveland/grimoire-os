@@ -8,9 +8,10 @@ const ARMOR_TYPES = ['Light', 'Medium', 'Heavy', 'Shields'] as const;
 
 export default function EquipmentTraining({ character }: EquipmentTrainingProps) {
   const armorTraining = character.armorTraining ?? [];
+  const proficiencies = character.proficiencies ?? [];
   const hasContent =
     armorTraining.length > 0 ||
-    character.proficiencies.length > 0 ||
+    proficiencies.length > 0 ||
     character.heroicInspiration;
 
   if (!hasContent) return null;
@@ -58,13 +59,13 @@ export default function EquipmentTraining({ character }: EquipmentTrainingProps)
       </div>
 
       {/* Proficiencies */}
-      {character.proficiencies.length > 0 && (
+      {proficiencies.length > 0 && (
         <div>
           <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-2">
             Proficiencies
           </h3>
           <div className="flex flex-wrap gap-2">
-            {character.proficiencies.map((p) => (
+            {proficiencies.map((p) => (
               <span
                 key={p}
                 className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"
