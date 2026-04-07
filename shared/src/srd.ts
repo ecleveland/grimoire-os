@@ -1,3 +1,61 @@
+// ── SRD Sub-types ──────────────────────────────────────────────────────
+
+/** Spellcasting configuration for a class (currently only stores ability; future M9 tickets add progression data) */
+export interface ClassSpellcasting {
+  ability: string;
+  /** True only for Warlock — uses Pact Magic instead of standard spell slots */
+  pactMagic?: boolean;
+  /** Standard spell slot progression keyed by character level, then slot level → count */
+  spellSlotProgression?: Record<number, Record<number, number>>;
+  /** Warlock-only: pact slot progression keyed by character level */
+  pactSlotProgression?: Record<number, { slots: number; slotLevel: number }>;
+  /** Cantrips known at each character level (all casters) */
+  cantripsKnown?: Record<number, number>;
+  /** Spells known at each character level (Bard, Ranger, Sorcerer, Warlock) */
+  spellsKnown?: Record<number, number>;
+  /** Formula for prepared spell count (Cleric, Druid, Paladin, Wizard) */
+  preparedFormula?: string;
+}
+
+/** A class or subclass feature unlocked at a specific level */
+export interface ClassFeature {
+  name: string;
+  level: number;
+  description?: string;
+}
+
+/** A starting equipment choice group for character creation */
+export interface EquipmentChoiceItem {
+  name: string;
+  quantity: number;
+}
+
+export interface EquipmentChoice {
+  choose: number;
+  from: { items: EquipmentChoiceItem[] }[];
+}
+
+/** Starting equipment for a class, including guaranteed items and gold alternative */
+export interface StartingEquipment {
+  choices: EquipmentChoice[];
+  guaranteed?: EquipmentChoiceItem[];
+  startingGold?: string;
+}
+
+/** A named ability/action on a monster (special abilities, actions, reactions, legendary actions) */
+export interface MonsterAction {
+  name: string;
+  description: string;
+}
+
+/** A background feature with name and description */
+export interface BackgroundFeature {
+  name: string;
+  description: string;
+}
+
+// ── SRD Entity Interfaces ──────────────────────────────────────────────
+
 export interface SrdSpell {
   id: string;
   name: string;
@@ -44,10 +102,10 @@ export interface SrdMonster {
   languages?: string;
   challengeRating: string;
   experiencePoints?: number;
-  specialAbilities?: unknown[];
-  actions: string[];
-  reactions?: unknown[];
-  legendaryActions?: unknown[];
+  specialAbilities?: MonsterAction[];
+  actions: MonsterAction[];
+  reactions?: MonsterAction[];
+  legendaryActions?: MonsterAction[];
   description?: string;
   source: string;
 }
@@ -83,9 +141,9 @@ export interface SrdClass {
   toolProficiencies: string[];
   numSkillChoices: number;
   description?: string;
-  features: { name: string; level?: number; description?: string }[];
-  spellcasting?: unknown;
-  equipmentChoices?: unknown[];
+  features: ClassFeature[];
+  spellcasting?: ClassSpellcasting;
+  equipmentChoices?: StartingEquipment;
   subclassLevel?: number;
   source: string;
 }
@@ -110,8 +168,8 @@ export interface SrdSubclass {
   name: string;
   classId: string;
   description?: string;
-  features?: unknown[];
-  spellList?: unknown[];
+  features?: ClassFeature[];
+  spellList?: string[];
   source: string;
 }
 
@@ -138,7 +196,7 @@ export interface SrdBackground {
   toolProficiencies: string[];
   languages: number;
   equipment?: string;
-  feature?: unknown;
+  feature?: BackgroundFeature | null;
   feat?: string;
   abilityScores?: SrdBackgroundAbilityScores;
   personalityTraits: string[];
@@ -153,7 +211,7 @@ export interface SrdFeat {
   name: string;
   description?: string;
   prerequisite?: string;
-  benefits?: unknown;
+  benefits?: string[];
   category?: string;
   repeatable?: boolean;
   source: string;
