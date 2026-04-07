@@ -1,10 +1,5 @@
 import type { Character } from '@/lib/types';
-import {
-  abilityModifier,
-  formatModifier,
-  proficiencyBonus,
-  passivePerception,
-} from './utils';
+import { abilityModifier, formatModifier, proficiencyBonus, passivePerception } from './utils';
 
 interface StatsBarProps {
   character: Character;
@@ -17,7 +12,7 @@ export default function StatsBar({ character }: StatsBarProps) {
   const passivePerc = passivePerception(
     character.abilityScores.wisdom,
     character.level,
-    isPerceptionProficient,
+    isPerceptionProficient
   );
 
   const stats: { label: string; value: string; testId: string }[] = [
@@ -39,9 +34,7 @@ export default function StatsBar({ character }: StatsBarProps) {
           <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
             {label}
           </div>
-          <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">
-            {value}
-          </div>
+          <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{value}</div>
         </div>
       ))}
     </div>

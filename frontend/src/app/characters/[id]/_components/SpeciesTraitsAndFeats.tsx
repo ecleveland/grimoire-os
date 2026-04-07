@@ -6,10 +6,8 @@ interface SpeciesTraitsAndFeatsProps {
 
 export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFeatsProps) {
   const features = character.features ?? [];
-  const speciesTraits = features.filter((f) => f.source === character.race);
-  const feats = features.filter(
-    (f) => f.source !== character.class && f.source !== character.race,
-  );
+  const speciesTraits = features.filter(f => f.source === character.race);
+  const feats = features.filter(f => f.source !== character.class && f.source !== character.race);
 
   if (speciesTraits.length === 0 && feats.length === 0) return null;
 
@@ -20,7 +18,7 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
           Species Traits
         </h3>
         <div className="space-y-3">
-          {speciesTraits.map((feature) => (
+          {speciesTraits.map(feature => (
             <div key={feature.name}>
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feature.name}
@@ -39,7 +37,7 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
           Feats
         </h3>
         <div className="space-y-3">
-          {feats.map((feature) => (
+          {feats.map(feature => (
             <div key={feature.name}>
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feature.name}

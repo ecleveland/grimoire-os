@@ -10,9 +10,7 @@ export default function EquipmentTraining({ character }: EquipmentTrainingProps)
   const armorTraining = character.armorTraining ?? [];
   const proficiencies = character.proficiencies ?? [];
   const hasContent =
-    armorTraining.length > 0 ||
-    proficiencies.length > 0 ||
-    character.heroicInspiration;
+    armorTraining.length > 0 || proficiencies.length > 0 || character.heroicInspiration;
 
   if (!hasContent) return null;
 
@@ -39,16 +37,14 @@ export default function EquipmentTraining({ character }: EquipmentTrainingProps)
           Armor Training
         </h3>
         <div className="flex flex-wrap gap-3">
-          {ARMOR_TYPES.map((type) => {
+          {ARMOR_TYPES.map(type => {
             const isTrained = armorTraining.includes(type);
             return (
               <div key={type} className="flex items-center gap-1.5">
                 <span
                   data-testid={`armor-dot-${type.toLowerCase()}`}
                   className={`inline-block w-2.5 h-2.5 rounded-full ${
-                    isTrained
-                      ? 'bg-indigo-600 dark:bg-indigo-400'
-                      : 'bg-gray-300 dark:bg-gray-600'
+                    isTrained ? 'bg-indigo-600 dark:bg-indigo-400' : 'bg-gray-300 dark:bg-gray-600'
                   }`}
                 />
                 <span className="text-sm text-gray-700 dark:text-gray-300">{type}</span>
@@ -65,7 +61,7 @@ export default function EquipmentTraining({ character }: EquipmentTrainingProps)
             Proficiencies
           </h3>
           <div className="flex flex-wrap gap-2">
-            {proficiencies.map((p) => (
+            {proficiencies.map(p => (
               <span
                 key={p}
                 className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"

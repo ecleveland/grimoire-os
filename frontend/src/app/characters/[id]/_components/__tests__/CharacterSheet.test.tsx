@@ -105,11 +105,11 @@ describe('CharacterSheet', () => {
 
       expect(screen.getByRole('tab', { name: 'Spells & Details' })).toHaveAttribute(
         'aria-selected',
-        'true',
+        'true'
       );
       expect(screen.getByRole('tab', { name: 'Character' })).toHaveAttribute(
         'aria-selected',
-        'false',
+        'false'
       );
     });
 
@@ -122,7 +122,7 @@ describe('CharacterSheet', () => {
 
       expect(screen.getByRole('tab', { name: 'Character' })).toHaveAttribute(
         'aria-selected',
-        'true',
+        'true'
       );
     });
   });
@@ -188,9 +188,7 @@ describe('CharacterSheet', () => {
 
   describe('layout', () => {
     it('uses max-w-5xl container', () => {
-      const { container } = render(
-        <CharacterSheet character={mockCharacter} isOwner={false} />,
-      );
+      const { container } = render(<CharacterSheet character={mockCharacter} isOwner={false} />);
       expect(container.firstChild).toHaveClass('max-w-5xl');
     });
   });
