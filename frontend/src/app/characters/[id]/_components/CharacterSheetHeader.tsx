@@ -18,9 +18,7 @@ export default function CharacterSheetHeader({ character, isOwner }: CharacterSh
     <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            {character.name}
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{character.name}</h1>
 
           <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3">
             {fields.map(({ label, value, testId }) => (
@@ -28,9 +26,7 @@ export default function CharacterSheetHeader({ character, isOwner }: CharacterSh
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
                   {label}
                 </div>
-                <div className="text-sm text-gray-900 dark:text-white">
-                  {value ?? '—'}
-                </div>
+                <div className="text-sm text-gray-900 dark:text-white">{value ?? '—'}</div>
               </div>
             ))}
           </div>

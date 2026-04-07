@@ -38,9 +38,21 @@ const mockCharacter: Character = {
   currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   features: [],
   weapons: [
-    { name: 'Longsword', attackBonus: '+6', damage: '1d8+3', damageType: 'Slashing', notes: 'Versatile (1d10)' },
+    {
+      name: 'Longsword',
+      attackBonus: '+6',
+      damage: '1d8+3',
+      damageType: 'Slashing',
+      notes: 'Versatile (1d10)',
+    },
     { name: 'Handaxe', attackBonus: '+6', damage: '1d6+3', damageType: 'Slashing' },
-    { name: 'Fire Bolt', attackBonus: 'DC 14', damage: '2d10', damageType: 'Fire', notes: 'Cantrip, 120ft' },
+    {
+      name: 'Fire Bolt',
+      attackBonus: 'DC 14',
+      damage: '2d10',
+      damageType: 'Fire',
+      notes: 'Cantrip, 120ft',
+    },
   ],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',

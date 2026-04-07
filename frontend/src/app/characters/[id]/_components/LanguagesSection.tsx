@@ -13,7 +13,7 @@ export default function LanguagesSection({ character }: LanguagesSectionProps) {
         Languages
       </h3>
       <div className="flex flex-wrap gap-2">
-        {character.languages.map((lang) => (
+        {character.languages.map(lang => (
           <span
             key={lang}
             className="px-2 py-1 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded"

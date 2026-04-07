@@ -68,9 +68,7 @@ export default function CombatBar({ character }: CombatBarProps) {
           <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
             {hitDice.spent}/{hitDice.total}
           </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">
-            {hitDice.dieType}
-          </div>
+          <div className="text-sm text-gray-500 dark:text-gray-400">{hitDice.dieType}</div>
         </div>
       )}
 
@@ -85,7 +83,7 @@ export default function CombatBar({ character }: CombatBarProps) {
         <div className="mt-2 space-y-1">
           <div className="flex items-center justify-center gap-1.5">
             <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">S</span>
-            {[0, 1, 2].map((i) => (
+            {[0, 1, 2].map(i => (
               <span
                 key={`success-${i}`}
                 data-testid={`death-success-${i}`}
@@ -99,7 +97,7 @@ export default function CombatBar({ character }: CombatBarProps) {
           </div>
           <div className="flex items-center justify-center gap-1.5">
             <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">F</span>
-            {[0, 1, 2].map((i) => (
+            {[0, 1, 2].map(i => (
               <span
                 key={`failure-${i}`}
                 data-testid={`death-failure-${i}`}

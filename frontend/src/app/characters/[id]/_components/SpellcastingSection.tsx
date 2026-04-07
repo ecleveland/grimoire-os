@@ -62,8 +62,12 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
             Spell Slots
           </h3>
           <div className="grid grid-cols-3 gap-3">
-            {spellSlots.map((slot) => (
-              <div key={slot.level} data-testid={`spell-slots-level-${slot.level}`} className="flex items-center gap-2">
+            {spellSlots.map(slot => (
+              <div
+                key={slot.level}
+                data-testid={`spell-slots-level-${slot.level}`}
+                className="flex items-center gap-2"
+              >
                 <span className="text-xs font-medium text-gray-500 dark:text-gray-400 w-14">
                   Level {slot.level}
                 </span>
@@ -93,13 +97,19 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
             Cantrips & Prepared Spells
           </h3>
           <div className="space-y-1">
-            {knownSpells.map((spell) => (
-              <div key={spell} className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
+            {knownSpells.map(spell => (
+              <div
+                key={spell}
+                className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0"
+              >
                 {spell}
               </div>
             ))}
-            {preparedSpells.map((spell) => (
-              <div key={spell} className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0">
+            {preparedSpells.map(spell => (
+              <div
+                key={spell}
+                className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0"
+              >
                 {spell}
               </div>
             ))}

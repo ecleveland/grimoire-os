@@ -20,7 +20,7 @@ function toTestId(name: string): string {
 export default function AbilityScoreColumn({ character }: AbilityScoreColumnProps) {
   return (
     <div className="flex flex-col gap-4">
-      {ABILITY_KEYS.map((key) => {
+      {ABILITY_KEYS.map(key => {
         const score = character.abilityScores[key];
         const mod = abilityModifier(score);
         const abilityName = ABILITY_KEY_TO_NAME[key];
@@ -54,10 +54,7 @@ export default function AbilityScoreColumn({ character }: AbilityScoreColumnProp
 
             <div className="border-t border-gray-200 dark:border-gray-700 my-2" />
 
-            <div
-              data-testid={`save-row-${key}`}
-              className="flex items-center gap-2 text-sm"
-            >
+            <div data-testid={`save-row-${key}`} className="flex items-center gap-2 text-sm">
               <span
                 data-testid={`save-dot-${key}`}
                 className={`inline-block w-2.5 h-2.5 rounded-full ${
@@ -72,7 +69,7 @@ export default function AbilityScoreColumn({ character }: AbilityScoreColumnProp
               </span>
             </div>
 
-            {skills.map((skillName) => {
+            {skills.map(skillName => {
               const isSkillProficient = character.skills.includes(skillName);
               const bonus = skillBonus(score, character.level, isSkillProficient);
               return (

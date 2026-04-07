@@ -9,7 +9,7 @@ export default function ClassFeatures({ character }: ClassFeaturesProps) {
 
   if (allFeatures.length === 0) return null;
 
-  const classFeatures = allFeatures.filter((f) => f.source === character.class);
+  const classFeatures = allFeatures.filter(f => f.source === character.class);
   const displayFeatures = classFeatures.length > 0 ? classFeatures : allFeatures;
 
   return (
@@ -18,7 +18,7 @@ export default function ClassFeatures({ character }: ClassFeaturesProps) {
         Class Features
       </h3>
       <div className="space-y-3">
-        {displayFeatures.map((feature) => (
+        {displayFeatures.map(feature => (
           <div key={feature.name}>
             <div className="flex items-center gap-2">
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
@@ -31,9 +31,7 @@ export default function ClassFeatures({ character }: ClassFeaturesProps) {
               )}
             </div>
             {feature.description && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                {feature.description}
-              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{feature.description}</p>
             )}
           </div>
         ))}

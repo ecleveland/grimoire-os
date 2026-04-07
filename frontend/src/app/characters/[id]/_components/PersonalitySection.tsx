@@ -4,7 +4,8 @@ interface PersonalitySectionProps {
   character: Character;
 }
 
-const labelClass = 'text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400';
+const labelClass =
+  'text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400';
 
 export default function PersonalitySection({ character }: PersonalitySectionProps) {
   const { appearance, backstory, personalityTraits, ideals, bonds, flaws, alignment } = character;
@@ -28,9 +29,7 @@ export default function PersonalitySection({ character }: PersonalitySectionProp
       {hasBackstorySection && (
         <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-3">
           <h3 className={`${labelClass} mb-2`}>Backstory & Personality</h3>
-          {backstory && (
-            <p className="text-sm text-gray-700 dark:text-gray-300">{backstory}</p>
-          )}
+          {backstory && <p className="text-sm text-gray-700 dark:text-gray-300">{backstory}</p>}
           {personalityTraits && (
             <div>
               <span className={labelClass}>Personality Traits</span>

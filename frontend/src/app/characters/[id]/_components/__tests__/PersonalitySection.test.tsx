@@ -70,7 +70,9 @@ describe('PersonalitySection', () => {
 
     it('renders backstory text', () => {
       render(<PersonalitySection character={baseCharacter} />);
-      expect(screen.getByText('Grew up in the Arcane Academy, obsessed with ancient magic.')).toBeInTheDocument();
+      expect(
+        screen.getByText('Grew up in the Arcane Academy, obsessed with ancient magic.')
+      ).toBeInTheDocument();
     });
 
     it('renders personality traits with label', () => {
@@ -82,19 +84,27 @@ describe('PersonalitySection', () => {
     it('renders ideals with label', () => {
       render(<PersonalitySection character={baseCharacter} />);
       expect(screen.getByText('Ideals')).toBeInTheDocument();
-      expect(screen.getByText('Knowledge is the path to power and self-improvement.')).toBeInTheDocument();
+      expect(
+        screen.getByText('Knowledge is the path to power and self-improvement.')
+      ).toBeInTheDocument();
     });
 
     it('renders bonds with label', () => {
       render(<PersonalitySection character={baseCharacter} />);
       expect(screen.getByText('Bonds')).toBeInTheDocument();
-      expect(screen.getByText('The library where I learned my craft is the most important place in the world.')).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'The library where I learned my craft is the most important place in the world.'
+        )
+      ).toBeInTheDocument();
     });
 
     it('renders flaws with label', () => {
       render(<PersonalitySection character={baseCharacter} />);
       expect(screen.getByText('Flaws')).toBeInTheDocument();
-      expect(screen.getByText('I overlook obvious solutions in favor of complicated ones.')).toBeInTheDocument();
+      expect(
+        screen.getByText('I overlook obvious solutions in favor of complicated ones.')
+      ).toBeInTheDocument();
     });
 
     it('does not render Backstory & Personality section when all sub-fields are undefined', () => {
@@ -120,7 +130,9 @@ describe('PersonalitySection', () => {
       };
       render(<PersonalitySection character={char} />);
       expect(screen.getByText('Backstory & Personality')).toBeInTheDocument();
-      expect(screen.getByText('Grew up in the Arcane Academy, obsessed with ancient magic.')).toBeInTheDocument();
+      expect(
+        screen.getByText('Grew up in the Arcane Academy, obsessed with ancient magic.')
+      ).toBeInTheDocument();
     });
   });
 
