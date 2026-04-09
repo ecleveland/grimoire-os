@@ -37,7 +37,15 @@ export type {
   // Response types
   AccessTokenResponse,
   InviteCodeResponse,
-  // SRD types
+  // SRD sub-types
+  ClassSpellcasting,
+  ClassFeature,
+  EquipmentChoice,
+  EquipmentChoiceItem,
+  StartingEquipment,
+  MonsterAction,
+  BackgroundFeature,
+  // SRD entity types
   SrdSpell,
   SrdMonster,
   SrdItem,
