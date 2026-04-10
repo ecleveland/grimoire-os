@@ -1,3 +1,78 @@
+// ── Spell Slot Progression Tables ──────────────────────────────────────
+// Keyed by character level → { slot level → count }
+
+/** Full caster progression (Bard, Cleric, Druid, Sorcerer, Wizard) */
+const FULL_CASTER_SLOTS: Record<number, Record<number, number>> = {
+  1: { 1: 2 },
+  2: { 1: 3 },
+  3: { 1: 4, 2: 2 },
+  4: { 1: 4, 2: 3 },
+  5: { 1: 4, 2: 3, 3: 2 },
+  6: { 1: 4, 2: 3, 3: 3 },
+  7: { 1: 4, 2: 3, 3: 3, 4: 1 },
+  8: { 1: 4, 2: 3, 3: 3, 4: 2 },
+  9: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 },
+  10: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 },
+  11: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 },
+  12: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1 },
+  13: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 },
+  14: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1 },
+  15: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 },
+  16: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1 },
+  17: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2, 6: 1, 7: 1, 8: 1, 9: 1 },
+  18: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 1, 7: 1, 8: 1, 9: 1 },
+  19: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 1, 8: 1, 9: 1 },
+  20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1 },
+};
+
+/** Half caster progression (Paladin, Ranger) — no slots at level 1 */
+const HALF_CASTER_SLOTS: Record<number, Record<number, number>> = {
+  1: {},
+  2: { 1: 2 },
+  3: { 1: 3 },
+  4: { 1: 3 },
+  5: { 1: 4, 2: 2 },
+  6: { 1: 4, 2: 2 },
+  7: { 1: 4, 2: 3 },
+  8: { 1: 4, 2: 3 },
+  9: { 1: 4, 2: 3, 3: 2 },
+  10: { 1: 4, 2: 3, 3: 2 },
+  11: { 1: 4, 2: 3, 3: 3 },
+  12: { 1: 4, 2: 3, 3: 3 },
+  13: { 1: 4, 2: 3, 3: 3, 4: 1 },
+  14: { 1: 4, 2: 3, 3: 3, 4: 1 },
+  15: { 1: 4, 2: 3, 3: 3, 4: 2 },
+  16: { 1: 4, 2: 3, 3: 3, 4: 2 },
+  17: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 },
+  18: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 1 },
+  19: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 },
+  20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 2 },
+};
+
+/** Warlock Pact Magic progression — slots + slot level per character level */
+const PACT_MAGIC_SLOTS: Record<number, { slots: number; slotLevel: number }> = {
+  1: { slots: 1, slotLevel: 1 },
+  2: { slots: 2, slotLevel: 1 },
+  3: { slots: 2, slotLevel: 2 },
+  4: { slots: 2, slotLevel: 2 },
+  5: { slots: 2, slotLevel: 3 },
+  6: { slots: 2, slotLevel: 3 },
+  7: { slots: 2, slotLevel: 4 },
+  8: { slots: 2, slotLevel: 4 },
+  9: { slots: 2, slotLevel: 5 },
+  10: { slots: 2, slotLevel: 5 },
+  11: { slots: 3, slotLevel: 5 },
+  12: { slots: 3, slotLevel: 5 },
+  13: { slots: 3, slotLevel: 5 },
+  14: { slots: 3, slotLevel: 5 },
+  15: { slots: 3, slotLevel: 5 },
+  16: { slots: 3, slotLevel: 5 },
+  17: { slots: 4, slotLevel: 5 },
+  18: { slots: 4, slotLevel: 5 },
+  19: { slots: 4, slotLevel: 5 },
+  20: { slots: 4, slotLevel: 5 },
+};
+
 export const srdClasses = [
   {
     name: 'Barbarian',
@@ -196,7 +271,7 @@ export const srdClasses = [
           'When you roll initiative and have no uses of Bardic Inspiration left, you regain one use.',
       },
     ],
-    spellcasting: { ability: 'Charisma' },
+    spellcasting: { ability: 'Charisma', spellSlotProgression: FULL_CASTER_SLOTS },
     subclassLevel: 3,
   },
   {
@@ -248,7 +323,7 @@ export const srdClasses = [
           'You can call on your deity to intervene on your behalf when your need is great. As an action, you describe the assistance you seek, and roll a percentile die. If you roll a number equal to or lower than your cleric level, your deity intervenes. At 20th level, your call for intervention succeeds automatically.',
       },
     ],
-    spellcasting: { ability: 'Wisdom' },
+    spellcasting: { ability: 'Wisdom', spellSlotProgression: FULL_CASTER_SLOTS },
     subclassLevel: 1,
   },
   {
@@ -331,7 +406,7 @@ export const srdClasses = [
           'You can use your Wild Shape an unlimited number of times. Additionally, you can ignore the verbal and somatic components of your druid spells, as well as any material components that lack a cost and are not consumed by a spell.',
       },
     ],
-    spellcasting: { ability: 'Wisdom' },
+    spellcasting: { ability: 'Wisdom', spellSlotProgression: FULL_CASTER_SLOTS },
     subclassLevel: 2,
   },
   {
@@ -602,7 +677,7 @@ export const srdClasses = [
           'You can use your action to end one spell on yourself or on one willing creature that you touch. You can use this feature a number of times equal to your Charisma modifier (a minimum of once). You regain expended uses when you finish a long rest.',
       },
     ],
-    spellcasting: { ability: 'Charisma' },
+    spellcasting: { ability: 'Charisma', spellSlotProgression: HALF_CASTER_SLOTS },
     subclassLevel: 3,
   },
   {
@@ -699,7 +774,7 @@ export const srdClasses = [
           'You become an unparalleled hunter of your enemies. Once on each of your turns, you can add your Wisdom modifier to the attack roll or the damage roll of an attack you make against one of your favored enemies.',
       },
     ],
-    spellcasting: { ability: 'Wisdom' },
+    spellcasting: { ability: 'Wisdom', spellSlotProgression: HALF_CASTER_SLOTS },
     subclassLevel: 3,
   },
   {
@@ -849,7 +924,7 @@ export const srdClasses = [
         description: 'You regain 4 expended sorcery points whenever you finish a short rest.',
       },
     ],
-    spellcasting: { ability: 'Charisma' },
+    spellcasting: { ability: 'Charisma', spellSlotProgression: FULL_CASTER_SLOTS },
     subclassLevel: 1,
   },
   {
@@ -909,7 +984,11 @@ export const srdClasses = [
           'You can draw on your inner reserve of mystical power while entreating your patron to regain expended spell slots. You can spend 1 minute entreating your patron for aid to regain all your expended Pact Magic spell slots. Once you use this feature, you must finish a long rest before you can use it again.',
       },
     ],
-    spellcasting: { ability: 'Charisma' },
+    spellcasting: {
+      ability: 'Charisma',
+      pactMagic: true,
+      pactSlotProgression: PACT_MAGIC_SLOTS,
+    },
     subclassLevel: 1,
   },
   {
@@ -955,7 +1034,7 @@ export const srdClasses = [
           'You gain mastery over two powerful spells and can cast them with little effort. Choose two 3rd-level wizard spells in your spellbook as your signature spells. You always have these spells prepared, they do not count against the number of spells you have prepared, and you can cast each of them once at 3rd level without expending a spell slot.',
       },
     ],
-    spellcasting: { ability: 'Intelligence' },
+    spellcasting: { ability: 'Intelligence', spellSlotProgression: FULL_CASTER_SLOTS },
     subclassLevel: 2,
   },
 ];
