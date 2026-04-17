@@ -5,6 +5,11 @@ const HALF_CASTERS = ['Paladin', 'Ranger'];
 const PACT_CASTER = 'Warlock';
 const NON_CASTERS = ['Barbarian', 'Fighter', 'Monk', 'Rogue'];
 
+const CANTRIP_CASTERS = ['Bard', 'Cleric', 'Druid', 'Sorcerer', 'Warlock', 'Wizard'];
+const NO_CANTRIP_CASTERS = ['Paladin', 'Ranger'];
+const SPELLS_KNOWN_CLASSES = ['Bard', 'Ranger', 'Sorcerer', 'Warlock'];
+const PREPARED_CLASSES = ['Cleric', 'Druid', 'Paladin', 'Wizard'];
+
 function getClass(name: string) {
   const cls = srdClasses.find(c => c.name === name);
   if (!cls) throw new Error(`Class "${name}" not found in seed data`);
@@ -161,6 +166,101 @@ describe('SRD class seed data — spell slot progression', () => {
           }
         }
       }
+    });
+  });
+});
+
+describe('SRD class seed data — cantrips known progression', () => {
+  describe('cantrip casters', () => {
+    it.each(CANTRIP_CASTERS)('%s should have cantripsKnown for levels 1–20', name => {
+      const prog = getClass(name).spellcasting?.cantripsKnown;
+      expect(prog).toBeDefined();
+
+      for (let level = 1; level <= 20; level++) {
+        expect(prog![level]).toBeDefined();
+        expect(prog![level]).toBeGreaterThan(0);
+      }
+    });
+
+    it.each(CANTRIP_CASTERS)('%s cantrip count should never decrease', name => {
+      const prog = getClass(name).spellcasting!.cantripsKnown!;
+      for (let level = 2; level <= 20; level++) {
+        expect(prog[level]).toBeGreaterThanOrEqual(prog[level - 1]);
+      }
+    });
+
+    it.each(CANTRIP_CASTERS)('%s cantrip counts should be positive integers', name => {
+      const prog = getClass(name).spellcasting!.cantripsKnown!;
+      for (let level = 1; level <= 20; level++) {
+        expect(Number.isInteger(prog[level])).toBe(true);
+        expect(prog[level]).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe('no-cantrip casters', () => {
+    it.each(NO_CANTRIP_CASTERS)('%s should not have cantripsKnown', name => {
+      expect(getClass(name).spellcasting?.cantripsKnown).toBeUndefined();
+    });
+  });
+
+  describe('non-casters', () => {
+    it.each(NON_CASTERS)('%s should not have cantripsKnown', name => {
+      expect(getClass(name).spellcasting?.cantripsKnown).toBeUndefined();
+    });
+  });
+});
+
+describe('SRD class seed data — spells known / prepared formula', () => {
+  describe('spells known classes', () => {
+    it.each(SPELLS_KNOWN_CLASSES)('%s should have spellsKnown for levels 1–20', name => {
+      const prog = getClass(name).spellcasting?.spellsKnown;
+      expect(prog).toBeDefined();
+
+      for (let level = 1; level <= 20; level++) {
+        expect(prog![level]).toBeDefined();
+        expect(Number.isInteger(prog![level])).toBe(true);
+      }
+    });
+
+    it.each(SPELLS_KNOWN_CLASSES)('%s spells known should never decrease', name => {
+      const prog = getClass(name).spellcasting!.spellsKnown!;
+      for (let level = 2; level <= 20; level++) {
+        expect(prog[level]).toBeGreaterThanOrEqual(prog[level - 1]);
+      }
+    });
+
+    it.each(SPELLS_KNOWN_CLASSES)('%s should NOT have preparedFormula', name => {
+      expect(getClass(name).spellcasting?.preparedFormula).toBeUndefined();
+    });
+
+    it('Ranger should have 0 spells known at level 1', () => {
+      expect(getClass('Ranger').spellcasting!.spellsKnown![1]).toBe(0);
+    });
+
+    it('Ranger should start knowing spells at level 2', () => {
+      expect(getClass('Ranger').spellcasting!.spellsKnown![2]).toBeGreaterThan(0);
+    });
+  });
+
+  describe('prepared casters', () => {
+    it.each(PREPARED_CLASSES)('%s should have preparedFormula', name => {
+      const formula = getClass(name).spellcasting?.preparedFormula;
+      expect(formula).toBeDefined();
+      expect(typeof formula).toBe('string');
+      expect(formula!.length).toBeGreaterThan(0);
+    });
+
+    it.each(PREPARED_CLASSES)('%s should NOT have spellsKnown', name => {
+      expect(getClass(name).spellcasting?.spellsKnown).toBeUndefined();
+    });
+  });
+
+  describe('non-casters', () => {
+    it.each(NON_CASTERS)('%s should not have spellsKnown or preparedFormula', name => {
+      const cls = getClass(name);
+      expect(cls.spellcasting?.spellsKnown).toBeUndefined();
+      expect(cls.spellcasting?.preparedFormula).toBeUndefined();
     });
   });
 });
