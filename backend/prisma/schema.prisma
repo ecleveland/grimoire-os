@@ -43,9 +43,11 @@ model User {
   displayName  String
   email        String?  @unique
   avatarUrl    String?
-  role         Role     @default(player)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  role                Role      @default(player)
+  failedLoginAttempts Int       @default(0)
+  lockoutUntil        DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   ownedCampaigns Campaign[]       @relation("CampaignOwner")
   campaigns      CampaignPlayer[]

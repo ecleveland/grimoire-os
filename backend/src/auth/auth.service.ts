@@ -16,9 +16,22 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.lockoutUntil && user.lockoutUntil > new Date()) {
+      throw new UnauthorizedException('Account temporarily locked. Please try again later.');
+    }
+
+    if (user.lockoutUntil && user.lockoutUntil <= new Date()) {
+      await this.usersService.resetFailedLogin(user.id);
+    }
+
     const isValid = await bcrypt.compare(password, user.passwordHash);
     if (!isValid) {
+      await this.usersService.recordFailedLogin(user.id, user.failedLoginAttempts);
       throw new UnauthorizedException('Invalid credentials');
+    }
+
+    if (user.failedLoginAttempts > 0) {
+      await this.usersService.resetFailedLogin(user.id);
     }
 
     const payload = {
