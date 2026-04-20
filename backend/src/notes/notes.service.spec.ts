@@ -12,7 +12,7 @@ describe('NotesService', () => {
   let prisma: MockPrismaService;
   let campaignAuth: {
     assertCampaignMember: jest.Mock;
-    findCampaignOrFail: jest.Mock;
+    findCampaignForAuth: jest.Mock;
     assertAuthorOrDm: jest.Mock;
   };
 
@@ -63,7 +63,7 @@ describe('NotesService', () => {
   beforeEach(async () => {
     campaignAuth = {
       assertCampaignMember: jest.fn(),
-      findCampaignOrFail: jest.fn(),
+      findCampaignForAuth: jest.fn(),
       assertAuthorOrDm: jest.fn(),
     };
 
@@ -217,11 +217,15 @@ describe('NotesService', () => {
   describe('update', () => {
     it('author can update their own note', async () => {
       const updatedNote = { ...mockNote, title: 'Updated Title' };
-      prisma.note.findUnique.mockResolvedValue(mockNote);
+      prisma.note.findUnique.mockResolvedValue({ id: NOTE_ID, authorId: USER_ID });
       prisma.note.update.mockResolvedValue(updatedNote);
 
       const result = await service.update(NOTE_ID, USER_ID, { title: 'Updated Title' });
 
+      expect(prisma.note.findUnique).toHaveBeenCalledWith({
+        where: { id: NOTE_ID },
+        select: { id: true, authorId: true },
+      });
       expect(prisma.note.update).toHaveBeenCalledWith({
         where: { id: NOTE_ID },
         data: { title: 'Updated Title' },
@@ -238,7 +242,7 @@ describe('NotesService', () => {
     });
 
     it('throws ForbiddenException for non-author', async () => {
-      prisma.note.findUnique.mockResolvedValue(mockNote);
+      prisma.note.findUnique.mockResolvedValue({ id: NOTE_ID, authorId: USER_ID });
 
       await expect(service.update(NOTE_ID, USER_ID_2, { title: 'Hacked Title' })).rejects.toThrow(
         ForbiddenException
@@ -248,13 +252,21 @@ describe('NotesService', () => {
 
   describe('remove', () => {
     it('author can delete their own note', async () => {
-      prisma.note.findUnique.mockResolvedValue(mockNote);
-      campaignAuth.findCampaignOrFail.mockResolvedValue(mockCampaignOwned);
+      prisma.note.findUnique.mockResolvedValue({
+        id: NOTE_ID,
+        authorId: USER_ID,
+        campaignId: CAMPAIGN_ID,
+      });
+      campaignAuth.findCampaignForAuth.mockResolvedValue(mockCampaignOwned);
       prisma.note.delete.mockResolvedValue(mockNote);
 
       await service.remove(NOTE_ID, USER_ID);
 
-      expect(campaignAuth.findCampaignOrFail).toHaveBeenCalledWith(CAMPAIGN_ID);
+      expect(prisma.note.findUnique).toHaveBeenCalledWith({
+        where: { id: NOTE_ID },
+        select: { id: true, authorId: true, campaignId: true },
+      });
+      expect(campaignAuth.findCampaignForAuth).toHaveBeenCalledWith(CAMPAIGN_ID);
       expect(campaignAuth.assertAuthorOrDm).toHaveBeenCalledWith(
         USER_ID, // authorId
         USER_ID, // campaignOwnerId
@@ -266,11 +278,13 @@ describe('NotesService', () => {
     });
 
     it('DM can delete any note', async () => {
-      // Note authored by USER_ID_2, campaign owned by USER_ID (DM)
-      const playerNote = { ...mockNote, authorId: USER_ID_2 };
-      prisma.note.findUnique.mockResolvedValue(playerNote);
-      campaignAuth.findCampaignOrFail.mockResolvedValue(mockCampaignOwned);
-      prisma.note.delete.mockResolvedValue(playerNote);
+      prisma.note.findUnique.mockResolvedValue({
+        id: NOTE_ID,
+        authorId: USER_ID_2,
+        campaignId: CAMPAIGN_ID,
+      });
+      campaignAuth.findCampaignForAuth.mockResolvedValue(mockCampaignOwned);
+      prisma.note.delete.mockResolvedValue(mockNote);
 
       await service.remove(NOTE_ID, USER_ID);
 
@@ -291,13 +305,16 @@ describe('NotesService', () => {
     });
 
     it('throws ForbiddenException for non-author non-DM', async () => {
-      prisma.note.findUnique.mockResolvedValue(mockNote);
-      campaignAuth.findCampaignOrFail.mockResolvedValue(mockCampaignOwned);
+      prisma.note.findUnique.mockResolvedValue({
+        id: NOTE_ID,
+        authorId: USER_ID,
+        campaignId: CAMPAIGN_ID,
+      });
+      campaignAuth.findCampaignForAuth.mockResolvedValue(mockCampaignOwned);
       campaignAuth.assertAuthorOrDm.mockImplementation(() => {
         throw new ForbiddenException('Only the author or DM can delete this note');
       });
 
-      // USER_ID_2 is not the author (USER_ID) and not the DM (USER_ID)
       await expect(service.remove(NOTE_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
     });
   });

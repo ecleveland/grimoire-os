@@ -72,7 +72,10 @@ export class NotesService {
   }
 
   async update(id: string, userId: string, dto: UpdateNoteDto) {
-    const note = await this.prisma.note.findUnique({ where: { id } });
+    const note = await this.prisma.note.findUnique({
+      where: { id },
+      select: { id: true, authorId: true },
+    });
     if (!note) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
@@ -86,12 +89,15 @@ export class NotesService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    const note = await this.prisma.note.findUnique({ where: { id } });
+    const note = await this.prisma.note.findUnique({
+      where: { id },
+      select: { id: true, authorId: true, campaignId: true },
+    });
     if (!note) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
-    const campaign = await this.campaignAuth.findCampaignOrFail(note.campaignId);
+    const campaign = await this.campaignAuth.findCampaignForAuth(note.campaignId);
     this.campaignAuth.assertAuthorOrDm(note.authorId, campaign.ownerId, userId);
     await this.prisma.note.delete({ where: { id } });
   }

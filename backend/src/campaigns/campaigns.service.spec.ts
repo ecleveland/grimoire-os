@@ -143,12 +143,17 @@ describe('CampaignsService', () => {
   });
 
   describe('findOneForUser', () => {
-    it('delegates to campaignAuth.assertCampaignMember', async () => {
-      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+    it('checks membership then fetches full campaign', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(undefined);
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
 
       const result = await service.findOneForUser(CAMPAIGN_ID, USER_ID);
 
       expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.campaign.findUnique).toHaveBeenCalledWith({
+        where: { id: CAMPAIGN_ID },
+        include: { players: true, characters: true },
+      });
       expect(result).toEqual(serializedMockCampaign);
     });
 

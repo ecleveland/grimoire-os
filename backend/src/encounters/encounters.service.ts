@@ -59,6 +59,7 @@ export class EncountersService {
   async update(id: string, userId: string, dto: UpdateEncounterDto) {
     const encounter = await this.prisma.encounter.findUnique({
       where: { id },
+      select: { id: true, campaignId: true },
     });
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);
@@ -79,6 +80,7 @@ export class EncountersService {
   async remove(id: string, userId: string): Promise<void> {
     const encounter = await this.prisma.encounter.findUnique({
       where: { id },
+      select: { id: true, campaignId: true },
     });
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);

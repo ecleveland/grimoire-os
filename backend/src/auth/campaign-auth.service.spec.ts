@@ -39,7 +39,7 @@ describe('CampaignAuthService', () => {
       expect(result).toEqual(mockCampaign);
       expect(prisma.campaign.findUnique).toHaveBeenCalledWith({
         where: { id: CAMPAIGN_ID },
-        include: { players: true, characters: true },
+        select: { id: true, ownerId: true, players: { select: { userId: true } } },
       });
     });
 
@@ -115,19 +115,23 @@ describe('CampaignAuthService', () => {
     });
   });
 
-  describe('findCampaignOrFail', () => {
-    it('returns campaign when found', async () => {
+  describe('findCampaignForAuth', () => {
+    it('returns lean campaign with only auth fields', async () => {
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
 
-      const result = await service.findCampaignOrFail(CAMPAIGN_ID);
+      const result = await service.findCampaignForAuth(CAMPAIGN_ID);
 
       expect(result).toEqual(mockCampaign);
+      expect(prisma.campaign.findUnique).toHaveBeenCalledWith({
+        where: { id: CAMPAIGN_ID },
+        select: { id: true, ownerId: true, players: { select: { userId: true } } },
+      });
     });
 
     it('throws NotFoundException when not found', async () => {
       prisma.campaign.findUnique.mockResolvedValue(null);
 
-      await expect(service.findCampaignOrFail('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.findCampaignForAuth('nonexistent')).rejects.toThrow(NotFoundException);
     });
   });
 });
