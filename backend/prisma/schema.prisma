@@ -326,8 +326,9 @@ model Subclass {
   classId     String
   description String?
   features    Json?
-  spellList   Json?
-  source      String  @default("SRD 5.2.1")
+  spellList     Json?
+  spellcasting  Json?
+  source        String  @default("SRD 5.2.1")
 
   srdClass SrdClass @relation(fields: [classId], references: [id])
 
