@@ -149,12 +149,14 @@ export class SeedService {
             description: sc.description,
             features: sc.features,
             spellList: sc.spellList,
+            spellcasting: sc.spellcasting,
           },
           update: {
             classId: parent.id,
             description: sc.description,
             features: sc.features,
             spellList: sc.spellList,
+            spellcasting: sc.spellcasting,
           },
         });
       }
