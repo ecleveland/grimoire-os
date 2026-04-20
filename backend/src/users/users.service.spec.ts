@@ -128,6 +128,59 @@ describe('UsersService', () => {
     });
   });
 
+  describe('recordFailedLogin', () => {
+    it('increments failedLoginAttempts by 1', async () => {
+      prisma.user.update.mockResolvedValue({ ...mockUser, failedLoginAttempts: 1 });
+
+      await service.recordFailedLogin(USER_ID, 0);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { failedLoginAttempts: { increment: 1 } },
+      });
+    });
+
+    it('sets lockoutUntil when attempts reach threshold', async () => {
+      prisma.user.update.mockResolvedValue({
+        ...mockUser,
+        failedLoginAttempts: 5,
+        lockoutUntil: new Date(),
+      });
+
+      await service.recordFailedLogin(USER_ID, 4);
+
+      const callData = prisma.user.update.mock.calls[0][0].data;
+      expect(callData.failedLoginAttempts).toEqual({ increment: 1 });
+      expect(callData.lockoutUntil).toBeInstanceOf(Date);
+    });
+
+    it('does not set lockoutUntil when below threshold', async () => {
+      prisma.user.update.mockResolvedValue({ ...mockUser, failedLoginAttempts: 2 });
+
+      await service.recordFailedLogin(USER_ID, 1);
+
+      const callData = prisma.user.update.mock.calls[0][0].data;
+      expect(callData.lockoutUntil).toBeUndefined();
+    });
+  });
+
+  describe('resetFailedLogin', () => {
+    it('resets failedLoginAttempts and lockoutUntil', async () => {
+      prisma.user.update.mockResolvedValue({
+        ...mockUser,
+        failedLoginAttempts: 0,
+        lockoutUntil: null,
+      });
+
+      await service.resetFailedLogin(USER_ID);
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { failedLoginAttempts: 0, lockoutUntil: null },
+      });
+    });
+  });
+
   describe('remove', () => {
     it('should throw NotFoundException when user does not exist (P2025)', async () => {
       prisma.user.delete.mockRejectedValue(

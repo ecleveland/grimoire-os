@@ -115,6 +115,24 @@ export class UsersService {
     });
   }
 
+  static readonly MAX_FAILED_ATTEMPTS = 5;
+  static readonly LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+
+  async recordFailedLogin(userId: string, currentAttempts: number): Promise<void> {
+    const data: Record<string, unknown> = { failedLoginAttempts: { increment: 1 } };
+    if (currentAttempts + 1 >= UsersService.MAX_FAILED_ATTEMPTS) {
+      data.lockoutUntil = new Date(Date.now() + UsersService.LOCKOUT_DURATION_MS);
+    }
+    await this.prisma.user.update({ where: { id: userId }, data });
+  }
+
+  async resetFailedLogin(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { failedLoginAttempts: 0, lockoutUntil: null },
+    });
+  }
+
   async remove(id: string): Promise<void> {
     try {
       await this.prisma.user.delete({ where: { id } });

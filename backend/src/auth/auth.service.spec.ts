@@ -14,11 +14,19 @@ import * as bcrypt from 'bcryptjs';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let usersService: { findByUsername: jest.Mock };
+  let usersService: {
+    findByUsername: jest.Mock;
+    recordFailedLogin: jest.Mock;
+    resetFailedLogin: jest.Mock;
+  };
   let jwtService: { sign: jest.Mock };
 
   beforeEach(async () => {
-    usersService = { findByUsername: jest.fn() };
+    usersService = {
+      findByUsername: jest.fn(),
+      recordFailedLogin: jest.fn(),
+      resetFailedLogin: jest.fn(),
+    };
     jwtService = { sign: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -79,6 +87,67 @@ describe('AuthService', () => {
         username: mockUser.username,
         role: mockUser.role,
       });
+    });
+
+    it('should throw UnauthorizedException when account is locked', async () => {
+      const lockedUser = {
+        ...mockUser,
+        failedLoginAttempts: 5,
+        lockoutUntil: new Date(Date.now() + 10 * 60 * 1000), // 10 min in future
+      };
+      usersService.findByUsername.mockResolvedValue(lockedUser);
+
+      await expect(service.login('testuser', 'password')).rejects.toThrow(
+        'Account temporarily locked. Please try again later.'
+      );
+      expect(bcrypt.compare).not.toHaveBeenCalled();
+    });
+
+    it('should allow login when lockout has expired and reset counter', async () => {
+      const expiredLockoutUser = {
+        ...mockUser,
+        failedLoginAttempts: 5,
+        lockoutUntil: new Date(Date.now() - 1000), // 1 sec in past
+      };
+      usersService.findByUsername.mockResolvedValue(expiredLockoutUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      jwtService.sign.mockReturnValue('token');
+
+      const result = await service.login('testuser', 'password');
+
+      expect(result).toEqual({ access_token: 'token' });
+      expect(usersService.resetFailedLogin).toHaveBeenCalledWith(mockUser.id);
+    });
+
+    it('should call recordFailedLogin on wrong password', async () => {
+      usersService.findByUsername.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login('testuser', 'wrongpassword')).rejects.toThrow(
+        UnauthorizedException
+      );
+      expect(usersService.recordFailedLogin).toHaveBeenCalledWith(mockUser.id, 0);
+    });
+
+    it('should call resetFailedLogin on successful login when counter > 0', async () => {
+      const userWithAttempts = { ...mockUser, failedLoginAttempts: 2 };
+      usersService.findByUsername.mockResolvedValue(userWithAttempts);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      jwtService.sign.mockReturnValue('token');
+
+      await service.login('testuser', 'password');
+
+      expect(usersService.resetFailedLogin).toHaveBeenCalledWith(mockUser.id);
+    });
+
+    it('should not call resetFailedLogin when counter is already 0', async () => {
+      usersService.findByUsername.mockResolvedValue(mockUser); // failedLoginAttempts: 0
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      jwtService.sign.mockReturnValue('token');
+
+      await service.login('testuser', 'password');
+
+      expect(usersService.resetFailedLogin).not.toHaveBeenCalled();
     });
   });
 });

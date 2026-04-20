@@ -13,6 +13,8 @@ export const mockUser = {
   email: 'test@example.com',
   avatarUrl: null,
   role: Role.PLAYER,
+  failedLoginAttempts: 0,
+  lockoutUntil: null,
   createdAt: new Date('2025-01-01T00:00:00Z'),
   updatedAt: new Date('2025-01-01T00:00:00Z'),
 };
