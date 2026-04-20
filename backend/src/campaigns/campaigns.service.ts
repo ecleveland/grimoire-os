@@ -73,8 +73,8 @@ export class CampaignsService {
   }
 
   async findOneForUser(id: string, userId: string) {
-    const campaign = await this.campaignAuth.assertCampaignMember(id, userId);
-    return serialize(campaign);
+    await this.campaignAuth.assertCampaignMember(id, userId);
+    return this.findOne(id);
   }
 
   async update(id: string, userId: string, dto: UpdateCampaignDto) {

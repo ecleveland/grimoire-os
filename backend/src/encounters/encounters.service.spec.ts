@@ -163,13 +163,17 @@ describe('EncountersService', () => {
 
   describe('update', () => {
     it('DM can update encounter fields', async () => {
-      prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
+      prisma.encounter.findUnique.mockResolvedValue({ id: ENCOUNTER_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       const updated = { ...mockEncounter, name: 'Dragon Fight' };
       prisma.encounter.update.mockResolvedValue(updated);
 
       const result = await service.update(ENCOUNTER_ID, USER_ID, { name: 'Dragon Fight' });
 
+      expect(prisma.encounter.findUnique).toHaveBeenCalledWith({
+        where: { id: ENCOUNTER_ID },
+        select: { id: true, campaignId: true },
+      });
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
@@ -179,7 +183,7 @@ describe('EncountersService', () => {
     });
 
     it('DM can update combatants as InputJsonValue', async () => {
-      prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
+      prisma.encounter.findUnique.mockResolvedValue({ id: ENCOUNTER_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       const newCombatants = [
         { name: 'Dragon', initiative: 20, hp: 200, maxHp: 200, ac: 19, isNpc: true },
@@ -207,7 +211,7 @@ describe('EncountersService', () => {
     });
 
     it('throws ForbiddenException when non-DM tries to update', async () => {
-      prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
+      prisma.encounter.findUnique.mockResolvedValue({ id: ENCOUNTER_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')
       );
@@ -226,7 +230,7 @@ describe('EncountersService', () => {
     });
 
     it('throws ForbiddenException when non-DM tries to delete', async () => {
-      prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
+      prisma.encounter.findUnique.mockResolvedValue({ id: ENCOUNTER_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')
       );
@@ -235,12 +239,16 @@ describe('EncountersService', () => {
     });
 
     it('DM can delete encounter', async () => {
-      prisma.encounter.findUnique.mockResolvedValue(mockEncounter);
+      prisma.encounter.findUnique.mockResolvedValue({ id: ENCOUNTER_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
       prisma.encounter.delete.mockResolvedValue(mockEncounter);
 
       await service.remove(ENCOUNTER_ID, USER_ID);
 
+      expect(prisma.encounter.findUnique).toHaveBeenCalledWith({
+        where: { id: ENCOUNTER_ID },
+        select: { id: true, campaignId: true },
+      });
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.encounter.delete).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
