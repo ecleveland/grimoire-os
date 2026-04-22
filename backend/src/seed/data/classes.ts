@@ -247,6 +247,9 @@ const PACT_MAGIC_SLOTS: Record<number, { slots: number; slotLevel: number }> = {
   20: { slots: 4, slotLevel: 5 },
 };
 
+// ── Equipment Helpers ──────────────────────────────────────────────────
+const item = (name: string, quantity = 1) => ({ name, quantity });
+
 export const srdClasses = [
   {
     name: 'Barbarian',
@@ -345,6 +348,26 @@ export const srdClasses = [
           'You embody the power of the wilds. Your Strength and Constitution scores each increase by 4. Your maximum for those scores is now 24.',
       },
     ],
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Greataxe')] },
+            { items: [item('Any martial melee weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Handaxe', 2)] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+      ],
+      guaranteed: [item("Explorer's pack"), item('Javelin', 4)],
+      startingGold: '2d4 x 10 gp',
+    },
     subclassLevel: 3,
   },
   {
@@ -451,6 +474,34 @@ export const srdClasses = [
       cantripsKnown: CANTRIPS_2_3_4,
       spellsKnown: BARD_SPELLS_KNOWN,
     },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Rapier')] },
+            { items: [item('Longsword')] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Diplomat's pack")] },
+            { items: [item("Entertainer's pack")] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Lute')] },
+            { items: [item('Any musical instrument')] },
+          ],
+        },
+      ],
+      guaranteed: [item('Leather armor'), item('Dagger')],
+      startingGold: '5d4 x 10 gp',
+    },
     subclassLevel: 3,
   },
   {
@@ -507,6 +558,41 @@ export const srdClasses = [
       spellSlotProgression: FULL_CASTER_SLOTS,
       cantripsKnown: CANTRIPS_3_4_5,
       preparedFormula: 'level + wisdom modifier',
+    },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Mace')] },
+            { items: [item('Warhammer')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Scale mail')] },
+            { items: [item('Leather armor')] },
+            { items: [item('Chain mail')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Light crossbow'), item('Crossbow bolt', 20)] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Priest's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Shield'), item('Holy symbol')],
+      startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 1,
   },
@@ -596,6 +682,26 @@ export const srdClasses = [
       cantripsKnown: CANTRIPS_2_3_4,
       preparedFormula: 'level + wisdom modifier',
     },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Wooden shield')] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Scimitar')] },
+            { items: [item('Any simple melee weapon')] },
+          ],
+        },
+      ],
+      guaranteed: [item('Leather armor'), item("Explorer's pack"), item('Druidic focus')],
+      startingGold: '2d4 x 10 gp',
+    },
     subclassLevel: 2,
   },
   {
@@ -656,6 +762,39 @@ export const srdClasses = [
           'You can reroll a saving throw that you fail. If you do so, you must use the new roll. You can use this feature once between long rests. You gain additional uses at 13th and 17th level.',
       },
     ],
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Chain mail')] },
+            { items: [item('Leather armor'), item('Longbow'), item('Arrow', 20)] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Any martial weapon'), item('Shield')] },
+            { items: [item('Any martial weapon', 2)] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Light crossbow'), item('Crossbow bolt', 20)] },
+            { items: [item('Handaxe', 2)] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Dungeoneer's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      startingGold: '5d4 x 10 gp',
+    },
     subclassLevel: 3,
   },
   {
@@ -780,6 +919,26 @@ export const srdClasses = [
           'When you roll for initiative and have no ki points remaining, you regain 4 ki points.',
       },
     ],
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Shortsword')] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Dungeoneer's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Dart', 10)],
+      startingGold: '5d4 gp',
+    },
     subclassLevel: 3,
   },
   {
@@ -870,6 +1029,33 @@ export const srdClasses = [
       ability: 'Charisma',
       spellSlotProgression: HALF_CASTER_SLOTS,
       preparedFormula: 'level / 2 + charisma modifier',
+    },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Any martial weapon'), item('Shield')] },
+            { items: [item('Any martial weapon', 2)] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Javelin', 5)] },
+            { items: [item('Any simple melee weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Priest's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Chain mail'), item('Holy symbol')],
+      startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 3,
   },
@@ -971,6 +1157,33 @@ export const srdClasses = [
       ability: 'Wisdom',
       spellSlotProgression: HALF_CASTER_SLOTS,
       spellsKnown: RANGER_SPELLS_KNOWN,
+    },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Scale mail')] },
+            { items: [item('Leather armor')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Shortsword', 2)] },
+            { items: [item('Any simple melee weapon', 2)] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Dungeoneer's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Longbow'), item('Arrow', 20)],
+      startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 3,
   },
@@ -1077,6 +1290,34 @@ export const srdClasses = [
           'You have an uncanny knack for succeeding when you need to. If your attack misses a target within range, you can turn the miss into a hit. Alternatively, if you fail an ability check, you can treat the d20 roll as a 20.',
       },
     ],
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Rapier')] },
+            { items: [item('Shortsword')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Shortbow'), item('Arrow', 20)] },
+            { items: [item('Shortsword')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Burglar's pack")] },
+            { items: [item("Dungeoneer's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Leather armor'), item('Dagger', 2), item("Thieves' tools")],
+      startingGold: '4d4 x 10 gp',
+    },
     subclassLevel: 3,
   },
   {
@@ -1126,6 +1367,33 @@ export const srdClasses = [
       spellSlotProgression: FULL_CASTER_SLOTS,
       cantripsKnown: CANTRIPS_4_5_6,
       spellsKnown: SORCERER_SPELLS_KNOWN,
+    },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Light crossbow'), item('Crossbow bolt', 20)] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Component pouch')] },
+            { items: [item('Arcane focus')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Dungeoneer's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Dagger', 2)],
+      startingGold: '3d4 x 10 gp',
     },
     subclassLevel: 1,
   },
@@ -1193,6 +1461,33 @@ export const srdClasses = [
       cantripsKnown: CANTRIPS_2_3_4,
       spellsKnown: WARLOCK_SPELLS_KNOWN,
     },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Light crossbow'), item('Crossbow bolt', 20)] },
+            { items: [item('Any simple weapon')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Component pouch')] },
+            { items: [item('Arcane focus')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Scholar's pack")] },
+            { items: [item("Dungeoneer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Leather armor'), item('Any simple weapon'), item('Dagger', 2)],
+      startingGold: '4d4 x 10 gp',
+    },
     subclassLevel: 1,
   },
   {
@@ -1243,6 +1538,33 @@ export const srdClasses = [
       spellSlotProgression: FULL_CASTER_SLOTS,
       cantripsKnown: CANTRIPS_3_4_5,
       preparedFormula: 'level + intelligence modifier',
+    },
+    equipmentChoices: {
+      choices: [
+        {
+          choose: 1,
+          from: [
+            { items: [item('Quarterstaff')] },
+            { items: [item('Dagger')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item('Component pouch')] },
+            { items: [item('Arcane focus')] },
+          ],
+        },
+        {
+          choose: 1,
+          from: [
+            { items: [item("Scholar's pack")] },
+            { items: [item("Explorer's pack")] },
+          ],
+        },
+      ],
+      guaranteed: [item('Spellbook')],
+      startingGold: '4d4 x 10 gp',
     },
     subclassLevel: 2,
   },

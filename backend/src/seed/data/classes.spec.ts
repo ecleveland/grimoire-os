@@ -1,5 +1,9 @@
 import { srdClasses } from './classes';
 
+const ALL_CLASSES = [
+  'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk',
+  'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard',
+];
 const FULL_CASTERS = ['Bard', 'Cleric', 'Druid', 'Sorcerer', 'Wizard'];
 const HALF_CASTERS = ['Paladin', 'Ranger'];
 const PACT_CASTER = 'Warlock';
@@ -261,6 +265,79 @@ describe('SRD class seed data — spells known / prepared formula', () => {
       const cls = getClass(name);
       expect(cls.spellcasting?.spellsKnown).toBeUndefined();
       expect(cls.spellcasting?.preparedFormula).toBeUndefined();
+    });
+  });
+});
+
+describe('SRD class seed data — starting equipment', () => {
+  describe('all classes have equipment defined', () => {
+    it.each(ALL_CLASSES)('%s should have equipmentChoices defined', name => {
+      const cls = getClass(name);
+      expect(cls.equipmentChoices).toBeDefined();
+    });
+
+    it.each(ALL_CLASSES)('%s should have at least one choice', name => {
+      const eq = getClass(name).equipmentChoices!;
+      expect(eq.choices.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it.each(ALL_CLASSES)('%s should have startingGold as a non-empty string', name => {
+      const eq = getClass(name).equipmentChoices!;
+      expect(typeof eq.startingGold).toBe('string');
+      expect(eq.startingGold!.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('choice structure validity', () => {
+    it.each(ALL_CLASSES)('%s choices should have valid structure', name => {
+      const eq = getClass(name).equipmentChoices!;
+      for (const choice of eq.choices) {
+        expect(choice.choose).toBeGreaterThanOrEqual(1);
+        expect(choice.from.length).toBeGreaterThan(0);
+        for (const option of choice.from) {
+          expect(option.items.length).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it.each(ALL_CLASSES)('%s items should have valid name and quantity', name => {
+      const eq = getClass(name).equipmentChoices!;
+      const allItems = [
+        ...eq.choices.flatMap(c => c.from.flatMap(o => o.items)),
+        ...(eq.guaranteed ?? []),
+      ];
+      for (const item of allItems) {
+        expect(typeof item.name).toBe('string');
+        expect(item.name.length).toBeGreaterThan(0);
+        expect(Number.isInteger(item.quantity)).toBe(true);
+        expect(item.quantity).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe('spot checks', () => {
+    it('Fighter should have startingGold of "5d4 x 10 gp"', () => {
+      expect(getClass('Fighter').equipmentChoices!.startingGold).toBe('5d4 x 10 gp');
+    });
+
+    it('Wizard guaranteed items should include Spellbook', () => {
+      const guaranteed = getClass('Wizard').equipmentChoices!.guaranteed!;
+      expect(guaranteed.some(i => i.name === 'Spellbook')).toBe(true);
+    });
+
+    it('Barbarian first choice should offer Greataxe', () => {
+      const firstChoice = getClass('Barbarian').equipmentChoices!.choices[0];
+      const allItemNames = firstChoice.from.flatMap(o => o.items.map(i => i.name));
+      expect(allItemNames).toContain('Greataxe');
+    });
+
+    it('Monk should have startingGold of "5d4 gp"', () => {
+      expect(getClass('Monk').equipmentChoices!.startingGold).toBe('5d4 gp');
+    });
+
+    it('Rogue guaranteed items should include Thieves\' tools', () => {
+      const guaranteed = getClass('Rogue').equipmentChoices!.guaranteed!;
+      expect(guaranteed.some(i => i.name === "Thieves' tools")).toBe(true);
     });
   });
 });
