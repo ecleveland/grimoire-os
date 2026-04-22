@@ -3,87 +3,58 @@ import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../common/enums';
-import { fetchAllDetails } from './srd-api.fetcher';
 import {
-  transformSpell,
-  transformMonster,
-  transformEquipment,
-  transformMagicItem,
-  transformBackground,
-  transformFeat,
-  type ApiSpell,
-  type ApiMonster,
-  type ApiEquipment,
-  type ApiMagicItem,
-  type ApiBackground,
-  type ApiFeat,
-} from './srd-api.transformers';
-import { srdSpells as fallbackSpells } from './data/spells';
-import { srdMonsters as fallbackMonsters } from './data/monsters';
-import { srdItems as fallbackItems } from './data/items';
+  loadSpellsFromJson,
+  loadMonstersFromJson,
+  loadMagicItemsFromJson,
+  loadSpeciesAsRacesFromJson,
+} from './srd-json.loader';
+import { srdItems as mundaneItems } from './data/items';
 import { srdClasses } from './data/classes';
-import { srdRaces } from './data/races';
 import { srdSubclasses } from './data/subclasses';
 import { srdSubraces } from './data/subraces';
 import { srdConditions } from './data/conditions';
 import { srdSkills } from './data/skills';
 import { srdLanguages } from './data/languages';
+import { srdBackgrounds } from './data/backgrounds';
+import { srdFeats } from './data/feats';
 
 @Injectable()
 export class SeedService {
   constructor(private prisma: PrismaService) {}
 
   async seed(): Promise<void> {
-    const useApi = process.env.SEED_FROM_API !== 'false';
+    // ── Load data from JSON files ──────────────────────
+    console.log('Loading SRD data from extracted JSON files...');
 
-    // ── Phase A: Fetch from API ────────────────────────
-    // Cast to Prisma input types since transformer return types use plain `null`
-    // for JSON fields, while Prisma expects `NullableJsonNullValueInput`
-    let spells = fallbackSpells as unknown as Prisma.SpellCreateManyInput[];
-    let monsters = fallbackMonsters as unknown as Prisma.MonsterCreateManyInput[];
-    let items = fallbackItems as unknown as Prisma.ItemCreateManyInput[];
-    let backgrounds: Prisma.BackgroundCreateManyInput[] = [];
-    let feats: Prisma.FeatCreateManyInput[] = [];
+    const spells = loadSpellsFromJson() as unknown as Prisma.SpellCreateManyInput[];
+    const monsters = loadMonstersFromJson() as unknown as Prisma.MonsterCreateManyInput[];
+    const magicItems = loadMagicItemsFromJson() as unknown as Prisma.ItemCreateManyInput[];
+    const races = loadSpeciesAsRacesFromJson();
 
-    if (useApi) {
-      try {
-        console.log('Fetching SRD data from D&D 5e API...');
+    const items = [...(mundaneItems as unknown as Prisma.ItemCreateManyInput[]), ...magicItems];
 
-        // Fetch sequentially to avoid overwhelming the API with rate limits
-        const apiSpells = await fetchAllDetails<ApiSpell>('spells');
-        spells = apiSpells.map(transformSpell) as unknown as Prisma.SpellCreateManyInput[];
+    const backgrounds: Prisma.BackgroundCreateManyInput[] = srdBackgrounds.map(b => ({
+      name: b.name,
+      description: b.description,
+      skillProficiencies: b.skillProficiencies,
+      toolProficiencies: b.toolProficiencies,
+      languages: b.languages,
+      equipment: b.equipment,
+      feature: b.feature ?? Prisma.JsonNull,
+      personalityTraits: b.personalityTraits,
+      ideals: b.ideals,
+      bonds: b.bonds,
+      flaws: b.flaws,
+    }));
+    const feats: Prisma.FeatCreateManyInput[] = srdFeats.map(f => ({
+      name: f.name,
+      description: f.description,
+      prerequisite: f.prerequisite ?? null,
+      benefits: f.benefits,
+    }));
 
-        const apiMonsters = await fetchAllDetails<ApiMonster>('monsters');
-        monsters = apiMonsters.map(transformMonster) as unknown as Prisma.MonsterCreateManyInput[];
-
-        const apiEquipment = await fetchAllDetails<ApiEquipment>('equipment');
-        const equipmentItems = apiEquipment.map(
-          transformEquipment
-        ) as unknown as Prisma.ItemCreateManyInput[];
-
-        const apiMagicItems = await fetchAllDetails<ApiMagicItem>('magic-items');
-        const magicItems = apiMagicItems.map(
-          transformMagicItem
-        ) as unknown as Prisma.ItemCreateManyInput[];
-        items = [...equipmentItems, ...magicItems];
-
-        const apiBackgrounds = await fetchAllDetails<ApiBackground>('backgrounds');
-        backgrounds = apiBackgrounds.map(
-          transformBackground
-        ) as unknown as Prisma.BackgroundCreateManyInput[];
-
-        const apiFeats = await fetchAllDetails<ApiFeat>('feats');
-        feats = apiFeats.map(transformFeat) as unknown as Prisma.FeatCreateManyInput[];
-
-        console.log('API fetch complete.');
-      } catch (error: unknown) {
-        console.warn('API fetch failed, falling back to static data:', (error as Error).message);
-      }
-    } else {
-      console.log('SEED_FROM_API=false, using static fallback data.');
-    }
-
-    // ── Phase B: Write to database ─────────────────────
+    // ── Write to database ──────────────────────────────
     console.log('Seeding SRD data...');
 
     await this.prisma.$transaction(async tx => {
@@ -129,8 +100,8 @@ export class SeedService {
       await tx.srdClass.createMany({ data: srdClasses, skipDuplicates: true });
       console.log(`  Classes: ${srdClasses.length} entries`);
 
-      await tx.race.createMany({ data: srdRaces, skipDuplicates: true });
-      console.log(`  Races: ${srdRaces.length} entries`);
+      await tx.race.createMany({ data: races, skipDuplicates: true });
+      console.log(`  Races: ${races.length} entries`);
 
       // FK-dependent tables
       for (const sc of srdSubclasses) {

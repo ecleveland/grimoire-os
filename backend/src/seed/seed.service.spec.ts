@@ -3,14 +3,29 @@ import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 
-// Mock the API fetcher module
-jest.mock('./srd-api.fetcher', () => ({
-  fetchAllDetails: jest.fn(),
+// Mock the JSON loader module
+jest.mock('./srd-json.loader', () => ({
+  loadSpellsFromJson: jest.fn(),
+  loadMonstersFromJson: jest.fn(),
+  loadMagicItemsFromJson: jest.fn(),
+  loadSpeciesAsRacesFromJson: jest.fn(),
 }));
 
-import { fetchAllDetails } from './srd-api.fetcher';
+import {
+  loadSpellsFromJson,
+  loadMonstersFromJson,
+  loadMagicItemsFromJson,
+  loadSpeciesAsRacesFromJson,
+} from './srd-json.loader';
 
-const mockFetchAllDetails = fetchAllDetails as jest.MockedFunction<typeof fetchAllDetails>;
+const mockLoadSpells = loadSpellsFromJson as jest.MockedFunction<typeof loadSpellsFromJson>;
+const mockLoadMonsters = loadMonstersFromJson as jest.MockedFunction<typeof loadMonstersFromJson>;
+const mockLoadMagicItems = loadMagicItemsFromJson as jest.MockedFunction<
+  typeof loadMagicItemsFromJson
+>;
+const mockLoadSpecies = loadSpeciesAsRacesFromJson as jest.MockedFunction<
+  typeof loadSpeciesAsRacesFromJson
+>;
 
 describe('SeedService', () => {
   let service: SeedService;
@@ -56,92 +71,80 @@ describe('SeedService', () => {
     // $transaction executes the callback
     prisma.$transaction.mockImplementation(fn => fn(prisma));
 
-    // Default: API returns sample data
-    mockFetchAllDetails.mockImplementation((endpoint: string) => {
-      const mockData: Record<string, unknown[]> = {
-        spells: [
-          {
-            name: 'Test Spell',
-            level: 0,
-            school: { name: 'Evocation' },
-            casting_time: '1 action',
-            range: '60 feet',
-            components: ['V', 'S'],
-            duration: 'Instantaneous',
-            concentration: false,
-            ritual: false,
-            desc: ['A test spell.'],
-            classes: [{ name: 'Wizard' }],
-          },
-        ],
-        monsters: [
-          {
-            name: 'Test Monster',
-            size: 'Medium',
-            type: 'beast',
-            alignment: 'unaligned',
-            armor_class: [{ value: 12 }],
-            hit_points: 10,
-            hit_dice: '2d8',
-            speed: { walk: '30 ft.' },
-            strength: 10,
-            dexterity: 10,
-            constitution: 10,
-            intelligence: 2,
-            wisdom: 10,
-            charisma: 5,
-            proficiencies: [],
-            damage_resistances: [],
-            damage_immunities: [],
-            damage_vulnerabilities: [],
-            condition_immunities: [],
-            senses: {},
-            languages: '',
-            challenge_rating: 0.25,
-            xp: 50,
-            actions: [],
-          },
-        ],
-        equipment: [
-          {
-            name: 'Test Sword',
-            equipment_category: { name: 'Weapon' },
-            category_range: 'Martial Melee',
-            cost: { quantity: 15, unit: 'gp' },
-            weight: 3,
-            properties: [],
-          },
-        ],
-        'magic-items': [
-          {
-            name: 'Test Wand',
-            equipment_category: { name: 'Wondrous Items' },
-            rarity: { name: 'Uncommon' },
-            desc: ['A magical wand.'],
-          },
-        ],
-        backgrounds: [
-          {
-            name: 'Test Background',
-            starting_proficiencies: [],
-            feature: { name: 'Test Feature', desc: ['A feature.'] },
-            personality_traits: { from: { options: [] } },
-            ideals: { from: { options: [] } },
-            bonds: { from: { options: [] } },
-            flaws: { from: { options: [] } },
-            starting_equipment: [],
-          },
-        ],
-        feats: [
-          {
-            name: 'Test Feat',
-            desc: ['A test feat.', 'Benefit 1.'],
-            prerequisites: [],
-          },
-        ],
-      };
-      return Promise.resolve(mockData[endpoint] ?? []);
-    });
+    // Mock JSON loaders
+    mockLoadSpells.mockReturnValue([
+      {
+        name: 'Test Spell',
+        level: 0,
+        school: 'Evocation',
+        castingTime: '1 action',
+        range: '60 feet',
+        components: 'V, S',
+        material: null,
+        duration: 'Instantaneous',
+        concentration: false,
+        ritual: false,
+        description: 'A test spell.',
+        higherLevels: null,
+        classes: ['Wizard'],
+      },
+    ]);
+    mockLoadMonsters.mockReturnValue([
+      {
+        name: 'Test Monster',
+        size: 'Medium',
+        type: 'Beast',
+        subtype: null,
+        alignment: 'Unaligned',
+        armorClass: 12,
+        armorType: null,
+        hitPoints: 10,
+        hitDice: '2d8',
+        speed: '30 ft.',
+        str: 10,
+        dex: 10,
+        con: 10,
+        int: 2,
+        wis: 10,
+        cha: 5,
+        savingThrows: null,
+        skills: null,
+        damageResistances: [],
+        damageImmunities: [],
+        damageVulnerabilities: [],
+        conditionImmunities: [],
+        senses: 'Passive Perception 10',
+        languages: '',
+        challengeRating: 0.25,
+        experiencePoints: 50,
+        specialAbilities: null,
+        actions: [{ name: 'Bite', description: 'Melee Attack' }],
+        reactions: null,
+        legendaryActions: null,
+        description: null,
+      },
+    ]);
+    mockLoadMagicItems.mockReturnValue([
+      {
+        name: 'Test Wand',
+        category: 'Wondrous Item',
+        description: 'A magical wand.',
+        rarity: 'Uncommon',
+        requiresAttunement: false,
+        isMagic: true,
+        properties: [],
+      },
+    ]);
+    mockLoadSpecies.mockReturnValue([
+      {
+        name: 'Test Species',
+        speed: 30,
+        size: 'Medium',
+        traits: [{ name: 'Darkvision', description: '60 ft.' }],
+        languages: ['Common'],
+        sizeDescription: 'about 5 feet tall',
+      },
+    ]);
   });
 
   afterEach(() => {
@@ -152,15 +155,13 @@ describe('SeedService', () => {
     expect(service).toBeDefined();
   });
 
-  it('fetches from API and calls createMany for all tables', async () => {
+  it('loads data from JSON and calls createMany for all tables', async () => {
     await service.seed();
 
-    expect(mockFetchAllDetails).toHaveBeenCalledWith('spells');
-    expect(mockFetchAllDetails).toHaveBeenCalledWith('monsters');
-    expect(mockFetchAllDetails).toHaveBeenCalledWith('equipment');
-    expect(mockFetchAllDetails).toHaveBeenCalledWith('magic-items');
-    expect(mockFetchAllDetails).toHaveBeenCalledWith('backgrounds');
-    expect(mockFetchAllDetails).toHaveBeenCalledWith('feats');
+    expect(mockLoadSpells).toHaveBeenCalled();
+    expect(mockLoadMonsters).toHaveBeenCalled();
+    expect(mockLoadMagicItems).toHaveBeenCalled();
+    expect(mockLoadSpecies).toHaveBeenCalled();
     expect(prisma.spell.createMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
     );
@@ -187,37 +188,23 @@ describe('SeedService', () => {
     );
   });
 
-  it('merges equipment and magic items into a single items insert', async () => {
+  it('merges mundane items with magic items from JSON', async () => {
     await service.seed();
 
     const itemsCall = prisma.item.createMany.mock.calls[0][0];
-    expect(itemsCall.data).toHaveLength(2); // 1 equipment + 1 magic item
-    expect(itemsCall.data[0].name).toBe('Test Sword');
-    expect(itemsCall.data[1].name).toBe('Test Wand');
-    expect(itemsCall.data[1].isMagic).toBe(true);
+    // 5 mundane items from static data + 1 magic item from JSON mock
+    expect(itemsCall.data).toHaveLength(6);
+    expect(itemsCall.data[0].name).toBe('Longsword');
+    expect(itemsCall.data[5].name).toBe('Test Wand');
+    expect(itemsCall.data[5].isMagic).toBe(true);
   });
 
-  it('falls back to static data when API fails', async () => {
-    mockFetchAllDetails.mockRejectedValue(new Error('Network error'));
-
+  it('uses species JSON data for races', async () => {
     await service.seed();
 
-    // Should still call createMany with fallback data
-    expect(prisma.spell.createMany).toHaveBeenCalled();
-    expect(prisma.monster.createMany).toHaveBeenCalled();
-    expect(prisma.item.createMany).toHaveBeenCalled();
-  });
-
-  it('uses static data when SEED_FROM_API=false', async () => {
-    process.env.SEED_FROM_API = 'false';
-    mockFetchAllDetails.mockClear();
-
-    await service.seed();
-
-    expect(mockFetchAllDetails).not.toHaveBeenCalled();
-    expect(prisma.spell.createMany).toHaveBeenCalled();
-
-    delete process.env.SEED_FROM_API;
+    const racesCall = prisma.race.createMany.mock.calls[0][0];
+    expect(racesCall.data).toHaveLength(1);
+    expect(racesCall.data[0].name).toBe('Test Species');
   });
 
   it('resolves FK references for subclasses via upsert', async () => {
