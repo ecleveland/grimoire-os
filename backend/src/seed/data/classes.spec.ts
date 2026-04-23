@@ -1,8 +1,18 @@
 import { srdClasses } from './classes';
 
 const ALL_CLASSES = [
-  'Barbarian', 'Bard', 'Cleric', 'Druid', 'Fighter', 'Monk',
-  'Paladin', 'Ranger', 'Rogue', 'Sorcerer', 'Warlock', 'Wizard',
+  'Barbarian',
+  'Bard',
+  'Cleric',
+  'Druid',
+  'Fighter',
+  'Monk',
+  'Paladin',
+  'Ranger',
+  'Rogue',
+  'Sorcerer',
+  'Warlock',
+  'Wizard',
 ];
 const FULL_CASTERS = ['Bard', 'Cleric', 'Druid', 'Sorcerer', 'Wizard'];
 const HALF_CASTERS = ['Paladin', 'Ranger'];
@@ -335,9 +345,134 @@ describe('SRD class seed data — starting equipment', () => {
       expect(getClass('Monk').equipmentChoices!.startingGold).toBe('5d4 gp');
     });
 
-    it('Rogue guaranteed items should include Thieves\' tools', () => {
+    it("Rogue guaranteed items should include Thieves' tools", () => {
       const guaranteed = getClass('Rogue').equipmentChoices!.guaranteed!;
       expect(guaranteed.some(i => i.name === "Thieves' tools")).toBe(true);
+    });
+  });
+});
+
+describe('SRD class seed data — multiclassing', () => {
+  const VALID_ABILITIES = [
+    'Strength',
+    'Dexterity',
+    'Constitution',
+    'Intelligence',
+    'Wisdom',
+    'Charisma',
+  ];
+
+  describe('all classes have multiclassing defined', () => {
+    it.each(ALL_CLASSES)('%s should have multiclassing defined', name => {
+      const cls = getClass(name);
+      expect(cls.multiclassing).toBeDefined();
+    });
+
+    it.each(ALL_CLASSES)('%s should have at least one prerequisite', name => {
+      const mc = getClass(name).multiclassing!;
+      expect(mc.prerequisites.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it.each(ALL_CLASSES)(
+      '%s prerequisites should require valid abilities with minimum 13',
+      name => {
+        const mc = getClass(name).multiclassing!;
+        for (const prereq of mc.prerequisites) {
+          expect(VALID_ABILITIES).toContain(prereq.ability);
+          expect(prereq.minimum).toBe(13);
+        }
+      }
+    );
+
+    it.each(ALL_CLASSES)('%s should have proficienciesGained as an array', name => {
+      const mc = getClass(name).multiclassing!;
+      expect(Array.isArray(mc.proficienciesGained)).toBe(true);
+    });
+
+    it.each(ALL_CLASSES)('%s proficienciesGained items should be non-empty strings', name => {
+      const mc = getClass(name).multiclassing!;
+      for (const prof of mc.proficienciesGained) {
+        expect(typeof prof).toBe('string');
+        expect(prof.length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe('caster type classification', () => {
+    it.each(FULL_CASTERS)('%s should have casterType "full"', name => {
+      expect(getClass(name).multiclassing!.casterType).toBe('full');
+    });
+
+    it.each(HALF_CASTERS)('%s should have casterType "half"', name => {
+      expect(getClass(name).multiclassing!.casterType).toBe('half');
+    });
+
+    it('Warlock should have casterType "pact"', () => {
+      expect(getClass('Warlock').multiclassing!.casterType).toBe('pact');
+    });
+
+    it.each(NON_CASTERS)('%s should have casterType null', name => {
+      expect(getClass(name).multiclassing!.casterType).toBeNull();
+    });
+  });
+
+  describe('prerequisite logic', () => {
+    it('Fighter should have prerequisiteLogic "OR" (STR or DEX)', () => {
+      const mc = getClass('Fighter').multiclassing!;
+      expect(mc.prerequisiteLogic).toBe('OR');
+      const abilities = mc.prerequisites.map(p => p.ability);
+      expect(abilities).toContain('Strength');
+      expect(abilities).toContain('Dexterity');
+    });
+
+    it('classes without prerequisiteLogic default to AND', () => {
+      const classesWithMultiplePrereqs = ALL_CLASSES.filter(name => {
+        const mc = getClass(name).multiclassing!;
+        return mc.prerequisites.length > 1 && name !== 'Fighter';
+      });
+      for (const name of classesWithMultiplePrereqs) {
+        const mc = getClass(name).multiclassing!;
+        expect(mc.prerequisiteLogic).toBeUndefined();
+      }
+    });
+  });
+
+  describe('spot checks', () => {
+    it('Paladin should require STR 13 and CHA 13', () => {
+      const prereqs = getClass('Paladin').multiclassing!.prerequisites;
+      expect(prereqs).toEqual(
+        expect.arrayContaining([
+          { ability: 'Strength', minimum: 13 },
+          { ability: 'Charisma', minimum: 13 },
+        ])
+      );
+    });
+
+    it('Monk should require DEX 13 and WIS 13', () => {
+      const prereqs = getClass('Monk').multiclassing!.prerequisites;
+      expect(prereqs).toEqual(
+        expect.arrayContaining([
+          { ability: 'Dexterity', minimum: 13 },
+          { ability: 'Wisdom', minimum: 13 },
+        ])
+      );
+    });
+
+    it('Sorcerer should gain no proficiencies', () => {
+      expect(getClass('Sorcerer').multiclassing!.proficienciesGained).toEqual([]);
+    });
+
+    it('Wizard should gain no proficiencies', () => {
+      expect(getClass('Wizard').multiclassing!.proficienciesGained).toEqual([]);
+    });
+
+    it("Rogue should gain Thieves' tools proficiency", () => {
+      expect(getClass('Rogue').multiclassing!.proficienciesGained).toContain("Thieves' tools");
+    });
+
+    it('Barbarian should require only STR 13', () => {
+      const prereqs = getClass('Barbarian').multiclassing!.prerequisites;
+      expect(prereqs).toEqual([{ ability: 'Strength', minimum: 13 }]);
     });
   });
 });
