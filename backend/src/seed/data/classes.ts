@@ -352,23 +352,22 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Greataxe')] },
-            { items: [item('Any martial melee weapon')] },
-          ],
+          from: [{ items: [item('Greataxe')] }, { items: [item('Any martial melee weapon')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Handaxe', 2)] },
-            { items: [item('Any simple weapon')] },
-          ],
+          from: [{ items: [item('Handaxe', 2)] }, { items: [item('Any simple weapon')] }],
         },
       ],
       guaranteed: [item("Explorer's pack"), item('Javelin', 4)],
       startingGold: '2d4 x 10 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [{ ability: 'Strength', minimum: 13 }],
+      proficienciesGained: ['Shields', 'Simple weapons', 'Martial weapons'],
+      casterType: null,
+    },
   },
   {
     name: 'Bard',
@@ -486,23 +485,26 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Diplomat's pack")] },
-            { items: [item("Entertainer's pack")] },
-          ],
+          from: [{ items: [item("Diplomat's pack")] }, { items: [item("Entertainer's pack")] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Lute')] },
-            { items: [item('Any musical instrument')] },
-          ],
+          from: [{ items: [item('Lute')] }, { items: [item('Any musical instrument')] }],
         },
       ],
       guaranteed: [item('Leather armor'), item('Dagger')],
       startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [{ ability: 'Charisma', minimum: 13 }],
+      proficienciesGained: [
+        'Light armor',
+        'One skill of your choice',
+        'One musical instrument of your choice',
+      ],
+      casterType: 'full' as const,
+    },
   },
   {
     name: 'Cleric',
@@ -563,10 +565,7 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Mace')] },
-            { items: [item('Warhammer')] },
-          ],
+          from: [{ items: [item('Mace')] }, { items: [item('Warhammer')] }],
         },
         {
           choose: 1,
@@ -585,16 +584,18 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Priest's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Priest's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       guaranteed: [item('Shield'), item('Holy symbol')],
       startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 1,
+    multiclassing: {
+      prerequisites: [{ ability: 'Wisdom', minimum: 13 }],
+      proficienciesGained: ['Light armor', 'Medium armor', 'Shields'],
+      casterType: 'full' as const,
+    },
   },
   {
     name: 'Druid',
@@ -686,23 +687,22 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Wooden shield')] },
-            { items: [item('Any simple weapon')] },
-          ],
+          from: [{ items: [item('Wooden shield')] }, { items: [item('Any simple weapon')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Scimitar')] },
-            { items: [item('Any simple melee weapon')] },
-          ],
+          from: [{ items: [item('Scimitar')] }, { items: [item('Any simple melee weapon')] }],
         },
       ],
       guaranteed: [item('Leather armor'), item("Explorer's pack"), item('Druidic focus')],
       startingGold: '2d4 x 10 gp',
     },
     subclassLevel: 2,
+    multiclassing: {
+      prerequisites: [{ ability: 'Wisdom', minimum: 13 }],
+      proficienciesGained: ['Light armor', 'Medium armor', 'Shields'],
+      casterType: 'full' as const,
+    },
   },
   {
     name: 'Fighter',
@@ -787,15 +787,27 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Dungeoneer's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Dungeoneer's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [
+        { ability: 'Strength', minimum: 13 },
+        { ability: 'Dexterity', minimum: 13 },
+      ],
+      prerequisiteLogic: 'OR' as const,
+      proficienciesGained: [
+        'Light armor',
+        'Medium armor',
+        'Shields',
+        'Simple weapons',
+        'Martial weapons',
+      ],
+      casterType: null,
+    },
   },
   {
     name: 'Monk',
@@ -923,23 +935,25 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Shortsword')] },
-            { items: [item('Any simple weapon')] },
-          ],
+          from: [{ items: [item('Shortsword')] }, { items: [item('Any simple weapon')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Dungeoneer's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Dungeoneer's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       guaranteed: [item('Dart', 10)],
       startingGold: '5d4 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [
+        { ability: 'Dexterity', minimum: 13 },
+        { ability: 'Wisdom', minimum: 13 },
+      ],
+      proficienciesGained: ['Simple weapons', 'Shortswords'],
+      casterType: null,
+    },
   },
   {
     name: 'Paladin',
@@ -1041,23 +1055,31 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Javelin', 5)] },
-            { items: [item('Any simple melee weapon')] },
-          ],
+          from: [{ items: [item('Javelin', 5)] }, { items: [item('Any simple melee weapon')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Priest's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Priest's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       guaranteed: [item('Chain mail'), item('Holy symbol')],
       startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [
+        { ability: 'Strength', minimum: 13 },
+        { ability: 'Charisma', minimum: 13 },
+      ],
+      proficienciesGained: [
+        'Light armor',
+        'Medium armor',
+        'Shields',
+        'Simple weapons',
+        'Martial weapons',
+      ],
+      casterType: 'half' as const,
+    },
   },
   {
     name: 'Ranger',
@@ -1162,10 +1184,7 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Scale mail')] },
-            { items: [item('Leather armor')] },
-          ],
+          from: [{ items: [item('Scale mail')] }, { items: [item('Leather armor')] }],
         },
         {
           choose: 1,
@@ -1176,16 +1195,28 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Dungeoneer's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Dungeoneer's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       guaranteed: [item('Longbow'), item('Arrow', 20)],
       startingGold: '5d4 x 10 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [
+        { ability: 'Dexterity', minimum: 13 },
+        { ability: 'Wisdom', minimum: 13 },
+      ],
+      proficienciesGained: [
+        'Light armor',
+        'Medium armor',
+        'Shields',
+        'Simple weapons',
+        'Martial weapons',
+        'One skill of your choice',
+      ],
+      casterType: 'half' as const,
+    },
   },
   {
     name: 'Rogue',
@@ -1294,17 +1325,11 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Rapier')] },
-            { items: [item('Shortsword')] },
-          ],
+          from: [{ items: [item('Rapier')] }, { items: [item('Shortsword')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Shortbow'), item('Arrow', 20)] },
-            { items: [item('Shortsword')] },
-          ],
+          from: [{ items: [item('Shortbow'), item('Arrow', 20)] }, { items: [item('Shortsword')] }],
         },
         {
           choose: 1,
@@ -1319,6 +1344,11 @@ export const srdClasses = [
       startingGold: '4d4 x 10 gp',
     },
     subclassLevel: 3,
+    multiclassing: {
+      prerequisites: [{ ability: 'Dexterity', minimum: 13 }],
+      proficienciesGained: ['Light armor', 'One skill of your choice', "Thieves' tools"],
+      casterType: null,
+    },
   },
   {
     name: 'Sorcerer',
@@ -1379,23 +1409,22 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Component pouch')] },
-            { items: [item('Arcane focus')] },
-          ],
+          from: [{ items: [item('Component pouch')] }, { items: [item('Arcane focus')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Dungeoneer's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Dungeoneer's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       guaranteed: [item('Dagger', 2)],
       startingGold: '3d4 x 10 gp',
     },
     subclassLevel: 1,
+    multiclassing: {
+      prerequisites: [{ ability: 'Charisma', minimum: 13 }],
+      proficienciesGained: [],
+      casterType: 'full' as const,
+    },
   },
   {
     name: 'Warlock',
@@ -1472,23 +1501,22 @@ export const srdClasses = [
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Component pouch')] },
-            { items: [item('Arcane focus')] },
-          ],
+          from: [{ items: [item('Component pouch')] }, { items: [item('Arcane focus')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Scholar's pack")] },
-            { items: [item("Dungeoneer's pack")] },
-          ],
+          from: [{ items: [item("Scholar's pack")] }, { items: [item("Dungeoneer's pack")] }],
         },
       ],
       guaranteed: [item('Leather armor'), item('Any simple weapon'), item('Dagger', 2)],
       startingGold: '4d4 x 10 gp',
     },
     subclassLevel: 1,
+    multiclassing: {
+      prerequisites: [{ ability: 'Charisma', minimum: 13 }],
+      proficienciesGained: ['Light armor', 'Simple weapons'],
+      casterType: 'pact' as const,
+    },
   },
   {
     name: 'Wizard',
@@ -1543,29 +1571,25 @@ export const srdClasses = [
       choices: [
         {
           choose: 1,
-          from: [
-            { items: [item('Quarterstaff')] },
-            { items: [item('Dagger')] },
-          ],
+          from: [{ items: [item('Quarterstaff')] }, { items: [item('Dagger')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item('Component pouch')] },
-            { items: [item('Arcane focus')] },
-          ],
+          from: [{ items: [item('Component pouch')] }, { items: [item('Arcane focus')] }],
         },
         {
           choose: 1,
-          from: [
-            { items: [item("Scholar's pack")] },
-            { items: [item("Explorer's pack")] },
-          ],
+          from: [{ items: [item("Scholar's pack")] }, { items: [item("Explorer's pack")] }],
         },
       ],
       guaranteed: [item('Spellbook')],
       startingGold: '4d4 x 10 gp',
     },
     subclassLevel: 2,
+    multiclassing: {
+      prerequisites: [{ ability: 'Intelligence', minimum: 13 }],
+      proficienciesGained: [],
+      casterType: 'full' as const,
+    },
   },
 ];
