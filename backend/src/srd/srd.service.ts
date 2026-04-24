@@ -231,4 +231,19 @@ export class SrdService {
   async findLanguage(id: string) {
     return this.prisma.language.findUnique({ where: { id } });
   }
+
+  // ── Game Rules ─────────────────────────────────────
+
+  async findAllRules() {
+    return this.prisma.gameRule.findMany({
+      orderBy: [{ category: 'asc' }, { key: 'asc' }],
+    });
+  }
+
+  async findRulesByCategory(category: string) {
+    return this.prisma.gameRule.findMany({
+      where: { category },
+      orderBy: { key: 'asc' },
+    });
+  }
 }

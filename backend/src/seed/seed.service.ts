@@ -18,6 +18,7 @@ import { srdSkills } from './data/skills';
 import { srdLanguages } from './data/languages';
 import { srdBackgrounds } from './data/backgrounds';
 import { srdFeats } from './data/feats';
+import { srdGameRules } from './data/game-rules';
 
 @Injectable()
 export class SeedService {
@@ -95,6 +96,12 @@ export class SeedService {
         skipDuplicates: true,
       });
       console.log(`  Languages: ${srdLanguages.length} entries`);
+
+      await tx.gameRule.createMany({
+        data: srdGameRules,
+        skipDuplicates: true,
+      });
+      console.log(`  Game Rules: ${srdGameRules.length} entries`);
 
       // Parent tables for FK relations
       await tx.srdClass.createMany({ data: srdClasses, skipDuplicates: true });
