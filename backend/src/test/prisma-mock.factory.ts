@@ -46,6 +46,7 @@ export type MockPrismaService = {
     | 'condition'
     | 'skill'
     | 'language'
+    | 'gameRule'
     | 'auditLog']: MockModel;
 } & {
   $transaction: jest.Mock;
@@ -71,6 +72,7 @@ export function createMockPrismaService(): MockPrismaService {
     condition: mockModel(),
     skill: mockModel(),
     language: mockModel(),
+    gameRule: mockModel(),
     auditLog: mockModel(),
     $transaction: jest.fn(fn => fn()),
   };

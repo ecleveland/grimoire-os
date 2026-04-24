@@ -1,0 +1,55 @@
+export const srdGameRules = [
+  {
+    category: 'proficiency-bonus',
+    key: 'table',
+    value: {
+      '1': 2,
+      '2': 2,
+      '3': 2,
+      '4': 2,
+      '5': 3,
+      '6': 3,
+      '7': 3,
+      '8': 3,
+      '9': 4,
+      '10': 4,
+      '11': 4,
+      '12': 4,
+      '13': 5,
+      '14': 5,
+      '15': 5,
+      '16': 5,
+      '17': 6,
+      '18': 6,
+      '19': 6,
+      '20': 6,
+    },
+  },
+  {
+    category: 'proficiency-bonus',
+    key: 'formula',
+    value: {
+      formula: 'ceil(level / 4) + 1',
+      description: 'Proficiency bonus increases by 1 for every 4 levels',
+    },
+  },
+  {
+    category: 'hp-calculation',
+    key: 'rules',
+    value: {
+      level1: 'Hit die maximum + Constitution modifier',
+      levelUp: 'Hit die roll (or fixed average) + Constitution modifier',
+      minimumPerLevel: 1,
+    },
+  },
+  {
+    category: 'hp-calculation',
+    key: 'average-per-die',
+    value: {
+      d6: 4,
+      d8: 5,
+      d10: 6,
+      d12: 7,
+    },
+  },
+];

@@ -256,3 +256,11 @@ export interface SrdLanguage {
   script?: string;
   source: string;
 }
+
+export interface GameRule {
+  id: string;
+  category: string;
+  key: string;
+  value: Record<string, unknown>;
+  source: string;
+}

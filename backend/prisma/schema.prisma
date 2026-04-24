@@ -410,6 +410,19 @@ model Language {
   @@map("languages")
 }
 
+// ── Game Rules (reference data) ───────────────────────
+
+model GameRule {
+  id       String @id @default(uuid())
+  category String
+  key      String
+  value    Json
+  source   String @default("SRD 5.2.1")
+
+  @@unique([category, key])
+  @@map("game_rules")
+}
+
 // ── Audit Log ─────────────────────────────────────────
 
 model AuditLog {

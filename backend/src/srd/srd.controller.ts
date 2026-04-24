@@ -177,4 +177,18 @@ export class SrdController {
   findLanguage(@Param('id') id: string) {
     return this.srdService.findLanguage(id);
   }
+
+  // ── Game Rules ─────────────────────────────────────
+
+  @Get('rules')
+  @ApiOperation({ summary: 'List all game rules' })
+  findAllRules() {
+    return this.srdService.findAllRules();
+  }
+
+  @Get('rules/:category')
+  @ApiOperation({ summary: 'Get game rules by category' })
+  findRulesByCategory(@Param('category') category: string) {
+    return this.srdService.findRulesByCategory(category);
+  }
 }

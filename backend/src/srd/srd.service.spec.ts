@@ -346,4 +346,41 @@ describe('SrdService', () => {
       });
     });
   });
+
+  // ── Game Rules ─────────────────────────────────────
+
+  describe('findAllRules', () => {
+    it('returns all game rules ordered by category then key', async () => {
+      const mockRules = [
+        { id: '1', category: 'hp-calculation', key: 'rules', value: {}, source: 'SRD 5.2.1' },
+        { id: '2', category: 'proficiency-bonus', key: 'table', value: {}, source: 'SRD 5.2.1' },
+      ];
+      prisma.gameRule.findMany.mockResolvedValue(mockRules);
+
+      const result = await service.findAllRules();
+
+      expect(prisma.gameRule.findMany).toHaveBeenCalledWith({
+        orderBy: [{ category: 'asc' }, { key: 'asc' }],
+      });
+      expect(result).toEqual(mockRules);
+    });
+  });
+
+  describe('findRulesByCategory', () => {
+    it('filters rules by category', async () => {
+      const mockRules = [
+        { id: '1', category: 'proficiency-bonus', key: 'formula', value: {}, source: 'SRD 5.2.1' },
+        { id: '2', category: 'proficiency-bonus', key: 'table', value: {}, source: 'SRD 5.2.1' },
+      ];
+      prisma.gameRule.findMany.mockResolvedValue(mockRules);
+
+      const result = await service.findRulesByCategory('proficiency-bonus');
+
+      expect(prisma.gameRule.findMany).toHaveBeenCalledWith({
+        where: { category: 'proficiency-bonus' },
+        orderBy: { key: 'asc' },
+      });
+      expect(result).toEqual(mockRules);
+    });
+  });
 });
