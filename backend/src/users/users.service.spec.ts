@@ -117,6 +117,68 @@ describe('UsersService', () => {
     });
   });
 
+  describe('findOnePublic', () => {
+    it('should return user without passwordHash', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUserPublic);
+
+      const result = await service.findOnePublic(USER_ID);
+
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        omit: { passwordHash: true },
+      });
+      expect(result).toEqual(mockUserPublic);
+    });
+
+    it('should throw NotFoundException when user not found', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOnePublic(USER_ID)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findByUsername', () => {
+    it('should return user by username', async () => {
+      prisma.user.findFirst.mockResolvedValue(mockUser);
+
+      const result = await service.findByUsername('testuser');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { username: 'testuser' },
+      });
+      expect(result).toEqual(mockUser);
+    });
+  });
+
+  describe('findByEmail', () => {
+    it('should return user by email', async () => {
+      prisma.user.findFirst.mockResolvedValue(mockUser);
+
+      const result = await service.findByEmail('test@example.com');
+
+      expect(prisma.user.findFirst).toHaveBeenCalledWith({
+        where: { email: 'test@example.com' },
+      });
+      expect(result).toEqual(mockUser);
+    });
+  });
+
+  describe('update', () => {
+    it('should return updated user without passwordHash', async () => {
+      const updated = { ...mockUserPublic, displayName: 'Updated' };
+      prisma.user.update.mockResolvedValue(updated);
+
+      const result = await service.update(USER_ID, { displayName: 'Updated' });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { displayName: 'Updated' },
+        omit: { passwordHash: true },
+      });
+      expect(result).toEqual(updated);
+    });
+  });
+
   describe('changePassword', () => {
     it('should throw UnauthorizedException when current password is wrong', async () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
@@ -125,6 +187,22 @@ describe('UsersService', () => {
       await expect(service.changePassword(USER_ID, 'wrongpassword', 'newpassword')).rejects.toThrow(
         UnauthorizedException
       );
+    });
+
+    it('should hash new password and update when current password is correct', async () => {
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      (bcrypt.hash as jest.Mock).mockResolvedValue('new_hashed_pw');
+      prisma.user.update.mockResolvedValue({ ...mockUser, passwordHash: 'new_hashed_pw' });
+
+      await service.changePassword(USER_ID, 'correctpassword', 'newpassword');
+
+      expect(bcrypt.compare).toHaveBeenCalledWith('correctpassword', mockUser.passwordHash);
+      expect(bcrypt.hash).toHaveBeenCalledWith('newpassword', 10);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { passwordHash: 'new_hashed_pw' },
+      });
     });
   });
 

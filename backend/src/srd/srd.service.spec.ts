@@ -196,6 +196,20 @@ describe('SrdService', () => {
 
   // ── Classes ─────────────────────────────────────────
 
+  describe('findAllClasses', () => {
+    it('returns all classes ordered by name', async () => {
+      const classes = [{ id: '1', name: 'Fighter' }];
+      prisma.srdClass.findMany.mockResolvedValue(classes);
+
+      const result = await service.findAllClasses();
+
+      expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
+        orderBy: { name: 'asc' },
+      });
+      expect(result).toEqual(classes);
+    });
+  });
+
   describe('findClass', () => {
     it('includes subclasses relation', async () => {
       prisma.srdClass.findUnique.mockResolvedValue({
@@ -214,6 +228,20 @@ describe('SrdService', () => {
   });
 
   // ── Races ───────────────────────────────────────────
+
+  describe('findAllRaces', () => {
+    it('returns all races ordered by name', async () => {
+      const races = [{ id: '1', name: 'Elf' }];
+      prisma.race.findMany.mockResolvedValue(races);
+
+      const result = await service.findAllRaces();
+
+      expect(prisma.race.findMany).toHaveBeenCalledWith({
+        orderBy: { name: 'asc' },
+      });
+      expect(result).toEqual(races);
+    });
+  });
 
   describe('findRace', () => {
     it('includes subraces relation', async () => {
@@ -381,6 +409,128 @@ describe('SrdService', () => {
         orderBy: { key: 'asc' },
       });
       expect(result).toEqual(mockRules);
+    });
+  });
+
+  // ── Find-by-ID methods ─────────────────────────────
+
+  describe('findSpell', () => {
+    it('returns spell by id', async () => {
+      const spell = { id: '1', name: 'Fireball' };
+      prisma.spell.findUnique.mockResolvedValue(spell);
+
+      const result = await service.findSpell('1');
+
+      expect(prisma.spell.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(spell);
+    });
+  });
+
+  describe('findMonster', () => {
+    it('returns monster by id', async () => {
+      const monster = { id: '1', name: 'Dragon' };
+      prisma.monster.findUnique.mockResolvedValue(monster);
+
+      const result = await service.findMonster('1');
+
+      expect(prisma.monster.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(monster);
+    });
+  });
+
+  describe('findItem', () => {
+    it('returns item by id', async () => {
+      const item = { id: '1', name: 'Healing Potion' };
+      prisma.item.findUnique.mockResolvedValue(item);
+
+      const result = await service.findItem('1');
+
+      expect(prisma.item.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(item);
+    });
+  });
+
+  describe('findSubclass', () => {
+    it('returns subclass by id', async () => {
+      const subclass = { id: '1', name: 'Champion' };
+      prisma.subclass.findUnique.mockResolvedValue(subclass);
+
+      const result = await service.findSubclass('1');
+
+      expect(prisma.subclass.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(subclass);
+    });
+  });
+
+  describe('findSubrace', () => {
+    it('returns subrace by id', async () => {
+      const subrace = { id: '1', name: 'High Elf' };
+      prisma.subrace.findUnique.mockResolvedValue(subrace);
+
+      const result = await service.findSubrace('1');
+
+      expect(prisma.subrace.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(subrace);
+    });
+  });
+
+  describe('findBackground', () => {
+    it('returns background by id', async () => {
+      const bg = { id: '1', name: 'Noble' };
+      prisma.background.findUnique.mockResolvedValue(bg);
+
+      const result = await service.findBackground('1');
+
+      expect(prisma.background.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(bg);
+    });
+  });
+
+  describe('findFeat', () => {
+    it('returns feat by id', async () => {
+      const feat = { id: '1', name: 'Tough' };
+      prisma.feat.findUnique.mockResolvedValue(feat);
+
+      const result = await service.findFeat('1');
+
+      expect(prisma.feat.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(feat);
+    });
+  });
+
+  describe('findCondition', () => {
+    it('returns condition by id', async () => {
+      const condition = { id: '1', name: 'Blinded' };
+      prisma.condition.findUnique.mockResolvedValue(condition);
+
+      const result = await service.findCondition('1');
+
+      expect(prisma.condition.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(condition);
+    });
+  });
+
+  describe('findSkill', () => {
+    it('returns skill by id', async () => {
+      const skill = { id: '1', name: 'Acrobatics' };
+      prisma.skill.findUnique.mockResolvedValue(skill);
+
+      const result = await service.findSkill('1');
+
+      expect(prisma.skill.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(skill);
+    });
+  });
+
+  describe('findLanguage', () => {
+    it('returns language by id', async () => {
+      const lang = { id: '1', name: 'Common' };
+      prisma.language.findUnique.mockResolvedValue(lang);
+
+      const result = await service.findLanguage('1');
+
+      expect(prisma.language.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(result).toEqual(lang);
     });
   });
 });
