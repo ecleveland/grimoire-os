@@ -43,6 +43,7 @@ export default function SpellListPage() {
   const [classFilter, setClassFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState('');
   const [schoolFilter, setSchoolFilter] = useState('');
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce search input
@@ -84,6 +85,15 @@ export default function SpellListPage() {
       })
       .finally(() => setLoading(false));
   }, [page, search, classFilter, levelFilter, schoolFilter]);
+
+  const toggle = (id: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const inputClass =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -145,33 +155,102 @@ export default function SpellListPage() {
         {total} spell{total !== 1 ? 's' : ''} found
       </p>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="space-y-4">
         {spells.map(s => (
           <div
             key={s.id}
-            className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+            className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
           >
-            <h3 className="font-semibold text-gray-900 dark:text-white">{s.name}</h3>
-            <div className="flex items-center gap-2 mt-1 text-sm text-gray-500 dark:text-gray-400">
-              <span>{s.level === 0 ? 'Cantrip' : `Level ${s.level}`}</span>
-              <span>&middot;</span>
-              <span>{s.school}</span>
-            </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-              <span className="font-medium">Casting Time:</span> {s.castingTime}
-            </p>
-            <div className="flex flex-wrap gap-1 mt-2">
-              {s.concentration && (
-                <span className="text-xs px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded">
-                  Concentration
-                </span>
-              )}
-              {s.ritual && (
-                <span className="text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
-                  Ritual
-                </span>
-              )}
-            </div>
+            <button
+              onClick={() => toggle(s.id)}
+              className="w-full flex items-center justify-between p-4 text-left"
+            >
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {s.name}
+                  {s.concentration && (
+                    <span className="ml-2 text-xs px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded">
+                      Concentration
+                    </span>
+                  )}
+                  {s.ritual && (
+                    <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
+                      Ritual
+                    </span>
+                  )}
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {s.level === 0 ? 'Cantrip' : `Level ${s.level}`} &middot; {s.school} &middot;{' '}
+                  {s.castingTime}
+                </p>
+              </div>
+              <span className="text-gray-400 text-lg">
+                {expanded.has(s.id) ? '\u2212' : '+'}
+              </span>
+            </button>
+            {expanded.has(s.id) && (
+              <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3 space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Range</h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{s.range}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Components
+                    </h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{s.components}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Duration
+                    </h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{s.duration}</p>
+                  </div>
+                </div>
+                {s.material && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Material
+                    </h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{s.material}</p>
+                  </div>
+                )}
+                <div>
+                  <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Description
+                  </h4>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
+                    {s.description}
+                  </p>
+                </div>
+                {s.higherLevels && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      At Higher Levels
+                    </h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{s.higherLevels}</p>
+                  </div>
+                )}
+                {s.classes.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Classes
+                    </h4>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {s.classes.map(c => (
+                        <span
+                          key={c}
+                          className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
+                        >
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>
