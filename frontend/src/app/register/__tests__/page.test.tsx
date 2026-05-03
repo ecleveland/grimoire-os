@@ -22,6 +22,8 @@ function getInput(labelText: RegExp): HTMLInputElement {
   return label.parentElement!.querySelector('input')! as HTMLInputElement;
 }
 
+const STRONG_PASSWORD = 'SecurePass1!23';
+
 async function fillRequiredFields(
   user: ReturnType<typeof userEvent.setup>,
   overrides: {
@@ -34,8 +36,8 @@ async function fillRequiredFields(
 ) {
   const {
     username = 'testuser',
-    password = 'password123',
-    confirmPassword = 'password123',
+    password = STRONG_PASSWORD,
+    confirmPassword = STRONG_PASSWORD,
     displayName,
     email,
   } = overrides;
@@ -102,15 +104,47 @@ describe('RegisterPage', () => {
   });
 
   describe('client-side validation', () => {
-    it('shows "Password must be at least 8 characters" for short password', async () => {
+    it('shows length error for a password shorter than 10 characters', async () => {
       const user = userEvent.setup();
       render(<RegisterPage />);
 
-      await fillRequiredFields(user, { password: 'short', confirmPassword: 'short' });
+      await fillRequiredFields(user, { password: 'Aa1!short', confirmPassword: 'Aa1!short' });
       await user.click(screen.getByRole('button', { name: /create account/i }));
 
       await waitFor(() => {
-        expect(screen.getByText('Password must be at least 8 characters')).toBeInTheDocument();
+        expect(screen.getByText('Password must be at least 10 characters')).toBeInTheDocument();
+      });
+      expect(mockRegister).not.toHaveBeenCalled();
+    });
+
+    it('shows uppercase error when password lacks an uppercase letter', async () => {
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+
+      const weak = 'lowercase1!23';
+      await fillRequiredFields(user, { password: weak, confirmPassword: weak });
+      await user.click(screen.getByRole('button', { name: /create account/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Password must contain at least one uppercase letter')
+        ).toBeInTheDocument();
+      });
+      expect(mockRegister).not.toHaveBeenCalled();
+    });
+
+    it('shows special-character error when password lacks one', async () => {
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+
+      const weak = 'NoSpecial1234';
+      await fillRequiredFields(user, { password: weak, confirmPassword: weak });
+      await user.click(screen.getByRole('button', { name: /create account/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Password must contain at least one special character')
+        ).toBeInTheDocument();
       });
       expect(mockRegister).not.toHaveBeenCalled();
     });
@@ -119,13 +153,23 @@ describe('RegisterPage', () => {
       const user = userEvent.setup();
       render(<RegisterPage />);
 
-      await fillRequiredFields(user, { password: 'password123', confirmPassword: 'different1' });
+      await fillRequiredFields(user, {
+        password: STRONG_PASSWORD,
+        confirmPassword: 'Different1!23',
+      });
       await user.click(screen.getByRole('button', { name: /create account/i }));
 
       await waitFor(() => {
         expect(screen.getByText('Passwords do not match')).toBeInTheDocument();
       });
       expect(mockRegister).not.toHaveBeenCalled();
+    });
+
+    it('renders the password requirements helper text', () => {
+      render(<RegisterPage />);
+      expect(
+        screen.getByText(/Must be at least 10 characters and include uppercase/i)
+      ).toBeInTheDocument();
     });
   });
 
@@ -137,8 +181,8 @@ describe('RegisterPage', () => {
 
       await fillRequiredFields(user, {
         username: 'newuser',
-        password: 'password123',
-        confirmPassword: 'password123',
+        password: STRONG_PASSWORD,
+        confirmPassword: STRONG_PASSWORD,
         displayName: 'New User',
         email: 'new@example.com',
       });
@@ -147,7 +191,7 @@ describe('RegisterPage', () => {
       await waitFor(() => {
         expect(mockRegister).toHaveBeenCalledWith({
           username: 'newuser',
-          password: 'password123',
+          password: STRONG_PASSWORD,
           displayName: 'New User',
           email: 'new@example.com',
         });
@@ -165,7 +209,7 @@ describe('RegisterPage', () => {
       await waitFor(() => {
         expect(mockRegister).toHaveBeenCalledWith({
           username: 'testuser',
-          password: 'password123',
+          password: STRONG_PASSWORD,
           displayName: undefined,
           email: undefined,
         });

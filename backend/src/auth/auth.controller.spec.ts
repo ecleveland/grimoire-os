@@ -55,18 +55,18 @@ describe('AuthController', () => {
 
       const result = await controller.register({
         username: 'newuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
         displayName: 'New User',
         email: 'new@example.com',
       });
 
       expect(usersService.create).toHaveBeenCalledWith({
         username: 'newuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
         displayName: 'New User',
         email: 'new@example.com',
       });
-      expect(authService.login).toHaveBeenCalledWith('newuser', 'securepass123');
+      expect(authService.login).toHaveBeenCalledWith('newuser', 'SecurePass1!23');
       expect(result).toEqual({ access_token: 'new-jwt' });
     });
 
@@ -76,12 +76,12 @@ describe('AuthController', () => {
 
       await controller.register({
         username: 'minuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
       });
 
       expect(usersService.create).toHaveBeenCalledWith({
         username: 'minuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
         displayName: undefined,
         email: undefined,
       });
@@ -93,7 +93,7 @@ describe('AuthController', () => {
       await expect(
         controller.register({
           username: 'taken',
-          password: 'securepass123',
+          password: 'SecurePass1!23',
         })
       ).rejects.toThrow('Username taken');
 

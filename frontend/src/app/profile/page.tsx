@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
 import { toast } from 'sonner';
 
 export default function ProfilePage() {
@@ -37,8 +38,9 @@ export default function ProfilePage() {
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters');
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      toast.error(passwordError);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -141,6 +143,9 @@ export default function ProfilePage() {
             required
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
           />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {PASSWORD_REQUIREMENTS_TEXT}
+          </p>
         </div>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

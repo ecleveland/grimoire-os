@@ -184,9 +184,7 @@ export default function SpellListPage() {
                   {s.castingTime}
                 </p>
               </div>
-              <span className="text-gray-400 text-lg">
-                {expanded.has(s.id) ? '\u2212' : '+'}
-              </span>
+              <span className="text-gray-400 text-lg">{expanded.has(s.id) ? '\u2212' : '+'}</span>
             </button>
             {expanded.has(s.id) && (
               <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3 space-y-3">

@@ -87,7 +87,7 @@ export const mockCharacter = {
 
 export const createUserDto = {
   username: 'newuser',
-  password: 'securepassword123',
+  password: 'SecurePass1!23',
   displayName: 'New User',
   email: 'new@example.com',
 };
