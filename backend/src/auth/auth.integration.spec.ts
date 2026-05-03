@@ -75,7 +75,7 @@ describe('Auth Integration', () => {
 
       const result = await controller.register({
         username: 'newuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
         displayName: 'New User',
         email: 'new@example.com',
       });
@@ -110,7 +110,7 @@ describe('Auth Integration', () => {
       await expect(
         controller.register({
           username: 'taken',
-          password: 'securepass123',
+          password: 'SecurePass1!23',
         })
       ).rejects.toThrow(ConflictException);
     });
@@ -123,12 +123,12 @@ describe('Auth Integration', () => {
 
       const registerResult = await controller.register({
         username: 'testuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
       });
 
       const loginResult = await controller.login({
         username: 'testuser',
-        password: 'securepass123',
+        password: 'SecurePass1!23',
       });
 
       // Both produce valid tokens

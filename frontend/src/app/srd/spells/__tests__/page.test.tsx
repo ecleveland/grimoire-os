@@ -51,8 +51,7 @@ const bless: SrdSpell = {
   range: '30 feet',
   components: 'V, S, M',
   duration: 'Up to 1 minute',
-  description:
-    'You bless up to three creatures of your choice within range.',
+  description: 'You bless up to three creatures of your choice within range.',
   classes: ['Cleric', 'Paladin'],
   ritual: false,
   concentration: true,
