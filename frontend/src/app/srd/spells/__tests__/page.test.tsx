@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SpellListPage from '../page';
 import type { SrdSpell, PaginatedResponse } from '@/lib/types';
@@ -81,7 +81,6 @@ function makePaginatedResponse(spells: SrdSpell[]): PaginatedResponse<SrdSpell> 
     total: spells.length,
     page: 1,
     lastPage: 1,
-    limit: 20,
   };
 }
 
@@ -319,6 +318,69 @@ describe('SpellListPage', () => {
       await user.click(screen.getByText('Prestidigitation'));
 
       expect(screen.queryByText('Material')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('focus preservation across debounced refetch', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    async function setupWithPendingRefetch(initial: SrdSpell[]) {
+      mockApiFetch.mockReset();
+      mockApiFetch.mockResolvedValueOnce(makePaginatedResponse(initial));
+
+      let resolveRefetch!: (v: PaginatedResponse<SrdSpell>) => void;
+      mockApiFetch.mockImplementationOnce(
+        () =>
+          new Promise<PaginatedResponse<SrdSpell>>(resolve => {
+            resolveRefetch = resolve;
+          })
+      );
+
+      render(<SpellListPage />);
+      const input = await screen.findByPlaceholderText('Search spells...');
+
+      vi.useFakeTimers();
+      return { input, resolveRefetch: () => resolveRefetch(makePaginatedResponse([fireball])) };
+    }
+
+    it('keeps the search input mounted while a refetch is in flight', async () => {
+      const { input, resolveRefetch } = await setupWithPendingRefetch([fireball, bless]);
+
+      input.focus();
+      fireEvent.change(input, { target: { value: 'f' } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(350);
+      });
+
+      expect(screen.getByPlaceholderText('Search spells...')).toBe(input);
+      expect(document.activeElement).toBe(input);
+
+      await act(async () => {
+        resolveRefetch();
+        await vi.runAllTimersAsync();
+      });
+    });
+
+    it('keeps the search input mounted when refetch is triggered with no current results', async () => {
+      const { input, resolveRefetch } = await setupWithPendingRefetch([]);
+
+      input.focus();
+      fireEvent.change(input, { target: { value: 'x' } });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(350);
+      });
+
+      expect(screen.getByPlaceholderText('Search spells...')).toBe(input);
+      expect(document.activeElement).toBe(input);
+
+      await act(async () => {
+        resolveRefetch();
+        await vi.runAllTimersAsync();
+      });
     });
   });
 });
