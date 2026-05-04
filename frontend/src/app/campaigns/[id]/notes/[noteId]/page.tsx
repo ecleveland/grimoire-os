@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import type { Note } from '@/lib/types';
+import FormField from '@/components/FormField';
 
 const visibilityColors: Record<string, string> = {
   private: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
@@ -73,9 +74,6 @@ export default function NoteDetailPage() {
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   if (!note) return <div className="text-gray-500 dark:text-gray-400">Note not found.</div>;
 
-  const inputClass =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
-
   if (editing) {
     return (
       <div className="max-w-2xl mx-auto">
@@ -84,66 +82,43 @@ export default function NoteDetailPage() {
           onSubmit={handleSave}
           className="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700"
         >
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Title
-            </label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Content
-            </label>
-            <textarea
-              rows={8}
-              required
-              value={content}
-              onChange={e => setContent(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Visibility
-            </label>
-            <select
-              value={visibility}
-              onChange={e => setVisibility(e.target.value as Note['visibility'])}
-              className={inputClass}
-            >
-              <option value="private">Private</option>
-              <option value="party">Party</option>
-              <option value="dm_only">DM Only</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Session Number
-            </label>
-            <input
-              type="number"
-              value={sessionNumber}
-              onChange={e => setSessionNumber(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Tags (comma-separated)
-            </label>
-            <input
-              type="text"
-              value={tags}
-              onChange={e => setTags(e.target.value)}
-              className={inputClass}
-            />
-          </div>
+          <FormField
+            label="Title"
+            type="text"
+            required
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+          />
+          <FormField
+            as="textarea"
+            label="Content"
+            rows={8}
+            required
+            value={content}
+            onChange={e => setContent(e.target.value)}
+          />
+          <FormField
+            as="select"
+            label="Visibility"
+            value={visibility}
+            onChange={e => setVisibility(e.target.value as Note['visibility'])}
+          >
+            <option value="private">Private</option>
+            <option value="party">Party</option>
+            <option value="dm_only">DM Only</option>
+          </FormField>
+          <FormField
+            label="Session Number"
+            type="number"
+            value={sessionNumber}
+            onChange={e => setSessionNumber(e.target.value)}
+          />
+          <FormField
+            label="Tags (comma-separated)"
+            type="text"
+            value={tags}
+            onChange={e => setTags(e.target.value)}
+          />
           <div className="flex gap-3">
             <button
               type="submit"

@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { Character, AbilityScores } from '@/lib/types';
+import FormField from '@/components/FormField';
 
 const abilityKeys: (keyof AbilityScores)[] = [
   'strength',
@@ -106,87 +107,54 @@ export default function EditCharacterPage() {
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
-  const inputClass =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
-
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Edit Character</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Basic Info</h2>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Name <span className="text-red-500">*</span>
-            </label>
-            <input
+          <FormField
+            label="Name"
+            type="text"
+            required
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              label="Race"
               type="text"
-              required
-              value={name}
-              onChange={e => setName(e.target.value)}
-              className={inputClass}
+              value={race}
+              onChange={e => setRace(e.target.value)}
+            />
+            <FormField
+              label="Class"
+              type="text"
+              value={charClass}
+              onChange={e => setCharClass(e.target.value)}
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Race
-              </label>
-              <input
-                type="text"
-                value={race}
-                onChange={e => setRace(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Class
-              </label>
-              <input
-                type="text"
-                value={charClass}
-                onChange={e => setCharClass(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-          </div>
           <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Level
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={level}
-                onChange={e => setLevel(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Background
-              </label>
-              <input
-                type="text"
-                value={background}
-                onChange={e => setBackground(e.target.value)}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Alignment
-              </label>
-              <input
-                type="text"
-                value={alignment}
-                onChange={e => setAlignment(e.target.value)}
-                className={inputClass}
-              />
-            </div>
+            <FormField
+              label="Level"
+              type="number"
+              min={1}
+              max={20}
+              value={level}
+              onChange={e => setLevel(Number(e.target.value))}
+            />
+            <FormField
+              label="Background"
+              type="text"
+              value={background}
+              onChange={e => setBackground(e.target.value)}
+            />
+            <FormField
+              label="Alignment"
+              type="text"
+              value={alignment}
+              onChange={e => setAlignment(e.target.value)}
+            />
           </div>
         </div>
 
@@ -208,7 +176,7 @@ export default function EditCharacterPage() {
                   onChange={e =>
                     setAbilityScores(prev => ({ ...prev, [key]: Number(e.target.value) }))
                   }
-                  className={inputClass + ' text-center'}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-center"
                 />
               </div>
             ))}
@@ -218,50 +186,30 @@ export default function EditCharacterPage() {
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Combat Stats</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Max HP
-              </label>
-              <input
-                type="number"
-                value={maxHp}
-                onChange={e => setMaxHp(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Current HP
-              </label>
-              <input
-                type="number"
-                value={currentHp}
-                onChange={e => setCurrentHp(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Armor Class
-              </label>
-              <input
-                type="number"
-                value={armorClass}
-                onChange={e => setArmorClass(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Speed
-              </label>
-              <input
-                type="number"
-                value={speed}
-                onChange={e => setSpeed(Number(e.target.value))}
-                className={inputClass}
-              />
-            </div>
+            <FormField
+              label="Max HP"
+              type="number"
+              value={maxHp}
+              onChange={e => setMaxHp(Number(e.target.value))}
+            />
+            <FormField
+              label="Current HP"
+              type="number"
+              value={currentHp}
+              onChange={e => setCurrentHp(Number(e.target.value))}
+            />
+            <FormField
+              label="Armor Class"
+              type="number"
+              value={armorClass}
+              onChange={e => setArmorClass(Number(e.target.value))}
+            />
+            <FormField
+              label="Speed"
+              type="number"
+              value={speed}
+              onChange={e => setSpeed(Number(e.target.value))}
+            />
           </div>
         </div>
 
