@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
 import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
 import { toast } from 'sonner';
+import FormField from '@/components/FormField';
 
 export default function ProfilePage() {
   const { user, refreshProfile } = useAuth();
@@ -73,39 +74,25 @@ export default function ProfilePage() {
         className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-4"
       >
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Account Details</h2>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Username
-          </label>
-          <input
-            type="text"
-            value={user?.username || ''}
-            disabled
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Display Name
-          </label>
-          <input
-            type="text"
-            value={displayName}
-            onChange={e => setDisplayName(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Email
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-        </div>
+        <FormField
+          label="Username"
+          type="text"
+          value={user?.username || ''}
+          disabled
+          onChange={() => {}}
+        />
+        <FormField
+          label="Display Name"
+          type="text"
+          value={displayName}
+          onChange={e => setDisplayName(e.target.value)}
+        />
+        <FormField
+          label="Email"
+          type="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+        />
         <button
           type="submit"
           disabled={loading}
@@ -120,45 +107,28 @@ export default function ProfilePage() {
         className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 space-y-4"
       >
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Change Password</h2>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Current Password
-          </label>
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={e => setCurrentPassword(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            New Password
-          </label>
-          <input
-            type="password"
-            value={newPassword}
-            onChange={e => setNewPassword(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {PASSWORD_REQUIREMENTS_TEXT}
-          </p>
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Confirm New Password
-          </label>
-          <input
-            type="password"
-            value={confirmPassword}
-            onChange={e => setConfirmPassword(e.target.value)}
-            required
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          />
-        </div>
+        <FormField
+          label="Current Password"
+          type="password"
+          value={currentPassword}
+          onChange={e => setCurrentPassword(e.target.value)}
+          required
+        />
+        <FormField
+          label="New Password"
+          type="password"
+          value={newPassword}
+          onChange={e => setNewPassword(e.target.value)}
+          required
+          helperText={PASSWORD_REQUIREMENTS_TEXT}
+        />
+        <FormField
+          label="Confirm New Password"
+          type="password"
+          value={confirmPassword}
+          onChange={e => setConfirmPassword(e.target.value)}
+          required
+        />
         <button
           type="submit"
           disabled={pwLoading}

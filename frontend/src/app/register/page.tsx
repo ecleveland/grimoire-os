@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
+import FormField from '@/components/FormField';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -54,67 +55,40 @@ export default function RegisterPage() {
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Username
-            </label>
-            <input
-              type="text"
-              value={username}
-              onChange={e => setUsername(e.target.value)}
-              required
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Display Name
-            </label>
-            <input
-              type="text"
-              value={displayName}
-              onChange={e => setDisplayName(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Email
-            </label>
-            <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Password
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {PASSWORD_REQUIREMENTS_TEXT}
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Confirm Password
-            </label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-          </div>
+          <FormField
+            label="Username"
+            type="text"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            required
+          />
+          <FormField
+            label="Display Name"
+            type="text"
+            value={displayName}
+            onChange={e => setDisplayName(e.target.value)}
+          />
+          <FormField
+            label="Email"
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+          <FormField
+            label="Password"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            required
+            helperText={PASSWORD_REQUIREMENTS_TEXT}
+          />
+          <FormField
+            label="Confirm Password"
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            required
+          />
           <button
             type="submit"
             disabled={loading}

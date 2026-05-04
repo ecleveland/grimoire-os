@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { Combatant, Encounter } from '@/lib/types';
+import FormField from '@/components/FormField';
 
 const emptyCombatant: Combatant = {
   name: '',
@@ -60,15 +61,12 @@ export default function NewEncounterPage() {
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Create Encounter</h1>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Encounter Name <span className="text-red-500">*</span>
-          </label>
-          <input
+          <FormField
+            label="Encounter Name"
             type="text"
             required
             value={name}
             onChange={e => setName(e.target.value)}
-            className={inputClass}
           />
         </div>
 

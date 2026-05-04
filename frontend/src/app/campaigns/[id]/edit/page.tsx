@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { Campaign } from '@/lib/types';
+import FormField from '@/components/FormField';
 
 export default function EditCampaignPage() {
   const { id } = useParams<{ id: string }>();
@@ -57,9 +58,6 @@ export default function EditCampaignPage() {
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
-  const inputClass =
-    'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
-
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Edit Campaign</h1>
@@ -67,54 +65,36 @@ export default function EditCampaignPage() {
         onSubmit={handleSubmit}
         className="space-y-5 bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700"
       >
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Name <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={e => setName(e.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Description
-          </label>
-          <textarea
-            rows={3}
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Setting
-          </label>
-          <input
-            type="text"
-            value={setting}
-            onChange={e => setSetting(e.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Status
-          </label>
-          <select
-            value={status}
-            onChange={e => setStatus(e.target.value as Campaign['status'])}
-            className={inputClass}
-          >
-            <option value="active">Active</option>
-            <option value="paused">Paused</option>
-            <option value="completed">Completed</option>
-          </select>
-        </div>
+        <FormField
+          label="Name"
+          type="text"
+          required
+          value={name}
+          onChange={e => setName(e.target.value)}
+        />
+        <FormField
+          as="textarea"
+          label="Description"
+          rows={3}
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+        />
+        <FormField
+          label="Setting"
+          type="text"
+          value={setting}
+          onChange={e => setSetting(e.target.value)}
+        />
+        <FormField
+          as="select"
+          label="Status"
+          value={status}
+          onChange={e => setStatus(e.target.value as Campaign['status'])}
+        >
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+          <option value="completed">Completed</option>
+        </FormField>
         <div className="flex items-center justify-between pt-2">
           <div className="flex gap-3">
             <button
