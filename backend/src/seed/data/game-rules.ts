@@ -96,4 +96,46 @@ export const srdGameRules = [
       '30': 10,
     },
   },
+  {
+    category: 'skills',
+    key: 'ability-mappings',
+    value: {
+      Athletics: 'Strength',
+      Acrobatics: 'Dexterity',
+      'Sleight of Hand': 'Dexterity',
+      Stealth: 'Dexterity',
+      Arcana: 'Intelligence',
+      History: 'Intelligence',
+      Investigation: 'Intelligence',
+      Nature: 'Intelligence',
+      Religion: 'Intelligence',
+      'Animal Handling': 'Wisdom',
+      Insight: 'Wisdom',
+      Medicine: 'Wisdom',
+      Perception: 'Wisdom',
+      Survival: 'Wisdom',
+      Deception: 'Charisma',
+      Intimidation: 'Charisma',
+      Performance: 'Charisma',
+      Persuasion: 'Charisma',
+    },
+  },
+  {
+    category: 'skills',
+    key: 'bonus-formula',
+    value: {
+      formula: 'ability_modifier + (isProficient ? proficiency_bonus : 0)',
+      description:
+        'Skill check bonus equals the governing ability modifier plus proficiency bonus if proficient',
+    },
+  },
+  {
+    category: 'skills',
+    key: 'passive-check-formula',
+    value: {
+      formula: '10 + ability_modifier + (isProficient ? proficiency_bonus : 0)',
+      description:
+        'Passive check score equals 10 plus the skill bonus. Applies to Perception, Insight, and Investigation',
+    },
+  },
 ];

@@ -64,4 +64,80 @@ describe('SRD game rules seed data', () => {
       expect(table['30']).toBe(10);
     });
   });
+
+  describe('skills / ability-mappings', () => {
+    it('exists', () => {
+      expect(getRule('skills', 'ability-mappings')).toBeDefined();
+    });
+
+    it('maps each of the 18 SRD skills to its governing ability', () => {
+      const rule = getRule('skills', 'ability-mappings')!;
+      expect(rule.value).toEqual({
+        Athletics: 'Strength',
+        Acrobatics: 'Dexterity',
+        'Sleight of Hand': 'Dexterity',
+        Stealth: 'Dexterity',
+        Arcana: 'Intelligence',
+        History: 'Intelligence',
+        Investigation: 'Intelligence',
+        Nature: 'Intelligence',
+        Religion: 'Intelligence',
+        'Animal Handling': 'Wisdom',
+        Insight: 'Wisdom',
+        Medicine: 'Wisdom',
+        Perception: 'Wisdom',
+        Survival: 'Wisdom',
+        Deception: 'Charisma',
+        Intimidation: 'Charisma',
+        Performance: 'Charisma',
+        Persuasion: 'Charisma',
+      });
+    });
+
+    it('uses only the six SRD abilities as values', () => {
+      const mappings = getRule('skills', 'ability-mappings')!.value as unknown as Record<
+        string,
+        string
+      >;
+      const validAbilities = new Set([
+        'Strength',
+        'Dexterity',
+        'Constitution',
+        'Intelligence',
+        'Wisdom',
+        'Charisma',
+      ]);
+      for (const ability of Object.values(mappings)) {
+        expect(validAbilities.has(ability)).toBe(true);
+      }
+    });
+  });
+
+  describe('skills / bonus-formula', () => {
+    it('exists', () => {
+      expect(getRule('skills', 'bonus-formula')).toBeDefined();
+    });
+
+    it('encodes the skill check bonus formula and a description', () => {
+      const rule = getRule('skills', 'bonus-formula')!;
+      expect(rule.value).toEqual({
+        formula: 'ability_modifier + (isProficient ? proficiency_bonus : 0)',
+        description: expect.stringMatching(/skill|proficien/i),
+      });
+    });
+  });
+
+  describe('skills / passive-check-formula', () => {
+    it('exists', () => {
+      expect(getRule('skills', 'passive-check-formula')).toBeDefined();
+    });
+
+    it('encodes the passive check formula and a description', () => {
+      const rule = getRule('skills', 'passive-check-formula')!;
+      expect(rule.value).toEqual({
+        formula: '10 + ability_modifier + (isProficient ? proficiency_bonus : 0)',
+        description: expect.stringMatching(/passive|10/i),
+      });
+    });
+  });
 });
