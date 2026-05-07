@@ -486,4 +486,93 @@ describe('SRD game rules seed data', () => {
       }
     });
   });
+
+  describe('experience-points / level-thresholds', () => {
+    it('exists', () => {
+      expect(getRule('experience-points', 'level-thresholds')).toBeDefined();
+    });
+
+    it('covers character levels 1 through 20', () => {
+      const table = getTable('experience-points', 'level-thresholds');
+      for (let level = 1; level <= 20; level++) {
+        expect(table[String(level)]).toBeDefined();
+      }
+    });
+
+    it('starts at 0 XP for level 1', () => {
+      const table = getTable('experience-points', 'level-thresholds');
+      expect(table['1']).toBe(0);
+    });
+
+    it('matches the SRD XP-by-level thresholds at key boundaries', () => {
+      const table = getTable('experience-points', 'level-thresholds');
+      expect(table['2']).toBe(300);
+      expect(table['3']).toBe(900);
+      expect(table['5']).toBe(6500);
+      expect(table['10']).toBe(64000);
+      expect(table['15']).toBe(165000);
+      expect(table['20']).toBe(355000);
+    });
+
+    it('is strictly increasing from level 2 onward', () => {
+      const table = getTable('experience-points', 'level-thresholds');
+      for (let level = 2; level <= 20; level++) {
+        expect(table[String(level)]).toBeGreaterThan(table[String(level - 1)]);
+      }
+    });
+  });
+
+  describe('experience-points / encounter-difficulty', () => {
+    type EncounterDifficulty = {
+      description: string;
+      thresholds: Record<string, { easy: number; medium: number; hard: number; deadly: number }>;
+    };
+
+    function getEncounterDifficulty(): EncounterDifficulty {
+      return getRule('experience-points', 'encounter-difficulty')!
+        .value as unknown as EncounterDifficulty;
+    }
+
+    it('exists', () => {
+      expect(getRule('experience-points', 'encounter-difficulty')).toBeDefined();
+    });
+
+    it('has a description and a thresholds map', () => {
+      const value = getEncounterDifficulty();
+      expect(typeof value.description).toBe('string');
+      expect(value.description.length).toBeGreaterThan(0);
+      expect(typeof value.thresholds).toBe('object');
+    });
+
+    it('covers character levels 1 through 20 with all four difficulty ratings', () => {
+      const { thresholds } = getEncounterDifficulty();
+      for (let level = 1; level <= 20; level++) {
+        const entry = thresholds[String(level)];
+        expect(entry).toBeDefined();
+        expect(typeof entry.easy).toBe('number');
+        expect(typeof entry.medium).toBe('number');
+        expect(typeof entry.hard).toBe('number');
+        expect(typeof entry.deadly).toBe('number');
+      }
+    });
+
+    it('matches the SRD encounter difficulty thresholds at key boundaries', () => {
+      const { thresholds } = getEncounterDifficulty();
+      expect(thresholds['1']).toEqual({ easy: 25, medium: 50, hard: 75, deadly: 100 });
+      expect(thresholds['2']).toEqual({ easy: 50, medium: 100, hard: 150, deadly: 200 });
+      expect(thresholds['5']).toEqual({ easy: 250, medium: 500, hard: 750, deadly: 1100 });
+      expect(thresholds['10']).toEqual({ easy: 600, medium: 1200, hard: 1900, deadly: 2800 });
+      expect(thresholds['20']).toEqual({ easy: 2800, medium: 5700, hard: 8500, deadly: 12700 });
+    });
+
+    it('orders ratings within each level: easy < medium < hard < deadly', () => {
+      const { thresholds } = getEncounterDifficulty();
+      for (let level = 1; level <= 20; level++) {
+        const t = thresholds[String(level)];
+        expect(t.easy).toBeLessThan(t.medium);
+        expect(t.medium).toBeLessThan(t.hard);
+        expect(t.hard).toBeLessThan(t.deadly);
+      }
+    });
+  });
 });
