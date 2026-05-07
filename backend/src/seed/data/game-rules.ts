@@ -479,4 +479,28 @@ export const srdGameRules = [
       },
     },
   },
+  {
+    category: 'resting',
+    key: 'short-rest',
+    value: {
+      duration: 'At least 1 hour',
+      hitDiceRecovery:
+        'Spend one or more Hit Dice to regain hit points (roll die + CON modifier per die spent)',
+      description:
+        'A period of downtime, at least 1 hour long, during which a character does nothing more strenuous than eating, drinking, reading, and tending to wounds',
+    },
+  },
+  {
+    category: 'resting',
+    key: 'long-rest',
+    value: {
+      duration: 'At least 8 hours (6 sleeping, 2 light activity)',
+      hpRecovery: 'Regain all lost hit points',
+      hitDiceRecovery: 'Regain spent Hit Dice up to half total (minimum 1)',
+      spellSlotRecovery: 'Regain all expended spell slots',
+      exhaustionRecovery: 'Reduce exhaustion level by 1 (if fed)',
+      frequency: 'Once per 24-hour period',
+      description: 'A period of extended downtime, at least 8 hours long',
+    },
+  },
 ];
