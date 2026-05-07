@@ -321,4 +321,169 @@ describe('SRD game rules seed data', () => {
       expect(multiclass).toEqual(fullCaster);
     });
   });
+
+  describe.each([
+    ['pattern-2-3-4', 2, 3, 4],
+    ['pattern-3-4-5', 3, 4, 5],
+    ['pattern-4-5-6', 4, 5, 6],
+  ])('cantrips-known / %s', (key, base, atL4, atL10) => {
+    it('exists', () => {
+      expect(getRule('cantrips-known', key)).toBeDefined();
+    });
+
+    it('covers character levels 1 through 20', () => {
+      const table = getTable('cantrips-known', key);
+      for (let level = 1; level <= 20; level++) {
+        expect(table[String(level)]).toBeDefined();
+      }
+    });
+
+    it('steps from base at L1 → +1 at L4 → +2 at L10', () => {
+      const table = getTable('cantrips-known', key);
+      expect(table['1']).toBe(base);
+      expect(table['3']).toBe(base);
+      expect(table['4']).toBe(atL4);
+      expect(table['9']).toBe(atL4);
+      expect(table['10']).toBe(atL10);
+      expect(table['20']).toBe(atL10);
+    });
+
+    it('is monotonically non-decreasing', () => {
+      const table = getTable('cantrips-known', key);
+      for (let level = 2; level <= 20; level++) {
+        expect(table[String(level)]).toBeGreaterThanOrEqual(table[String(level - 1)]);
+      }
+    });
+  });
+
+  describe('spells-known / bard', () => {
+    it('exists', () => {
+      expect(getRule('spells-known', 'bard')).toBeDefined();
+    });
+
+    it('covers character levels 1 through 20', () => {
+      const table = getTable('spells-known', 'bard');
+      for (let level = 1; level <= 20; level++) {
+        expect(table[String(level)]).toBeDefined();
+      }
+    });
+
+    it('matches the SRD bard spells-known progression including Magical Secrets bumps', () => {
+      const table = getTable('spells-known', 'bard');
+      expect(table['1']).toBe(4);
+      expect(table['2']).toBe(5);
+      expect(table['9']).toBe(12);
+      expect(table['10']).toBe(14);
+      expect(table['13']).toBe(16);
+      expect(table['14']).toBe(18);
+      expect(table['17']).toBe(20);
+      expect(table['18']).toBe(22);
+      expect(table['20']).toBe(22);
+    });
+
+    it('is monotonically non-decreasing', () => {
+      const table = getTable('spells-known', 'bard');
+      for (let level = 2; level <= 20; level++) {
+        expect(table[String(level)]).toBeGreaterThanOrEqual(table[String(level - 1)]);
+      }
+    });
+  });
+
+  describe('spells-known / ranger', () => {
+    it('exists', () => {
+      expect(getRule('spells-known', 'ranger')).toBeDefined();
+    });
+
+    it('covers character levels 1 through 20', () => {
+      const table = getTable('spells-known', 'ranger');
+      for (let level = 1; level <= 20; level++) {
+        expect(table[String(level)]).toBeDefined();
+      }
+    });
+
+    it('has zero spells known at level 1 (ranger gains spellcasting at level 2)', () => {
+      const table = getTable('spells-known', 'ranger');
+      expect(table['1']).toBe(0);
+      expect(table['2']).toBe(2);
+    });
+
+    it('matches the SRD ranger progression at key boundaries', () => {
+      const table = getTable('spells-known', 'ranger');
+      expect(table['5']).toBe(4);
+      expect(table['9']).toBe(6);
+      expect(table['13']).toBe(8);
+      expect(table['17']).toBe(10);
+      expect(table['20']).toBe(11);
+    });
+
+    it('is monotonically non-decreasing', () => {
+      const table = getTable('spells-known', 'ranger');
+      for (let level = 2; level <= 20; level++) {
+        expect(table[String(level)]).toBeGreaterThanOrEqual(table[String(level - 1)]);
+      }
+    });
+  });
+
+  describe('spells-known / sorcerer', () => {
+    it('exists', () => {
+      expect(getRule('spells-known', 'sorcerer')).toBeDefined();
+    });
+
+    it('covers character levels 1 through 20', () => {
+      const table = getTable('spells-known', 'sorcerer');
+      for (let level = 1; level <= 20; level++) {
+        expect(table[String(level)]).toBeDefined();
+      }
+    });
+
+    it('matches the SRD sorcerer progression at key boundaries', () => {
+      const table = getTable('spells-known', 'sorcerer');
+      expect(table['1']).toBe(2);
+      expect(table['2']).toBe(3);
+      expect(table['9']).toBe(10);
+      expect(table['11']).toBe(12);
+      expect(table['15']).toBe(14);
+      expect(table['17']).toBe(15);
+      expect(table['20']).toBe(15);
+    });
+
+    it('is monotonically non-decreasing', () => {
+      const table = getTable('spells-known', 'sorcerer');
+      for (let level = 2; level <= 20; level++) {
+        expect(table[String(level)]).toBeGreaterThanOrEqual(table[String(level - 1)]);
+      }
+    });
+  });
+
+  describe('spells-known / warlock', () => {
+    it('exists', () => {
+      expect(getRule('spells-known', 'warlock')).toBeDefined();
+    });
+
+    it('covers character levels 1 through 20', () => {
+      const table = getTable('spells-known', 'warlock');
+      for (let level = 1; level <= 20; level++) {
+        expect(table[String(level)]).toBeDefined();
+      }
+    });
+
+    it('matches the SRD warlock progression at key boundaries', () => {
+      const table = getTable('spells-known', 'warlock');
+      expect(table['1']).toBe(2);
+      expect(table['2']).toBe(3);
+      expect(table['9']).toBe(10);
+      expect(table['10']).toBe(10);
+      expect(table['11']).toBe(11);
+      expect(table['17']).toBe(14);
+      expect(table['19']).toBe(15);
+      expect(table['20']).toBe(15);
+    });
+
+    it('is monotonically non-decreasing', () => {
+      const table = getTable('spells-known', 'warlock');
+      for (let level = 2; level <= 20; level++) {
+        expect(table[String(level)]).toBeGreaterThanOrEqual(table[String(level - 1)]);
+      }
+    });
+  });
 });
