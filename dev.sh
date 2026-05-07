@@ -23,6 +23,9 @@ echo "PostgreSQL is ready."
 echo "Running Prisma migrations..."
 cd "$ROOT_DIR/backend" && npx prisma migrate dev --skip-generate
 
+echo "Seeding SRD data (idempotent)..."
+cd "$ROOT_DIR/backend" && npm run seed
+
 echo "Starting backend (port 3001)..."
 cd "$ROOT_DIR/backend" && npm run start:dev &
 
