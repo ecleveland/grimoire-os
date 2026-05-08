@@ -44,3 +44,11 @@ cd frontend && npm test           # Unit tests
 ## API Docs
 
 Swagger UI available at http://localhost:3001/api/docs when backend is running.
+
+## Dev Server Management
+
+Before invoking `./dev.sh`:
+
+- Kill stale processes on the dev ports: `lsof -ti:3000,3001 | xargs kill -9 2>/dev/null`
+- Verify Docker is running and the `postgres` container is up (`docker compose ps`)
+- Verify `.env` exists in the repo root and `backend/.env` is present; copy from `.env.example` if missing
