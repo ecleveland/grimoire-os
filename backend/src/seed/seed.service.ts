@@ -42,7 +42,6 @@ export class SeedService {
       toolProficiencies: b.toolProficiencies,
       languages: b.languages,
       equipment: b.equipment,
-      feature: b.feature ?? Prisma.JsonNull,
       personalityTraits: b.personalityTraits,
       ideals: b.ideals,
       bonds: b.bonds,
@@ -103,14 +102,100 @@ export class SeedService {
       });
       console.log(`  Game Rules: ${srdGameRules.length} entries`);
 
-      // Parent tables for FK relations
-      await tx.srdClass.createMany({ data: srdClasses, skipDuplicates: true });
-      console.log(`  Classes: ${srdClasses.length} entries`);
+      // Parent tables for FK relations — strip embedded feature/trait arrays
+      // before insert; those now live in their own tables (created below).
+      const classRows = srdClasses.map(({ features: _features, ...rest }) => rest);
+      await tx.srdClass.createMany({ data: classRows, skipDuplicates: true });
+      console.log(`  Classes: ${classRows.length} entries`);
 
-      await tx.race.createMany({ data: races, skipDuplicates: true });
-      console.log(`  Races: ${races.length} entries`);
+      const raceRows = races.map(({ traits: _traits, ...rest }) => rest);
+      await tx.race.createMany({ data: raceRows, skipDuplicates: true });
+      console.log(`  Races: ${raceRows.length} entries`);
 
-      // FK-dependent tables
+      // ── Class features ───────────────────────────────
+      const classNames = srdClasses.map(c => c.name);
+      const classRecords = await tx.srdClass.findMany({
+        where: { name: { in: classNames } },
+        select: { id: true, name: true },
+      });
+      const classIdByName = new Map(classRecords.map(c => [c.name, c.id]));
+      const classFeatureRows: Prisma.ClassFeatureCreateManyInput[] = [];
+      for (const cls of srdClasses) {
+        const classId = classIdByName.get(cls.name);
+        if (!classId) continue;
+        for (const f of cls.features ?? []) {
+          classFeatureRows.push({
+            classId,
+            name: f.name,
+            level: f.level,
+            description: f.description,
+          });
+        }
+      }
+      if (classFeatureRows.length) {
+        await tx.classFeature.createMany({
+          data: classFeatureRows,
+          skipDuplicates: true,
+        });
+      }
+      console.log(`  Class Features: ${classFeatureRows.length} entries`);
+
+      // ── Race traits ──────────────────────────────────
+      const raceNames = races.map(r => r.name);
+      const raceRecords = await tx.race.findMany({
+        where: { name: { in: raceNames } },
+        select: { id: true, name: true },
+      });
+      const raceIdByName = new Map(raceRecords.map(r => [r.name, r.id]));
+      const raceTraitRows: Prisma.RaceTraitCreateManyInput[] = [];
+      for (const race of races) {
+        const raceId = raceIdByName.get(race.name);
+        if (!raceId) continue;
+        for (const t of race.traits ?? []) {
+          raceTraitRows.push({
+            raceId,
+            name: t.name,
+            description: t.description,
+          });
+        }
+      }
+      if (raceTraitRows.length) {
+        await tx.raceTrait.createMany({
+          data: raceTraitRows,
+          skipDuplicates: true,
+        });
+      }
+      console.log(`  Race Traits: ${raceTraitRows.length} entries`);
+
+      // ── Background features ──────────────────────────
+      const backgroundNames = srdBackgrounds.map(b => b.name);
+      const backgroundRecords = await tx.background.findMany({
+        where: { name: { in: backgroundNames } },
+        select: { id: true, name: true },
+      });
+      const backgroundIdByName = new Map(backgroundRecords.map(b => [b.name, b.id]));
+      const backgroundFeatureRows: Prisma.BackgroundFeatureCreateManyInput[] = [];
+      for (const bg of srdBackgrounds) {
+        const feature = bg.feature as { name: string; description: string } | null;
+        if (!feature) continue;
+        const backgroundId = backgroundIdByName.get(bg.name);
+        if (!backgroundId) continue;
+        backgroundFeatureRows.push({
+          backgroundId,
+          name: feature.name,
+          description: feature.description,
+        });
+      }
+      if (backgroundFeatureRows.length) {
+        await tx.backgroundFeature.createMany({
+          data: backgroundFeatureRows,
+          skipDuplicates: true,
+        });
+      }
+      console.log(`  Background Features: ${backgroundFeatureRows.length} entries`);
+
+      // ── Subclasses + their features ──────────────────
+      let subclassFeatureCount = 0;
       for (const sc of srdSubclasses) {
         const parent = await tx.srdClass.findUnique({
           where: { name: sc.className },
@@ -119,26 +204,38 @@ export class SeedService {
           console.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
           continue;
         }
-        await tx.subclass.upsert({
+        const subclass = await tx.subclass.upsert({
           where: { name: sc.name },
           create: {
             name: sc.name,
             classId: parent.id,
             description: sc.description,
-            features: sc.features,
             spellList: sc.spellList,
             spellcasting: sc.spellcasting,
           },
           update: {
             classId: parent.id,
             description: sc.description,
-            features: sc.features,
             spellList: sc.spellList,
             spellcasting: sc.spellcasting,
           },
         });
+        const features: Prisma.SubclassFeatureCreateManyInput[] = (sc.features ?? []).map(f => ({
+          subclassId: subclass.id,
+          name: f.name,
+          level: f.level,
+          description: f.description,
+        }));
+        if (features.length) {
+          await tx.subclassFeature.createMany({
+            data: features,
+            skipDuplicates: true,
+          });
+          subclassFeatureCount += features.length;
+        }
       }
       console.log(`  Subclasses: ${srdSubclasses.length} entries`);
+      console.log(`  Subclass Features: ${subclassFeatureCount} entries`);
 
       for (const sr of srdSubraces) {
         const parent = await tx.race.findUnique({

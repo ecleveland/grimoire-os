@@ -197,32 +197,39 @@ describe('SrdService', () => {
   // ── Classes ─────────────────────────────────────────
 
   describe('findAllClasses', () => {
-    it('returns all classes ordered by name', async () => {
-      const classes = [{ id: '1', name: 'Fighter' }];
+    it('returns all classes ordered by name with features included', async () => {
+      const classes = [{ id: '1', name: 'Fighter', features: [] }];
       prisma.srdClass.findMany.mockResolvedValue(classes);
 
       const result = await service.findAllClasses();
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         orderBy: { name: 'asc' },
+        include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
       expect(result).toEqual(classes);
     });
   });
 
   describe('findClass', () => {
-    it('includes subclasses relation', async () => {
+    it('includes subclasses and features (with subclass features) ordered', async () => {
       prisma.srdClass.findUnique.mockResolvedValue({
         id: '1',
         name: 'Fighter',
         subclasses: [],
+        features: [],
       });
 
       await service.findClass('1');
 
       expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
         where: { id: '1' },
-        include: { subclasses: true },
+        include: {
+          subclasses: {
+            include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
+          },
+          features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] },
+        },
       });
     });
   });
@@ -230,32 +237,37 @@ describe('SrdService', () => {
   // ── Races ───────────────────────────────────────────
 
   describe('findAllRaces', () => {
-    it('returns all races ordered by name', async () => {
-      const races = [{ id: '1', name: 'Elf' }];
+    it('returns all races ordered by name with traits included', async () => {
+      const races = [{ id: '1', name: 'Elf', traits: [] }];
       prisma.race.findMany.mockResolvedValue(races);
 
       const result = await service.findAllRaces();
 
       expect(prisma.race.findMany).toHaveBeenCalledWith({
         orderBy: { name: 'asc' },
+        include: { traits: { orderBy: { name: 'asc' } } },
       });
       expect(result).toEqual(races);
     });
   });
 
   describe('findRace', () => {
-    it('includes subraces relation', async () => {
+    it('includes subraces and traits relations', async () => {
       prisma.race.findUnique.mockResolvedValue({
         id: '1',
         name: 'Elf',
         subraces: [],
+        traits: [],
       });
 
       await service.findRace('1');
 
       expect(prisma.race.findUnique).toHaveBeenCalledWith({
         where: { id: '1' },
-        include: { subraces: true },
+        include: {
+          subraces: true,
+          traits: { orderBy: { name: 'asc' } },
+        },
       });
     });
   });
@@ -263,7 +275,7 @@ describe('SrdService', () => {
   // ── Subclasses ──────────────────────────────────────
 
   describe('searchSubclasses', () => {
-    it('passes empty where when no filter', async () => {
+    it('passes empty where when no filter, with features included', async () => {
       prisma.subclass.findMany.mockResolvedValue([]);
 
       await service.searchSubclasses();
@@ -271,10 +283,11 @@ describe('SrdService', () => {
       expect(prisma.subclass.findMany).toHaveBeenCalledWith({
         where: {},
         orderBy: { name: 'asc' },
+        include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
     });
 
-    it('filters by classId', async () => {
+    it('filters by classId, with features included', async () => {
       prisma.subclass.findMany.mockResolvedValue([]);
 
       await service.searchSubclasses('class-1');
@@ -282,6 +295,7 @@ describe('SrdService', () => {
       expect(prisma.subclass.findMany).toHaveBeenCalledWith({
         where: { classId: 'class-1' },
         orderBy: { name: 'asc' },
+        include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
     });
   });
@@ -451,13 +465,16 @@ describe('SrdService', () => {
   });
 
   describe('findSubclass', () => {
-    it('returns subclass by id', async () => {
-      const subclass = { id: '1', name: 'Champion' };
+    it('returns subclass by id with features included', async () => {
+      const subclass = { id: '1', name: 'Champion', features: [] };
       prisma.subclass.findUnique.mockResolvedValue(subclass);
 
       const result = await service.findSubclass('1');
 
-      expect(prisma.subclass.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(prisma.subclass.findUnique).toHaveBeenCalledWith({
+        where: { id: '1' },
+        include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
+      });
       expect(result).toEqual(subclass);
     });
   });
@@ -475,13 +492,16 @@ describe('SrdService', () => {
   });
 
   describe('findBackground', () => {
-    it('returns background by id', async () => {
-      const bg = { id: '1', name: 'Noble' };
+    it('returns background by id with features included', async () => {
+      const bg = { id: '1', name: 'Noble', features: [] };
       prisma.background.findUnique.mockResolvedValue(bg);
 
       const result = await service.findBackground('1');
 
-      expect(prisma.background.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(prisma.background.findUnique).toHaveBeenCalledWith({
+        where: { id: '1' },
+        include: { features: { orderBy: { name: 'asc' } } },
+      });
       expect(result).toEqual(bg);
     });
   });
@@ -531,6 +551,123 @@ describe('SrdService', () => {
 
       expect(prisma.language.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
       expect(result).toEqual(lang);
+    });
+  });
+
+  // ── Features (cross-parent search) ──────────────────
+
+  describe('searchFeatures', () => {
+    beforeEach(() => {
+      prisma.classFeature.findMany.mockResolvedValue([]);
+      prisma.classFeature.count.mockResolvedValue(0);
+      prisma.subclassFeature.findMany.mockResolvedValue([]);
+      prisma.subclassFeature.count.mockResolvedValue(0);
+      prisma.raceTrait.findMany.mockResolvedValue([]);
+      prisma.raceTrait.count.mockResolvedValue(0);
+      prisma.backgroundFeature.findMany.mockResolvedValue([]);
+      prisma.backgroundFeature.count.mockResolvedValue(0);
+    });
+
+    it('queries all four feature tables when no parentType filter', async () => {
+      await service.searchFeatures({});
+
+      expect(prisma.classFeature.findMany).toHaveBeenCalled();
+      expect(prisma.subclassFeature.findMany).toHaveBeenCalled();
+      expect(prisma.raceTrait.findMany).toHaveBeenCalled();
+      expect(prisma.backgroundFeature.findMany).toHaveBeenCalled();
+    });
+
+    it('queries only the requested parentType', async () => {
+      await service.searchFeatures({ parentType: 'class' });
+
+      expect(prisma.classFeature.findMany).toHaveBeenCalled();
+      expect(prisma.subclassFeature.findMany).not.toHaveBeenCalled();
+      expect(prisma.raceTrait.findMany).not.toHaveBeenCalled();
+      expect(prisma.backgroundFeature.findMany).not.toHaveBeenCalled();
+    });
+
+    it('filters by name with case-insensitive contains', async () => {
+      await service.searchFeatures({ q: 'rage' });
+
+      const call = prisma.classFeature.findMany.mock.calls[0][0];
+      expect(call.where).toMatchObject({
+        name: { contains: 'rage', mode: 'insensitive' },
+      });
+    });
+
+    it('filters by parentId on the matching parent column', async () => {
+      await service.searchFeatures({ parentType: 'class', parentId: 'cls-1' });
+
+      const call = prisma.classFeature.findMany.mock.calls[0][0];
+      expect(call.where).toMatchObject({ classId: 'cls-1' });
+    });
+
+    it('returns discriminated rows tagged with kind and parent info', async () => {
+      prisma.classFeature.findMany.mockResolvedValue([
+        {
+          id: 'cf-1',
+          name: 'Rage',
+          level: 1,
+          description: 'Bonus action.',
+          classId: 'cls-1',
+          class: { id: 'cls-1', name: 'Barbarian' },
+        },
+      ]);
+      prisma.classFeature.count.mockResolvedValue(1);
+
+      const result = await service.searchFeatures({ parentType: 'class' });
+
+      expect(result.data[0]).toMatchObject({
+        kind: 'class',
+        id: 'cf-1',
+        name: 'Rage',
+        level: 1,
+        description: 'Bonus action.',
+        parent: { id: 'cls-1', name: 'Barbarian' },
+      });
+      expect(result.total).toBe(1);
+    });
+
+    it('paginates by combined total across all tables', async () => {
+      prisma.classFeature.count.mockResolvedValue(3);
+      prisma.subclassFeature.count.mockResolvedValue(2);
+      prisma.raceTrait.count.mockResolvedValue(4);
+      prisma.backgroundFeature.count.mockResolvedValue(1);
+
+      const result = await service.searchFeatures({});
+
+      expect(result.total).toBe(10);
+      expect(result.page).toBe(1);
+      expect(result.lastPage).toBe(1);
+    });
+
+    it('respects page and limit defaults (page 1, limit 20) on the response shape', async () => {
+      const result = await service.searchFeatures({});
+
+      expect(result.page).toBe(1);
+      expect(result.lastPage).toBe(1);
+      expect(result.data.length).toBeLessThanOrEqual(20);
+    });
+
+    it('paginates the merged in-memory list by page/limit slice', async () => {
+      const makeRow = (i: number) => ({
+        id: `cf-${i}`,
+        name: `Feat ${String(i).padStart(2, '0')}`,
+        level: 1,
+        description: 'd',
+        classId: 'cls-1',
+        class: { id: 'cls-1', name: 'Barb' },
+      });
+      prisma.classFeature.findMany.mockResolvedValue([1, 2, 3, 4, 5].map(makeRow));
+      prisma.classFeature.count.mockResolvedValue(5);
+
+      const result = await service.searchFeatures({ parentType: 'class', page: 2, limit: 2 });
+
+      expect(result.total).toBe(5);
+      expect(result.page).toBe(2);
+      expect(result.lastPage).toBe(3);
+      expect(result.data).toHaveLength(2);
+      expect((result.data[0] as { name: string }).name).toBe('Feat 03');
     });
   });
 });

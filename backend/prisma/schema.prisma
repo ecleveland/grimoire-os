@@ -290,7 +290,6 @@ model SrdClass {
   toolProficiencies    String[]
   numSkillChoices      Int        @default(2)
   description          String?
-  features             Json?
   spellcasting         Json?
   equipmentChoices     Json?
   multiclassing        Json?
@@ -298,6 +297,7 @@ model SrdClass {
   source               String     @default("SRD 5.2.1")
 
   subclasses Subclass[]
+  features   ClassFeature[]
 
   @@map("srd_classes")
 }
@@ -308,7 +308,6 @@ model Race {
   speed           Int
   size            String
   abilityBonuses  Json?
-  traits          Json?
   languages       String[]
   description     String?
   age             String?
@@ -317,6 +316,7 @@ model Race {
   source          String    @default("SRD 5.2.1")
 
   subraces Subrace[]
+  traits   RaceTrait[]
 
   @@map("races")
 }
@@ -326,12 +326,12 @@ model Subclass {
   name        String  @unique
   classId     String
   description String?
-  features    Json?
   spellList     Json?
   spellcasting  Json?
   source        String  @default("SRD 5.2.1")
 
-  srdClass SrdClass @relation(fields: [classId], references: [id])
+  srdClass SrdClass          @relation(fields: [classId], references: [id])
+  features SubclassFeature[]
 
   @@map("subclasses")
 }
@@ -358,14 +358,73 @@ model Background {
   toolProficiencies  String[]
   languages         Int      @default(0)
   equipment         String?
-  feature           Json?
   personalityTraits String[]
   ideals            String[]
   bonds             String[]
   flaws             String[]
   source            String   @default("SRD 5.2.1")
 
+  features BackgroundFeature[]
+
   @@map("backgrounds")
+}
+
+model ClassFeature {
+  id          String @id @default(uuid())
+  name        String
+  level       Int
+  description String
+  classId     String
+
+  class SrdClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, name])
+  @@index([name])
+  @@index([classId])
+  @@map("class_features")
+}
+
+model SubclassFeature {
+  id          String @id @default(uuid())
+  name        String
+  level       Int
+  description String
+  subclassId  String
+
+  subclass Subclass @relation(fields: [subclassId], references: [id], onDelete: Cascade)
+
+  @@unique([subclassId, name])
+  @@index([name])
+  @@index([subclassId])
+  @@map("subclass_features")
+}
+
+model RaceTrait {
+  id          String @id @default(uuid())
+  name        String
+  description String
+  raceId      String
+
+  race Race @relation(fields: [raceId], references: [id], onDelete: Cascade)
+
+  @@unique([raceId, name])
+  @@index([name])
+  @@index([raceId])
+  @@map("race_traits")
+}
+
+model BackgroundFeature {
+  id           String @id @default(uuid())
+  name         String
+  description  String
+  backgroundId String
+
+  background Background @relation(fields: [backgroundId], references: [id], onDelete: Cascade)
+
+  @@unique([backgroundId, name])
+  @@index([name])
+  @@index([backgroundId])
+  @@map("background_features")
 }
 
 model Feat {

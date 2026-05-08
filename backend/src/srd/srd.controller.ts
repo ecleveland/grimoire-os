@@ -4,6 +4,7 @@ import { SrdService } from './srd.service';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
+import { QueryFeaturesDto } from './dto/query-features.dto';
 
 @ApiTags('SRD')
 @Controller('srd')
@@ -190,5 +191,15 @@ export class SrdController {
   @ApiOperation({ summary: 'Get game rules by category' })
   findRulesByCategory(@Param('category') category: string) {
     return this.srdService.findRulesByCategory(category);
+  }
+
+  // ── Features (cross-parent search) ──────────────────
+
+  @Get('features')
+  @ApiOperation({
+    summary: 'Search class/subclass/race/background features',
+  })
+  searchFeatures(@Query() query: QueryFeaturesDto) {
+    return this.srdService.searchFeatures(query);
   }
 }
