@@ -55,6 +55,18 @@ export class QuerySearchDto extends PaginationDto {
   @IsBooleanString()
   hasPrerequisite?: string;
 
+  @ApiPropertyOptional({ description: 'Feat category filter (only applies when kind=feat)' })
+  @IsOptional()
+  @IsString()
+  category?: string;
+
+  @ApiPropertyOptional({
+    description: 'When "true", only repeatable feats. When "false", non-repeatable.',
+  })
+  @IsOptional()
+  @IsBooleanString()
+  repeatable?: string;
+
   // ── Feature sub-filters ───────────────────────────────
   @ApiPropertyOptional({ enum: ['class', 'subclass', 'race', 'background'] })
   @IsOptional()

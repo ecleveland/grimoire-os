@@ -6,12 +6,8 @@ const categories = [
   {
     href: '/srd/search',
     title: 'Search',
-    description: 'Unified search across spells, feats, and class/race/background features.',
-  },
-  {
-    href: '/srd/spells',
-    title: 'Spells',
-    description: 'Browse spells by class, level, and school of magic.',
+    description:
+      'Find spells, feats, and class/race/background features in one place. Filter by class, level, school, category, prerequisite, or source.',
   },
   {
     href: '/srd/monsters',

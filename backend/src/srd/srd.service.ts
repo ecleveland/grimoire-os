@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Spell, Feat } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
@@ -7,23 +8,18 @@ import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
 
+export type UnifiedFeatureData = {
+  id: string;
+  name: string;
+  level?: number;
+  description: string;
+  parent: { kind: FeatureParentType; id: string; name: string };
+};
+
 export type UnifiedSearchHit =
-  | { kind: 'spell'; id: string; name: string; level: number; school: string; description: string }
-  | {
-      kind: 'feat';
-      id: string;
-      name: string;
-      prerequisite: string | null;
-      description: string;
-    }
-  | {
-      kind: 'feature';
-      id: string;
-      name: string;
-      level?: number;
-      description: string;
-      parent: { kind: FeatureParentType; id: string; name: string };
-    };
+  | { kind: 'spell'; data: Spell }
+  | { kind: 'feat'; data: Feat }
+  | { kind: 'feature'; data: UnifiedFeatureData };
 
 const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
 const SUBCLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
@@ -433,7 +429,7 @@ export class SrdService {
     const allHits = results.flatMap(r => r.hits);
     const total = results.reduce((sum, r) => sum + r.total, 0);
 
-    allHits.sort((a, b) => a.name.localeCompare(b.name));
+    allHits.sort((a, b) => a.data.name.localeCompare(b.data.name));
     const start = (page - 1) * limit;
     const data = allHits.slice(start, start + limit);
 
@@ -461,16 +457,7 @@ export class SrdService {
 
     return {
       total,
-      hits: rows.map(
-        (r): UnifiedSearchHit => ({
-          kind: 'spell',
-          id: r.id,
-          name: r.name,
-          level: r.level,
-          school: r.school,
-          description: r.description,
-        })
-      ),
+      hits: rows.map((r): UnifiedSearchHit => ({ kind: 'spell', data: r })),
     };
   }
 
@@ -486,6 +473,9 @@ export class SrdService {
     }
     if (dto.hasPrerequisite === 'true') where.prerequisite = { not: null };
     else if (dto.hasPrerequisite === 'false') where.prerequisite = null;
+    if (dto.category) where.category = dto.category;
+    if (dto.repeatable === 'true') where.repeatable = true;
+    else if (dto.repeatable === 'false') where.repeatable = false;
 
     const [rows, total] = await Promise.all([
       this.prisma.feat.findMany({ where, orderBy: { name: 'asc' } }),
@@ -494,15 +484,7 @@ export class SrdService {
 
     return {
       total,
-      hits: rows.map(
-        (r): UnifiedSearchHit => ({
-          kind: 'feat',
-          id: r.id,
-          name: r.name,
-          prerequisite: r.prerequisite ?? null,
-          description: r.description ?? '',
-        })
-      ),
+      hits: rows.map((r): UnifiedSearchHit => ({ kind: 'feat', data: r })),
     };
   }
 
@@ -551,11 +533,13 @@ export class SrdService {
         hits: rows.map(
           (r): UnifiedSearchHit => ({
             kind: 'feature',
-            id: r.id,
-            name: r.name,
-            level: r.level,
-            description: r.description,
-            parent: { kind: 'class', id: r.class.id, name: r.class.name },
+            data: {
+              id: r.id,
+              name: r.name,
+              level: r.level,
+              description: r.description,
+              parent: { kind: 'class', id: r.class.id, name: r.class.name },
+            },
           })
         ),
       };
@@ -574,11 +558,13 @@ export class SrdService {
         hits: rows.map(
           (r): UnifiedSearchHit => ({
             kind: 'feature',
-            id: r.id,
-            name: r.name,
-            level: r.level,
-            description: r.description,
-            parent: { kind: 'subclass', id: r.subclass.id, name: r.subclass.name },
+            data: {
+              id: r.id,
+              name: r.name,
+              level: r.level,
+              description: r.description,
+              parent: { kind: 'subclass', id: r.subclass.id, name: r.subclass.name },
+            },
           })
         ),
       };
@@ -597,10 +583,12 @@ export class SrdService {
         hits: rows.map(
           (r): UnifiedSearchHit => ({
             kind: 'feature',
-            id: r.id,
-            name: r.name,
-            description: r.description,
-            parent: { kind: 'race', id: r.race.id, name: r.race.name },
+            data: {
+              id: r.id,
+              name: r.name,
+              description: r.description,
+              parent: { kind: 'race', id: r.race.id, name: r.race.name },
+            },
           })
         ),
       };
@@ -618,10 +606,12 @@ export class SrdService {
       hits: rows.map(
         (r): UnifiedSearchHit => ({
           kind: 'feature',
-          id: r.id,
-          name: r.name,
-          description: r.description,
-          parent: { kind: 'background', id: r.background.id, name: r.background.name },
+          data: {
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            parent: { kind: 'background', id: r.background.id, name: r.background.name },
+          },
         })
       ),
     };

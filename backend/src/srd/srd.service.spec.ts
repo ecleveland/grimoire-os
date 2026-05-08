@@ -806,51 +806,52 @@ describe('SrdService', () => {
       expect(call.where).toMatchObject({ classId: 'cls-1' });
     });
 
-    it('returns spell hits tagged with kind=spell', async () => {
-      prisma.spell.findMany.mockResolvedValue([
-        {
-          id: 'sp-1',
-          name: 'Fireball',
-          level: 3,
-          school: 'Evocation',
-          description: 'A bright streak.',
-        },
-      ]);
-      prisma.spell.count.mockResolvedValue(1);
-
-      const result = await service.search({ types: ['spell'] });
-
-      expect(result.data[0]).toMatchObject({
-        kind: 'spell',
+    it('returns spell hits as {kind, data} with full Spell payload', async () => {
+      const fullSpell = {
         id: 'sp-1',
         name: 'Fireball',
         level: 3,
         school: 'Evocation',
-      });
+        castingTime: '1 action',
+        range: '150 feet',
+        components: 'V, S, M',
+        duration: 'Instantaneous',
+        description: 'A bright streak.',
+        classes: ['Sorcerer', 'Wizard'],
+        ritual: false,
+        concentration: false,
+        material: 'A tiny ball of bat guano and sulfur',
+        higherLevels: 'Higher slot increases damage by 1d6.',
+        source: 'SRD 5.2.1',
+      };
+      prisma.spell.findMany.mockResolvedValue([fullSpell]);
+      prisma.spell.count.mockResolvedValue(1);
+
+      const result = await service.search({ types: ['spell'] });
+
+      expect(result.data[0]).toEqual({ kind: 'spell', data: fullSpell });
     });
 
-    it('returns feat hits tagged with kind=feat', async () => {
-      prisma.feat.findMany.mockResolvedValue([
-        {
-          id: 'feat-1',
-          name: 'Sharpshooter',
-          prerequisite: null,
-          description: '',
-        },
-      ]);
+    it('returns feat hits as {kind, data} with full Feat payload (incl. category, repeatable, benefits)', async () => {
+      const fullFeat = {
+        id: 'feat-1',
+        name: 'Sharpshooter',
+        prerequisite: null,
+        description: 'You have mastered ranged weapons.',
+        benefits: ['No long-range disadvantage', 'Ignore half/three-quarters cover'],
+        category: 'General',
+        repeatable: false,
+        source: 'SRD 5.2.1',
+      };
+      prisma.feat.findMany.mockResolvedValue([fullFeat]);
       prisma.feat.count.mockResolvedValue(1);
 
       const result = await service.search({ types: ['feat'] });
 
-      expect(result.data[0]).toMatchObject({
-        kind: 'feat',
-        id: 'feat-1',
-        name: 'Sharpshooter',
-        prerequisite: null,
-      });
+      expect(result.data[0]).toEqual({ kind: 'feat', data: fullFeat });
     });
 
-    it('returns feature hits tagged with kind=feature with parent metadata', async () => {
+    it('returns feature hits as {kind, data} with parent metadata', async () => {
       prisma.classFeature.findMany.mockResolvedValue([
         {
           id: 'cf-1',
@@ -865,13 +866,37 @@ describe('SrdService', () => {
 
       const result = await service.search({ types: ['feature'], parentType: 'class' });
 
-      expect(result.data[0]).toMatchObject({
+      expect(result.data[0]).toEqual({
         kind: 'feature',
-        id: 'cf-1',
-        name: 'Sneak Attack',
-        level: 1,
-        parent: { kind: 'class', id: 'cls-1', name: 'Rogue' },
+        data: {
+          id: 'cf-1',
+          name: 'Sneak Attack',
+          level: 1,
+          description: 'Deals extra damage.',
+          parent: { kind: 'class', id: 'cls-1', name: 'Rogue' },
+        },
       });
+    });
+
+    it('applies feat category filter when provided', async () => {
+      await service.search({ types: ['feat'], category: 'Origin' });
+
+      const featCall = prisma.feat.findMany.mock.calls[0][0];
+      expect(featCall.where).toMatchObject({ category: 'Origin' });
+    });
+
+    it('applies feat repeatable=true filter as boolean', async () => {
+      await service.search({ types: ['feat'], repeatable: 'true' });
+
+      const featCall = prisma.feat.findMany.mock.calls[0][0];
+      expect(featCall.where).toMatchObject({ repeatable: true });
+    });
+
+    it('applies feat repeatable=false filter as boolean', async () => {
+      await service.search({ types: ['feat'], repeatable: 'false' });
+
+      const featCall = prisma.feat.findMany.mock.calls[0][0];
+      expect(featCall.where).toMatchObject({ repeatable: false });
     });
 
     it('combines totals across all queried tables', async () => {
@@ -887,7 +912,7 @@ describe('SrdService', () => {
       expect(result.total).toBe(10);
     });
 
-    it('sorts merged results alphabetically by name and slices by page/limit', async () => {
+    it('sorts merged results alphabetically by data.name and slices by page/limit', async () => {
       prisma.spell.findMany.mockResolvedValue([
         { id: 's1', name: 'Bless', level: 1, school: 'Enchantment', description: '' },
         { id: 's2', name: 'Fireball', level: 3, school: 'Evocation', description: '' },
@@ -903,8 +928,8 @@ describe('SrdService', () => {
       expect(result.total).toBe(3);
       expect(result.lastPage).toBe(2);
       expect(result.data).toHaveLength(2);
-      expect((result.data[0] as { name: string }).name).toBe('Alert');
-      expect((result.data[1] as { name: string }).name).toBe('Bless');
+      expect((result.data[0] as { data: { name: string } }).data.name).toBe('Alert');
+      expect((result.data[1] as { data: { name: string } }).data.name).toBe('Bless');
     });
   });
 });

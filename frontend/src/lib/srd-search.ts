@@ -1,29 +1,19 @@
+import type { SrdSpell, SrdFeat } from '@/lib/types';
+
 export type FeatureParentKind = 'class' | 'subclass' | 'race' | 'background';
 
+export type UnifiedFeatureData = {
+  id: string;
+  name: string;
+  level?: number;
+  description: string;
+  parent: { kind: FeatureParentKind; id: string; name: string };
+};
+
 export type UnifiedSearchHit =
-  | {
-      kind: 'spell';
-      id: string;
-      name: string;
-      level: number;
-      school: string;
-      description: string;
-    }
-  | {
-      kind: 'feat';
-      id: string;
-      name: string;
-      prerequisite: string | null;
-      description: string;
-    }
-  | {
-      kind: 'feature';
-      id: string;
-      name: string;
-      level?: number;
-      description: string;
-      parent: { kind: FeatureParentKind; id: string; name: string };
-    };
+  | { kind: 'spell'; data: SrdSpell }
+  | { kind: 'feat'; data: SrdFeat }
+  | { kind: 'feature'; data: UnifiedFeatureData };
 
 export type SearchKind = 'spell' | 'feat' | 'feature';
 
@@ -41,18 +31,7 @@ export const KIND_LABEL_PLURAL: Record<SearchKind, string> = {
   feature: 'Features',
 };
 
-export function detailHrefFor(hit: UnifiedSearchHit): string {
-  switch (hit.kind) {
-    case 'spell':
-      return `/srd/spells#${hit.id}`;
-    case 'feat':
-      return `/srd/feats#${hit.id}`;
-    case 'feature':
-      return parentHref(hit.parent);
-  }
-}
-
-function parentHref(parent: { kind: FeatureParentKind; id: string }): string {
+export function parentDetailHref(parent: { kind: FeatureParentKind; id: string }): string {
   switch (parent.kind) {
     case 'class':
       return `/srd/classes/${parent.id}`;

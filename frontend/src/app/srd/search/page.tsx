@@ -4,20 +4,32 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import type { PaginatedResponse } from '@/lib/types';
+import type { PaginatedResponse, SrdSpell, SrdFeat } from '@/lib/types';
 import {
   ALL_SEARCH_KINDS,
   KIND_LABEL,
   KIND_LABEL_PLURAL,
   SearchKind,
+  UnifiedFeatureData,
   UnifiedSearchHit,
-  detailHrefFor,
+  parentDetailHref,
 } from '@/lib/srd-search';
 import SearchBox from '@/components/SearchBox';
 import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
 
 const LIMIT = 20;
+
+const SRD_CLASSES = [
+  'Bard',
+  'Cleric',
+  'Druid',
+  'Paladin',
+  'Ranger',
+  'Sorcerer',
+  'Warlock',
+  'Wizard',
+];
 
 const SPELL_SCHOOLS = [
   'Abjuration',
@@ -32,6 +44,8 @@ const SPELL_SCHOOLS = [
 
 const SPELL_LEVELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+const FEAT_CATEGORIES = ['Origin', 'General', 'Fighting Style', 'Epic Boon'];
+
 const FEATURE_PARENT_TYPES: {
   value: 'class' | 'subclass' | 'race' | 'background';
   label: string;
@@ -45,22 +59,30 @@ const FEATURE_PARENT_TYPES: {
 const inputClass =
   'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
 
+function hitId(hit: UnifiedSearchHit): string {
+  return hit.data.id;
+}
+
 export default function SrdSearchPage() {
   const [hits, setHits] = useState<UnifiedSearchHit[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
   const [enabledKinds, setEnabledKinds] = useState<Set<SearchKind>>(new Set(ALL_SEARCH_KINDS));
 
   // Spell sub-filters
+  const [spellClass, setSpellClass] = useState('');
   const [spellLevel, setSpellLevel] = useState('');
   const [spellSchool, setSpellSchool] = useState('');
 
   // Feat sub-filters
+  const [featCategory, setFeatCategory] = useState('');
   const [featPrereq, setFeatPrereq] = useState('');
+  const [featRepeatable, setFeatRepeatable] = useState('');
 
   // Feature sub-filters
   const [featureParent, setFeatureParent] = useState('');
@@ -84,11 +106,14 @@ export default function SrdSearchPage() {
     const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
     const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
     if (onlySpells) {
+      if (spellClass) params.set('class', spellClass);
       if (spellLevel !== '') params.set('level', spellLevel);
       if (spellSchool) params.set('school', spellSchool);
     }
     if (onlyFeats) {
+      if (featCategory) params.set('category', featCategory);
       if (featPrereq) params.set('hasPrerequisite', featPrereq);
+      if (featRepeatable) params.set('repeatable', featRepeatable);
     }
     if (onlyFeatures) {
       if (featureParent) params.set('parentType', featureParent);
@@ -112,7 +137,18 @@ export default function SrdSearchPage() {
     return () => {
       cancelled = true;
     };
-  }, [page, search, enabledKinds, spellLevel, spellSchool, featPrereq, featureParent]);
+  }, [
+    page,
+    search,
+    enabledKinds,
+    spellClass,
+    spellLevel,
+    spellSchool,
+    featCategory,
+    featPrereq,
+    featRepeatable,
+    featureParent,
+  ]);
 
   const toggleKind = (kind: SearchKind) => {
     setEnabledKinds(prev => {
@@ -127,20 +163,17 @@ export default function SrdSearchPage() {
     setPage(1);
   };
 
-  const updateSpellLevel = (value: string) => {
-    setSpellLevel(value);
-    setPage(1);
+  const toggleExpand = (key: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
-  const updateSpellSchool = (value: string) => {
-    setSpellSchool(value);
-    setPage(1);
-  };
-  const updateFeatPrereq = (value: string) => {
-    setFeatPrereq(value);
-    setPage(1);
-  };
-  const updateFeatureParent = (value: string) => {
-    setFeatureParent(value);
+
+  const resetPage = (setter: (v: string) => void) => (value: string) => {
+    setter(value);
     setPage(1);
   };
 
@@ -188,11 +221,27 @@ export default function SrdSearchPage() {
           {onlySpells && (
             <>
               <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Spell Class</span>
+                <select
+                  aria-label="Spell Class"
+                  value={spellClass}
+                  onChange={e => resetPage(setSpellClass)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">All Classes</option>
+                  {SRD_CLASSES.map(c => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
                 <span className="block mb-1 text-gray-600 dark:text-gray-400">Spell Level</span>
                 <select
                   aria-label="Spell Level"
                   value={spellLevel}
-                  onChange={e => updateSpellLevel(e.target.value)}
+                  onChange={e => resetPage(setSpellLevel)(e.target.value)}
                   className={inputClass}
                 >
                   <option value="">All Levels</option>
@@ -208,7 +257,7 @@ export default function SrdSearchPage() {
                 <select
                   aria-label="Spell School"
                   value={spellSchool}
-                  onChange={e => updateSpellSchool(e.target.value)}
+                  onChange={e => resetPage(setSpellSchool)(e.target.value)}
                   className={inputClass}
                 >
                   <option value="">All Schools</option>
@@ -222,19 +271,50 @@ export default function SrdSearchPage() {
             </>
           )}
           {onlyFeats && (
-            <label className="block text-sm">
-              <span className="block mb-1 text-gray-600 dark:text-gray-400">Prerequisite</span>
-              <select
-                aria-label="Prerequisite"
-                value={featPrereq}
-                onChange={e => updateFeatPrereq(e.target.value)}
-                className={inputClass}
-              >
-                <option value="">Any</option>
-                <option value="true">Has prerequisite</option>
-                <option value="false">No prerequisite</option>
-              </select>
-            </label>
+            <>
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Feat Category</span>
+                <select
+                  aria-label="Feat Category"
+                  value={featCategory}
+                  onChange={e => resetPage(setFeatCategory)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">All Categories</option>
+                  {FEAT_CATEGORIES.map(c => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Prerequisite</span>
+                <select
+                  aria-label="Prerequisite"
+                  value={featPrereq}
+                  onChange={e => resetPage(setFeatPrereq)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Any</option>
+                  <option value="true">Has prerequisite</option>
+                  <option value="false">No prerequisite</option>
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Repeatable</span>
+                <select
+                  aria-label="Repeatable"
+                  value={featRepeatable}
+                  onChange={e => resetPage(setFeatRepeatable)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Any</option>
+                  <option value="true">Repeatable</option>
+                  <option value="false">Single-use</option>
+                </select>
+              </label>
+            </>
           )}
           {onlyFeatures && (
             <label className="block text-sm">
@@ -242,7 +322,7 @@ export default function SrdSearchPage() {
               <select
                 aria-label="Parent Type"
                 value={featureParent}
-                onChange={e => updateFeatureParent(e.target.value)}
+                onChange={e => resetPage(setFeatureParent)(e.target.value)}
                 className={inputClass}
               >
                 <option value="">All Sources</option>
@@ -260,9 +340,13 @@ export default function SrdSearchPage() {
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{countLabel}</p>
 
       <div className={`space-y-3 ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
-        {hits.map(hit => (
-          <ResultCard key={`${hit.kind}-${hit.id}`} hit={hit} />
-        ))}
+        {hits.map(hit => {
+          const key = `${hit.kind}-${hitId(hit)}`;
+          const isOpen = expanded.has(key);
+          return (
+            <ResultCard key={key} hit={hit} expanded={isOpen} onToggle={() => toggleExpand(key)} />
+          );
+        })}
       </div>
 
       <Pagination
@@ -276,33 +360,164 @@ export default function SrdSearchPage() {
   );
 }
 
-function ResultCard({ hit }: { hit: UnifiedSearchHit }) {
+function ResultCard({
+  hit,
+  expanded,
+  onToggle,
+}: {
+  hit: UnifiedSearchHit;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <Link
-      href={detailHrefFor(hit)}
-      className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
-    >
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{hit.name}</h2>
-        <span className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded">
-          {KIND_LABEL[hit.kind]}
-        </span>
-      </div>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
-    </Link>
+    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-start justify-between gap-3 p-4 text-left"
+      >
+        <div className="flex-1">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            {hit.data.name}
+            {hit.kind === 'spell' && hit.data.concentration && (
+              <span className="ml-2 text-xs px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded">
+                Concentration
+              </span>
+            )}
+            {hit.kind === 'spell' && hit.data.ritual && (
+              <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
+                Ritual
+              </span>
+            )}
+            {hit.kind === 'feat' && hit.data.repeatable && (
+              <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">
+                Repeatable
+              </span>
+            )}
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded whitespace-nowrap">
+            {KIND_LABEL[hit.kind]}
+          </span>
+          <span className="text-gray-400 text-lg">{expanded ? '−' : '+'}</span>
+        </div>
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3">
+          {hit.kind === 'spell' && <SpellDetail spell={hit.data} />}
+          {hit.kind === 'feat' && <FeatDetail feat={hit.data} />}
+          {hit.kind === 'feature' && <FeatureDetail feature={hit.data} />}
+        </div>
+      )}
+    </div>
   );
 }
 
 function subtitleFor(hit: UnifiedSearchHit): string {
   if (hit.kind === 'spell') {
-    return `${hit.level === 0 ? 'Cantrip' : `Level ${hit.level}`} · ${hit.school}`;
+    const levelLabel = hit.data.level === 0 ? 'Cantrip' : `Level ${hit.data.level}`;
+    return `${levelLabel} · ${hit.data.school} · ${hit.data.castingTime}`;
   }
   if (hit.kind === 'feat') {
-    return hit.prerequisite ?? 'No prerequisite';
+    const parts = [hit.data.category, hit.data.prerequisite].filter(Boolean) as string[];
+    return parts.length ? parts.join(' · ') : 'Feat';
   }
   // feature
-  const lvl = hit.level !== undefined ? ` · Level ${hit.level}` : '';
-  return `${capitalize(hit.parent.kind)}: ${hit.parent.name}${lvl}`;
+  const lvl = hit.data.level !== undefined ? ` · Level ${hit.data.level}` : '';
+  return `${capitalize(hit.data.parent.kind)}: ${hit.data.parent.name}${lvl}`;
+}
+
+function SpellDetail({ spell }: { spell: SrdSpell }) {
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Range</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.range}</p>
+        </div>
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Components</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.components}</p>
+        </div>
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Duration</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.duration}</p>
+        </div>
+      </div>
+      {spell.material && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Material</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.material}</p>
+        </div>
+      )}
+      <div>
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
+          {spell.description}
+        </p>
+      </div>
+      {spell.higherLevels && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">At Higher Levels</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.higherLevels}</p>
+        </div>
+      )}
+      {spell.classes.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Classes</h3>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {spell.classes.map(c => (
+              <span
+                key={c}
+                className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
+              >
+                {c}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeatDetail({ feat }: { feat: SrdFeat }) {
+  return (
+    <div className="space-y-3">
+      {feat.description && (
+        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
+          {feat.description}
+        </p>
+      )}
+      {feat.benefits && feat.benefits.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Benefits</h3>
+          <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-400 mt-1 space-y-1">
+            {feat.benefits.map((b, i) => (
+              <li key={i}>{b}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FeatureDetail({ feature }: { feature: UnifiedFeatureData }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
+        {feature.description}
+      </p>
+      <Link
+        href={parentDetailHref(feature.parent)}
+        className="inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+      >
+        Open {feature.parent.name} {capitalize(feature.parent.kind)} →
+      </Link>
+    </div>
+  );
 }
 
 function capitalize(s: string): string {
