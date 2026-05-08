@@ -670,4 +670,241 @@ describe('SrdService', () => {
       expect((result.data[0] as { name: string }).name).toBe('Feat 03');
     });
   });
+
+  // ── Unified search (spells + feats + features) ──────
+
+  describe('search (unified)', () => {
+    beforeEach(() => {
+      prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
+      prisma.feat.findMany.mockResolvedValue([]);
+      prisma.feat.count.mockResolvedValue(0);
+      prisma.classFeature.findMany.mockResolvedValue([]);
+      prisma.classFeature.count.mockResolvedValue(0);
+      prisma.subclassFeature.findMany.mockResolvedValue([]);
+      prisma.subclassFeature.count.mockResolvedValue(0);
+      prisma.raceTrait.findMany.mockResolvedValue([]);
+      prisma.raceTrait.count.mockResolvedValue(0);
+      prisma.backgroundFeature.findMany.mockResolvedValue([]);
+      prisma.backgroundFeature.count.mockResolvedValue(0);
+    });
+
+    it('queries all three types when no types filter provided', async () => {
+      await service.search({});
+
+      expect(prisma.spell.findMany).toHaveBeenCalled();
+      expect(prisma.feat.findMany).toHaveBeenCalled();
+      expect(prisma.classFeature.findMany).toHaveBeenCalled();
+    });
+
+    it('only queries the spell table when types=["spell"]', async () => {
+      await service.search({ types: ['spell'] });
+
+      expect(prisma.spell.findMany).toHaveBeenCalled();
+      expect(prisma.feat.findMany).not.toHaveBeenCalled();
+      expect(prisma.classFeature.findMany).not.toHaveBeenCalled();
+      expect(prisma.subclassFeature.findMany).not.toHaveBeenCalled();
+      expect(prisma.raceTrait.findMany).not.toHaveBeenCalled();
+      expect(prisma.backgroundFeature.findMany).not.toHaveBeenCalled();
+    });
+
+    it('only queries the feat table when types=["feat"]', async () => {
+      await service.search({ types: ['feat'] });
+
+      expect(prisma.feat.findMany).toHaveBeenCalled();
+      expect(prisma.spell.findMany).not.toHaveBeenCalled();
+      expect(prisma.classFeature.findMany).not.toHaveBeenCalled();
+    });
+
+    it('only queries the feature tables when types=["feature"]', async () => {
+      await service.search({ types: ['feature'] });
+
+      expect(prisma.spell.findMany).not.toHaveBeenCalled();
+      expect(prisma.feat.findMany).not.toHaveBeenCalled();
+      expect(prisma.classFeature.findMany).toHaveBeenCalled();
+      expect(prisma.subclassFeature.findMany).toHaveBeenCalled();
+      expect(prisma.raceTrait.findMany).toHaveBeenCalled();
+      expect(prisma.backgroundFeature.findMany).toHaveBeenCalled();
+    });
+
+    it('applies q to name and description across all types (case-insensitive contains)', async () => {
+      await service.search({ q: 'fire' });
+
+      const spellCall = prisma.spell.findMany.mock.calls[0][0];
+      expect(spellCall.where).toMatchObject({
+        OR: [
+          { name: { contains: 'fire', mode: 'insensitive' } },
+          { description: { contains: 'fire', mode: 'insensitive' } },
+        ],
+      });
+
+      const featCall = prisma.feat.findMany.mock.calls[0][0];
+      expect(featCall.where).toMatchObject({
+        OR: [
+          { name: { contains: 'fire', mode: 'insensitive' } },
+          { description: { contains: 'fire', mode: 'insensitive' } },
+        ],
+      });
+
+      const classFeatureCall = prisma.classFeature.findMany.mock.calls[0][0];
+      expect(classFeatureCall.where).toMatchObject({
+        OR: [
+          { name: { contains: 'fire', mode: 'insensitive' } },
+          { description: { contains: 'fire', mode: 'insensitive' } },
+        ],
+      });
+    });
+
+    it('applies spell sub-filters (class, level, school)', async () => {
+      await service.search({
+        types: ['spell'],
+        class: 'Wizard',
+        level: 3,
+        school: 'Evocation',
+      });
+
+      const spellCall = prisma.spell.findMany.mock.calls[0][0];
+      expect(spellCall.where).toMatchObject({
+        classes: { has: 'Wizard' },
+        level: 3,
+        school: 'Evocation',
+      });
+    });
+
+    it('applies hasPrerequisite=true filter', async () => {
+      await service.search({
+        types: ['feat'],
+        hasPrerequisite: 'true',
+      });
+
+      const featCall = prisma.feat.findMany.mock.calls[0][0];
+      expect(featCall.where).toMatchObject({
+        prerequisite: { not: null },
+      });
+    });
+
+    it('treats hasPrerequisite=false as "no prerequisite"', async () => {
+      await service.search({ types: ['feat'], hasPrerequisite: 'false' });
+
+      const featCall = prisma.feat.findMany.mock.calls[0][0];
+      expect(featCall.where).toMatchObject({ prerequisite: null });
+    });
+
+    it('applies feature parentType filter (only that table is queried)', async () => {
+      await service.search({ types: ['feature'], parentType: 'class' });
+
+      expect(prisma.classFeature.findMany).toHaveBeenCalled();
+      expect(prisma.subclassFeature.findMany).not.toHaveBeenCalled();
+      expect(prisma.raceTrait.findMany).not.toHaveBeenCalled();
+      expect(prisma.backgroundFeature.findMany).not.toHaveBeenCalled();
+    });
+
+    it('applies feature parentId on the matching column', async () => {
+      await service.search({ types: ['feature'], parentType: 'class', parentId: 'cls-1' });
+
+      const call = prisma.classFeature.findMany.mock.calls[0][0];
+      expect(call.where).toMatchObject({ classId: 'cls-1' });
+    });
+
+    it('returns spell hits tagged with kind=spell', async () => {
+      prisma.spell.findMany.mockResolvedValue([
+        {
+          id: 'sp-1',
+          name: 'Fireball',
+          level: 3,
+          school: 'Evocation',
+          description: 'A bright streak.',
+        },
+      ]);
+      prisma.spell.count.mockResolvedValue(1);
+
+      const result = await service.search({ types: ['spell'] });
+
+      expect(result.data[0]).toMatchObject({
+        kind: 'spell',
+        id: 'sp-1',
+        name: 'Fireball',
+        level: 3,
+        school: 'Evocation',
+      });
+    });
+
+    it('returns feat hits tagged with kind=feat', async () => {
+      prisma.feat.findMany.mockResolvedValue([
+        {
+          id: 'feat-1',
+          name: 'Sharpshooter',
+          prerequisite: null,
+          description: '',
+        },
+      ]);
+      prisma.feat.count.mockResolvedValue(1);
+
+      const result = await service.search({ types: ['feat'] });
+
+      expect(result.data[0]).toMatchObject({
+        kind: 'feat',
+        id: 'feat-1',
+        name: 'Sharpshooter',
+        prerequisite: null,
+      });
+    });
+
+    it('returns feature hits tagged with kind=feature with parent metadata', async () => {
+      prisma.classFeature.findMany.mockResolvedValue([
+        {
+          id: 'cf-1',
+          name: 'Sneak Attack',
+          level: 1,
+          description: 'Deals extra damage.',
+          classId: 'cls-1',
+          class: { id: 'cls-1', name: 'Rogue' },
+        },
+      ]);
+      prisma.classFeature.count.mockResolvedValue(1);
+
+      const result = await service.search({ types: ['feature'], parentType: 'class' });
+
+      expect(result.data[0]).toMatchObject({
+        kind: 'feature',
+        id: 'cf-1',
+        name: 'Sneak Attack',
+        level: 1,
+        parent: { kind: 'class', id: 'cls-1', name: 'Rogue' },
+      });
+    });
+
+    it('combines totals across all queried tables', async () => {
+      prisma.spell.count.mockResolvedValue(3);
+      prisma.feat.count.mockResolvedValue(2);
+      prisma.classFeature.count.mockResolvedValue(4);
+      prisma.subclassFeature.count.mockResolvedValue(1);
+      prisma.raceTrait.count.mockResolvedValue(0);
+      prisma.backgroundFeature.count.mockResolvedValue(0);
+
+      const result = await service.search({});
+
+      expect(result.total).toBe(10);
+    });
+
+    it('sorts merged results alphabetically by name and slices by page/limit', async () => {
+      prisma.spell.findMany.mockResolvedValue([
+        { id: 's1', name: 'Bless', level: 1, school: 'Enchantment', description: '' },
+        { id: 's2', name: 'Fireball', level: 3, school: 'Evocation', description: '' },
+      ]);
+      prisma.spell.count.mockResolvedValue(2);
+      prisma.feat.findMany.mockResolvedValue([
+        { id: 'f1', name: 'Alert', prerequisite: null, description: '' },
+      ]);
+      prisma.feat.count.mockResolvedValue(1);
+
+      const result = await service.search({ types: ['spell', 'feat'], page: 1, limit: 2 });
+
+      expect(result.total).toBe(3);
+      expect(result.lastPage).toBe(2);
+      expect(result.data).toHaveLength(2);
+      expect((result.data[0] as { name: string }).name).toBe('Alert');
+      expect((result.data[1] as { name: string }).name).toBe('Bless');
+    });
+  });
 });

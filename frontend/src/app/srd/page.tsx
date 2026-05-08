@@ -4,6 +4,11 @@ import Link from 'next/link';
 
 const categories = [
   {
+    href: '/srd/search',
+    title: 'Search',
+    description: 'Unified search across spells, feats, and class/race/background features.',
+  },
+  {
     href: '/srd/spells',
     title: 'Spells',
     description: 'Browse spells by class, level, and school of magic.',

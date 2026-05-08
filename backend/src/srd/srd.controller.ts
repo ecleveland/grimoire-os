@@ -5,6 +5,7 @@ import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto } from './dto/query-features.dto';
+import { QuerySearchDto } from './dto/query-search.dto';
 
 @ApiTags('SRD')
 @Controller('srd')
@@ -201,5 +202,15 @@ export class SrdController {
   })
   searchFeatures(@Query() query: QueryFeaturesDto) {
     return this.srdService.searchFeatures(query);
+  }
+
+  // ── Unified search (spells + feats + features) ──────
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Unified search across spells, feats, and features',
+  })
+  search(@Query() query: QuerySearchDto) {
+    return this.srdService.search(query);
   }
 }

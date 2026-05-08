@@ -35,6 +35,7 @@ describe('SrdController', () => {
       findAllRules: jest.fn(),
       findRulesByCategory: jest.fn(),
       searchFeatures: jest.fn(),
+      search: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -385,6 +386,18 @@ describe('SrdController', () => {
       const result = await controller.searchFeatures(query as any);
 
       expect(service.searchFeatures).toHaveBeenCalledWith(query);
+      expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
+    });
+  });
+
+  describe('search (unified)', () => {
+    it('delegates to service.search with query', async () => {
+      const query = { q: 'fire', types: ['spell', 'feature'] as ('spell' | 'feature')[] };
+      service.search.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
+
+      const result = await controller.search(query as any);
+
+      expect(service.search).toHaveBeenCalledWith(query);
       expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
     });
   });
