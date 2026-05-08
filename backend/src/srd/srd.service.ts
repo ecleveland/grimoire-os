@@ -4,6 +4,20 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
+import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
+
+const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
+const SUBCLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
+const NAME_ORDER = { name: 'asc' as const };
+
+type FeatureSearchHit = {
+  kind: FeatureParentType;
+  id: string;
+  name: string;
+  description: string;
+  level?: number;
+  parent: { id: string; name: string };
+};
 
 @Injectable()
 export class SrdService {
@@ -117,26 +131,40 @@ export class SrdService {
   // ── Classes ─────────────────────────────────────────
 
   async findAllClasses() {
-    return this.prisma.srdClass.findMany({ orderBy: { name: 'asc' } });
+    return this.prisma.srdClass.findMany({
+      orderBy: { name: 'asc' },
+      include: { features: { orderBy: CLASS_FEATURE_ORDER } },
+    });
   }
 
   async findClass(id: string) {
     return this.prisma.srdClass.findUnique({
       where: { id },
-      include: { subclasses: true },
+      include: {
+        subclasses: {
+          include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
+        },
+        features: { orderBy: CLASS_FEATURE_ORDER },
+      },
     });
   }
 
   // ── Races ───────────────────────────────────────────
 
   async findAllRaces() {
-    return this.prisma.race.findMany({ orderBy: { name: 'asc' } });
+    return this.prisma.race.findMany({
+      orderBy: { name: 'asc' },
+      include: { traits: { orderBy: NAME_ORDER } },
+    });
   }
 
   async findRace(id: string) {
     return this.prisma.race.findUnique({
       where: { id },
-      include: { subraces: true },
+      include: {
+        subraces: true,
+        traits: { orderBy: NAME_ORDER },
+      },
     });
   }
 
@@ -145,11 +173,18 @@ export class SrdService {
   async searchSubclasses(classId?: string) {
     const where: Record<string, unknown> = {};
     if (classId) where.classId = classId;
-    return this.prisma.subclass.findMany({ where, orderBy: { name: 'asc' } });
+    return this.prisma.subclass.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
+    });
   }
 
   async findSubclass(id: string) {
-    return this.prisma.subclass.findUnique({ where: { id } });
+    return this.prisma.subclass.findUnique({
+      where: { id },
+      include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
+    });
   }
 
   // ── Subraces ────────────────────────────────────────
@@ -178,7 +213,123 @@ export class SrdService {
   }
 
   async findBackground(id: string) {
-    return this.prisma.background.findUnique({ where: { id } });
+    return this.prisma.background.findUnique({
+      where: { id },
+      include: { features: { orderBy: NAME_ORDER } },
+    });
+  }
+
+  // ── Features (cross-parent search) ──────────────────
+
+  async searchFeatures(dto: QueryFeaturesDto) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
+    const types: FeatureParentType[] = dto.parentType
+      ? [dto.parentType]
+      : ['class', 'subclass', 'race', 'background'];
+
+    const nameFilter = dto.q ? { name: { contains: dto.q, mode: 'insensitive' as const } } : {};
+
+    const queries = await Promise.all(
+      types.map(type => this.queryFeatureTable(type, nameFilter, dto.parentId))
+    );
+
+    const allHits: FeatureSearchHit[] = queries.flatMap(q => q.hits);
+    const total = queries.reduce((sum, q) => sum + q.total, 0);
+
+    allHits.sort((a, b) => a.name.localeCompare(b.name));
+    const start = (page - 1) * limit;
+    const data = allHits.slice(start, start + limit);
+
+    return buildPaginatedResponse(data, total, page, limit);
+  }
+
+  private async queryFeatureTable(
+    kind: FeatureParentType,
+    nameFilter: Record<string, unknown>,
+    parentId: string | undefined
+  ): Promise<{ hits: FeatureSearchHit[]; total: number }> {
+    if (kind === 'class') {
+      const where = { ...nameFilter, ...(parentId ? { classId: parentId } : {}) };
+      const [rows, total] = await Promise.all([
+        this.prisma.classFeature.findMany({
+          where,
+          include: { class: { select: { id: true, name: true } } },
+        }),
+        this.prisma.classFeature.count({ where }),
+      ]);
+      return {
+        total,
+        hits: rows.map(r => ({
+          kind: 'class' as const,
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          level: r.level,
+          parent: { id: r.class.id, name: r.class.name },
+        })),
+      };
+    }
+    if (kind === 'subclass') {
+      const where = { ...nameFilter, ...(parentId ? { subclassId: parentId } : {}) };
+      const [rows, total] = await Promise.all([
+        this.prisma.subclassFeature.findMany({
+          where,
+          include: { subclass: { select: { id: true, name: true } } },
+        }),
+        this.prisma.subclassFeature.count({ where }),
+      ]);
+      return {
+        total,
+        hits: rows.map(r => ({
+          kind: 'subclass' as const,
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          level: r.level,
+          parent: { id: r.subclass.id, name: r.subclass.name },
+        })),
+      };
+    }
+    if (kind === 'race') {
+      const where = { ...nameFilter, ...(parentId ? { raceId: parentId } : {}) };
+      const [rows, total] = await Promise.all([
+        this.prisma.raceTrait.findMany({
+          where,
+          include: { race: { select: { id: true, name: true } } },
+        }),
+        this.prisma.raceTrait.count({ where }),
+      ]);
+      return {
+        total,
+        hits: rows.map(r => ({
+          kind: 'race' as const,
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          parent: { id: r.race.id, name: r.race.name },
+        })),
+      };
+    }
+    // background
+    const where = { ...nameFilter, ...(parentId ? { backgroundId: parentId } : {}) };
+    const [rows, total] = await Promise.all([
+      this.prisma.backgroundFeature.findMany({
+        where,
+        include: { background: { select: { id: true, name: true } } },
+      }),
+      this.prisma.backgroundFeature.count({ where }),
+    ]);
+    return {
+      total,
+      hits: rows.map(r => ({
+        kind: 'background' as const,
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        parent: { id: r.background.id, name: r.background.name },
+      })),
+    };
   }
 
   // ── Feats ───────────────────────────────────────────

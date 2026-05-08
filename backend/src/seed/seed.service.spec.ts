@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
+import { srdBackgrounds } from './data/backgrounds';
 
 // Mock the JSON loader module
 jest.mock('./srd-json.loader', () => ({
@@ -54,6 +55,26 @@ describe('SeedService', () => {
     prisma.condition.createMany.mockResolvedValue({ count: 0 });
     prisma.skill.createMany.mockResolvedValue({ count: 0 });
     prisma.language.createMany.mockResolvedValue({ count: 0 });
+    prisma.classFeature.createMany.mockResolvedValue({ count: 0 });
+    prisma.subclassFeature.createMany.mockResolvedValue({ count: 0 });
+    prisma.raceTrait.createMany.mockResolvedValue({ count: 0 });
+    prisma.backgroundFeature.createMany.mockResolvedValue({ count: 0 });
+
+    // FK resolution: findMany returns parent rows keyed by name, used to resolve FKs
+    // for child feature rows. Default returns objects with `id` derived from `name`.
+    const buildFkRows = (names: string[]) => names.map(name => ({ id: `id-${name}`, name }));
+    prisma.srdClass.findMany.mockImplementation(args => {
+      const names = (args?.where?.name?.in ?? []) as string[];
+      return Promise.resolve(buildFkRows(names));
+    });
+    prisma.race.findMany.mockImplementation(args => {
+      const names = (args?.where?.name?.in ?? []) as string[];
+      return Promise.resolve(buildFkRows(names));
+    });
+    prisma.background.findMany.mockImplementation(args => {
+      const names = (args?.where?.name?.in ?? []) as string[];
+      return Promise.resolve(buildFkRows(names));
+    });
 
     // Subclass/subrace FK resolution
     prisma.srdClass.findUnique.mockResolvedValue({
@@ -61,7 +82,9 @@ describe('SeedService', () => {
       name: 'Fighter',
     });
     prisma.race.findUnique.mockResolvedValue({ id: 'race-1', name: 'Dwarf' });
-    prisma.subclass.upsert.mockResolvedValue({});
+    prisma.subclass.upsert.mockImplementation((args: any) =>
+      Promise.resolve({ id: `sub-${args.where.name}`, name: args.where.name })
+    );
     prisma.subrace.upsert.mockResolvedValue({});
 
     // Dev admin user lookup returns null (user doesn't exist yet)
@@ -232,5 +255,120 @@ describe('SeedService', () => {
 
     const createCall = prisma.user.create.mock.calls[0][0].data;
     expect(createCall.role).toBe('admin');
+  });
+
+  // ── Normalized feature tables ──────────────────────────
+
+  it('seeds class features into class_features with FK to parent class', async () => {
+    await service.seed();
+
+    expect(prisma.classFeature.createMany).toHaveBeenCalled();
+    const call = prisma.classFeature.createMany.mock.calls[0][0];
+    expect(call).toHaveProperty('skipDuplicates', true);
+    expect(Array.isArray(call.data)).toBe(true);
+    expect(call.data.length).toBeGreaterThan(0);
+    for (const row of call.data) {
+      expect(row).toMatchObject({
+        name: expect.any(String),
+        level: expect.any(Number),
+        description: expect.any(String),
+        classId: expect.stringMatching(/^id-/),
+      });
+    }
+  });
+
+  it('does not write features field on srd_classes anymore', async () => {
+    await service.seed();
+
+    const classesCall = prisma.srdClass.createMany.mock.calls[0][0];
+    for (const row of classesCall.data) {
+      expect(row).not.toHaveProperty('features');
+    }
+  });
+
+  it('seeds subclass features into subclass_features with FK to parent subclass', async () => {
+    await service.seed();
+
+    expect(prisma.subclassFeature.createMany).toHaveBeenCalled();
+    const call = prisma.subclassFeature.createMany.mock.calls[0][0];
+    expect(call).toHaveProperty('skipDuplicates', true);
+    expect(Array.isArray(call.data)).toBe(true);
+    for (const row of call.data) {
+      expect(row).toMatchObject({
+        name: expect.any(String),
+        level: expect.any(Number),
+        description: expect.any(String),
+        subclassId: expect.stringMatching(/^sub-/),
+      });
+    }
+  });
+
+  it('does not pass features to subclass.upsert anymore', async () => {
+    await service.seed();
+
+    for (const call of prisma.subclass.upsert.mock.calls) {
+      const args = call[0];
+      expect(args.create).not.toHaveProperty('features');
+      expect(args.update).not.toHaveProperty('features');
+    }
+  });
+
+  it('seeds race traits into race_traits with FK to parent race', async () => {
+    await service.seed();
+
+    expect(prisma.raceTrait.createMany).toHaveBeenCalled();
+    const call = prisma.raceTrait.createMany.mock.calls[0][0];
+    expect(call).toHaveProperty('skipDuplicates', true);
+    for (const row of call.data) {
+      expect(row).toMatchObject({
+        name: expect.any(String),
+        description: expect.any(String),
+        raceId: expect.stringMatching(/^id-/),
+      });
+      expect(row).not.toHaveProperty('level');
+    }
+  });
+
+  it('does not write traits field on races anymore', async () => {
+    await service.seed();
+
+    const racesCall = prisma.race.createMany.mock.calls[0][0];
+    for (const row of racesCall.data) {
+      expect(row).not.toHaveProperty('traits');
+    }
+  });
+
+  it('only seeds background features when source data has a non-null feature', async () => {
+    // SRD 5.2.1 backgrounds all have feature: null (the personality data lives
+    // on Background directly). Once a background gains a non-null feature in
+    // the source data, this test will start asserting the createMany shape.
+    const withFeature = srdBackgrounds.filter(b => b.feature !== null);
+
+    await service.seed();
+
+    if (withFeature.length === 0) {
+      expect(prisma.backgroundFeature.createMany).not.toHaveBeenCalled();
+      return;
+    }
+
+    expect(prisma.backgroundFeature.createMany).toHaveBeenCalled();
+    const call = prisma.backgroundFeature.createMany.mock.calls[0][0];
+    expect(call).toHaveProperty('skipDuplicates', true);
+    for (const row of call.data) {
+      expect(row).toMatchObject({
+        name: expect.any(String),
+        description: expect.any(String),
+        backgroundId: expect.stringMatching(/^id-/),
+      });
+    }
+  });
+
+  it('does not write feature field on backgrounds anymore', async () => {
+    await service.seed();
+
+    const bgCall = prisma.background.createMany.mock.calls[0][0];
+    for (const row of bgCall.data) {
+      expect(row).not.toHaveProperty('feature');
+    }
   });
 });
