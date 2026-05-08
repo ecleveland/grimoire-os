@@ -730,6 +730,79 @@ describe('SRD game rules seed data', () => {
     });
   });
 
+  describe('npc-generation / trinket-chance', () => {
+    it('exists with a probability between 0 and 1', () => {
+      const rule = getRule('npc-generation', 'trinket-chance');
+      expect(rule).toBeDefined();
+      expect(typeof rule!.value).toBe('number');
+      expect(rule!.value).toBeGreaterThanOrEqual(0);
+      expect(rule!.value).toBeLessThanOrEqual(1);
+    });
+
+    it('matches the design-doc default of 0.05', () => {
+      const rule = getRule('npc-generation', 'trinket-chance');
+      expect(rule!.value).toBe(0.05);
+    });
+  });
+
+  describe('npc-generation / magic-item-chance-by-cr', () => {
+    it('exists with all five CR-bucket keys', () => {
+      const rule = getRule('npc-generation', 'magic-item-chance-by-cr');
+      expect(rule).toBeDefined();
+      const table = rule!.value as unknown as Record<string, number>;
+      for (const bucket of ['0', '0–1', '2–4', '5–10', '11+']) {
+        expect(table[bucket]).toBeDefined();
+        expect(typeof table[bucket]).toBe('number');
+      }
+    });
+
+    it('chance increases monotonically with CR bucket', () => {
+      const table = getRule('npc-generation', 'magic-item-chance-by-cr')!
+        .value as unknown as Record<string, number>;
+      expect(table['0']).toBeLessThanOrEqual(table['0–1']);
+      expect(table['0–1']).toBeLessThanOrEqual(table['2–4']);
+      expect(table['2–4']).toBeLessThanOrEqual(table['5–10']);
+      expect(table['5–10']).toBeLessThanOrEqual(table['11+']);
+    });
+
+    it('every probability is between 0 and 1', () => {
+      const table = getRule('npc-generation', 'magic-item-chance-by-cr')!
+        .value as unknown as Record<string, number>;
+      for (const v of Object.values(table)) {
+        expect(v).toBeGreaterThanOrEqual(0);
+        expect(v).toBeLessThanOrEqual(1);
+      }
+    });
+  });
+
+  describe('npc-generation / item-count-die', () => {
+    it('exists as a dice-notation string', () => {
+      const rule = getRule('npc-generation', 'item-count-die');
+      expect(rule).toBeDefined();
+      expect(typeof rule!.value).toBe('string');
+      expect(rule!.value).toMatch(/^\d+d\d+$/);
+    });
+
+    it('defaults to 1d3 per the design doc', () => {
+      const rule = getRule('npc-generation', 'item-count-die');
+      expect(rule!.value).toBe('1d3');
+    });
+  });
+
+  describe('npc-generation / coinage-multiplier', () => {
+    it('exists as a positive number', () => {
+      const rule = getRule('npc-generation', 'coinage-multiplier');
+      expect(rule).toBeDefined();
+      expect(typeof rule!.value).toBe('number');
+      expect(rule!.value).toBeGreaterThan(0);
+    });
+
+    it('defaults to 1 (no scaling) per the design doc', () => {
+      const rule = getRule('npc-generation', 'coinage-multiplier');
+      expect(rule!.value).toBe(1);
+    });
+  });
+
   describe('size-categories / space', () => {
     it('exists', () => {
       expect(getRule('size-categories', 'space')).toBeDefined();

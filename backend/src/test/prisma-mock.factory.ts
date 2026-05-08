@@ -8,6 +8,7 @@ type MockModel = {
   createMany: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
+  deleteMany: jest.Mock;
   upsert: jest.Mock;
   count: jest.Mock;
 };
@@ -21,6 +22,7 @@ function mockModel(): MockModel {
     createMany: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
+    deleteMany: jest.fn(),
     upsert: jest.fn(),
     count: jest.fn(),
   };
@@ -51,7 +53,14 @@ export type MockPrismaService = {
     | 'classFeature'
     | 'subclassFeature'
     | 'raceTrait'
-    | 'backgroundFeature']: MockModel;
+    | 'backgroundFeature'
+    | 'npc'
+    | 'npcRelation'
+    | 'npcNamePool'
+    | 'npcAppearanceTrait'
+    | 'npcLootTemplate'
+    | 'npcAlignmentPrior'
+    | 'trinket']: MockModel;
 } & {
   $transaction: jest.Mock;
   $queryRaw: jest.Mock;
@@ -83,6 +92,13 @@ export function createMockPrismaService(): MockPrismaService {
     subclassFeature: mockModel(),
     raceTrait: mockModel(),
     backgroundFeature: mockModel(),
+    npc: mockModel(),
+    npcRelation: mockModel(),
+    npcNamePool: mockModel(),
+    npcAppearanceTrait: mockModel(),
+    npcLootTemplate: mockModel(),
+    npcAlignmentPrior: mockModel(),
+    trinket: mockModel(),
     $transaction: jest.fn(fn => fn()),
     $queryRaw: jest.fn(),
   };

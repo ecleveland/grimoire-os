@@ -556,6 +556,32 @@ export const srdGameRules = [
     },
   },
   {
+    category: 'npc-generation',
+    key: 'trinket-chance',
+    value: 0.05,
+  },
+  {
+    category: 'npc-generation',
+    key: 'magic-item-chance-by-cr',
+    value: {
+      '0': 0.001,
+      '0–1': 0.005,
+      '2–4': 0.02,
+      '5–10': 0.05,
+      '11+': 0.15,
+    },
+  },
+  {
+    category: 'npc-generation',
+    key: 'item-count-die',
+    value: '1d3',
+  },
+  {
+    category: 'npc-generation',
+    key: 'coinage-multiplier',
+    value: 1,
+  },
+  {
     category: 'size-categories',
     key: 'space',
     value: {

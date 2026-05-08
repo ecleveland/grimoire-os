@@ -62,6 +62,16 @@ describe('SeedService', () => {
     prisma.subclassFeature.createMany.mockResolvedValue({ count: 0 });
     prisma.raceTrait.createMany.mockResolvedValue({ count: 0 });
     prisma.backgroundFeature.createMany.mockResolvedValue({ count: 0 });
+    prisma.npcNamePool.createMany.mockResolvedValue({ count: 0 });
+    prisma.npcNamePool.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.npcAppearanceTrait.createMany.mockResolvedValue({ count: 0 });
+    prisma.npcAppearanceTrait.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.npcLootTemplate.createMany.mockResolvedValue({ count: 0 });
+    prisma.npcLootTemplate.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.npcAlignmentPrior.createMany.mockResolvedValue({ count: 0 });
+    prisma.npcAlignmentPrior.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.trinket.createMany.mockResolvedValue({ count: 0 });
+    prisma.trinket.deleteMany.mockResolvedValue({ count: 0 });
 
     // FK resolution: findMany returns parent rows keyed by name, used to resolve FKs
     // for child feature rows. Default returns objects with `id` derived from `name`.
@@ -375,6 +385,78 @@ describe('SeedService', () => {
       expect(args.create).not.toHaveProperty('feature');
       expect(args.update).not.toHaveProperty('feature');
     }
+  });
+
+  // ── NPC Generator reference tables ─────────────────────
+
+  it('seeds NPC name pools after clearing curated rows (idempotent)', async () => {
+    await service.seed();
+
+    expect(prisma.npcNamePool.deleteMany).toHaveBeenCalledWith({
+      where: { source: 'curated' },
+    });
+    expect(prisma.npcNamePool.createMany).toHaveBeenCalled();
+    const call = prisma.npcNamePool.createMany.mock.calls[0][0];
+    expect(call.data.length).toBeGreaterThan(0);
+  });
+
+  it('seeds NPC appearance traits after clearing curated rows', async () => {
+    await service.seed();
+
+    expect(prisma.npcAppearanceTrait.deleteMany).toHaveBeenCalledWith({
+      where: { source: 'curated' },
+    });
+    expect(prisma.npcAppearanceTrait.createMany).toHaveBeenCalled();
+    const call = prisma.npcAppearanceTrait.createMany.mock.calls[0][0];
+    expect(call.data.length).toBeGreaterThan(0);
+  });
+
+  it('seeds NPC loot templates after clearing curated rows', async () => {
+    await service.seed();
+
+    expect(prisma.npcLootTemplate.deleteMany).toHaveBeenCalledWith({
+      where: { source: 'curated' },
+    });
+    expect(prisma.npcLootTemplate.createMany).toHaveBeenCalled();
+    const call = prisma.npcLootTemplate.createMany.mock.calls[0][0];
+    expect(call.data.length).toBeGreaterThan(0);
+  });
+
+  it('seeds NPC alignment priors after clearing curated rows (compound unique with nullable background prevents upsert)', async () => {
+    await service.seed();
+
+    expect(prisma.npcAlignmentPrior.deleteMany).toHaveBeenCalledWith({
+      where: { source: 'curated' },
+    });
+    expect(prisma.npcAlignmentPrior.createMany).toHaveBeenCalled();
+    const call = prisma.npcAlignmentPrior.createMany.mock.calls[0][0];
+    expect(call.data.length).toBeGreaterThan(0);
+    for (const row of call.data) {
+      expect(Array.isArray(row.weights)).toBe(true);
+      expect(row.weights.length).toBe(9);
+    }
+  });
+
+  it('seeds trinkets after clearing curated/srd rows', async () => {
+    await service.seed();
+
+    expect(prisma.trinket.deleteMany).toHaveBeenCalled();
+    expect(prisma.trinket.createMany).toHaveBeenCalled();
+    const call = prisma.trinket.createMany.mock.calls[0][0];
+    expect(call.data.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it('seeds the four new npc-generation game-rule rows via createMany', async () => {
+    await service.seed();
+
+    const allCalls = prisma.gameRule.createMany.mock.calls.flatMap(c => c[0].data);
+    const npcRules = allCalls.filter(
+      (r: { category: string }) => r.category === 'npc-generation'
+    );
+    const keys = npcRules.map((r: { key: string }) => r.key).sort();
+    expect(keys).toEqual(
+      ['coinage-multiplier', 'item-count-die', 'magic-item-chance-by-cr', 'trinket-chance'].sort()
+    );
   });
 
   it('upserts backgrounds by name so reseed overwrites personality arrays', async () => {
