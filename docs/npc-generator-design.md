@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved for v1.** Linear epic [VEG-242](https://linear.app/vega-apps/issue/VEG-242) tracks the work, with sub-issues [VEG-243](https://linear.app/vega-apps/issue/VEG-243) through [VEG-251](https://linear.app/vega-apps/issue/VEG-251) covering schema → seed → backend → frontend → stat blocks → relations → admin UI. One [open question](#open-questions) remains — Q6 (relation directionality) — which only blocks [VEG-250](https://linear.app/vega-apps/issue/VEG-250).
+**Approved for v1, all questions resolved.** Linear epic [VEG-242](https://linear.app/vega-apps/issue/VEG-242) tracks the work, with sub-issues [VEG-243](https://linear.app/vega-apps/issue/VEG-243) through [VEG-251](https://linear.app/vega-apps/issue/VEG-251) covering schema → seed → backend → frontend → stat blocks → relations → admin UI.
 
 ## Overview
 
@@ -506,6 +506,43 @@ From an NPC's detail page, two affordances:
    - Adjacent age (parent ≈ +25, child ≈ -25)
    - Optional: aligned background bias
 
+### Directionality (Q6 — store both)
+
+Every relation is persisted as **two `NpcRelation` rows**, one in each direction. Adding "Aria is the parent of Bren" inserts both rows in a single transaction:
+
+- `(fromNpcId: aria, toNpcId: bren, relation: 'parent')`
+- `(fromNpcId: bren, toNpcId: aria, relation: 'child')`
+
+Deleting either side looks up its mirror by tuple `(toNpcId, fromNpcId, inverseOf(relation))` and deletes both atomically. Both rows share the same lifecycle — there is no "primary" side.
+
+**Inverse-relation map** (lives in `backend/src/npcs/relation-inverses.ts`):
+
+| Forward | Inverse |
+|---------|---------|
+| `parent` | `child` |
+| `child` | `parent` |
+| `sibling` | `sibling` *(symmetric)* |
+| `spouse` | `spouse` *(symmetric)* |
+| `mentor` | `student` |
+| `student` | `mentor` |
+| `rival` | `rival` *(symmetric)* |
+| `ally` | `ally` *(symmetric)* |
+| `friend` | `friend` *(symmetric)* |
+| `enemy` | `enemy` *(symmetric)* |
+| `boss` | `subordinate` |
+| `subordinate` | `boss` |
+
+For a relation not in the map (custom DM input), default to **symmetric** (mirror the same label). This is the safe option — the DM can edit either side later.
+
+### Schema impact
+
+None. The existing `NpcRelation` model from [VEG-243](https://linear.app/vega-apps/issue/VEG-243) — with `@@unique([fromNpcId, toNpcId, relation])` — already supports store-both: the two rows are different tuples and never collide.
+
+### Trade-offs
+
+- **Pro:** every row carries an explicit, stored label — no inference logic, no UI drift between views, queries are symmetric.
+- **Con:** double the rows, and a malformed write (one side fails) leaves an orphan. Mitigated by transactional insert + delete.
+
 Relation types are a free string in v1 (`relation` column), with a small autocomplete list. Promote to enum if usage stabilizes.
 
 ## Frontend Routes
@@ -561,12 +598,13 @@ Resolved during design review. Numbers preserved from the original open-question
 3. **Stat block default.** **Lite** (no stat block) by default. UI exposes a toggle to generate a Full stat block when the DM expects combat.
 4. **Profession list.** **Hybrid** — curated dropdown (blacksmith, mercenary, sage, …) plus an "Other (custom)" free-text option. Loot templates key off curated values; custom professions fall back to a generic loot table.
 5. **Setting/region constraint.** Ship a **small fixed mapping** in v1 (dwarven mine, nine hells, elven forest, etc.). Per-campaign DM-defined biases deferred.
+6. **Relation directionality.** **Store both directions.** Every relation persists as two `NpcRelation` rows (e.g. `parent` + `child`) inside a single transaction. Inverse labels come from a static map (see [Directionality](#directionality-q6--store-both) in the Relations section); custom relations default to symmetric. Trade-off: 2× row count and a transactional invariant to maintain, gained against fully explicit stored labels and zero inference logic at read time.
 7. **LLM / external naming providers.** **Out of scope.** Local seeded pools only. Provider seam preserved in `NpcGeneratorService.pickName()` for future contributors.
 8. **Reroll cost.** Replaced with **field locking**: each rerollable field has a 🎲 reroll button and a 🔒 lock toggle. `Npc.lockedFields: String[]` persists which fields are exempt from "reroll all". No "manual override" state — locks are the single mechanism.
 
 ## Open Questions
 
-6. **Relation directionality.** "Parent of" vs. "Child of" — store one direction and infer the other on read, or store both rows? Storing one is simpler and prevents drift; the UI labels appropriately based on which NPC the user is viewing. Storing both is more queryable but requires keeping the pair in sync. Default proposal: **store one**, infer the inverse. Confirm or override.
+*None remaining.* All design questions resolved.
 
 ## Appendix: Why Not Just Reuse `Character`?
 
