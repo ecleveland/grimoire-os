@@ -4,7 +4,8 @@ const FRONTEND_URL = process.env.E2E_BASE_URL ?? 'http://localhost:3000';
 const BACKEND_URL = process.env.E2E_API_URL ?? 'http://localhost:3001';
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: '.',
+  testMatch: '**/*.spec.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -28,6 +29,7 @@ export default defineConfig({
     ? undefined
     : {
         command: './dev.sh',
+        cwd: '..',
         url: FRONTEND_URL,
         reuseExistingServer: true,
         timeout: 120_000,
