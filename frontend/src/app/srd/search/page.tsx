@@ -92,9 +92,11 @@ export default function SrdSearchPage() {
     setPage(1);
   }, []);
 
-  // Fetch results.
+  // Fetch results. Uses AbortController so that superseded fetches (filter
+  // changes, fast typing, unmount) cancel on the wire instead of silently
+  // running to completion and only being suppressed at setState time.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('limit', String(LIMIT));
@@ -119,24 +121,23 @@ export default function SrdSearchPage() {
       if (featureParent) params.set('parentType', featureParent);
     }
 
-    apiFetch<PaginatedResponse<UnifiedSearchHit>>(`/srd/search?${params.toString()}`)
+    apiFetch<PaginatedResponse<UnifiedSearchHit>>(`/srd/search?${params.toString()}`, {
+      signal: controller.signal,
+    })
       .then(res => {
-        if (cancelled) return;
         setHits(res.data);
         setTotal(res.total);
         setLastPage(res.lastPage);
         setLoading(false);
       })
       .catch(err => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         console.error('Failed to load search results:', err);
         toast.error('Failed to load search results', { id: 'load-search' });
         setLoading(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [
     page,
     search,

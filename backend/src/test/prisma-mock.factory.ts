@@ -54,6 +54,7 @@ export type MockPrismaService = {
     | 'backgroundFeature']: MockModel;
 } & {
   $transaction: jest.Mock;
+  $queryRaw: jest.Mock;
 };
 
 export function createMockPrismaService(): MockPrismaService {
@@ -83,6 +84,7 @@ export function createMockPrismaService(): MockPrismaService {
     raceTrait: mockModel(),
     backgroundFeature: mockModel(),
     $transaction: jest.fn(fn => fn()),
+    $queryRaw: jest.fn(),
   };
 }
 

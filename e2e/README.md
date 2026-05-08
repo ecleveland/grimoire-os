@@ -10,7 +10,11 @@ One spec per ticket is usually enough. Cover the golden path; let unit tests cov
 
 ## Run locally
 
+All commands run from this `e2e/` directory.
+
 ```bash
+cd e2e
+
 # One-time
 npm install
 npm run e2e:install
