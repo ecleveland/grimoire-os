@@ -19,6 +19,11 @@ import { srdLanguages } from './data/languages';
 import { srdBackgrounds } from './data/backgrounds';
 import { srdFeats } from './data/feats';
 import { srdGameRules } from './data/game-rules';
+import { npcNamePools } from './data/npc-name-pools';
+import { npcAppearanceTraits } from './data/npc-appearance-traits';
+import { npcLootTemplates } from './data/npc-loot-templates';
+import { npcAlignmentPriors } from './data/npc-alignment-priors';
+import { trinkets } from './data/trinkets';
 
 @Injectable()
 export class SeedService {
@@ -247,6 +252,70 @@ export class SeedService {
       }
       console.log(`  Subclasses: ${srdSubclasses.length} entries`);
       console.log(`  Subclass Features: ${subclassFeatureCount} entries`);
+
+      // ── NPC Generator reference data ─────────────────
+      // Curated tables: clear curated rows and re-create. User-added rows
+      // (source !== 'curated') survive reseed.
+      await tx.npcNamePool.deleteMany({ where: { source: 'curated' } });
+      await tx.npcNamePool.createMany({
+        data: npcNamePools.map(n => ({
+          race: n.race,
+          gender: n.gender,
+          kind: n.kind,
+          value: n.value,
+        })),
+        skipDuplicates: true,
+      });
+      console.log(`  NPC Name Pools: ${npcNamePools.length} entries`);
+
+      await tx.npcAppearanceTrait.deleteMany({ where: { source: 'curated' } });
+      await tx.npcAppearanceTrait.createMany({
+        data: npcAppearanceTraits.map(t => ({
+          race: t.race,
+          category: t.category,
+          trait: t.trait,
+        })),
+        skipDuplicates: true,
+      });
+      console.log(`  NPC Appearance Traits: ${npcAppearanceTraits.length} entries`);
+
+      await tx.npcLootTemplate.deleteMany({ where: { source: 'curated' } });
+      await tx.npcLootTemplate.createMany({
+        data: npcLootTemplates.map(t => ({
+          profession: t.profession,
+          crBucket: t.crBucket,
+          coinage: t.coinage as unknown as Prisma.InputJsonValue,
+          items: t.items as unknown as Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
+      });
+      console.log(`  NPC Loot Templates: ${npcLootTemplates.length} entries`);
+
+      // Alignment priors carry nullable `background` (default rows), and
+      // Prisma compound uniques don't accept null. Drop curated rows and
+      // re-create instead of upserting.
+      await tx.npcAlignmentPrior.deleteMany({ where: { source: 'curated' } });
+      await tx.npcAlignmentPrior.createMany({
+        data: npcAlignmentPriors.map(p => ({
+          race: p.race,
+          background: p.background,
+          weights: p.weights,
+        })),
+        skipDuplicates: true,
+      });
+      console.log(`  NPC Alignment Priors: ${npcAlignmentPriors.length} entries`);
+
+      await tx.trinket.deleteMany({
+        where: { source: { in: ['curated', 'srd-5.0'] } },
+      });
+      await tx.trinket.createMany({
+        data: trinkets.map(t => ({
+          description: t.description,
+          source: t.source,
+        })),
+        skipDuplicates: true,
+      });
+      console.log(`  Trinkets: ${trinkets.length} entries`);
 
       for (const sr of srdSubraces) {
         const parent = await tx.race.findUnique({
