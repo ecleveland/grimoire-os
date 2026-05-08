@@ -674,139 +674,159 @@ describe('SrdService', () => {
   // ── Unified search (spells + feats + features) ──────
 
   describe('search (unified)', () => {
+    type SqlFragment = { sql: string; values: unknown[] };
+
     beforeEach(() => {
+      prisma.$queryRaw.mockResolvedValue([]);
       prisma.spell.findMany.mockResolvedValue([]);
-      prisma.spell.count.mockResolvedValue(0);
       prisma.feat.findMany.mockResolvedValue([]);
-      prisma.feat.count.mockResolvedValue(0);
       prisma.classFeature.findMany.mockResolvedValue([]);
-      prisma.classFeature.count.mockResolvedValue(0);
       prisma.subclassFeature.findMany.mockResolvedValue([]);
-      prisma.subclassFeature.count.mockResolvedValue(0);
       prisma.raceTrait.findMany.mockResolvedValue([]);
-      prisma.raceTrait.count.mockResolvedValue(0);
       prisma.backgroundFeature.findMany.mockResolvedValue([]);
-      prisma.backgroundFeature.count.mockResolvedValue(0);
     });
 
-    it('queries all three types when no types filter provided', async () => {
+    function captureSql() {
+      const calls = prisma.$queryRaw.mock.calls;
+      return {
+        idQuery: calls[0]?.[0] as SqlFragment | undefined,
+        countQuery: calls[1]?.[0] as SqlFragment | undefined,
+      };
+    }
+
+    function mockUnifiedQueryResults(idRows: { source: string; id: string }[], total: number) {
+      prisma.$queryRaw.mockResolvedValueOnce(idRows).mockResolvedValueOnce([{ total }]);
+    }
+
+    it('runs UNION ALL across all six sources when types is unset', async () => {
       await service.search({});
-
-      expect(prisma.spell.findMany).toHaveBeenCalled();
-      expect(prisma.feat.findMany).toHaveBeenCalled();
-      expect(prisma.classFeature.findMany).toHaveBeenCalled();
+      const { idQuery, countQuery } = captureSql();
+      for (const table of [
+        '"spells"',
+        '"feats"',
+        '"class_features"',
+        '"subclass_features"',
+        '"race_traits"',
+        '"background_features"',
+      ]) {
+        expect(idQuery?.sql).toContain(table);
+        expect(countQuery?.sql).toContain(table);
+      }
+      expect(idQuery?.sql).toContain('UNION ALL');
     });
 
-    it('only queries the spell table when types=["spell"]', async () => {
+    it('paginates in SQL via ORDER BY, LIMIT, and OFFSET (not in JS)', async () => {
+      await service.search({ page: 3, limit: 10 });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('ORDER BY');
+      expect(idQuery?.sql).toContain('LIMIT');
+      expect(idQuery?.sql).toContain('OFFSET');
+      expect(idQuery?.values).toContain(10);
+      expect(idQuery?.values).toContain(20);
+    });
+
+    it('only includes the spell source when types=["spell"]', async () => {
       await service.search({ types: ['spell'] });
-
-      expect(prisma.spell.findMany).toHaveBeenCalled();
-      expect(prisma.feat.findMany).not.toHaveBeenCalled();
-      expect(prisma.classFeature.findMany).not.toHaveBeenCalled();
-      expect(prisma.subclassFeature.findMany).not.toHaveBeenCalled();
-      expect(prisma.raceTrait.findMany).not.toHaveBeenCalled();
-      expect(prisma.backgroundFeature.findMany).not.toHaveBeenCalled();
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"spells"');
+      expect(idQuery?.sql).not.toContain('"feats"');
+      expect(idQuery?.sql).not.toContain('"class_features"');
+      expect(idQuery?.sql).not.toContain('"subclass_features"');
+      expect(idQuery?.sql).not.toContain('"race_traits"');
+      expect(idQuery?.sql).not.toContain('"background_features"');
     });
 
-    it('only queries the feat table when types=["feat"]', async () => {
+    it('only includes the feat source when types=["feat"]', async () => {
       await service.search({ types: ['feat'] });
-
-      expect(prisma.feat.findMany).toHaveBeenCalled();
-      expect(prisma.spell.findMany).not.toHaveBeenCalled();
-      expect(prisma.classFeature.findMany).not.toHaveBeenCalled();
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"feats"');
+      expect(idQuery?.sql).not.toContain('"spells"');
+      expect(idQuery?.sql).not.toContain('"class_features"');
     });
 
-    it('only queries the feature tables when types=["feature"]', async () => {
+    it('only includes the four feature tables when types=["feature"]', async () => {
       await service.search({ types: ['feature'] });
-
-      expect(prisma.spell.findMany).not.toHaveBeenCalled();
-      expect(prisma.feat.findMany).not.toHaveBeenCalled();
-      expect(prisma.classFeature.findMany).toHaveBeenCalled();
-      expect(prisma.subclassFeature.findMany).toHaveBeenCalled();
-      expect(prisma.raceTrait.findMany).toHaveBeenCalled();
-      expect(prisma.backgroundFeature.findMany).toHaveBeenCalled();
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).not.toContain('"spells"');
+      expect(idQuery?.sql).not.toContain('"feats"');
+      expect(idQuery?.sql).toContain('"class_features"');
+      expect(idQuery?.sql).toContain('"subclass_features"');
+      expect(idQuery?.sql).toContain('"race_traits"');
+      expect(idQuery?.sql).toContain('"background_features"');
     });
 
-    it('applies q to name and description across all types (case-insensitive contains)', async () => {
+    it('applies q as ILIKE on name and description in every enabled source', async () => {
       await service.search({ q: 'fire' });
-
-      const spellCall = prisma.spell.findMany.mock.calls[0][0];
-      expect(spellCall.where).toMatchObject({
-        OR: [
-          { name: { contains: 'fire', mode: 'insensitive' } },
-          { description: { contains: 'fire', mode: 'insensitive' } },
-        ],
-      });
-
-      const featCall = prisma.feat.findMany.mock.calls[0][0];
-      expect(featCall.where).toMatchObject({
-        OR: [
-          { name: { contains: 'fire', mode: 'insensitive' } },
-          { description: { contains: 'fire', mode: 'insensitive' } },
-        ],
-      });
-
-      const classFeatureCall = prisma.classFeature.findMany.mock.calls[0][0];
-      expect(classFeatureCall.where).toMatchObject({
-        OR: [
-          { name: { contains: 'fire', mode: 'insensitive' } },
-          { description: { contains: 'fire', mode: 'insensitive' } },
-        ],
-      });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('ILIKE');
+      const wildcardMatches = idQuery?.values.filter(v => v === '%fire%') ?? [];
+      // 6 sources × 2 columns (name + description) per source.
+      expect(wildcardMatches.length).toBe(12);
     });
 
-    it('applies spell sub-filters (class, level, school)', async () => {
+    it('applies spell sub-filters (class via ANY, level, school)', async () => {
       await service.search({
         types: ['spell'],
         class: 'Wizard',
         level: 3,
         school: 'Evocation',
       });
-
-      const spellCall = prisma.spell.findMany.mock.calls[0][0];
-      expect(spellCall.where).toMatchObject({
-        classes: { has: 'Wizard' },
-        level: 3,
-        school: 'Evocation',
-      });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toMatch(/ANY\s*\(\s*"classes"\s*\)/);
+      expect(idQuery?.values).toContain('Wizard');
+      expect(idQuery?.values).toContain(3);
+      expect(idQuery?.values).toContain('Evocation');
     });
 
-    it('applies hasPrerequisite=true filter', async () => {
-      await service.search({
-        types: ['feat'],
-        hasPrerequisite: 'true',
-      });
-
-      const featCall = prisma.feat.findMany.mock.calls[0][0];
-      expect(featCall.where).toMatchObject({
-        prerequisite: { not: null },
-      });
+    it('applies hasPrerequisite=true as IS NOT NULL', async () => {
+      await service.search({ types: ['feat'], hasPrerequisite: 'true' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"prerequisite" IS NOT NULL');
     });
 
-    it('treats hasPrerequisite=false as "no prerequisite"', async () => {
+    it('applies hasPrerequisite=false as IS NULL', async () => {
       await service.search({ types: ['feat'], hasPrerequisite: 'false' });
-
-      const featCall = prisma.feat.findMany.mock.calls[0][0];
-      expect(featCall.where).toMatchObject({ prerequisite: null });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"prerequisite" IS NULL');
     });
 
-    it('applies feature parentType filter (only that table is queried)', async () => {
+    it('applies feat category filter as a parameterized value', async () => {
+      await service.search({ types: ['feat'], category: 'Origin' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"category"');
+      expect(idQuery?.values).toContain('Origin');
+    });
+
+    it('applies feat repeatable=true filter', async () => {
+      await service.search({ types: ['feat'], repeatable: 'true' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"repeatable" = TRUE');
+    });
+
+    it('applies feat repeatable=false filter', async () => {
+      await service.search({ types: ['feat'], repeatable: 'false' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"repeatable" = FALSE');
+    });
+
+    it('restricts feature sources to the requested parentType', async () => {
       await service.search({ types: ['feature'], parentType: 'class' });
-
-      expect(prisma.classFeature.findMany).toHaveBeenCalled();
-      expect(prisma.subclassFeature.findMany).not.toHaveBeenCalled();
-      expect(prisma.raceTrait.findMany).not.toHaveBeenCalled();
-      expect(prisma.backgroundFeature.findMany).not.toHaveBeenCalled();
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"class_features"');
+      expect(idQuery?.sql).not.toContain('"subclass_features"');
+      expect(idQuery?.sql).not.toContain('"race_traits"');
+      expect(idQuery?.sql).not.toContain('"background_features"');
     });
 
-    it('applies feature parentId on the matching column', async () => {
+    it('applies parentId on the matching parent FK column', async () => {
       await service.search({ types: ['feature'], parentType: 'class', parentId: 'cls-1' });
-
-      const call = prisma.classFeature.findMany.mock.calls[0][0];
-      expect(call.where).toMatchObject({ classId: 'cls-1' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"classId"');
+      expect(idQuery?.values).toContain('cls-1');
     });
 
-    it('returns spell hits as {kind, data} with full Spell payload', async () => {
+    it('hydrates spell hits via findMany with id IN page IDs', async () => {
+      mockUnifiedQueryResults([{ source: 'spell', id: 'sp-1' }], 1);
       const fullSpell = {
         id: 'sp-1',
         name: 'Fireball',
@@ -825,33 +845,36 @@ describe('SrdService', () => {
         source: 'SRD 5.2.1',
       };
       prisma.spell.findMany.mockResolvedValue([fullSpell]);
-      prisma.spell.count.mockResolvedValue(1);
 
       const result = await service.search({ types: ['spell'] });
 
+      expect(prisma.spell.findMany).toHaveBeenCalledWith({ where: { id: { in: ['sp-1'] } } });
       expect(result.data[0]).toEqual({ kind: 'spell', data: fullSpell });
+      expect(result.total).toBe(1);
     });
 
-    it('returns feat hits as {kind, data} with full Feat payload (incl. category, repeatable, benefits)', async () => {
+    it('hydrates feat hits via findMany with id IN page IDs', async () => {
+      mockUnifiedQueryResults([{ source: 'feat', id: 'feat-1' }], 1);
       const fullFeat = {
         id: 'feat-1',
         name: 'Sharpshooter',
         prerequisite: null,
         description: 'You have mastered ranged weapons.',
-        benefits: ['No long-range disadvantage', 'Ignore half/three-quarters cover'],
+        benefits: ['No long-range disadvantage'],
         category: 'General',
         repeatable: false,
         source: 'SRD 5.2.1',
       };
       prisma.feat.findMany.mockResolvedValue([fullFeat]);
-      prisma.feat.count.mockResolvedValue(1);
 
       const result = await service.search({ types: ['feat'] });
 
+      expect(prisma.feat.findMany).toHaveBeenCalledWith({ where: { id: { in: ['feat-1'] } } });
       expect(result.data[0]).toEqual({ kind: 'feat', data: fullFeat });
     });
 
-    it('returns feature hits as {kind, data} with parent metadata', async () => {
+    it('hydrates class-feature hits with parent metadata', async () => {
+      mockUnifiedQueryResults([{ source: 'feature:class', id: 'cf-1' }], 1);
       prisma.classFeature.findMany.mockResolvedValue([
         {
           id: 'cf-1',
@@ -862,10 +885,13 @@ describe('SrdService', () => {
           class: { id: 'cls-1', name: 'Rogue' },
         },
       ]);
-      prisma.classFeature.count.mockResolvedValue(1);
 
       const result = await service.search({ types: ['feature'], parentType: 'class' });
 
+      expect(prisma.classFeature.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['cf-1'] } },
+        include: { class: { select: { id: true, name: true } } },
+      });
       expect(result.data[0]).toEqual({
         kind: 'feature',
         data: {
@@ -878,58 +904,92 @@ describe('SrdService', () => {
       });
     });
 
-    it('applies feat category filter when provided', async () => {
-      await service.search({ types: ['feat'], category: 'Origin' });
-
-      const featCall = prisma.feat.findMany.mock.calls[0][0];
-      expect(featCall.where).toMatchObject({ category: 'Origin' });
-    });
-
-    it('applies feat repeatable=true filter as boolean', async () => {
-      await service.search({ types: ['feat'], repeatable: 'true' });
-
-      const featCall = prisma.feat.findMany.mock.calls[0][0];
-      expect(featCall.where).toMatchObject({ repeatable: true });
-    });
-
-    it('applies feat repeatable=false filter as boolean', async () => {
-      await service.search({ types: ['feat'], repeatable: 'false' });
-
-      const featCall = prisma.feat.findMany.mock.calls[0][0];
-      expect(featCall.where).toMatchObject({ repeatable: false });
-    });
-
-    it('combines totals across all queried tables', async () => {
-      prisma.spell.count.mockResolvedValue(3);
-      prisma.feat.count.mockResolvedValue(2);
-      prisma.classFeature.count.mockResolvedValue(4);
-      prisma.subclassFeature.count.mockResolvedValue(1);
-      prisma.raceTrait.count.mockResolvedValue(0);
-      prisma.backgroundFeature.count.mockResolvedValue(0);
+    it('returns total from the SQL count query (not from row counts)', async () => {
+      mockUnifiedQueryResults([{ source: 'spell', id: 'sp-1' }], 42);
+      prisma.spell.findMany.mockResolvedValue([
+        {
+          id: 'sp-1',
+          name: 'X',
+          level: 0,
+          school: '',
+          castingTime: '',
+          range: '',
+          components: '',
+          duration: '',
+          description: '',
+          classes: [],
+          ritual: false,
+          concentration: false,
+          material: null,
+          higherLevels: null,
+          source: '',
+        },
+      ]);
 
       const result = await service.search({});
 
-      expect(result.total).toBe(10);
+      expect(result.total).toBe(42);
+      expect(result.lastPage).toBe(Math.ceil(42 / 20));
     });
 
-    it('sorts merged results alphabetically by data.name and slices by page/limit', async () => {
+    it('preserves SQL-given page order across kinds in the response', async () => {
+      mockUnifiedQueryResults(
+        [
+          { source: 'feat', id: 'feat-1' },
+          { source: 'spell', id: 'sp-1' },
+          { source: 'feature:class', id: 'cf-1' },
+        ],
+        3
+      );
       prisma.spell.findMany.mockResolvedValue([
-        { id: 's1', name: 'Bless', level: 1, school: 'Enchantment', description: '' },
-        { id: 's2', name: 'Fireball', level: 3, school: 'Evocation', description: '' },
+        {
+          id: 'sp-1',
+          name: 'Bless',
+          level: 1,
+          school: '',
+          castingTime: '',
+          range: '',
+          components: '',
+          duration: '',
+          description: '',
+          classes: [],
+          ritual: false,
+          concentration: false,
+          material: null,
+          higherLevels: null,
+          source: '',
+        },
       ]);
-      prisma.spell.count.mockResolvedValue(2);
       prisma.feat.findMany.mockResolvedValue([
-        { id: 'f1', name: 'Alert', prerequisite: null, description: '' },
+        {
+          id: 'feat-1',
+          name: 'Alert',
+          prerequisite: null,
+          description: '',
+          benefits: null,
+          category: null,
+          repeatable: false,
+          source: '',
+        },
       ]);
-      prisma.feat.count.mockResolvedValue(1);
+      prisma.classFeature.findMany.mockResolvedValue([
+        {
+          id: 'cf-1',
+          name: 'Cunning Action',
+          level: 2,
+          description: '',
+          classId: 'cls-1',
+          class: { id: 'cls-1', name: 'Rogue' },
+        },
+      ]);
 
-      const result = await service.search({ types: ['spell', 'feat'], page: 1, limit: 2 });
+      const result = await service.search({});
 
-      expect(result.total).toBe(3);
-      expect(result.lastPage).toBe(2);
-      expect(result.data).toHaveLength(2);
-      expect((result.data[0] as { data: { name: string } }).data.name).toBe('Alert');
-      expect((result.data[1] as { data: { name: string } }).data.name).toBe('Bless');
+      expect(result.data.map(h => (h.data as { name: string }).name)).toEqual([
+        'Alert',
+        'Bless',
+        'Cunning Action',
+      ]);
     });
   });
 });
