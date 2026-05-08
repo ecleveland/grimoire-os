@@ -56,8 +56,55 @@ const sneakAttackFeature: UnifiedFeatureData = {
   parent: { kind: 'class', id: 'cls-1', name: 'Rogue' },
 };
 
+const blessSpell: SrdSpell = {
+  id: 'sp-2',
+  name: 'Bless',
+  level: 1,
+  school: 'Enchantment',
+  castingTime: '1 action',
+  range: '30 feet',
+  components: 'V, S, M',
+  duration: 'Up to 1 minute',
+  description: 'You bless up to three creatures.',
+  classes: ['Cleric', 'Paladin'],
+  ritual: false,
+  concentration: true,
+  material: 'A sprinkling of holy water',
+  source: 'SRD 5.2.1',
+};
+
+const detectMagicSpell: SrdSpell = {
+  id: 'sp-3',
+  name: 'Detect Magic',
+  level: 1,
+  school: 'Divination',
+  castingTime: '1 action',
+  range: 'Self',
+  components: 'V, S',
+  duration: 'Up to 10 minutes',
+  description: 'You sense the presence of magic.',
+  classes: ['Bard', 'Cleric'],
+  ritual: true,
+  concentration: false,
+  source: 'SRD 5.2.1',
+};
+
+const toughFeat: SrdFeat = {
+  id: 'feat-2',
+  name: 'Tough',
+  description: 'Your hit point maximum increases.',
+  prerequisite: undefined,
+  benefits: undefined,
+  category: 'General',
+  repeatable: false,
+  source: 'SRD 5.2.1',
+};
+
 const fireball: UnifiedSearchHit = { kind: 'spell', data: fireballSpell };
+const bless: UnifiedSearchHit = { kind: 'spell', data: blessSpell };
+const detectMagic: UnifiedSearchHit = { kind: 'spell', data: detectMagicSpell };
 const sharpshooter: UnifiedSearchHit = { kind: 'feat', data: sharpshooterFeat };
+const tough: UnifiedSearchHit = { kind: 'feat', data: toughFeat };
 const sneakAttack: UnifiedSearchHit = { kind: 'feature', data: sneakAttackFeature };
 
 function paginated(hits: UnifiedSearchHit[]): PaginatedResponse<UnifiedSearchHit> {
@@ -200,6 +247,83 @@ describe('SrdSearchPage', () => {
       expect(screen.getByText(/Once per turn, deal extra damage/)).toBeInTheDocument();
       const drilldown = screen.getByRole('link', { name: /Open Rogue/i });
       expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1');
+    });
+  });
+
+  describe('conditional rendering — spell badges', () => {
+    it('shows the Concentration badge when spell.concentration is true', async () => {
+      mockApiFetch.mockResolvedValue(paginated([bless]));
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Bless')).toBeInTheDocument());
+      expect(screen.getByText('Concentration')).toBeInTheDocument();
+    });
+
+    it('shows the Ritual badge when spell.ritual is true', async () => {
+      mockApiFetch.mockResolvedValue(paginated([detectMagic]));
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Detect Magic')).toBeInTheDocument());
+      expect(screen.getByText('Ritual')).toBeInTheDocument();
+    });
+
+    it('does not show Concentration or Ritual badges when both flags are false', async () => {
+      // fireballSpell has both flags false
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
+      expect(screen.queryByText('Concentration')).not.toBeInTheDocument();
+      expect(screen.queryByText('Ritual')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('conditional rendering — spell expanded fields', () => {
+    it('does not render the Material section when spell.material is absent', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([detectMagic]));
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Detect Magic')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Detect Magic'));
+
+      expect(screen.queryByText('Material')).not.toBeInTheDocument();
+    });
+
+    it('does not render the At Higher Levels section when spell.higherLevels is absent', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([detectMagic]));
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Detect Magic')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Detect Magic'));
+
+      expect(screen.queryByText('At Higher Levels')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('conditional rendering — feat benefits', () => {
+    it('does not render the Benefits section when feat.benefits is undefined', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([tough]));
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Tough')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Tough'));
+
+      expect(screen.queryByText('Benefits')).not.toBeInTheDocument();
+      expect(screen.getByText('Your hit point maximum increases.')).toBeInTheDocument();
+    });
+
+    it('does not render the Benefits section when feat.benefits is an empty array', async () => {
+      const user = userEvent.setup();
+      const featWithEmptyBenefits: UnifiedSearchHit = {
+        kind: 'feat',
+        data: { ...toughFeat, id: 'feat-3', name: 'Resilient', benefits: [] },
+      };
+      mockApiFetch.mockResolvedValue(paginated([featWithEmptyBenefits]));
+      render(<SrdSearchPage />);
+      await waitFor(() => expect(screen.getByText('Resilient')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Resilient'));
+
+      expect(screen.queryByText('Benefits')).not.toBeInTheDocument();
     });
   });
 
