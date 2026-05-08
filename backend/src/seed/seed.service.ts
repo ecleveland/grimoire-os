@@ -52,6 +52,8 @@ export class SeedService {
       description: f.description,
       prerequisite: f.prerequisite ?? null,
       benefits: f.benefits,
+      category: f.category ?? null,
+      repeatable: f.repeatable ?? false,
     }));
 
     // ── Write to database ──────────────────────────────
@@ -77,7 +79,13 @@ export class SeedService {
       }
 
       if (feats.length) {
-        await tx.feat.createMany({ data: feats, skipDuplicates: true });
+        for (const feat of feats) {
+          await tx.feat.upsert({
+            where: { name: feat.name },
+            create: feat,
+            update: feat,
+          });
+        }
         console.log(`  Feats: ${feats.length} entries`);
       }
 

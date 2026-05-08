@@ -1,10 +1,25 @@
 import { Injectable } from '@nestjs/common';
+import { Spell, Feat } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
+import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
+
+export type UnifiedFeatureData = {
+  id: string;
+  name: string;
+  level?: number;
+  description: string;
+  parent: { kind: FeatureParentType; id: string; name: string };
+};
+
+export type UnifiedSearchHit =
+  | { kind: 'spell'; data: Spell }
+  | { kind: 'feat'; data: Feat }
+  | { kind: 'feature'; data: UnifiedFeatureData };
 
 const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
 const SUBCLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
@@ -396,5 +411,209 @@ export class SrdService {
       where: { category },
       orderBy: { key: 'asc' },
     });
+  }
+
+  // ── Unified search (spells + feats + features) ──────
+
+  async search(dto: QuerySearchDto) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
+    const types: SearchKind[] = dto.types?.length ? dto.types : ['spell', 'feat', 'feature'];
+
+    const tasks: Promise<{ hits: UnifiedSearchHit[]; total: number }>[] = [];
+    if (types.includes('spell')) tasks.push(this.searchSpellsForUnion(dto));
+    if (types.includes('feat')) tasks.push(this.searchFeatsForUnion(dto));
+    if (types.includes('feature')) tasks.push(this.searchFeaturesForUnion(dto));
+
+    const results = await Promise.all(tasks);
+    const allHits = results.flatMap(r => r.hits);
+    const total = results.reduce((sum, r) => sum + r.total, 0);
+
+    allHits.sort((a, b) => a.data.name.localeCompare(b.data.name));
+    const start = (page - 1) * limit;
+    const data = allHits.slice(start, start + limit);
+
+    return buildPaginatedResponse<UnifiedSearchHit>(data, total, page, limit);
+  }
+
+  private async searchSpellsForUnion(
+    dto: QuerySearchDto
+  ): Promise<{ hits: UnifiedSearchHit[]; total: number }> {
+    const where: Record<string, unknown> = {};
+    if (dto.q) {
+      where.OR = [
+        { name: { contains: dto.q, mode: 'insensitive' } },
+        { description: { contains: dto.q, mode: 'insensitive' } },
+      ];
+    }
+    if (dto.class) where.classes = { has: dto.class };
+    if (dto.level !== undefined) where.level = dto.level;
+    if (dto.school) where.school = dto.school;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.spell.findMany({ where, orderBy: { name: 'asc' } }),
+      this.prisma.spell.count({ where }),
+    ]);
+
+    return {
+      total,
+      hits: rows.map((r): UnifiedSearchHit => ({ kind: 'spell', data: r })),
+    };
+  }
+
+  private async searchFeatsForUnion(
+    dto: QuerySearchDto
+  ): Promise<{ hits: UnifiedSearchHit[]; total: number }> {
+    const where: Record<string, unknown> = {};
+    if (dto.q) {
+      where.OR = [
+        { name: { contains: dto.q, mode: 'insensitive' } },
+        { description: { contains: dto.q, mode: 'insensitive' } },
+      ];
+    }
+    if (dto.hasPrerequisite === 'true') where.prerequisite = { not: null };
+    else if (dto.hasPrerequisite === 'false') where.prerequisite = null;
+    if (dto.category) where.category = dto.category;
+    if (dto.repeatable === 'true') where.repeatable = true;
+    else if (dto.repeatable === 'false') where.repeatable = false;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.feat.findMany({ where, orderBy: { name: 'asc' } }),
+      this.prisma.feat.count({ where }),
+    ]);
+
+    return {
+      total,
+      hits: rows.map((r): UnifiedSearchHit => ({ kind: 'feat', data: r })),
+    };
+  }
+
+  private async searchFeaturesForUnion(
+    dto: QuerySearchDto
+  ): Promise<{ hits: UnifiedSearchHit[]; total: number }> {
+    const parents: FeatureParentType[] = dto.parentType
+      ? [dto.parentType]
+      : ['class', 'subclass', 'race', 'background'];
+
+    const orFilter = dto.q
+      ? {
+          OR: [
+            { name: { contains: dto.q, mode: 'insensitive' as const } },
+            { description: { contains: dto.q, mode: 'insensitive' as const } },
+          ],
+        }
+      : {};
+
+    const queries = await Promise.all(
+      parents.map(p => this.searchFeatureTableForUnion(p, orFilter, dto.parentId))
+    );
+
+    return {
+      hits: queries.flatMap(q => q.hits),
+      total: queries.reduce((sum, q) => sum + q.total, 0),
+    };
+  }
+
+  private async searchFeatureTableForUnion(
+    kind: FeatureParentType,
+    matchFilter: Record<string, unknown>,
+    parentId: string | undefined
+  ): Promise<{ hits: UnifiedSearchHit[]; total: number }> {
+    if (kind === 'class') {
+      const where = { ...matchFilter, ...(parentId ? { classId: parentId } : {}) };
+      const [rows, total] = await Promise.all([
+        this.prisma.classFeature.findMany({
+          where,
+          include: { class: { select: { id: true, name: true } } },
+        }),
+        this.prisma.classFeature.count({ where }),
+      ]);
+      return {
+        total,
+        hits: rows.map(
+          (r): UnifiedSearchHit => ({
+            kind: 'feature',
+            data: {
+              id: r.id,
+              name: r.name,
+              level: r.level,
+              description: r.description,
+              parent: { kind: 'class', id: r.class.id, name: r.class.name },
+            },
+          })
+        ),
+      };
+    }
+    if (kind === 'subclass') {
+      const where = { ...matchFilter, ...(parentId ? { subclassId: parentId } : {}) };
+      const [rows, total] = await Promise.all([
+        this.prisma.subclassFeature.findMany({
+          where,
+          include: { subclass: { select: { id: true, name: true } } },
+        }),
+        this.prisma.subclassFeature.count({ where }),
+      ]);
+      return {
+        total,
+        hits: rows.map(
+          (r): UnifiedSearchHit => ({
+            kind: 'feature',
+            data: {
+              id: r.id,
+              name: r.name,
+              level: r.level,
+              description: r.description,
+              parent: { kind: 'subclass', id: r.subclass.id, name: r.subclass.name },
+            },
+          })
+        ),
+      };
+    }
+    if (kind === 'race') {
+      const where = { ...matchFilter, ...(parentId ? { raceId: parentId } : {}) };
+      const [rows, total] = await Promise.all([
+        this.prisma.raceTrait.findMany({
+          where,
+          include: { race: { select: { id: true, name: true } } },
+        }),
+        this.prisma.raceTrait.count({ where }),
+      ]);
+      return {
+        total,
+        hits: rows.map(
+          (r): UnifiedSearchHit => ({
+            kind: 'feature',
+            data: {
+              id: r.id,
+              name: r.name,
+              description: r.description,
+              parent: { kind: 'race', id: r.race.id, name: r.race.name },
+            },
+          })
+        ),
+      };
+    }
+    const where = { ...matchFilter, ...(parentId ? { backgroundId: parentId } : {}) };
+    const [rows, total] = await Promise.all([
+      this.prisma.backgroundFeature.findMany({
+        where,
+        include: { background: { select: { id: true, name: true } } },
+      }),
+      this.prisma.backgroundFeature.count({ where }),
+    ]);
+    return {
+      total,
+      hits: rows.map(
+        (r): UnifiedSearchHit => ({
+          kind: 'feature',
+          data: {
+            id: r.id,
+            name: r.name,
+            description: r.description,
+            parent: { kind: 'background', id: r.background.id, name: r.background.name },
+          },
+        })
+      ),
+    };
   }
 }

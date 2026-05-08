@@ -287,20 +287,20 @@ describe('SRD class seed data — starting equipment', () => {
     });
 
     it.each(ALL_CLASSES)('%s should have at least one choice', name => {
-      const eq = getClass(name).equipmentChoices!;
+      const eq = getClass(name).equipmentChoices;
       expect(eq.choices.length).toBeGreaterThanOrEqual(1);
     });
 
     it.each(ALL_CLASSES)('%s should have startingGold as a non-empty string', name => {
-      const eq = getClass(name).equipmentChoices!;
+      const eq = getClass(name).equipmentChoices;
       expect(typeof eq.startingGold).toBe('string');
-      expect(eq.startingGold!.length).toBeGreaterThan(0);
+      expect(eq.startingGold.length).toBeGreaterThan(0);
     });
   });
 
   describe('choice structure validity', () => {
     it.each(ALL_CLASSES)('%s choices should have valid structure', name => {
-      const eq = getClass(name).equipmentChoices!;
+      const eq = getClass(name).equipmentChoices;
       for (const choice of eq.choices) {
         expect(choice.choose).toBeGreaterThanOrEqual(1);
         expect(choice.from.length).toBeGreaterThan(0);
@@ -311,7 +311,7 @@ describe('SRD class seed data — starting equipment', () => {
     });
 
     it.each(ALL_CLASSES)('%s items should have valid name and quantity', name => {
-      const eq = getClass(name).equipmentChoices!;
+      const eq = getClass(name).equipmentChoices;
       const allItems = [
         ...eq.choices.flatMap(c => c.from.flatMap(o => o.items)),
         ...(eq.guaranteed ?? []),
@@ -327,26 +327,26 @@ describe('SRD class seed data — starting equipment', () => {
 
   describe('spot checks', () => {
     it('Fighter should have startingGold of "5d4 x 10 gp"', () => {
-      expect(getClass('Fighter').equipmentChoices!.startingGold).toBe('5d4 x 10 gp');
+      expect(getClass('Fighter').equipmentChoices.startingGold).toBe('5d4 x 10 gp');
     });
 
     it('Wizard guaranteed items should include Spellbook', () => {
-      const guaranteed = getClass('Wizard').equipmentChoices!.guaranteed!;
+      const guaranteed = getClass('Wizard').equipmentChoices.guaranteed!;
       expect(guaranteed.some(i => i.name === 'Spellbook')).toBe(true);
     });
 
     it('Barbarian first choice should offer Greataxe', () => {
-      const firstChoice = getClass('Barbarian').equipmentChoices!.choices[0];
+      const firstChoice = getClass('Barbarian').equipmentChoices.choices[0];
       const allItemNames = firstChoice.from.flatMap(o => o.items.map(i => i.name));
       expect(allItemNames).toContain('Greataxe');
     });
 
     it('Monk should have startingGold of "5d4 gp"', () => {
-      expect(getClass('Monk').equipmentChoices!.startingGold).toBe('5d4 gp');
+      expect(getClass('Monk').equipmentChoices.startingGold).toBe('5d4 gp');
     });
 
     it("Rogue guaranteed items should include Thieves' tools", () => {
-      const guaranteed = getClass('Rogue').equipmentChoices!.guaranteed!;
+      const guaranteed = getClass('Rogue').equipmentChoices.guaranteed!;
       expect(guaranteed.some(i => i.name === "Thieves' tools")).toBe(true);
     });
   });
@@ -369,14 +369,14 @@ describe('SRD class seed data — multiclassing', () => {
     });
 
     it.each(ALL_CLASSES)('%s should have at least one prerequisite', name => {
-      const mc = getClass(name).multiclassing!;
+      const mc = getClass(name).multiclassing;
       expect(mc.prerequisites.length).toBeGreaterThanOrEqual(1);
     });
 
     it.each(ALL_CLASSES)(
       '%s prerequisites should require valid abilities with minimum 13',
       name => {
-        const mc = getClass(name).multiclassing!;
+        const mc = getClass(name).multiclassing;
         for (const prereq of mc.prerequisites) {
           expect(VALID_ABILITIES).toContain(prereq.ability);
           expect(prereq.minimum).toBe(13);
@@ -385,12 +385,12 @@ describe('SRD class seed data — multiclassing', () => {
     );
 
     it.each(ALL_CLASSES)('%s should have proficienciesGained as an array', name => {
-      const mc = getClass(name).multiclassing!;
+      const mc = getClass(name).multiclassing;
       expect(Array.isArray(mc.proficienciesGained)).toBe(true);
     });
 
     it.each(ALL_CLASSES)('%s proficienciesGained items should be non-empty strings', name => {
-      const mc = getClass(name).multiclassing!;
+      const mc = getClass(name).multiclassing;
       for (const prof of mc.proficienciesGained) {
         expect(typeof prof).toBe('string');
         expect(prof.length).toBeGreaterThan(0);
@@ -400,25 +400,25 @@ describe('SRD class seed data — multiclassing', () => {
 
   describe('caster type classification', () => {
     it.each(FULL_CASTERS)('%s should have casterType "full"', name => {
-      expect(getClass(name).multiclassing!.casterType).toBe('full');
+      expect(getClass(name).multiclassing.casterType).toBe('full');
     });
 
     it.each(HALF_CASTERS)('%s should have casterType "half"', name => {
-      expect(getClass(name).multiclassing!.casterType).toBe('half');
+      expect(getClass(name).multiclassing.casterType).toBe('half');
     });
 
     it('Warlock should have casterType "pact"', () => {
-      expect(getClass('Warlock').multiclassing!.casterType).toBe('pact');
+      expect(getClass('Warlock').multiclassing.casterType).toBe('pact');
     });
 
     it.each(NON_CASTERS)('%s should have casterType null', name => {
-      expect(getClass(name).multiclassing!.casterType).toBeNull();
+      expect(getClass(name).multiclassing.casterType).toBeNull();
     });
   });
 
   describe('prerequisite logic', () => {
     it('Fighter should have prerequisiteLogic "OR" (STR or DEX)', () => {
-      const mc = getClass('Fighter').multiclassing!;
+      const mc = getClass('Fighter').multiclassing;
       expect(mc.prerequisiteLogic).toBe('OR');
       const abilities = mc.prerequisites.map(p => p.ability);
       expect(abilities).toContain('Strength');
@@ -427,11 +427,11 @@ describe('SRD class seed data — multiclassing', () => {
 
     it('classes without prerequisiteLogic default to AND', () => {
       const classesWithMultiplePrereqs = ALL_CLASSES.filter(name => {
-        const mc = getClass(name).multiclassing!;
+        const mc = getClass(name).multiclassing;
         return mc.prerequisites.length > 1 && name !== 'Fighter';
       });
       for (const name of classesWithMultiplePrereqs) {
-        const mc = getClass(name).multiclassing!;
+        const mc = getClass(name).multiclassing;
         expect(mc.prerequisiteLogic).toBeUndefined();
       }
     });
@@ -439,7 +439,7 @@ describe('SRD class seed data — multiclassing', () => {
 
   describe('spot checks', () => {
     it('Paladin should require STR 13 and CHA 13', () => {
-      const prereqs = getClass('Paladin').multiclassing!.prerequisites;
+      const prereqs = getClass('Paladin').multiclassing.prerequisites;
       expect(prereqs).toEqual(
         expect.arrayContaining([
           { ability: 'Strength', minimum: 13 },
@@ -449,7 +449,7 @@ describe('SRD class seed data — multiclassing', () => {
     });
 
     it('Monk should require DEX 13 and WIS 13', () => {
-      const prereqs = getClass('Monk').multiclassing!.prerequisites;
+      const prereqs = getClass('Monk').multiclassing.prerequisites;
       expect(prereqs).toEqual(
         expect.arrayContaining([
           { ability: 'Dexterity', minimum: 13 },
@@ -459,19 +459,19 @@ describe('SRD class seed data — multiclassing', () => {
     });
 
     it('Sorcerer should gain no proficiencies', () => {
-      expect(getClass('Sorcerer').multiclassing!.proficienciesGained).toEqual([]);
+      expect(getClass('Sorcerer').multiclassing.proficienciesGained).toEqual([]);
     });
 
     it('Wizard should gain no proficiencies', () => {
-      expect(getClass('Wizard').multiclassing!.proficienciesGained).toEqual([]);
+      expect(getClass('Wizard').multiclassing.proficienciesGained).toEqual([]);
     });
 
     it("Rogue should gain Thieves' tools proficiency", () => {
-      expect(getClass('Rogue').multiclassing!.proficienciesGained).toContain("Thieves' tools");
+      expect(getClass('Rogue').multiclassing.proficienciesGained).toContain("Thieves' tools");
     });
 
     it('Barbarian should require only STR 13', () => {
-      const prereqs = getClass('Barbarian').multiclassing!.prerequisites;
+      const prereqs = getClass('Barbarian').multiclassing.prerequisites;
       expect(prereqs).toEqual([{ ability: 'Strength', minimum: 13 }]);
     });
   });

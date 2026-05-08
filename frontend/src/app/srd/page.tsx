@@ -4,9 +4,10 @@ import Link from 'next/link';
 
 const categories = [
   {
-    href: '/srd/spells',
-    title: 'Spells',
-    description: 'Browse spells by class, level, and school of magic.',
+    href: '/srd/search',
+    title: 'Search',
+    description:
+      'Find spells, feats, and class/race/background features in one place. Filter by class, level, school, category, prerequisite, or source.',
   },
   {
     href: '/srd/monsters',
