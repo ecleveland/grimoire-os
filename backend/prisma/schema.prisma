@@ -433,6 +433,8 @@ model Feat {
   description  String?
   prerequisite String?
   benefits     Json?
+  category     String?
+  repeatable   Boolean @default(false)
   source       String  @default("SRD 5.2.1")
 
   @@map("feats")

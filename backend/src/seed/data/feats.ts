@@ -10,7 +10,6 @@ export const srdFeats = [
       "Initiative Swap: Immediately after you roll Initiative, you can swap your Initiative with the Initiative of one willing ally in the same combat. You can't make this swap if you or the ally has the Incapacitated condition.",
     ],
     category: 'Origin',
-    level: null,
     repeatable: false,
   },
   {
@@ -24,7 +23,6 @@ export const srdFeats = [
       'Spell Change: Whenever you gain a new level, you can replace one of the spells you chose for this feat with a different spell of the same level from the chosen spell list.',
     ],
     category: 'Origin',
-    level: null,
     repeatable: true,
   },
   {
@@ -36,7 +34,6 @@ export const srdFeats = [
       "Once per turn when you hit a target with a weapon, you can roll the weapon's damage dice twice and use either roll against the target.",
     ],
     category: 'Origin',
-    level: null,
     repeatable: false,
   },
   {
@@ -45,7 +42,6 @@ export const srdFeats = [
     prerequisite: null,
     benefits: ['You gain proficiency in any combination of three skills or tools of your choice.'],
     category: 'Origin',
-    level: null,
     repeatable: true,
   },
 
@@ -85,7 +81,6 @@ export const srdFeats = [
     prerequisite: 'Fighting Style Feature',
     benefits: ['You gain a +2 bonus to attack rolls you make with Ranged weapons.'],
     category: 'Fighting Style',
-    level: null,
     repeatable: false,
   },
   {
@@ -97,7 +92,6 @@ export const srdFeats = [
       "While you're wearing Light, Medium, or Heavy armor, you gain a +1 bonus to Armor Class.",
     ],
     category: 'Fighting Style',
-    level: null,
     repeatable: false,
   },
   {
@@ -109,7 +103,6 @@ export const srdFeats = [
       'When you roll damage for an attack you make with a Melee weapon that you are holding with two hands, you can treat any 1 or 2 on a damage die as a 3. The weapon must have the Two-Handed or Versatile property to gain this benefit.',
     ],
     category: 'Fighting Style',
-    level: null,
     repeatable: false,
   },
   {
@@ -121,7 +114,6 @@ export const srdFeats = [
       "When you make an extra attack as a result of using a weapon that has the Light property, you can add your ability modifier to the damage of that attack if you aren't already adding it to the damage.",
     ],
     category: 'Fighting Style',
-    level: null,
     repeatable: false,
   },
 
