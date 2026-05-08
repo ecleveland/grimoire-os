@@ -20,3 +20,8 @@ _working/
 
 # Tool config (may contain auth tokens)
 .mcp.json
+
+# Playwright
+playwright-report/
+test-results/
+e2e/.auth/
