@@ -503,4 +503,68 @@ export const srdGameRules = [
       description: 'A period of extended downtime, at least 8 hours long',
     },
   },
+  {
+    category: 'exhaustion',
+    key: 'levels',
+    value: {
+      '1': 'Disadvantage on ability checks',
+      '2': 'Speed halved',
+      '3': 'Disadvantage on attack rolls and saving throws',
+      '4': 'Hit point maximum halved',
+      '5': 'Speed reduced to 0',
+      '6': 'Death',
+    },
+  },
+  {
+    category: 'cover',
+    key: 'types',
+    value: {
+      half: {
+        acBonus: 2,
+        dexSavingThrowBonus: 2,
+        description: 'Half cover: +2 AC and DEX saving throws',
+      },
+      'three-quarters': {
+        acBonus: 5,
+        dexSavingThrowBonus: 5,
+        description: 'Three-quarters cover: +5 AC and DEX saving throws',
+      },
+      full: {
+        description: "Full cover: can't be targeted directly by attacks or spells",
+      },
+    },
+  },
+  {
+    category: 'carrying-capacity',
+    key: 'rules',
+    value: {
+      carryCapacity: 'Strength score × 15 (in pounds)',
+      pushDragLift: 'Strength score × 30 (in pounds)',
+      sizeMultipliers: {
+        Tiny: 0.5,
+        Small: 1,
+        Medium: 1,
+        Large: 2,
+        Huge: 4,
+        Gargantuan: 8,
+      },
+      encumbrance: {
+        encumbered: 'Strength score × 5 — speed reduced by 10 ft',
+        heavilyEncumbered:
+          'Strength score × 10 — speed reduced by 20 ft, disadvantage on ability checks, attack rolls, and STR/DEX/CON saving throws',
+      },
+    },
+  },
+  {
+    category: 'size-categories',
+    key: 'space',
+    value: {
+      Tiny: '2.5 × 2.5 ft',
+      Small: '5 × 5 ft',
+      Medium: '5 × 5 ft',
+      Large: '10 × 10 ft',
+      Huge: '15 × 15 ft',
+      Gargantuan: '20 × 20 ft or larger',
+    },
+  },
 ];

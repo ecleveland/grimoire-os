@@ -611,4 +611,150 @@ describe('SRD game rules seed data', () => {
       });
     });
   });
+
+  describe('exhaustion / levels', () => {
+    it('exists', () => {
+      expect(getRule('exhaustion', 'levels')).toBeDefined();
+    });
+
+    it('covers exhaustion levels 1 through 6', () => {
+      const rule = getRule('exhaustion', 'levels')!;
+      const table = rule.value as unknown as Record<string, string>;
+      for (let level = 1; level <= 6; level++) {
+        expect(typeof table[String(level)]).toBe('string');
+        expect(table[String(level)].length).toBeGreaterThan(0);
+      }
+    });
+
+    it('matches the SRD exhaustion effects per level', () => {
+      const rule = getRule('exhaustion', 'levels')!;
+      expect(rule.value).toEqual({
+        '1': 'Disadvantage on ability checks',
+        '2': 'Speed halved',
+        '3': 'Disadvantage on attack rolls and saving throws',
+        '4': 'Hit point maximum halved',
+        '5': 'Speed reduced to 0',
+        '6': 'Death',
+      });
+    });
+  });
+
+  describe('cover / types', () => {
+    type CoverTypes = {
+      half: { acBonus: number; dexSavingThrowBonus: number; description: string };
+      'three-quarters': { acBonus: number; dexSavingThrowBonus: number; description: string };
+      full: { description: string };
+    };
+
+    it('exists', () => {
+      expect(getRule('cover', 'types')).toBeDefined();
+    });
+
+    it('matches the SRD cover types and bonuses', () => {
+      const rule = getRule('cover', 'types')!;
+      expect(rule.value).toEqual({
+        half: {
+          acBonus: 2,
+          dexSavingThrowBonus: 2,
+          description: 'Half cover: +2 AC and DEX saving throws',
+        },
+        'three-quarters': {
+          acBonus: 5,
+          dexSavingThrowBonus: 5,
+          description: 'Three-quarters cover: +5 AC and DEX saving throws',
+        },
+        full: {
+          description: "Full cover: can't be targeted directly by attacks or spells",
+        },
+      });
+    });
+
+    it('three-quarters cover gives a larger bonus than half cover', () => {
+      const value = getRule('cover', 'types')!.value as unknown as CoverTypes;
+      expect(value['three-quarters'].acBonus).toBeGreaterThan(value.half.acBonus);
+      expect(value['three-quarters'].dexSavingThrowBonus).toBeGreaterThan(
+        value.half.dexSavingThrowBonus
+      );
+    });
+  });
+
+  describe('carrying-capacity / rules', () => {
+    type CarryingCapacity = {
+      carryCapacity: string;
+      pushDragLift: string;
+      sizeMultipliers: Record<string, number>;
+      encumbrance: { encumbered: string; heavilyEncumbered: string };
+    };
+
+    function getCarryingCapacity(): CarryingCapacity {
+      return getRule('carrying-capacity', 'rules')!.value as unknown as CarryingCapacity;
+    }
+
+    it('exists', () => {
+      expect(getRule('carrying-capacity', 'rules')).toBeDefined();
+    });
+
+    it('matches the SRD carrying-capacity rules', () => {
+      const rule = getRule('carrying-capacity', 'rules')!;
+      expect(rule.value).toEqual({
+        carryCapacity: 'Strength score × 15 (in pounds)',
+        pushDragLift: 'Strength score × 30 (in pounds)',
+        sizeMultipliers: {
+          Tiny: 0.5,
+          Small: 1,
+          Medium: 1,
+          Large: 2,
+          Huge: 4,
+          Gargantuan: 8,
+        },
+        encumbrance: {
+          encumbered: 'Strength score × 5 — speed reduced by 10 ft',
+          heavilyEncumbered:
+            'Strength score × 10 — speed reduced by 20 ft, disadvantage on ability checks, attack rolls, and STR/DEX/CON saving throws',
+        },
+      });
+    });
+
+    it('covers all six SRD size categories', () => {
+      const { sizeMultipliers } = getCarryingCapacity();
+      expect(Object.keys(sizeMultipliers).sort()).toEqual(
+        ['Gargantuan', 'Huge', 'Large', 'Medium', 'Small', 'Tiny'].sort()
+      );
+    });
+
+    it('size multipliers double each step from Medium upward', () => {
+      const { sizeMultipliers } = getCarryingCapacity();
+      expect(sizeMultipliers.Large).toBe(sizeMultipliers.Medium * 2);
+      expect(sizeMultipliers.Huge).toBe(sizeMultipliers.Large * 2);
+      expect(sizeMultipliers.Gargantuan).toBe(sizeMultipliers.Huge * 2);
+    });
+  });
+
+  describe('size-categories / space', () => {
+    it('exists', () => {
+      expect(getRule('size-categories', 'space')).toBeDefined();
+    });
+
+    it('matches the SRD size-category space requirements', () => {
+      const rule = getRule('size-categories', 'space')!;
+      expect(rule.value).toEqual({
+        Tiny: '2.5 × 2.5 ft',
+        Small: '5 × 5 ft',
+        Medium: '5 × 5 ft',
+        Large: '10 × 10 ft',
+        Huge: '15 × 15 ft',
+        Gargantuan: '20 × 20 ft or larger',
+      });
+    });
+
+    it('uses the same six size categories as carrying-capacity multipliers', () => {
+      const space = getRule('size-categories', 'space')!.value as unknown as Record<string, string>;
+      const multipliers = (
+        getRule('carrying-capacity', 'rules')!.value as unknown as {
+          sizeMultipliers: Record<string, number>;
+        }
+      ).sizeMultipliers;
+      expect(Object.keys(space).sort()).toEqual(Object.keys(multipliers).sort());
+    });
+  });
 });
