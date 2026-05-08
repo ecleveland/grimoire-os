@@ -51,6 +51,9 @@ describe('SeedService', () => {
     prisma.srdClass.createMany.mockResolvedValue({ count: 0 });
     prisma.race.createMany.mockResolvedValue({ count: 0 });
     prisma.background.createMany.mockResolvedValue({ count: 0 });
+    prisma.background.upsert.mockImplementation((args: any) =>
+      Promise.resolve({ id: `bg-${args.where.name}`, name: args.where.name })
+    );
     prisma.feat.createMany.mockResolvedValue({ count: 0 });
     prisma.condition.createMany.mockResolvedValue({ count: 0 });
     prisma.skill.createMany.mockResolvedValue({ count: 0 });
@@ -366,9 +369,24 @@ describe('SeedService', () => {
   it('does not write feature field on backgrounds anymore', async () => {
     await service.seed();
 
-    const bgCall = prisma.background.createMany.mock.calls[0][0];
-    for (const row of bgCall.data) {
-      expect(row).not.toHaveProperty('feature');
+    expect(prisma.background.upsert).toHaveBeenCalled();
+    for (const call of prisma.background.upsert.mock.calls) {
+      const args = call[0];
+      expect(args.create).not.toHaveProperty('feature');
+      expect(args.update).not.toHaveProperty('feature');
+    }
+  });
+
+  it('upserts backgrounds by name so reseed overwrites personality arrays', async () => {
+    await service.seed();
+
+    expect(prisma.background.upsert).toHaveBeenCalled();
+    for (const call of prisma.background.upsert.mock.calls) {
+      const args = call[0];
+      expect(args.where).toHaveProperty('name');
+      expect(args.create).toEqual(args.update);
+      expect(Array.isArray(args.create.personalityTraits)).toBe(true);
+      expect(args.create.personalityTraits.length).toBeGreaterThanOrEqual(6);
     }
   });
 });
