@@ -54,6 +54,7 @@ model User {
   characters     Character[]
   notes          Note[]
   encounters     Encounter[]
+  npcs           Npc[]
 
   @@map("users")
 }
@@ -77,6 +78,7 @@ model Campaign {
   characters Character[]
   notes      Note[]
   encounters Encounter[]
+  npcs       Npc[]
 
   @@index([ownerId])
   @@map("campaigns")
@@ -482,6 +484,134 @@ model GameRule {
 
   @@unique([category, key])
   @@map("game_rules")
+}
+
+// ── NPC Generator ─────────────────────────────────────
+
+model Npc {
+  id          String  @id @default(uuid())
+  campaignId  String
+  createdById String
+
+  // Identity
+  name       String
+  race       String
+  background String?
+  profession String?
+  alignment  String?
+  size       String?
+  age        Int?
+  gender     String?
+
+  // Description
+  appearance        String?
+  personalityTraits String[] @default([])
+  ideals            String[] @default([])
+  bonds             String[] @default([])
+  flaws             String[] @default([])
+
+  // Combat (null = Lite mode, default)
+  statBlock Json?
+
+  // Coinage — scaled to profession/background, not a flat gp value
+  goldPieces   Int @default(0)
+  silverPieces Int @default(0)
+  copperPieces Int @default(0)
+
+  // Loot
+  loot          Json?
+  lootOverrides Json?
+
+  // Generation metadata
+  generationParams Json?
+  lockedFields     String[] @default([])
+  isManual         Boolean  @default(false)
+
+  campaign      Campaign      @relation(fields: [campaignId], references: [id])
+  createdBy     User          @relation(fields: [createdById], references: [id])
+  outgoingLinks NpcRelation[] @relation("FromNpc")
+  incomingLinks NpcRelation[] @relation("ToNpc")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([campaignId])
+  @@map("npcs")
+}
+
+model NpcRelation {
+  id        String  @id @default(uuid())
+  fromNpcId String
+  toNpcId   String
+  relation  String
+  notes     String?
+
+  fromNpc Npc @relation("FromNpc", fields: [fromNpcId], references: [id], onDelete: Cascade)
+  toNpc   Npc @relation("ToNpc", fields: [toNpcId], references: [id], onDelete: Cascade)
+
+  @@unique([fromNpcId, toNpcId, relation])
+  @@map("npc_relations")
+}
+
+// ── NPC Generator reference data ──────────────────────
+
+model NpcNamePool {
+  id       String  @id @default(uuid())
+  race     String
+  gender   String?
+  kind     String
+  value    String
+  source   String  @default("curated")
+  isActive Boolean @default(true)
+
+  @@index([race, kind])
+  @@map("npc_name_pools")
+}
+
+model NpcAppearanceTrait {
+  id       String  @id @default(uuid())
+  race     String
+  category String
+  trait    String
+  source   String  @default("curated")
+  isActive Boolean @default(true)
+
+  @@index([race, category])
+  @@map("npc_appearance_traits")
+}
+
+model NpcLootTemplate {
+  id         String  @id @default(uuid())
+  profession String
+  crBucket   String
+  coinage    Json
+  items      Json
+  source     String  @default("curated")
+  isActive   Boolean @default(true)
+
+  @@index([profession, crBucket])
+  @@map("npc_loot_templates")
+}
+
+model NpcAlignmentPrior {
+  id         String  @id @default(uuid())
+  race       String
+  background String?
+  weights    Int[]
+  source     String  @default("curated")
+  isActive   Boolean @default(true)
+
+  @@unique([race, background])
+  @@map("npc_alignment_priors")
+}
+
+model Trinket {
+  id          String  @id @default(uuid())
+  description String
+  source      String  @default("curated")
+  isActive    Boolean @default(true)
+
+  @@map("trinkets")
 }
 
 // ── Audit Log ─────────────────────────────────────────
