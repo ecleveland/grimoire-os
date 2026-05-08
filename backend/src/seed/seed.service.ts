@@ -71,10 +71,13 @@ export class SeedService {
       console.log(`  Items: ${items.length} entries`);
 
       if (backgrounds.length) {
-        await tx.background.createMany({
-          data: backgrounds,
-          skipDuplicates: true,
-        });
+        for (const background of backgrounds) {
+          await tx.background.upsert({
+            where: { name: background.name },
+            create: background,
+            update: background,
+          });
+        }
         console.log(`  Backgrounds: ${backgrounds.length} entries`);
       }
 
