@@ -32,6 +32,14 @@ export type {
   Character,
   Note,
   Encounter,
+  // NPC
+  Npc,
+  NpcRelation,
+  NpcLootOverrides,
+  NpcLootItem,
+  NpcRerollField,
+  GenerateNpcRequest,
+  GeneratedNpcPreview,
   // Pagination
   PaginatedResponse,
   // Response types

@@ -7,7 +7,14 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
-import type { Campaign, Note, Encounter, PaginatedResponse, InviteCodeResponse } from '@/lib/types';
+import type {
+  Campaign,
+  Note,
+  Encounter,
+  Npc,
+  PaginatedResponse,
+  InviteCodeResponse,
+} from '@/lib/types';
 
 const statusColors: Record<string, string> = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
@@ -15,7 +22,7 @@ const statusColors: Record<string, string> = {
   completed: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
 };
 
-type Tab = 'overview' | 'notes' | 'encounters';
+type Tab = 'overview' | 'notes' | 'encounters' | 'npcs';
 
 const LIMIT = 20;
 
@@ -31,6 +38,8 @@ export default function CampaignDetailPage() {
   const [encountersTotal, setEncountersTotal] = useState(0);
   const [encountersLastPage, setEncountersLastPage] = useState(1);
   const [encountersPage, setEncountersPage] = useState(1);
+  const [recentNpcs, setRecentNpcs] = useState<Npc[]>([]);
+  const [npcsTotal, setNpcsTotal] = useState(0);
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
@@ -74,6 +83,17 @@ export default function CampaignDetailPage() {
           toast.error('Failed to load encounters', { id: 'load-encounters' });
         });
     }
+    if (tab === 'npcs') {
+      apiFetch<PaginatedResponse<Npc>>(`/npcs?campaignId=${id}&page=1&limit=3`)
+        .then(res => {
+          setRecentNpcs(res.data);
+          setNpcsTotal(res.total);
+        })
+        .catch(err => {
+          console.error('Failed to load NPCs:', err);
+          toast.error('Failed to load NPCs', { id: 'load-npcs' });
+        });
+    }
   }, [tab, id, notesPage, encountersPage]);
 
   const handleTabChange = (newTab: Tab) => {
@@ -103,6 +123,7 @@ export default function CampaignDetailPage() {
     { key: 'overview', label: 'Overview' },
     { key: 'notes', label: 'Notes' },
     { key: 'encounters', label: 'Encounters' },
+    { key: 'npcs', label: 'NPCs' },
   ];
 
   return (
@@ -273,6 +294,58 @@ export default function CampaignDetailPage() {
                 onPageChange={setNotesPage}
               />
             </>
+          )}
+        </div>
+      )}
+
+      {tab === 'npcs' && (
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">NPCs</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {npcsTotal} total · showing {recentNpcs.length} most recent
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Link
+                href={`/campaigns/${id}/npcs`}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                View all
+              </Link>
+              <Link
+                href={`/campaigns/${id}/npcs/new`}
+                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                New NPC
+              </Link>
+            </div>
+          </div>
+          {recentNpcs.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400">No NPCs yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {recentNpcs.map(npc => (
+                <Link
+                  key={npc.id}
+                  href={`/campaigns/${id}/npcs/${npc.id}`}
+                  className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="font-medium text-gray-900 dark:text-white">{npc.name}</h3>
+                    {npc.alignment && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                        {npc.alignment}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {npc.profession ? `${npc.race} · ${npc.profession}` : npc.race}
+                  </p>
+                </Link>
+              ))}
+            </div>
           )}
         </div>
       )}
