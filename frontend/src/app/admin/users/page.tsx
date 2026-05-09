@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import type { User, PaginatedResponse } from '@/lib/types';
 
 const LIMIT = 20;
@@ -18,6 +19,7 @@ export default function AdminUsersPage() {
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; username: string } | null>(null);
 
   useEffect(() => {
     if (!isAdmin) {
@@ -48,9 +50,9 @@ export default function AdminUsersPage() {
     }
   };
 
-  const deleteUser = async (userId: string, username: string) => {
-    if (!confirm(`Are you sure you want to delete user "${username}"? This cannot be undone.`))
-      return;
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const { id: userId } = pendingDelete;
     try {
       await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
       setUsers(prev => prev.filter(u => u.id !== userId));
@@ -109,7 +111,7 @@ export default function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={() => deleteUser(u.id, u.username)}
+                      onClick={() => setPendingDelete({ id: u.id, username: u.username })}
                       className="text-sm text-red-600 hover:text-red-700"
                     >
                       Delete
@@ -127,6 +129,20 @@ export default function AdminUsersPage() {
         total={total}
         limit={LIMIT}
         onPageChange={setPage}
+      />
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={open => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Delete user?"
+        description={
+          pendingDelete
+            ? `Are you sure you want to delete user "${pendingDelete.username}"? This cannot be undone.`
+            : ''
+        }
+        variant="danger"
+        onConfirm={confirmDelete}
       />
     </div>
   );

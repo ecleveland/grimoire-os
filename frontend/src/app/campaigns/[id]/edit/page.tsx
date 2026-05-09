@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { Campaign } from '@/lib/types';
 import FormField from '@/components/FormField';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 export default function EditCampaignPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +17,7 @@ export default function EditCampaignPage() {
   const [status, setStatus] = useState<Campaign['status']>('active');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     apiFetch<Campaign>(`/campaigns/${id}`)
@@ -46,7 +48,6 @@ export default function EditCampaignPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this campaign? This cannot be undone.')) return;
     try {
       await apiFetch(`/campaigns/${id}`, { method: 'DELETE' });
       toast.success('Campaign deleted');
@@ -114,13 +115,21 @@ export default function EditCampaignPage() {
           </div>
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => setConfirmDeleteOpen(true)}
             className="px-4 py-2 text-red-600 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
           >
             Delete
           </button>
         </div>
       </form>
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete campaign?"
+        description="Are you sure you want to delete this campaign? This cannot be undone."
+        variant="danger"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
