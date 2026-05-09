@@ -1,0 +1,86 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
+import { NpcsService } from './npcs.service';
+import { CreateNpcDto } from './dto/create-npc.dto';
+import { UpdateNpcDto } from './dto/update-npc.dto';
+import { NpcQueryDto } from './dto/npc-query.dto';
+import { AddNpcRelationDto } from './dto/add-npc-relation.dto';
+
+@ApiTags('NPCs')
+@ApiBearerAuth()
+@Controller('npcs')
+@UseGuards(JwtAuthGuard)
+export class NpcsController {
+  constructor(private readonly npcsService: NpcsService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Create an NPC (manual or pre-generated payload)' })
+  create(@Req() req: AuthenticatedRequest, @Body() dto: CreateNpcDto) {
+    return this.npcsService.create(req.user.userId, dto);
+  }
+
+  @Get()
+  @ApiOperation({ summary: 'List NPCs for a campaign (paginated, DM-only)' })
+  findAll(@Query() query: NpcQueryDto, @Req() req: AuthenticatedRequest) {
+    return this.npcsService.findAllForCampaign(query.campaignId, req.user.userId, query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get NPC by id with relations' })
+  findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.npcsService.findOne(id, req.user.userId);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Update NPC (incl. lockedFields, lootOverrides)' })
+  update(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: UpdateNpcDto
+  ) {
+    return this.npcsService.update(id, req.user.userId, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete NPC' })
+  remove(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.npcsService.remove(id, req.user.userId);
+  }
+
+  @Post(':id/relations')
+  @ApiOperation({ summary: 'Add relation from this NPC to another' })
+  addRelation(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: AddNpcRelationDto
+  ) {
+    return this.npcsService.addRelation(id, req.user.userId, dto);
+  }
+
+  @Delete(':id/relations/:relationId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove a relation owned by this NPC' })
+  removeRelation(
+    @Param('id') id: string,
+    @Param('relationId') relationId: string,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return this.npcsService.removeRelation(id, relationId, req.user.userId);
+  }
+}
