@@ -106,10 +106,11 @@ export class CreateNpcDto {
   @Min(0)
   copperPieces?: number;
 
-  @ApiPropertyOptional({ type: 'object', additionalProperties: true })
+  // Generator returns `loot` as an array of items; manual saves may pass any
+  // JSON-serializable shape. Skip @IsObject() so arrays aren't rejected.
+  @ApiPropertyOptional({ description: 'Loot items (array) or arbitrary JSON' })
   @IsOptional()
-  @IsObject()
-  loot?: Record<string, unknown>;
+  loot?: unknown;
 
   @ApiPropertyOptional({ type: 'object', additionalProperties: true })
   @IsOptional()

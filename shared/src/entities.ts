@@ -110,3 +110,110 @@ export interface Encounter {
   createdAt: string;
   updatedAt: string;
 }
+
+// ── NPC ──────────────────────────────────────────────
+
+export type NpcLootOverrides = {
+  trinketChance?: number;
+  magicItemChance?: number;
+  itemCountDie?: string;
+  coinageMultiplier?: number;
+};
+
+export type NpcLootItem = {
+  itemId: string | null;
+  name: string;
+  quantity: number;
+  source: 'profession' | 'trinket' | 'magic-item';
+  notes?: string;
+};
+
+export interface NpcRelation {
+  id: string;
+  fromNpcId: string;
+  toNpcId: string;
+  relation: string;
+  notes?: string | null;
+}
+
+export interface Npc {
+  id: string;
+  campaignId: string;
+  createdById: string;
+  name: string;
+  race: string;
+  background?: string | null;
+  profession?: string | null;
+  alignment?: string | null;
+  size?: string | null;
+  age?: number | null;
+  gender?: string | null;
+  appearance?: string | null;
+  personalityTraits: string[];
+  ideals: string[];
+  bonds: string[];
+  flaws: string[];
+  statBlock?: Record<string, unknown> | null;
+  goldPieces: number;
+  silverPieces: number;
+  copperPieces: number;
+  loot?: NpcLootItem[] | Record<string, unknown> | null;
+  lootOverrides?: NpcLootOverrides | null;
+  generationParams?: Record<string, unknown> | null;
+  lockedFields: string[];
+  isManual: boolean;
+  outgoingLinks?: NpcRelation[];
+  incomingLinks?: NpcRelation[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type NpcRerollField =
+  | 'race'
+  | 'background'
+  | 'profession'
+  | 'alignment'
+  | 'name'
+  | 'appearance'
+  | 'personality'
+  | 'loot'
+  | 'all';
+
+export interface GenerateNpcRequest {
+  campaignId: string;
+  seed?: string;
+  race?: string;
+  setting?: string;
+  background?: string;
+  profession?: string;
+  alignment?: string;
+  name?: string;
+  gender?: 'male' | 'female';
+  hostility?: 'friendly' | 'neutral' | 'hostile';
+  combatRelevant?: boolean;
+  lootOverrides?: NpcLootOverrides;
+}
+
+export interface GeneratedNpcPreview {
+  campaignId: string;
+  name: string;
+  race: string;
+  background: string | null;
+  profession: string | null;
+  alignment: string;
+  size: string | null;
+  age: number | null;
+  gender: string | null;
+  appearance: string | null;
+  personalityTraits: string[];
+  ideals: string[];
+  bonds: string[];
+  flaws: string[];
+  statBlock: null;
+  goldPieces: number;
+  silverPieces: number;
+  copperPieces: number;
+  loot: NpcLootItem[];
+  lootOverrides: NpcLootOverrides | null;
+  generationParams: Record<string, unknown>;
+}
