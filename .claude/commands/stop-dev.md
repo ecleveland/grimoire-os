@@ -1,3 +1,5 @@
-Stop the backend and frontend dev servers using the stop.sh script in the project root.
+Stop the GrimoireOS dev servers using `./stop.sh` in the project root.
 
-Execute `./stop.sh` to stop the development servers. PostgreSQL container is left running.
+The script kills every `dev.sh` process group it finds (backend, frontend, and any orphans left behind by previous Claude background shells), then sweeps anything still bound to ports 3000/3001. PostgreSQL is left running.
+
+Run `./stop.sh` and report which trees were stopped.
