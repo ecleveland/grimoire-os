@@ -24,6 +24,12 @@ export default defineConfig({
         'src/**/*.d.ts',
         'src/**/layout.tsx',
       ],
+      thresholds: {
+        statements: 47,
+        branches: 52,
+        functions: 41,
+        lines: 48,
+      },
     },
   },
 });

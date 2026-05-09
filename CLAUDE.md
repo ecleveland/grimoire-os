@@ -24,12 +24,27 @@ JWT_SECRET=your-secret docker compose up --build
 # Backend
 cd backend && npm run start:dev   # Dev server
 cd backend && npm test            # Unit tests
+cd backend && npm run test:cov    # Unit tests + coverage (enforces thresholds)
 cd backend && npm run seed        # Seed SRD data
 
 # Frontend
 cd frontend && npm run dev        # Dev server
 cd frontend && npm test           # Unit tests
+cd frontend && npm run test:cov   # Unit tests + coverage (enforces thresholds)
 ```
+
+## Testing & Coverage Thresholds
+
+Both projects enforce minimum coverage thresholds via their respective test runners. `test:cov` (backend Jest, frontend Vitest) will exit non-zero if any metric drops below the configured floor.
+
+| Project | Statements | Branches | Functions | Lines | Configured in |
+|---------|------------|----------|-----------|-------|---------------|
+| Backend (Jest) | 85% | 70% | 75% | 85% | `backend/package.json` (`jest.coverageThreshold.global`) |
+| Frontend (Vitest) | 47% | 52% | 41% | 48% | `frontend/vitest.config.ts` (`test.coverage.thresholds`) |
+
+Backend thresholds match the targets agreed in VEG-204; current actual coverage exceeds them comfortably. Frontend thresholds were set ~1-2 points below the actual baseline (current: ~48.6/53.4/42.3/49.5%) to avoid flaky failures while still preventing regression.
+
+**Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
 
 ## Environment Variables
 
