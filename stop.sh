@@ -1,12 +1,55 @@
 #!/bin/bash
 
-# Stop the backend and frontend dev servers (leaves PostgreSQL running)
-set -e
+# Stop every dev.sh process tree (backend + frontend + any orphans),
+# then anything still bound to the dev ports. Leaves PostgreSQL running.
+#
+# We kill by process group rather than by port because orphaned dev.sh
+# trees may not own a port (lost the bind race to an earlier instance).
 
-echo "Stopping backend (port 3001)..."
-lsof -ti :3001 | xargs kill 2>/dev/null && echo "Backend stopped." || echo "Backend not running."
+set -u
 
-echo "Stopping frontend (port 3000)..."
-lsof -ti :3000 | xargs kill 2>/dev/null && echo "Frontend stopped." || echo "Frontend not running."
+# Collect unique process group IDs of every running dev.sh
+# shellcheck disable=SC2009
+DEV_PGIDS=$(ps -ax -o pgid=,command= | awk '/[d]ev\.sh/ { print $1 }' | sort -u)
+
+if [ -n "$DEV_PGIDS" ]; then
+  COUNT=$(echo "$DEV_PGIDS" | wc -l | tr -d ' ')
+  echo "Found $COUNT dev.sh process group(s): $(echo "$DEV_PGIDS" | tr '\n' ' ')"
+
+  for pgid in $DEV_PGIDS; do
+    kill -TERM -- -"$pgid" 2>/dev/null || true
+  done
+
+  # Give the trees a moment to shut down gracefully
+  sleep 2
+
+  # Force-kill any survivors
+  REMAINING=$(ps -ax -o pgid=,command= | awk '/[d]ev\.sh/ { print $1 }' | sort -u)
+  if [ -n "$REMAINING" ]; then
+    for pgid in $REMAINING; do
+      kill -KILL -- -"$pgid" 2>/dev/null || true
+    done
+  fi
+  echo "dev.sh process groups stopped."
+else
+  echo "No dev.sh processes found."
+fi
+
+# Belt-and-suspenders: anything still listening on the dev ports
+echo "Checking port 3001 (backend)..."
+if PIDS=$(lsof -ti :3001 2>/dev/null) && [ -n "$PIDS" ]; then
+  echo "$PIDS" | xargs kill 2>/dev/null || true
+  echo "Backend port cleared."
+else
+  echo "Backend port already free."
+fi
+
+echo "Checking port 3000 (frontend)..."
+if PIDS=$(lsof -ti :3000 2>/dev/null) && [ -n "$PIDS" ]; then
+  echo "$PIDS" | xargs kill 2>/dev/null || true
+  echo "Frontend port cleared."
+else
+  echo "Frontend port already free."
+fi
 
 echo "Done. (PostgreSQL container left running)"

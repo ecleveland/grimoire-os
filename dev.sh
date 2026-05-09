@@ -6,6 +6,23 @@ trap 'kill 0' EXIT
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Reap any existing dev.sh process trees from prior runs (orphans whose
+# parent shell died without delivering a signal). Skip our own group.
+OUR_PGID=$(ps -o pgid= -p $$ | tr -d ' ')
+EXISTING_PGIDS=$(ps -ax -o pgid=,command= | awk '/[d]ev\.sh/ { print $1 }' | sort -u | grep -v "^${OUR_PGID}$" || true)
+if [ -n "$EXISTING_PGIDS" ]; then
+  COUNT=$(echo "$EXISTING_PGIDS" | wc -l | tr -d ' ')
+  echo "Found $COUNT stale dev.sh tree(s); cleaning up: $(echo "$EXISTING_PGIDS" | tr '\n' ' ')"
+  for pgid in $EXISTING_PGIDS; do
+    kill -TERM -- -"$pgid" 2>/dev/null || true
+  done
+  sleep 2
+  REMAINING=$(ps -ax -o pgid=,command= | awk '/[d]ev\.sh/ { print $1 }' | sort -u | grep -v "^${OUR_PGID}$" || true)
+  for pgid in $REMAINING; do
+    kill -KILL -- -"$pgid" 2>/dev/null || true
+  done
+fi
+
 # Load .env from project root
 set -a
 source "$ROOT_DIR/.env"
