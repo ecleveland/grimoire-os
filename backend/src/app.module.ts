@@ -10,6 +10,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { CharactersModule } from './characters/characters.module';
 import { NotesModule } from './notes/notes.module';
 import { EncountersModule } from './encounters/encounters.module';
+import { NpcsModule } from './npcs/npcs.module';
 import { SrdModule } from './srd/srd.module';
 import { AdminModule } from './admin/admin.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
@@ -30,6 +31,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     CharactersModule,
     NotesModule,
     EncountersModule,
+    NpcsModule,
     SrdModule,
     AdminModule,
     AuditLogModule,
