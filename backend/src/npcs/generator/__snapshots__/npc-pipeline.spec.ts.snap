@@ -1,0 +1,18 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`NpcPipeline — generate (full pipeline) snapshot for { race: Dwarf, background: Soldier, seed: fixed } 1`] = `
+{
+  "alignment": "Lawful Good",
+  "background": "Soldier",
+  "gender": "female",
+  "name": "Tordek Holderhek",
+  "personalityCounts": {
+    "bonds": 1,
+    "flaws": 1,
+    "ideals": 1,
+    "traits": 1,
+  },
+  "profession": "innkeeper",
+  "race": "Dwarf",
+}
+`;
