@@ -295,6 +295,77 @@ Skip B (external name APIs) — too fragile for self-hosters. Skip C (LLM) — a
 
 The same applies to other free-form text fields (appearance prose, distinguishing marks): seeded composition only.
 
+## Appearance Composition
+
+The appearance paragraph (e.g. *"A human who is soft-bellied and round-faced. They have auburn hair streaked with premature white. Their eyes are icy gray-green, very pale. Their skin is soft brown, lined around the eyes. They bear a slight limp in the right leg."*) is **template-assembled from a curated trait table** — no AI, no Markov chains. Two pieces work together.
+
+### 1. The trait table — `npc_appearance_traits`
+
+Five categories per race: `hair`, `eyes`, `skin`, `build`, `distinguishing-mark`. Each is a pool of pre-written phrases, hand-crafted so they slot grammatically into the sentences below. Lives in [`backend/src/seed/data/npc-appearance-traits.ts`](backend/src/seed/data/npc-appearance-traits.ts).
+
+```ts
+const COMMON_BUILDS = [
+  'soft-bellied and round-faced',
+  'lean and wiry',
+  'broad-shouldered and muscular',
+  ...
+];
+const COMMON_MARKS = [
+  'a slight limp in the right leg',
+  'a long scar across the cheek',
+  ...
+];
+```
+
+Race-specific pools (`Human`, `Elf`, `Dwarf`, …) layer on top — `Dragonborn` has its own `hair` pool ("a thin crest of bony horns…"), while `build` and `distinguishing-mark` reuse the COMMON pools for most humanoids.
+
+### 2. The picker — `NpcPipeline.pickAppearance`
+
+For each category, filter to `(race, category)` and pick one phrase with the seeded RNG:
+
+```ts
+for (const category of NPC_APPEARANCE_CATEGORIES) {
+  const pool = this.data.appearanceTraits.filter(
+    t => t.race === race && t.category === category
+  );
+  parts[category] = rng.pickOne(pool).trait;
+}
+```
+
+Same seed → same five phrases, every time. That's what makes per-field reroll work: re-running just `appearance` from the persisted `generationParams.seed` reproduces (and replaces) the picks.
+
+### 3. The renderer — `composeAppearanceProse`
+
+A literal string template, also in [`npc-pipeline.ts`](backend/src/npcs/generator/npc-pipeline.ts):
+
+```
+"A {race}" + (build ? " who is {build}" : "") + "."
+" They have {hair}."
+" Their eyes are {eyes}."
+" Their skin is {skin}."
+" They bear {distinguishing-mark}."
+```
+
+Optional categories are skipped if the pool is empty for that race.
+
+### Why this approach
+
+All "creativity" lives in the phrase pool. Every connector word is hardcoded. That makes it cheap, deterministic, license-clean, and trivially extensible — adding variety means adding strings to a TS file, no model retraining or API key.
+
+### Future expansion ideas
+
+Building on the same template-assembly pattern:
+
+- **More categories.** Add `voice`, `posture`, `clothing`, `scent`, `mannerisms` as new entries in `NPC_APPEARANCE_CATEGORIES` and matching prose connectors in `composeAppearanceProse`. Each can be optional so older NPCs render fine without backfill.
+- **Conditional phrasing.** Today every phrase reads the same. The renderer could vary connectors based on `gender`, `age` (e.g. *"They have…"* → *"She has…"* / *"The old man has…"*), or pick from a pool of openers (*"At first glance…"*, *"You'd notice first…"*).
+- **Cross-field coherence.** Tag traits with weights so they bias each other: a `gaunt, almost skeletal` build pairs more naturally with `pale and sunken` skin than with `ruddy from sun`. Cheap version: define a few `(category, trait) → (otherCategory, biasMap)` weight tables. Same pickOne, just biased.
+- **Profession or setting flavor.** A `Blacksmith` could weight toward `forge-burns` and `soot-stained` traits; a `coastal village` setting could surface `salt-cracked` skin. Hook: filter the pool by an extra `(profession?, setting?)` predicate before `pickOne`, falling back to unfiltered if no match.
+- **User-curated pools.** Custom contributions (deferred to [VEG-251](https://linear.app/vega-apps/issue/VEG-251)) can let DMs add their own phrases per category without touching code. Same picker, just a unioned pool from `npc_appearance_traits` + `custom_appearance_traits`.
+- **Hybrid LLM polish.** If we ever want richer prose, the structured `parts: Record<NpcAppearanceCategory, string>` is a clean prompt seed: *"Rewrite these traits into a single paragraph, keeping each fact intact."* The deterministic pipeline still chooses the facts; the LLM only restyles. Stays optional / pluggable per the naming strategy.
+- **Length / tone presets.** Expose a `proseStyle: 'terse' | 'standard' | 'verbose'` constraint that picks fewer or more categories, or swaps the renderer for one that uses sub-clauses instead of separate sentences.
+
+The seam for all of these is small: extend the trait data (or its loader) and tweak one renderer function. The `generationParams` snapshot stays intact, so rerolls keep working.
+
 ## Sourcing the Personality Tables
 
 The 2024 SRD 5.2.1 backgrounds are **mechanical only** — they don't ship personality traits, ideals, bonds, or flaws. (Confirmed: [backgrounds.ts:17-20](backend/src/seed/data/backgrounds.ts) seeds these as empty arrays.)
