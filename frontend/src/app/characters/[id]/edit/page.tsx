@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { Character, AbilityScores } from '@/lib/types';
 import FormField from '@/components/FormField';
+import ConfirmDialog from '@/components/ConfirmDialog';
 
 const abilityKeys: (keyof AbilityScores)[] = [
   'strength',
@@ -47,6 +48,7 @@ export default function EditCharacterPage() {
   const [speed, setSpeed] = useState(30);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     apiFetch<Character>(`/characters/${id}`)
@@ -95,7 +97,6 @@ export default function EditCharacterPage() {
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this character? This cannot be undone.')) return;
     try {
       await apiFetch(`/characters/${id}`, { method: 'DELETE' });
       toast.success('Character deleted');
@@ -232,13 +233,21 @@ export default function EditCharacterPage() {
           </div>
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => setConfirmDeleteOpen(true)}
             className="px-4 py-2 text-red-600 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
           >
             Delete
           </button>
         </div>
       </form>
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete character?"
+        description="Are you sure you want to delete this character? This cannot be undone."
+        variant="danger"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
