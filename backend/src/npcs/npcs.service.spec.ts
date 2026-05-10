@@ -259,6 +259,17 @@ describe('NpcsService', () => {
         ForbiddenException
       );
     });
+
+    it('clears statBlock via Prisma.JsonNull when null is passed', async () => {
+      prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.npc.update.mockResolvedValue({ ...mockNpc, statBlock: null });
+
+      await service.update(NPC_ID, USER_ID, { statBlock: null } as any);
+
+      const callArgs = prisma.npc.update.mock.calls[0][0];
+      expect(callArgs.data.statBlock).toBe(Prisma.JsonNull);
+    });
   });
 
   describe('remove', () => {

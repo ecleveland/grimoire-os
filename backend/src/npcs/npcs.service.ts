@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -16,18 +12,23 @@ const JSON_FIELDS = ['statBlock', 'loot', 'lootOverrides', 'generationParams'] a
 
 type NpcJsonField = (typeof JSON_FIELDS)[number];
 
+type NpcJsonValue = Prisma.InputJsonValue | typeof Prisma.JsonNull;
+
 function extractJsonFields<T extends Partial<Record<NpcJsonField, unknown>>>(
   dto: T
-): { rest: Omit<T, NpcJsonField>; jsonData: Partial<Record<NpcJsonField, Prisma.InputJsonValue>> } {
+): { rest: Omit<T, NpcJsonField>; jsonData: Partial<Record<NpcJsonField, NpcJsonValue>> } {
   const { statBlock, loot, lootOverrides, generationParams, ...rest } = dto as T &
     Record<NpcJsonField, unknown>;
-  const jsonData: Partial<Record<NpcJsonField, Prisma.InputJsonValue>> = {};
-  if (statBlock !== undefined) jsonData.statBlock = statBlock as Prisma.InputJsonValue;
-  if (loot !== undefined) jsonData.loot = loot as Prisma.InputJsonValue;
-  if (lootOverrides !== undefined) jsonData.lootOverrides = lootOverrides as Prisma.InputJsonValue;
-  if (generationParams !== undefined)
-    jsonData.generationParams = generationParams as Prisma.InputJsonValue;
+  const jsonData: Partial<Record<NpcJsonField, NpcJsonValue>> = {};
+  if (statBlock !== undefined) jsonData.statBlock = toJsonValue(statBlock);
+  if (loot !== undefined) jsonData.loot = toJsonValue(loot);
+  if (lootOverrides !== undefined) jsonData.lootOverrides = toJsonValue(lootOverrides);
+  if (generationParams !== undefined) jsonData.generationParams = toJsonValue(generationParams);
   return { rest: rest as Omit<T, NpcJsonField>, jsonData };
+}
+
+function toJsonValue(v: unknown): NpcJsonValue {
+  return v === null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
 }
 
 @Injectable()

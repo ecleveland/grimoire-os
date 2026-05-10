@@ -79,6 +79,10 @@ export class NpcGeneratorService {
       ideals: next.ideals,
       bonds: next.bonds,
       flaws: next.flaws,
+      statBlock:
+        next.statBlock === null
+          ? Prisma.JsonNull
+          : (next.statBlock as unknown as Prisma.InputJsonValue),
       goldPieces: next.goldPieces,
       silverPieces: next.silverPieces,
       copperPieces: next.copperPieces,

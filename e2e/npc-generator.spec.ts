@@ -61,6 +61,47 @@ test.describe('NPC Generator', () => {
     await expect(page.getByRole('button', { name: /reroll all/i })).toBeVisible();
   });
 
+  test('combat-relevant toggle produces a stat block card in the preview', async ({
+    page,
+    request,
+  }) => {
+    const { token, campaignId } = await setup(request);
+    await injectAuth(page, token);
+
+    await page.goto(`/campaigns/${campaignId}/npcs/new`);
+    await page.getByLabel(/combat-relevant/i).check();
+    await page.getByRole('button', { name: /generate preview/i }).click();
+
+    await expect(page.getByTestId('npc-stat-block')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Based on/i)).toBeVisible();
+  });
+
+  test('Generate Stat Block button promotes a Lite NPC to Full', async ({ page, request }) => {
+    const { token, campaignId } = await setup(request);
+
+    const npcRes = await request.post(`${BACKEND}/api/npcs/generate`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { campaignId, profession: 'guard' },
+    });
+    expect(npcRes.ok(), `generate failed: ${npcRes.status()}`).toBeTruthy();
+    const preview = await npcRes.json();
+    const saveRes = await request.post(`${BACKEND}/api/npcs`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: preview,
+    });
+    expect(saveRes.ok(), `save failed: ${saveRes.status()}`).toBeTruthy();
+    const saved = await saveRes.json();
+
+    await injectAuth(page, token);
+    await page.goto(`/campaigns/${campaignId}/npcs/${saved.id}`);
+
+    const generateButton = page.getByRole('button', { name: /generate stat block/i });
+    await expect(generateButton).toBeVisible();
+    await generateButton.click();
+    await expect(page.getByTestId('npc-stat-block')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /remove stat block/i })).toBeVisible();
+  });
+
   test('list page shows saved NPC and links to detail', async ({ page, request }) => {
     const { token, campaignId } = await setup(request);
 

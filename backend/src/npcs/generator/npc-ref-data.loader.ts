@@ -4,7 +4,8 @@
 
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { NpcRefData } from './npc-pipeline';
+import { NpcRefData, MonsterRef } from './npc-pipeline';
+import { StatBlockAction } from './npc-generator.types';
 import { npcSettingBiases } from '../../seed/data/npc-setting-biases';
 
 const NPC_GAME_RULE_CATEGORY = 'npc-generation';
@@ -36,6 +37,7 @@ export class NpcRefDataLoader {
       lootTemplates,
       trinkets,
       items,
+      monsters,
       gameRules,
     ] = await Promise.all([
       this.prisma.race.findMany({ select: { name: true, size: true } }),
@@ -54,6 +56,7 @@ export class NpcRefDataLoader {
       this.prisma.npcLootTemplate.findMany({ where: { isActive: true } }),
       this.prisma.trinket.findMany({ where: { isActive: true }, select: { description: true } }),
       this.prisma.item.findMany({ select: { id: true, name: true, isMagic: true } }),
+      this.prisma.monster.findMany(),
       this.prisma.gameRule.findMany({ where: { category: NPC_GAME_RULE_CATEGORY } }),
     ]);
 
@@ -95,6 +98,7 @@ export class NpcRefDataLoader {
       trinkets,
       itemsByName,
       magicItems,
+      monsters: monsters.map(toMonsterRef),
       settingBiases: npcSettingBiases,
       gameRules: {
         trinketChance:
@@ -112,4 +116,72 @@ export class NpcRefDataLoader {
       },
     };
   }
+}
+
+type PrismaMonster = {
+  name: string;
+  size: string;
+  type: string;
+  subtype: string | null;
+  alignment: string | null;
+  armorClass: number;
+  armorType: string | null;
+  hitPoints: number;
+  hitDice: string | null;
+  speed: string;
+  str: number;
+  dex: number;
+  con: number;
+  int: number;
+  wis: number;
+  cha: number;
+  savingThrows: unknown;
+  skills: unknown;
+  damageResistances: string[];
+  damageImmunities: string[];
+  damageVulnerabilities: string[];
+  conditionImmunities: string[];
+  senses: string | null;
+  languages: string | null;
+  challengeRating: number;
+  experiencePoints: number | null;
+  specialAbilities: unknown;
+  actions: unknown;
+  reactions: unknown;
+  legendaryActions: unknown;
+};
+
+function toMonsterRef(m: PrismaMonster): MonsterRef {
+  return {
+    name: m.name,
+    size: m.size,
+    type: m.type,
+    subtype: m.subtype,
+    alignment: m.alignment,
+    armorClass: m.armorClass,
+    armorType: m.armorType,
+    hitPoints: m.hitPoints,
+    hitDice: m.hitDice,
+    speed: m.speed,
+    str: m.str,
+    dex: m.dex,
+    con: m.con,
+    int: m.int,
+    wis: m.wis,
+    cha: m.cha,
+    savingThrows: (m.savingThrows as Record<string, number> | null) ?? null,
+    skills: (m.skills as Record<string, number> | null) ?? null,
+    damageResistances: m.damageResistances,
+    damageImmunities: m.damageImmunities,
+    damageVulnerabilities: m.damageVulnerabilities,
+    conditionImmunities: m.conditionImmunities,
+    senses: m.senses,
+    languages: m.languages,
+    challengeRating: m.challengeRating,
+    experiencePoints: m.experiencePoints,
+    specialAbilities: (m.specialAbilities as StatBlockAction[] | null) ?? null,
+    actions: ((m.actions as StatBlockAction[] | null) ?? []) as StatBlockAction[],
+    reactions: (m.reactions as StatBlockAction[] | null) ?? null,
+    legendaryActions: (m.legendaryActions as StatBlockAction[] | null) ?? null,
+  };
 }

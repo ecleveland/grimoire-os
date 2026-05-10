@@ -3,7 +3,9 @@
 import type { ReactNode } from 'react';
 import type { NpcRerollField } from '@/lib/types';
 
-type RowField = Exclude<NpcRerollField, 'all'>;
+// Mirrors RowField in the detail page: the stat block has its own dedicated
+// UI (Generate/Remove buttons + card) and is not rendered via NpcFieldRow.
+type RowField = Exclude<NpcRerollField, 'all' | 'statBlock'>;
 
 interface NpcFieldRowProps {
   field: RowField;

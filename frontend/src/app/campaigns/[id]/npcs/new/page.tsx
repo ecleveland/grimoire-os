@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
 import LootOddsAdvanced from '@/components/LootOddsAdvanced';
+import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
 import { NPC_ALIGNMENTS, NPC_HOSTILITIES, NPC_PROFESSIONS, NPC_RACES } from '@/lib/npc-constants';
 import type { GenerateNpcRequest, GeneratedNpcPreview, Npc, NpcLootOverrides } from '@/lib/types';
 
@@ -412,6 +413,12 @@ export default function NewNpcPage() {
                   </li>
                 ))}
               </ul>
+            </PreviewSection>
+          )}
+
+          {preview.statBlock && (
+            <PreviewSection title="Stat Block">
+              <NpcStatBlockCard statBlock={preview.statBlock as unknown as NpcStatBlockShape} />
             </PreviewSection>
           )}
         </div>

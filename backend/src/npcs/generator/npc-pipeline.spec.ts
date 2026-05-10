@@ -327,9 +327,136 @@ describe('NpcPipeline — pickLoot', () => {
 });
 
 describe('NpcPipeline — pickStatBlock', () => {
-  it('returns null in v1 (Lite mode) regardless of combatRelevant flag', () => {
-    expect(pipeline().pickStatBlock(baseConstraints({ combatRelevant: true }))).toBeNull();
-    expect(pipeline().pickStatBlock(baseConstraints({ combatRelevant: false }))).toBeNull();
+  const decisionsFor = (over: Partial<typeof baseDecisions> = {}): typeof baseDecisions => ({
+    ...baseDecisions,
+    ...over,
+  });
+  const baseDecisions = {
+    race: 'Human',
+    background: 'Soldier',
+    profession: 'guard',
+    alignment: 'Lawful Neutral',
+    name: {
+      full: 'Karda Steelhand',
+      first: 'Karda',
+      family: 'Steelhand',
+      gender: 'female' as const,
+    },
+  };
+
+  it('returns null when combatRelevant is not set', () => {
+    expect(pipeline().pickStatBlock(newRng('sb'), baseConstraints(), decisionsFor())).toBeNull();
+  });
+
+  it('returns null when combatRelevant is explicitly false', () => {
+    expect(
+      pipeline().pickStatBlock(
+        newRng('sb'),
+        baseConstraints({ combatRelevant: false }),
+        decisionsFor()
+      )
+    ).toBeNull();
+  });
+
+  it('produces a structurally valid stat block when combatRelevant', () => {
+    const sb = pipeline().pickStatBlock(
+      newRng('sb-valid'),
+      baseConstraints({ combatRelevant: true }),
+      decisionsFor()
+    );
+    expect(sb).not.toBeNull();
+    if (!sb) return;
+    expect(sb.hitPoints).toBeGreaterThan(0);
+    expect(typeof sb.armorClass).toBe('number');
+    expect(sb.str).toBeGreaterThan(0);
+    expect(sb.dex).toBeGreaterThan(0);
+    expect(sb.con).toBeGreaterThan(0);
+    expect(sb.int).toBeGreaterThan(0);
+    expect(sb.wis).toBeGreaterThan(0);
+    expect(sb.cha).toBeGreaterThan(0);
+    expect(sb.actions.length).toBeGreaterThan(0);
+  });
+
+  it('overrides name and alignment with the NPC decisions', () => {
+    const sb = pipeline().pickStatBlock(
+      newRng('sb-override'),
+      baseConstraints({ combatRelevant: true }),
+      decisionsFor()
+    );
+    expect(sb?.name).toBe('Karda Steelhand');
+    expect(sb?.alignment).toBe('Lawful Neutral');
+  });
+
+  it('swaps an action to the profession-mapped weapon ≥90% of the time', () => {
+    const N = 200;
+    let swapped = 0;
+    for (let i = 0; i < N; i++) {
+      const sb = pipeline().pickStatBlock(
+        newRng(`sb-swap-${i}`),
+        baseConstraints({ combatRelevant: true }),
+        decisionsFor({ profession: 'blacksmith' })
+      );
+      if (sb?.professionWeaponSwap?.weapon === 'warhammer') swapped++;
+    }
+    expect(swapped / N).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('leaves actions untouched when profession has no weapon mapping', () => {
+    const sb = pipeline().pickStatBlock(
+      newRng('sb-noswap'),
+      baseConstraints({ combatRelevant: true }),
+      decisionsFor({ profession: 'lighthouse-keeper' })
+    );
+    expect(sb?.professionWeaponSwap).toBeNull();
+  });
+
+  it('returns null when monsters table is empty', () => {
+    const emptyPipeline = new NpcPipeline({ ...buildSeedRefData(), monsters: [] });
+    expect(
+      emptyPipeline.pickStatBlock(
+        newRng('sb-empty'),
+        baseConstraints({ combatRelevant: true }),
+        decisionsFor()
+      )
+    ).toBeNull();
+  });
+
+  it('produces deterministic output for the same seed', () => {
+    const a = pipeline().pickStatBlock(
+      newRng('sb-fixed'),
+      baseConstraints({ combatRelevant: true }),
+      decisionsFor()
+    );
+    const b = pipeline().pickStatBlock(
+      newRng('sb-fixed'),
+      baseConstraints({ combatRelevant: true }),
+      decisionsFor()
+    );
+    expect(a?.baseMonster).toBe(b?.baseMonster);
+    expect(a?.actions).toEqual(b?.actions);
+  });
+
+  it.each([
+    ['blacksmith', 'warhammer'],
+    ['hunter', 'longbow'],
+    ['soldier', 'longsword'],
+    ['guard', 'spear'],
+    ['mercenary', 'shortsword'],
+    ['bandit', 'scimitar'],
+  ])('snapshot for profession=%s, weapon=%s', (profession, weapon) => {
+    const sb = pipeline().pickStatBlock(
+      newRng(`sb-snap-${profession}`),
+      baseConstraints({ combatRelevant: true }),
+      decisionsFor({ profession })
+    );
+    expect(sb?.professionWeaponSwap?.weapon).toBe(weapon);
+    expect({
+      baseMonster: sb?.baseMonster,
+      acGtZero: (sb?.armorClass ?? 0) > 0,
+      hpGtZero: (sb?.hitPoints ?? 0) > 0,
+      actionsCount: sb?.actions.length,
+      swappedAction: sb?.actions.find(a => a.name.toLowerCase().includes(weapon))?.name,
+    }).toMatchSnapshot();
   });
 });
 
@@ -433,5 +560,28 @@ describe('NpcPipeline — reroll', () => {
     const before = buildBase();
     const after = pipeline().reroll('name', before.generationParams, ['name']);
     expect(after.name).toBe(before.name);
+  });
+
+  it('generate produces a stat block when combatRelevant is true', () => {
+    const npc = pipeline().generate(
+      baseConstraints({ combatRelevant: true }),
+      'combat-relevant-seed'
+    );
+    expect(npc.statBlock).not.toBeNull();
+    expect((npc.statBlock as { name: string })?.name).toBe(npc.name);
+  });
+
+  it('reroll("statBlock") on a Lite NPC promotes it to Full', () => {
+    const lite = pipeline().generate(baseConstraints(), 'lite-seed');
+    expect(lite.statBlock).toBeNull();
+    const promoted = pipeline().reroll('statBlock', lite.generationParams, []);
+    expect(promoted.statBlock).not.toBeNull();
+    expect((promoted.statBlock as { name: string }).name).toBe(lite.name);
+  });
+
+  it('reroll("all") preserves stat block absence when combatRelevant is not set', () => {
+    const lite = pipeline().generate(baseConstraints(), 'lite-all-seed');
+    const after = pipeline().reroll('all', lite.generationParams, []);
+    expect(after.statBlock).toBeNull();
   });
 });

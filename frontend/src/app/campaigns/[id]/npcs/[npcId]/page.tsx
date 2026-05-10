@@ -6,9 +6,13 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import NpcFieldRow from '@/components/NpcFieldRow';
+import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
 import type { Npc, NpcLootItem, NpcRerollField } from '@/lib/types';
 
-type RowField = Exclude<NpcRerollField, 'all'>;
+// Fields rendered as a labelled row with dice + lock controls. The stat block
+// has its own dedicated card and Generate / Remove buttons, so it is not part
+// of this map even though it is rerollable.
+type RowField = Exclude<NpcRerollField, 'all' | 'statBlock'>;
 
 const FIELD_LABELS: Record<RowField, string> = {
   race: 'Race',
@@ -29,6 +33,13 @@ function lootItems(loot: Npc['loot']): NpcLootItem[] {
   if (!loot) return [];
   if (Array.isArray(loot)) return loot as NpcLootItem[];
   return [];
+}
+
+function statBlockShape(sb: Npc['statBlock']): NpcStatBlockShape | null {
+  if (!sb || Array.isArray(sb)) return null;
+  // The backend persists NpcStatBlock as JSONB matching this shape; we trust
+  // the runtime contract here rather than re-deriving a schema.
+  return sb as unknown as NpcStatBlockShape;
 }
 
 export default function NpcDetailPage() {
@@ -95,6 +106,26 @@ export default function NpcDetailPage() {
     }
     await reroll('all');
   };
+
+  const handleRemoveStatBlock = async () => {
+    if (!npc) return;
+    if (!window.confirm('Remove the stat block from this NPC?')) return;
+    setBusy(true);
+    try {
+      const updated = await apiFetch<Npc>(`/npcs/${npcId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ statBlock: null }),
+      });
+      setNpc(updated);
+      toast.success('Stat block removed');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove stat block');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleGenerateStatBlock = () => reroll('statBlock');
 
   const handleDelete = async () => {
     if (!npc) return;
@@ -252,12 +283,35 @@ export default function NpcDetailPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Stat Block</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          {npc.statBlock
-            ? 'Stat block present.'
-            : 'No stat block (Lite NPC). Coming soon: full stat block UI.'}
-        </p>
+        <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Stat Block</h2>
+          {statBlockShape(npc.statBlock) ? (
+            <button
+              type="button"
+              onClick={handleRemoveStatBlock}
+              disabled={busy}
+              className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
+            >
+              Remove Stat Block
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGenerateStatBlock}
+              disabled={busy}
+              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+            >
+              Generate Stat Block
+            </button>
+          )}
+        </div>
+        {statBlockShape(npc.statBlock) ? (
+          <NpcStatBlockCard statBlock={statBlockShape(npc.statBlock)!} />
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            No stat block (Lite NPC). Click <strong>Generate Stat Block</strong> to roll one.
+          </p>
+        )}
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">

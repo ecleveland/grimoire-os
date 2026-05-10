@@ -67,3 +67,57 @@ export const DEFAULT_ALIGNMENT_WEIGHTS = NPC_ALIGNMENT_ORDER.map(() => 1);
 export function alignmentIndex(alignment: string): number {
   return NPC_ALIGNMENT_ORDER.indexOf(alignment as (typeof NPC_ALIGNMENT_ORDER)[number]);
 }
+
+// Civilian fallback for the stat block step. When combat-relevance is not
+// requested, the generator does not produce a stat block at all; this name
+// is the floor when only a civilian-shaped base monster is available.
+export const STATBLOCK_CIVILIAN_BASE = 'Commoner';
+
+// Combatant base monsters by CR bucket. The pipeline narrows the pool by
+// `Monster.challengeRating` and falls back to wider buckets when empty so a
+// sparse `monsters` table never crashes generation.
+export const STATBLOCK_COMBATANT_POOLS_BY_BUCKET: Record<string, string[]> = {
+  '0': ['Commoner'],
+  '0–1': ['Bandit', 'Guard', 'Priest Acolyte', 'Scout'],
+  '2–4': ['Spy', 'Bandit Captain', 'Knight', 'Priest', 'Warrior Veteran'],
+  '5–10': ['Mage', 'Guard Captain', 'Warrior Veteran'],
+  '11+': ['Mage', 'Knight'],
+};
+
+// Maps the curated profession dropdown values to a preferred weapon name.
+// Used by the stat-block step to swap a base monster's weapon action.
+export const PROFESSION_WEAPON: Record<string, string> = {
+  blacksmith: 'warhammer',
+  hunter: 'longbow',
+  soldier: 'longsword',
+  guard: 'spear',
+  mercenary: 'shortsword',
+  bandit: 'scimitar',
+  scholar: 'quarterstaff',
+  priest: 'mace',
+  sage: 'quarterstaff',
+};
+
+// Words that identify a weapon-like entry in the base monster's `actions`.
+// We swap the first matching action's name + description to the profession
+// weapon, preserving stat-block math.
+export const STATBLOCK_WEAPON_ACTION_KEYWORDS: readonly string[] = [
+  'sword',
+  'bow',
+  'mace',
+  'axe',
+  'hammer',
+  'dagger',
+  'spear',
+  'pike',
+  'club',
+  'staff',
+  'rapier',
+  'scimitar',
+  'crossbow',
+  'morningstar',
+  'flail',
+  'shortbow',
+  'longsword',
+  'shortsword',
+];

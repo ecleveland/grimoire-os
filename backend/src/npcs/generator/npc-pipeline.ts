@@ -14,7 +14,9 @@ import {
   NpcGenerationDecisions,
   NpcGenerationParams,
   NpcLootOverrides,
+  NpcStatBlock,
   RerollField,
+  StatBlockAction,
 } from './npc-generator.types';
 import { SeededRng } from './seeded-rng';
 import {
@@ -27,6 +29,10 @@ import {
   NPC_ALIGNMENT_ORDER,
   NPC_LOOT_GENERIC_PROFESSION,
   PROFESSIONS_BY_BACKGROUND,
+  PROFESSION_WEAPON,
+  STATBLOCK_CIVILIAN_BASE,
+  STATBLOCK_COMBATANT_POOLS_BY_BUCKET,
+  STATBLOCK_WEAPON_ACTION_KEYWORDS,
 } from './npc-generator.constants';
 import { NPC_APPEARANCE_CATEGORIES } from '../../seed/data/npc-appearance-traits';
 
@@ -72,6 +78,39 @@ export type TrinketRef = { description: string };
 
 export type ItemRef = { id: string; name: string; isMagic: boolean };
 
+export type MonsterRef = {
+  name: string;
+  size: string;
+  type: string;
+  subtype: string | null;
+  alignment: string | null;
+  armorClass: number;
+  armorType: string | null;
+  hitPoints: number;
+  hitDice: string | null;
+  speed: string;
+  str: number;
+  dex: number;
+  con: number;
+  int: number;
+  wis: number;
+  cha: number;
+  savingThrows: Record<string, number> | null;
+  skills: Record<string, number> | null;
+  damageResistances: string[];
+  damageImmunities: string[];
+  damageVulnerabilities: string[];
+  conditionImmunities: string[];
+  senses: string | null;
+  languages: string | null;
+  challengeRating: number;
+  experiencePoints: number | null;
+  specialAbilities: StatBlockAction[] | null;
+  actions: StatBlockAction[];
+  reactions: StatBlockAction[] | null;
+  legendaryActions: StatBlockAction[] | null;
+};
+
 export type GameRulesRef = {
   trinketChance: number;
   magicItemChanceByCr: Record<string, number>;
@@ -89,6 +128,7 @@ export type NpcRefData = {
   trinkets: TrinketRef[];
   itemsByName: Map<string, ItemRef>;
   magicItems: ItemRef[];
+  monsters: MonsterRef[];
   settingBiases: Record<string, Record<string, number>>;
   gameRules: GameRulesRef;
 };
@@ -132,7 +172,11 @@ export class NpcPipeline {
       decisions
     );
     decisions.loot = this.pickLoot(this.subRng(seed, 'loot'), constraints, decisions);
-    decisions.statBlock = this.pickStatBlock(constraints);
+    decisions.statBlock = this.pickStatBlock(
+      this.subRng(seed, 'statBlock'),
+      constraints,
+      decisions
+    );
     return this.assemble(seed, constraints, decisions);
   }
 
@@ -150,7 +194,7 @@ export class NpcPipeline {
     if (field === 'all') {
       const newSeed = SeededRng.generateSeed();
       const baseDecisions: NpcGenerationDecisions = {};
-      const orderedSteps: Exclude<RerollField, 'all'>[] = [
+      const orderedSteps: Exclude<RerollField, 'all' | 'statBlock'>[] = [
         'race',
         'background',
         'profession',
@@ -168,7 +212,15 @@ export class NpcPipeline {
           this.runSingleStep(step, this.subRng(newSeed, step), params.constraints, baseDecisions);
         }
       }
-      baseDecisions.statBlock = this.pickStatBlock(params.constraints);
+      // Stat block follows the combatRelevant constraint and overrides from the
+      // (possibly rerolled) name/alignment decisions. Always rerolled on a
+      // reroll-all: lockedFields gates whole-field protection, not the
+      // generation step itself.
+      baseDecisions.statBlock = this.pickStatBlock(
+        this.subRng(newSeed, 'statBlock'),
+        params.constraints,
+        baseDecisions
+      );
       return this.assemble(newSeed, params.constraints, baseDecisions);
     }
 
@@ -181,7 +233,12 @@ export class NpcPipeline {
     // mint a fresh per-field seed so the rerolled value differs.
     const newDecisions: NpcGenerationDecisions = { ...params.decisions };
     const stepSeed = `${params.seed}::reroll::${field}::${SeededRng.generateSeed()}`;
-    this.runSingleStep(field, new SeededRng(stepSeed), params.constraints, newDecisions);
+    // Promoting a Lite NPC to Full: when the user explicitly rerolls statBlock
+    // we force combatRelevant=true for that single step so a meaningful stat
+    // block is produced. The persisted constraints themselves are not mutated.
+    const stepConstraints =
+      field === 'statBlock' ? { ...params.constraints, combatRelevant: true } : params.constraints;
+    this.runSingleStep(field, new SeededRng(stepSeed), stepConstraints, newDecisions);
     return this.assemble(params.seed, params.constraints, newDecisions);
   }
 
@@ -438,9 +495,138 @@ export class NpcPipeline {
   }
 
   // ── Step 9 ────────────────────────────────────────────────────────────────
-  pickStatBlock(_constraints: NpcGenerationConstraints): null {
-    // Full stat-block generation lands in VEG-249. v1 ships Lite-by-default.
-    return null;
+  pickStatBlock(
+    rng: SeededRng,
+    constraints: NpcGenerationConstraints,
+    decisions: NpcGenerationDecisions
+  ): NpcStatBlock | null {
+    if (!constraints.combatRelevant) return null;
+    if (this.data.monsters.length === 0) return null;
+
+    const base = this.pickBaseMonster(rng, constraints);
+    if (!base) return null;
+
+    const npcName = decisions.name?.full ?? `Unnamed ${decisions.race ?? 'humanoid'}`;
+    const npcAlignment = decisions.alignment ?? base.alignment ?? 'Neutral';
+    const profession = decisions.profession ?? constraints.profession ?? null;
+
+    const swap = this.swapProfessionWeapon(base.actions, profession);
+
+    return {
+      baseMonster: base.name,
+      name: npcName,
+      size: base.size,
+      type: base.type,
+      subtype: base.subtype,
+      alignment: npcAlignment,
+      armorClass: base.armorClass,
+      armorType: base.armorType,
+      hitPoints: base.hitPoints,
+      hitDice: base.hitDice,
+      speed: base.speed,
+      str: base.str,
+      dex: base.dex,
+      con: base.con,
+      int: base.int,
+      wis: base.wis,
+      cha: base.cha,
+      savingThrows: base.savingThrows,
+      skills: base.skills,
+      damageResistances: base.damageResistances,
+      damageImmunities: base.damageImmunities,
+      damageVulnerabilities: base.damageVulnerabilities,
+      conditionImmunities: base.conditionImmunities,
+      senses: base.senses,
+      languages: base.languages,
+      challengeRating: base.challengeRating,
+      experiencePoints: base.experiencePoints,
+      specialAbilities: base.specialAbilities,
+      actions: swap.actions,
+      reactions: base.reactions,
+      legendaryActions: base.legendaryActions,
+      professionWeaponSwap: swap.swap,
+    };
+  }
+
+  private pickBaseMonster(
+    rng: SeededRng,
+    constraints: NpcGenerationConstraints
+  ): MonsterRef | null {
+    const bucket = this.pickStatBlockCrBucket(rng);
+    const buckets = this.crBucketsToTry(bucket);
+    const wantedNames = new Set<string>([STATBLOCK_CIVILIAN_BASE]);
+    for (const b of buckets) {
+      for (const name of STATBLOCK_COMBATANT_POOLS_BY_BUCKET[b] ?? []) wantedNames.add(name);
+    }
+    const eligible = this.data.monsters.filter(m => wantedNames.has(m.name));
+    if (eligible.length === 0) {
+      // Fall back to anything in the bucket(s) by CR if curated names are absent.
+      const byCr = this.data.monsters.filter(m =>
+        buckets.some(b => this.crFitsBucket(m.challengeRating, b))
+      );
+      if (byCr.length === 0) return rng.pickOne(this.data.monsters);
+      return rng.pickOne(byCr);
+    }
+    return rng.pickOne(eligible);
+  }
+
+  private pickStatBlockCrBucket(rng: SeededRng): string {
+    return rng.weightedPick(
+      DEFAULT_CR_BUCKET_WEIGHTS.map(b => ({ value: b.bucket, weight: b.weight }))
+    );
+  }
+
+  private crBucketsToTry(start: string): string[] {
+    const order = ['0', '0–1', '2–4', '5–10', '11+'];
+    const idx = order.indexOf(start);
+    if (idx < 0) return order.slice();
+    return [order[idx], ...order.filter((_, i) => i !== idx)];
+  }
+
+  private crFitsBucket(cr: number, bucket: string): boolean {
+    switch (bucket) {
+      case '0':
+        return cr === 0;
+      case '0–1':
+        return cr > 0 && cr <= 1;
+      case '2–4':
+        return cr >= 2 && cr <= 4;
+      case '5–10':
+        return cr >= 5 && cr <= 10;
+      case '11+':
+        return cr >= 11;
+      default:
+        return false;
+    }
+  }
+
+  private swapProfessionWeapon(
+    actions: StatBlockAction[],
+    profession: string | null
+  ): { actions: StatBlockAction[]; swap: NpcStatBlock['professionWeaponSwap'] } {
+    const weapon = profession ? PROFESSION_WEAPON[profession] : undefined;
+    if (!profession || !weapon) {
+      return { actions: actions.slice(), swap: null };
+    }
+    const idx = actions.findIndex(a => isWeaponAction(a.name));
+    if (idx < 0) {
+      return { actions: actions.slice(), swap: null };
+    }
+    const original = actions[idx];
+    const replaced: StatBlockAction = {
+      name: capitalizeWords(weapon),
+      description: rewriteWeaponDescription(original.description, weapon),
+    };
+    const nextActions = actions.slice();
+    nextActions[idx] = replaced;
+    return {
+      actions: nextActions,
+      swap: {
+        profession,
+        weapon,
+        replacedAction: original.name,
+      },
+    };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -479,6 +665,9 @@ export class NpcPipeline {
       case 'loot':
         decisions.loot = this.pickLoot(rng, constraints, decisions);
         break;
+      case 'statBlock':
+        decisions.statBlock = this.pickStatBlock(rng, constraints, decisions);
+        break;
     }
   }
 
@@ -511,6 +700,9 @@ export class NpcPipeline {
         break;
       case 'loot':
         to.loot = from.loot;
+        break;
+      case 'statBlock':
+        to.statBlock = from.statBlock;
         break;
     }
   }
@@ -554,7 +746,7 @@ export class NpcPipeline {
       ideals: personality.ideals,
       bonds: personality.bonds,
       flaws: personality.flaws,
-      statBlock: null,
+      statBlock: decisions.statBlock ?? null,
       goldPieces: loot?.coinage.gp ?? 0,
       silverPieces: loot?.coinage.sp ?? 0,
       copperPieces: loot?.coinage.cp ?? 0,
@@ -573,4 +765,26 @@ export class NpcPipeline {
     if (o.coinageMultiplier !== undefined) cleaned.coinageMultiplier = o.coinageMultiplier;
     return Object.keys(cleaned).length > 0 ? cleaned : null;
   }
+}
+
+function isWeaponAction(name: string): boolean {
+  const lower = name.toLowerCase();
+  return STATBLOCK_WEAPON_ACTION_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function rewriteWeaponDescription(description: string, weapon: string): string {
+  // Preserve the stat-block math (the `Hit:` / `Melee Weapon Attack:` clauses)
+  // while replacing only the weapon noun. We anchor on the first parenthesized
+  // weapon phrase; if the base monster's description doesn't include one we
+  // append a parenthetical so the swap is still visible to the DM.
+  const withParen = description.replace(/\([^)]*\)/, `(${weapon})`);
+  if (withParen !== description) return withParen;
+  return `${description} (now wields a ${weapon})`;
+}
+
+function capitalizeWords(s: string): string {
+  return s
+    .split(/\s+/)
+    .map(w => (w.length > 0 ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
 }
