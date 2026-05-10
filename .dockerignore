@@ -1,0 +1,29 @@
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/.env
+**/.env.local
+**/.env*.local
+
+# Test/dev artifacts
+e2e/playwright-report
+e2e/test-results
+e2e/.auth
+_working
+.claude
+.git
+.github
+.husky
+.vscode
+.idea
+
+# Docs/random
+docs
+resources
+*.md
+!README.md
+
+# OS
+.DS_Store
+*.log

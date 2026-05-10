@@ -46,6 +46,10 @@ Backend thresholds match the targets agreed in VEG-204; current actual coverage 
 
 **Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
 
+## Pre-merge production build check
+
+Until VEG-120 (GitHub Actions CI) lands, run `./verify.sh` from the repo root before merging any PR that touches `backend/` or `frontend/` source. It runs the same production builds (`shared` → `nest build` → `next build`) that `docker compose build` runs inside each image, and catches type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
+
 ## Environment Variables
 
 | Variable | Required | Default |
