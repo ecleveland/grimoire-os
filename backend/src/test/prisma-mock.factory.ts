@@ -67,7 +67,7 @@ export type MockPrismaService = {
 };
 
 export function createMockPrismaService(): MockPrismaService {
-  return {
+  const mock = {
     user: mockModel(),
     campaign: mockModel(),
     campaignPlayer: mockModel(),
@@ -99,9 +99,20 @@ export function createMockPrismaService(): MockPrismaService {
     npcLootTemplate: mockModel(),
     npcAlignmentPrior: mockModel(),
     trinket: mockModel(),
-    $transaction: jest.fn(fn => fn()),
     $queryRaw: jest.fn(),
-  };
+  } as unknown as MockPrismaService;
+  mock.$transaction = jest.fn(
+    (
+      fnOrArray:
+        | ((tx: MockPrismaService) => Promise<unknown> | unknown)
+        | Array<Promise<unknown> | unknown>
+    ): Promise<unknown> => {
+      if (typeof fnOrArray === 'function') return Promise.resolve(fnOrArray(mock));
+      if (Array.isArray(fnOrArray)) return Promise.all(fnOrArray);
+      return Promise.resolve();
+    }
+  );
+  return mock;
 }
 
 export function prismaMockProvider() {

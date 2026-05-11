@@ -1,7 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { NpcsService } from './npcs.service';
+import { NpcGeneratorService } from './generator/npc-generator.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
@@ -11,6 +17,7 @@ describe('NpcsService', () => {
   let service: NpcsService;
   let prisma: MockPrismaService;
   let campaignAuth: { assertCampaignOwner: jest.Mock };
+  let generator: { generate: jest.Mock };
 
   const NPC_ID = 'npc-1111-2222-3333-444444444444';
   const TARGET_NPC_ID = 'npc-5555-6666-7777-888888888888';
@@ -56,12 +63,14 @@ describe('NpcsService', () => {
 
   beforeEach(async () => {
     campaignAuth = { assertCampaignOwner: jest.fn() };
+    generator = { generate: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         NpcsService,
         prismaMockProvider(),
         { provide: CampaignAuthService, useValue: campaignAuth },
+        { provide: NpcGeneratorService, useValue: generator },
       ],
     }).compile();
 
@@ -194,7 +203,20 @@ describe('NpcsService', () => {
 
       expect(prisma.npc.findUnique).toHaveBeenCalledWith({
         where: { id: NPC_ID },
-        include: { outgoingLinks: true, incomingLinks: true },
+        include: {
+          outgoingLinks: {
+            include: {
+              toNpc: { select: { id: true, name: true, race: true } },
+              fromNpc: { select: { id: true, name: true, race: true } },
+            },
+          },
+          incomingLinks: {
+            include: {
+              toNpc: { select: { id: true, name: true, race: true } },
+              fromNpc: { select: { id: true, name: true, race: true } },
+            },
+          },
+        },
       });
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(result).toEqual(withRelations);
@@ -297,75 +319,180 @@ describe('NpcsService', () => {
     });
   });
 
-  describe('addRelation', () => {
-    const dto = { toNpcId: TARGET_NPC_ID, relation: 'sibling' };
+  describe('addRelation (store-both)', () => {
+    const dto = { toNpcId: TARGET_NPC_ID, relation: 'parent' };
+    const forwardRow = { ...mockRelation, relation: 'parent' };
+    const inverseRow = {
+      id: 'rel-inverse-row',
+      fromNpcId: TARGET_NPC_ID,
+      toNpcId: NPC_ID,
+      relation: 'child',
+      notes: null,
+    };
 
-    it('creates relation and verifies DM', async () => {
+    beforeEach(() => {
       prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
-      prisma.npcRelation.create.mockResolvedValue(mockRelation);
+      prisma.npcRelation.create
+        .mockResolvedValueOnce(forwardRow)
+        .mockResolvedValueOnce(inverseRow);
+    });
 
+    it('persists forward + inverse rows in a single $transaction', async () => {
       const result = await service.addRelation(NPC_ID, USER_ID, dto);
 
-      expect(prisma.npcRelation.create).toHaveBeenCalledWith({
-        data: { fromNpcId: NPC_ID, toNpcId: TARGET_NPC_ID, relation: 'sibling' },
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NPC_ID, toNpcId: TARGET_NPC_ID, relation: 'parent' },
       });
-      expect(result).toEqual(mockRelation);
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: TARGET_NPC_ID, toNpcId: NPC_ID, relation: 'child' },
+      });
+      expect(result).toEqual(forwardRow);
+    });
+
+    it('mirrors notes onto the inverse row', async () => {
+      prisma.npcRelation.create
+        .mockReset()
+        .mockResolvedValueOnce({ ...forwardRow, notes: 'estranged' })
+        .mockResolvedValueOnce({ ...inverseRow, notes: 'estranged' });
+
+      await service.addRelation(NPC_ID, USER_ID, { ...dto, notes: 'estranged' });
+
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: {
+          fromNpcId: NPC_ID,
+          toNpcId: TARGET_NPC_ID,
+          relation: 'parent',
+          notes: 'estranged',
+        },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: {
+          fromNpcId: TARGET_NPC_ID,
+          toNpcId: NPC_ID,
+          relation: 'child',
+          notes: 'estranged',
+        },
+      });
+    });
+
+    it('writes symmetric pair for unknown (custom) relations', async () => {
+      prisma.npcRelation.create
+        .mockReset()
+        .mockResolvedValueOnce({ ...forwardRow, relation: 'blood-bound' })
+        .mockResolvedValueOnce({ ...inverseRow, relation: 'blood-bound' });
+
+      await service.addRelation(NPC_ID, USER_ID, {
+        toNpcId: TARGET_NPC_ID,
+        relation: 'blood-bound',
+      });
+
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NPC_ID, toNpcId: TARGET_NPC_ID, relation: 'blood-bound' },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: TARGET_NPC_ID, toNpcId: NPC_ID, relation: 'blood-bound' },
+      });
+    });
+
+    it('throws BadRequestException for self-relation (no DB writes)', async () => {
+      await expect(
+        service.addRelation(NPC_ID, USER_ID, { toNpcId: NPC_ID, relation: 'sibling' })
+      ).rejects.toThrow(BadRequestException);
+
+      expect(prisma.npcRelation.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when source NPC missing', async () => {
-      prisma.npc.findUnique.mockResolvedValue(null);
+      prisma.npc.findUnique.mockReset().mockResolvedValue(null);
       await expect(service.addRelation(NPC_ID, USER_ID, dto)).rejects.toThrow(NotFoundException);
+      expect(prisma.npcRelation.create).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException when non-DM adds relation', async () => {
-      prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
-      campaignAuth.assertCampaignOwner.mockRejectedValue(
+      campaignAuth.assertCampaignOwner.mockReset().mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')
       );
       await expect(service.addRelation(NPC_ID, USER_ID_2, dto)).rejects.toThrow(ForbiddenException);
+      expect(prisma.npcRelation.create).not.toHaveBeenCalled();
     });
 
-    it('throws ConflictException when relation already exists (P2002)', async () => {
-      prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
-      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
-      prisma.npcRelation.create.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-          code: 'P2002',
-          clientVersion: '5.0.0',
-        })
-      );
+    it('throws ConflictException when P2002 fires on either insert', async () => {
+      prisma.npcRelation.create
+        .mockReset()
+        .mockRejectedValueOnce(
+          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+            code: 'P2002',
+            clientVersion: '5.0.0',
+          })
+        );
 
       await expect(service.addRelation(NPC_ID, USER_ID, dto)).rejects.toThrow(ConflictException);
     });
   });
 
-  describe('removeRelation', () => {
-    it('deletes relation when DM owns source NPC', async () => {
+  describe('removeRelation (store-both)', () => {
+    const forwardRow = { ...mockRelation, relation: 'parent' };
+
+    beforeEach(() => {
       prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
-      prisma.npcRelation.findUnique.mockResolvedValue(mockRelation);
-      prisma.npcRelation.delete.mockResolvedValue(mockRelation);
+      prisma.npcRelation.findUnique.mockResolvedValue(forwardRow);
+      prisma.npcRelation.delete.mockResolvedValue(forwardRow);
+      prisma.npcRelation.deleteMany.mockResolvedValue({ count: 1 });
+    });
+
+    it('deletes forward + mirror row in one $transaction', async () => {
+      await service.removeRelation(NPC_ID, RELATION_ID, USER_ID);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.npcRelation.delete).toHaveBeenCalledWith({ where: { id: RELATION_ID } });
+      expect(prisma.npcRelation.deleteMany).toHaveBeenCalledWith({
+        where: {
+          fromNpcId: TARGET_NPC_ID,
+          toNpcId: NPC_ID,
+          relation: 'child',
+        },
+      });
+    });
+
+    it('uses symmetric mirror for unknown (custom) relations', async () => {
+      prisma.npcRelation.findUnique
+        .mockReset()
+        .mockResolvedValue({ ...forwardRow, relation: 'blood-bound' });
+      prisma.npcRelation.delete.mockResolvedValue({ ...forwardRow, relation: 'blood-bound' });
 
       await service.removeRelation(NPC_ID, RELATION_ID, USER_ID);
 
-      expect(prisma.npcRelation.delete).toHaveBeenCalledWith({ where: { id: RELATION_ID } });
+      expect(prisma.npcRelation.deleteMany).toHaveBeenCalledWith({
+        where: {
+          fromNpcId: TARGET_NPC_ID,
+          toNpcId: NPC_ID,
+          relation: 'blood-bound',
+        },
+      });
+    });
+
+    it('does not throw when the mirror row is missing (graceful orphan delete)', async () => {
+      prisma.npcRelation.deleteMany.mockResolvedValue({ count: 0 });
+      await expect(service.removeRelation(NPC_ID, RELATION_ID, USER_ID)).resolves.toBeUndefined();
+      expect(prisma.npcRelation.delete).toHaveBeenCalled();
     });
 
     it('throws NotFoundException when relation missing', async () => {
-      prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
-      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
-      prisma.npcRelation.findUnique.mockResolvedValue(null);
-
+      prisma.npcRelation.findUnique.mockReset().mockResolvedValue(null);
       await expect(service.removeRelation(NPC_ID, RELATION_ID, USER_ID)).rejects.toThrow(
         NotFoundException
       );
+      expect(prisma.npcRelation.delete).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when relation belongs to a different NPC', async () => {
-      prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
-      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
-      prisma.npcRelation.findUnique.mockResolvedValue({ ...mockRelation, fromNpcId: 'other-npc' });
+      prisma.npcRelation.findUnique
+        .mockReset()
+        .mockResolvedValue({ ...forwardRow, fromNpcId: 'other-npc' });
 
       await expect(service.removeRelation(NPC_ID, RELATION_ID, USER_ID)).rejects.toThrow(
         NotFoundException
@@ -373,13 +500,275 @@ describe('NpcsService', () => {
     });
 
     it('throws ForbiddenException when non-DM removes', async () => {
-      prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
-      campaignAuth.assertCampaignOwner.mockRejectedValue(
+      campaignAuth.assertCampaignOwner.mockReset().mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')
       );
       await expect(service.removeRelation(NPC_ID, RELATION_ID, USER_ID_2)).rejects.toThrow(
         ForbiddenException
       );
+    });
+  });
+
+  describe('generateRelated', () => {
+    const NEW_NPC_ID = 'npc-new-aaaa-bbbb-cccccccccccc';
+    const SPOUSE_NPC_ID = 'npc-spouse-1111-2222-3333-444444444444';
+
+    const sourceNpc = {
+      ...mockNpc,
+      name: 'Aldric Stormwind',
+      race: 'Human',
+      age: 40,
+      outgoingLinks: [] as Array<{ relation: string; toNpc: { id: string; race: string } }>,
+    };
+
+    const generatedTemplate = {
+      campaignId: CAMPAIGN_ID,
+      name: 'Bren the Younger',
+      race: 'Human',
+      background: 'Soldier',
+      profession: 'guard',
+      alignment: 'Lawful Good',
+      size: 'Medium',
+      age: 20,
+      gender: 'male',
+      appearance: 'Broad-shouldered',
+      personalityTraits: ['Stoic'],
+      ideals: ['Duty'],
+      bonds: ['Family'],
+      flaws: ['Stubborn'],
+      statBlock: null,
+      goldPieces: 5,
+      silverPieces: 0,
+      copperPieces: 0,
+      loot: [],
+      lootOverrides: null,
+      generationParams: {
+        version: 1 as const,
+        seed: 'test-seed',
+        constraints: { campaignId: CAMPAIGN_ID },
+        decisions: {},
+      },
+    };
+
+    function arrangeSuccess(
+      overrides: Partial<typeof sourceNpc> = {},
+      generatedOverrides: Partial<typeof generatedTemplate> = {}
+    ) {
+      const sourceFromDb = { ...sourceNpc, ...overrides };
+      prisma.npc.findUnique.mockResolvedValue(sourceFromDb);
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      generator.generate.mockResolvedValue({ ...generatedTemplate, ...generatedOverrides });
+      prisma.npc.create.mockImplementation(({ data }) =>
+        Promise.resolve({ ...sourceFromDb, ...data, id: NEW_NPC_ID })
+      );
+      prisma.npcRelation.create
+        .mockResolvedValueOnce({
+          id: 'rel-1',
+          fromNpcId: NEW_NPC_ID,
+          toNpcId: NPC_ID,
+          relation: 'placeholder',
+          notes: null,
+        })
+        .mockResolvedValueOnce({
+          id: 'rel-2',
+          fromNpcId: NPC_ID,
+          toNpcId: NEW_NPC_ID,
+          relation: 'placeholder',
+          notes: null,
+        });
+      return sourceFromDb;
+    }
+
+    function constraintsArg() {
+      return generator.generate.mock.calls[0][1] as Record<string, unknown>;
+    }
+
+    function npcCreateData() {
+      return prisma.npc.create.mock.calls[0][0].data as Record<string, unknown>;
+    }
+
+    it('parent: pre-seeds same race, swaps family name, adjusts age (+25), creates relation pair', async () => {
+      arrangeSuccess();
+
+      const result = await service.generateRelated(NPC_ID, USER_ID, { relation: 'parent' });
+
+      // Constraints to generator
+      expect(constraintsArg()).toMatchObject({ campaignId: CAMPAIGN_ID, race: 'Human' });
+
+      // Persisted NPC
+      expect(npcCreateData()).toMatchObject({
+        campaignId: CAMPAIGN_ID,
+        race: 'Human',
+        name: 'Bren the Stormwind', // last token swapped from 'Younger' to source family
+        age: 65, // 40 + 25
+        createdById: USER_ID,
+      });
+
+      // Relation pair
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NEW_NPC_ID, toNpcId: NPC_ID, relation: 'parent' },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: NPC_ID, toNpcId: NEW_NPC_ID, relation: 'child' },
+      });
+
+      expect(result).toMatchObject({ id: NEW_NPC_ID, age: 65 });
+    });
+
+    it('child: pre-seeds same race when no spouse, adjusts age (-25)', async () => {
+      arrangeSuccess({ age: 30 });
+
+      await service.generateRelated(NPC_ID, USER_ID, { relation: 'child' });
+
+      expect(constraintsArg()).toMatchObject({ race: 'Human' });
+      expect(npcCreateData()).toMatchObject({
+        race: 'Human',
+        age: 5, // 30 - 25
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NEW_NPC_ID, toNpcId: NPC_ID, relation: 'child' },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: NPC_ID, toNpcId: NEW_NPC_ID, relation: 'parent' },
+      });
+    });
+
+    it('child of mixed-race couple: picks Half-X race and stores parentRaces', async () => {
+      arrangeSuccess(
+        {
+          outgoingLinks: [{ relation: 'spouse', toNpc: { id: SPOUSE_NPC_ID, race: 'Elf' } }],
+        },
+        { race: 'Half-Elf' }
+      );
+
+      await service.generateRelated(NPC_ID, USER_ID, { relation: 'child' });
+
+      expect(constraintsArg()).toMatchObject({ race: 'Half-Elf' });
+      const persisted = npcCreateData() as { generationParams: { parentRaces: string[] } };
+      expect(persisted.generationParams.parentRaces).toEqual(['Human', 'Elf']);
+    });
+
+    it('sibling: same race, family name swap, age within ±5 of source', async () => {
+      arrangeSuccess({ age: 40 });
+
+      await service.generateRelated(NPC_ID, USER_ID, { relation: 'sibling' });
+
+      expect(constraintsArg()).toMatchObject({ race: 'Human' });
+      const data = npcCreateData() as { age: number; name: string };
+      expect(data.age).toBeGreaterThanOrEqual(35);
+      expect(data.age).toBeLessThanOrEqual(45);
+      expect(data.name.endsWith('Stormwind')).toBe(true);
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NEW_NPC_ID, toNpcId: NPC_ID, relation: 'sibling' },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: NPC_ID, toNpcId: NEW_NPC_ID, relation: 'sibling' },
+      });
+    });
+
+    it('spouse: race is NOT forced and family name is NOT swapped', async () => {
+      arrangeSuccess({ age: 40 }, { race: 'Tiefling', name: 'Vesna Ravenfall', age: 38 });
+
+      await service.generateRelated(NPC_ID, USER_ID, { relation: 'spouse' });
+
+      // Source race NOT injected as constraint
+      expect(constraintsArg().race).toBeUndefined();
+
+      const data = npcCreateData() as { name: string; age: number; race: string };
+      expect(data.race).toBe('Tiefling');
+      expect(data.name).toBe('Vesna Ravenfall'); // family name NOT replaced
+      expect(data.age).toBe(38); // generator's age, no adjustment
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NEW_NPC_ID, toNpcId: NPC_ID, relation: 'spouse' },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: NPC_ID, toNpcId: NEW_NPC_ID, relation: 'spouse' },
+      });
+    });
+
+    it('custom relation: no pre-seeding, no age/name override, symmetric pair', async () => {
+      arrangeSuccess(
+        { age: 40 },
+        { race: 'Tiefling', name: 'Vesna Ravenfall', age: 200 }
+      );
+
+      await service.generateRelated(NPC_ID, USER_ID, { relation: 'blood-bound' });
+
+      expect(constraintsArg().race).toBeUndefined();
+      const data = npcCreateData() as { name: string; age: number };
+      expect(data.name).toBe('Vesna Ravenfall');
+      expect(data.age).toBe(200);
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
+        data: { fromNpcId: NEW_NPC_ID, toNpcId: NPC_ID, relation: 'blood-bound' },
+      });
+      expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(2, {
+        data: { fromNpcId: NPC_ID, toNpcId: NEW_NPC_ID, relation: 'blood-bound' },
+      });
+    });
+
+    it('constraintsOverride.race wins over rule-based race', async () => {
+      arrangeSuccess(
+        { outgoingLinks: [{ relation: 'spouse', toNpc: { id: SPOUSE_NPC_ID, race: 'Elf' } }] },
+        { race: 'Dwarf' }
+      );
+
+      await service.generateRelated(NPC_ID, USER_ID, {
+        relation: 'child',
+        constraintsOverride: { race: 'Dwarf' },
+      });
+
+      expect(constraintsArg()).toMatchObject({ race: 'Dwarf' });
+      const data = npcCreateData() as {
+        race: string;
+        generationParams: { parentRaces: string[] };
+      };
+      expect(data.race).toBe('Dwarf');
+      expect(data.generationParams.parentRaces).toEqual(['Human', 'Elf']); // still recorded
+    });
+
+    it('constraintsOverride.name suppresses family-name swap', async () => {
+      arrangeSuccess({}, { name: 'Pelor of Ten Towns' });
+
+      await service.generateRelated(NPC_ID, USER_ID, {
+        relation: 'parent',
+        constraintsOverride: { name: 'Pelor of Ten Towns' },
+      });
+
+      expect(npcCreateData()).toMatchObject({ name: 'Pelor of Ten Towns' });
+    });
+
+    it('throws NotFoundException when source NPC missing', async () => {
+      prisma.npc.findUnique.mockResolvedValue(null);
+      await expect(
+        service.generateRelated(NPC_ID, USER_ID, { relation: 'parent' })
+      ).rejects.toThrow(NotFoundException);
+      expect(generator.generate).not.toHaveBeenCalled();
+    });
+
+    it('throws ForbiddenException when non-DM generates', async () => {
+      prisma.npc.findUnique.mockResolvedValue(sourceNpc);
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
+      await expect(
+        service.generateRelated(NPC_ID, USER_ID_2, { relation: 'parent' })
+      ).rejects.toThrow(ForbiddenException);
+      expect(generator.generate).not.toHaveBeenCalled();
+    });
+
+    it('rolls back: when relation insert fails, no orphan NPC remains', async () => {
+      arrangeSuccess();
+      // Use a fresh $transaction mock that throws if the callback throws
+      prisma.$transaction.mockImplementationOnce(async (fn: any) => {
+        // run the callback against the real mock prisma
+        return fn(prisma);
+      });
+      prisma.npcRelation.create.mockReset().mockRejectedValueOnce(new Error('boom'));
+
+      await expect(
+        service.generateRelated(NPC_ID, USER_ID, { relation: 'parent' })
+      ).rejects.toThrow(/boom/);
     });
   });
 });

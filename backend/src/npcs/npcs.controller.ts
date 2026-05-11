@@ -22,6 +22,7 @@ import { UpdateNpcDto } from './dto/update-npc.dto';
 import { NpcQueryDto } from './dto/npc-query.dto';
 import { AddNpcRelationDto } from './dto/add-npc-relation.dto';
 import { GenerateNpcDto } from './dto/generate-npc.dto';
+import { GenerateRelatedNpcDto } from './dto/generate-related-npc.dto';
 import { RerollNpcDto } from './dto/reroll-npc.dto';
 
 @ApiTags('NPCs')
@@ -98,5 +99,17 @@ export class NpcsController {
     @Req() req: AuthenticatedRequest
   ) {
     return this.npcsService.removeRelation(id, relationId, req.user.userId);
+  }
+
+  @Post(':id/relations/generate')
+  @ApiOperation({
+    summary: "Generate a new NPC related to this one and persist the relation pair atomically",
+  })
+  generateRelated(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: GenerateRelatedNpcDto
+  ) {
+    return this.npcsService.generateRelated(id, req.user.userId, dto);
   }
 }

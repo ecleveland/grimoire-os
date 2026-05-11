@@ -134,6 +134,10 @@ export interface NpcRelation {
   toNpcId: string;
   relation: string;
   notes?: string | null;
+  // Optional joins included by GET /npcs/:id so the UI can render names
+  // without a follow-up fetch per row.
+  fromNpc?: { id: string; name: string; race: string } | null;
+  toNpc?: { id: string; name: string; race: string } | null;
 }
 
 export interface Npc {
