@@ -16,3 +16,63 @@ exports[`NpcPipeline — generate (full pipeline) snapshot for { race: Dwarf, ba
   "race": "Dwarf",
 }
 `;
+
+exports[`NpcPipeline — pickStatBlock snapshot for profession=bandit, weapon=scimitar 1`] = `
+{
+  "acGtZero": true,
+  "actionsCount": 2,
+  "baseMonster": "Bandit",
+  "hpGtZero": true,
+  "swappedAction": "Scimitar",
+}
+`;
+
+exports[`NpcPipeline — pickStatBlock snapshot for profession=blacksmith, weapon=warhammer 1`] = `
+{
+  "acGtZero": true,
+  "actionsCount": 1,
+  "baseMonster": "Priest Acolyte",
+  "hpGtZero": true,
+  "swappedAction": "Warhammer",
+}
+`;
+
+exports[`NpcPipeline — pickStatBlock snapshot for profession=guard, weapon=spear 1`] = `
+{
+  "acGtZero": true,
+  "actionsCount": 1,
+  "baseMonster": "Priest Acolyte",
+  "hpGtZero": true,
+  "swappedAction": "Spear",
+}
+`;
+
+exports[`NpcPipeline — pickStatBlock snapshot for profession=hunter, weapon=longbow 1`] = `
+{
+  "acGtZero": true,
+  "actionsCount": 1,
+  "baseMonster": "Spy",
+  "hpGtZero": true,
+  "swappedAction": "Longbow",
+}
+`;
+
+exports[`NpcPipeline — pickStatBlock snapshot for profession=mercenary, weapon=shortsword 1`] = `
+{
+  "acGtZero": true,
+  "actionsCount": 2,
+  "baseMonster": "Warrior Veteran",
+  "hpGtZero": true,
+  "swappedAction": "Shortsword",
+}
+`;
+
+exports[`NpcPipeline — pickStatBlock snapshot for profession=soldier, weapon=longsword 1`] = `
+{
+  "acGtZero": true,
+  "actionsCount": 1,
+  "baseMonster": "Guard",
+  "hpGtZero": true,
+  "swappedAction": "Longsword",
+}
+`;

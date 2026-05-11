@@ -70,6 +70,52 @@ export type GeneratedLoot = {
   };
 };
 
+export type StatBlockAction = {
+  name: string;
+  description: string;
+};
+
+// Mirrors the Prisma `Monster` model shape so the encounter combatant builder
+// can ingest both interchangeably. Persisted on Npc.statBlock as JSONB.
+export type NpcStatBlock = {
+  baseMonster: string;
+  name: string;
+  size: string;
+  type: string;
+  subtype: string | null;
+  alignment: string | null;
+  armorClass: number;
+  armorType: string | null;
+  hitPoints: number;
+  hitDice: string | null;
+  speed: string;
+  str: number;
+  dex: number;
+  con: number;
+  int: number;
+  wis: number;
+  cha: number;
+  savingThrows: Record<string, number> | null;
+  skills: Record<string, number> | null;
+  damageResistances: string[];
+  damageImmunities: string[];
+  damageVulnerabilities: string[];
+  conditionImmunities: string[];
+  senses: string | null;
+  languages: string | null;
+  challengeRating: number;
+  experiencePoints: number | null;
+  specialAbilities: StatBlockAction[] | null;
+  actions: StatBlockAction[];
+  reactions: StatBlockAction[] | null;
+  legendaryActions: StatBlockAction[] | null;
+  professionWeaponSwap: {
+    profession: string;
+    weapon: string;
+    replacedAction: string;
+  } | null;
+};
+
 export type NpcGenerationDecisions = {
   race?: string;
   background?: string | null;
@@ -79,7 +125,7 @@ export type NpcGenerationDecisions = {
   appearance?: GeneratedAppearance;
   personality?: GeneratedPersonality;
   loot?: GeneratedLoot;
-  statBlock?: null;
+  statBlock?: NpcStatBlock | null;
 };
 
 export type NpcGenerationParams = {
@@ -104,7 +150,7 @@ export type GeneratedNpc = {
   ideals: string[];
   bonds: string[];
   flaws: string[];
-  statBlock: null;
+  statBlock: NpcStatBlock | null;
   goldPieces: number;
   silverPieces: number;
   copperPieces: number;
@@ -122,6 +168,7 @@ export const REROLL_FIELDS = [
   'appearance',
   'personality',
   'loot',
+  'statBlock',
   'all',
 ] as const;
 

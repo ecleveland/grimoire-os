@@ -177,6 +177,7 @@ export type NpcRerollField =
   | 'appearance'
   | 'personality'
   | 'loot'
+  | 'statBlock'
   | 'all';
 
 export interface GenerateNpcRequest {
@@ -209,7 +210,7 @@ export interface GeneratedNpcPreview {
   ideals: string[];
   bonds: string[];
   flaws: string[];
-  statBlock: null;
+  statBlock: Record<string, unknown> | null;
   goldPieces: number;
   silverPieces: number;
   copperPieces: number;

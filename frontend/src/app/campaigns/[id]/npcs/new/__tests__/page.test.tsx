@@ -129,6 +129,48 @@ describe('NewNpcPage', () => {
     expect(screen.queryByRole('button', { name: /generate preview/i })).not.toBeInTheDocument();
   });
 
+  it('passes combatRelevant: true when the toggle is checked', async () => {
+    mockApiFetch.mockResolvedValue(buildPreview());
+    const user = userEvent.setup();
+    render(<NewNpcPage />);
+    await user.click(screen.getByLabelText(/combat-relevant/i));
+    await user.click(screen.getByRole('button', { name: /generate preview/i }));
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+    const body = JSON.parse((mockApiFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.combatRelevant).toBe(true);
+  });
+
+  it('renders the stat block card in the preview when one is present', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      buildPreview({
+        name: 'Karda Steelhand',
+        statBlock: {
+          baseMonster: 'Guard',
+          name: 'Karda Steelhand',
+          size: 'Medium',
+          type: 'humanoid',
+          alignment: 'Lawful Neutral',
+          armorClass: 16,
+          hitPoints: 11,
+          speed: '30 ft.',
+          str: 13,
+          dex: 12,
+          con: 12,
+          int: 10,
+          wis: 11,
+          cha: 10,
+          challengeRating: 0.125,
+          actions: [{ name: 'Spear', description: 'Hit: 4 piercing damage.' }],
+        },
+      })
+    );
+    const user = userEvent.setup();
+    render(<NewNpcPage />);
+    await user.click(screen.getByRole('button', { name: /generate preview/i }));
+    await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
+    expect(screen.getByText(/Based on Guard/i)).toBeInTheDocument();
+  });
+
   it('manual create posts to /npcs with isManual:true', async () => {
     mockApiFetch.mockResolvedValue({
       id: 'manual-id',
