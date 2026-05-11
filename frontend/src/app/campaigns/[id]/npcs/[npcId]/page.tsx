@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import NpcFieldRow from '@/components/NpcFieldRow';
+import NpcRelationsPanel from '@/components/NpcRelationsPanel';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
 import type { Npc, NpcLootItem, NpcRerollField } from '@/lib/types';
 
@@ -314,27 +315,7 @@ export default function NpcDetailPage() {
         )}
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Relations</h2>
-        {(npc.outgoingLinks?.length ?? 0) === 0 && (npc.incomingLinks?.length ?? 0) === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">No relations yet.</p>
-        ) : (
-          <ul className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
-            {npc.outgoingLinks?.map(r => (
-              <li key={r.id}>
-                <span className="font-medium">{r.relation}</span> → {r.toNpcId}
-                {r.notes ? ` — ${r.notes}` : ''}
-              </li>
-            ))}
-            {npc.incomingLinks?.map(r => (
-              <li key={r.id}>
-                <span className="font-medium">{r.relation}</span> ← {r.fromNpcId}
-                {r.notes ? ` — ${r.notes}` : ''}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      <NpcRelationsPanel npc={npc} onRefetch={fetchNpc} />
     </div>
   );
 }
