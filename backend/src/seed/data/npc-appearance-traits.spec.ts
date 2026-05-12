@@ -1,7 +1,4 @@
-import {
-  npcAppearanceTraits,
-  NPC_APPEARANCE_CATEGORIES,
-} from './npc-appearance-traits';
+import { npcAppearanceTraits, NPC_APPEARANCE_CATEGORIES } from './npc-appearance-traits';
 
 const SRD_521_SPECIES = [
   'Dragonborn',

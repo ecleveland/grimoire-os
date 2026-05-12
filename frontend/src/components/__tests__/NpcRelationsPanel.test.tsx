@@ -85,9 +85,7 @@ describe('NpcRelationsPanel', () => {
       relation: 'parent',
       toNpc: { id: 'npc-2', name: 'Aria Stormwind', race: 'Elf' },
     });
-    render(
-      <NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />
-    );
+    render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
     expect(screen.getByText(/parent/i)).toBeInTheDocument();
     expect(screen.getByText(/aria stormwind/i)).toBeInTheDocument();
     expect(screen.getByText(/elf/i)).toBeInTheDocument();
@@ -100,9 +98,7 @@ describe('NpcRelationsPanel', () => {
     mockApiFetch.mockResolvedValueOnce(undefined);
 
     const rel = makeRelation({ id: 'rel-99' });
-    render(
-      <NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={onRefetch} />
-    );
+    render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={onRefetch} />);
 
     await user.click(screen.getByRole('button', { name: /remove relation/i }));
     expect(mockConfirm).toHaveBeenCalled();
@@ -117,9 +113,7 @@ describe('NpcRelationsPanel', () => {
     const user = userEvent.setup();
     mockConfirm.mockReturnValue(false);
     const rel = makeRelation();
-    render(
-      <NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />
-    );
+    render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /remove relation/i }));
     expect(mockConfirm).toHaveBeenCalled();
     expect(mockApiFetch).not.toHaveBeenCalled();

@@ -1,8 +1,4 @@
-import {
-  npcNamePools,
-  NpcNamePoolEntry,
-  NPC_NAME_KINDS,
-} from './npc-name-pools';
+import { npcNamePools, NpcNamePoolEntry, NPC_NAME_KINDS } from './npc-name-pools';
 
 const SRD_521_SPECIES = [
   'Dragonborn',

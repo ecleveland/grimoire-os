@@ -333,9 +333,7 @@ describe('NpcsService', () => {
     beforeEach(() => {
       prisma.npc.findUnique.mockResolvedValue({ id: NPC_ID, campaignId: CAMPAIGN_ID });
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
-      prisma.npcRelation.create
-        .mockResolvedValueOnce(forwardRow)
-        .mockResolvedValueOnce(inverseRow);
+      prisma.npcRelation.create.mockResolvedValueOnce(forwardRow).mockResolvedValueOnce(inverseRow);
     });
 
     it('persists forward + inverse rows in a single $transaction', async () => {
@@ -412,22 +410,22 @@ describe('NpcsService', () => {
     });
 
     it('throws ForbiddenException when non-DM adds relation', async () => {
-      campaignAuth.assertCampaignOwner.mockReset().mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action')
-      );
+      campaignAuth.assertCampaignOwner
+        .mockReset()
+        .mockRejectedValue(
+          new ForbiddenException('Only the campaign owner can perform this action')
+        );
       await expect(service.addRelation(NPC_ID, USER_ID_2, dto)).rejects.toThrow(ForbiddenException);
       expect(prisma.npcRelation.create).not.toHaveBeenCalled();
     });
 
     it('throws ConflictException when P2002 fires on either insert', async () => {
-      prisma.npcRelation.create
-        .mockReset()
-        .mockRejectedValueOnce(
-          new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-            code: 'P2002',
-            clientVersion: '5.0.0',
-          })
-        );
+      prisma.npcRelation.create.mockReset().mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: '5.0.0',
+        })
+      );
 
       await expect(service.addRelation(NPC_ID, USER_ID, dto)).rejects.toThrow(ConflictException);
     });
@@ -500,9 +498,11 @@ describe('NpcsService', () => {
     });
 
     it('throws ForbiddenException when non-DM removes', async () => {
-      campaignAuth.assertCampaignOwner.mockReset().mockRejectedValue(
-        new ForbiddenException('Only the campaign owner can perform this action')
-      );
+      campaignAuth.assertCampaignOwner
+        .mockReset()
+        .mockRejectedValue(
+          new ForbiddenException('Only the campaign owner can perform this action')
+        );
       await expect(service.removeRelation(NPC_ID, RELATION_ID, USER_ID_2)).rejects.toThrow(
         ForbiddenException
       );
@@ -688,10 +688,7 @@ describe('NpcsService', () => {
     });
 
     it('custom relation: no pre-seeding, no age/name override, symmetric pair', async () => {
-      arrangeSuccess(
-        { age: 40 },
-        { race: 'Tiefling', name: 'Vesna Ravenfall', age: 200 }
-      );
+      arrangeSuccess({ age: 40 }, { race: 'Tiefling', name: 'Vesna Ravenfall', age: 200 });
 
       await service.generateRelated(NPC_ID, USER_ID, { relation: 'blood-bound' });
 

@@ -33,7 +33,12 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
 
   const handleRemove = async (rel: NpcRelation) => {
     const target = rel.toNpc?.name ?? rel.toNpcId;
-    if (!window.confirm(`Remove the "${rel.relation}" relation to ${target}? Both directions will be deleted.`)) return;
+    if (
+      !window.confirm(
+        `Remove the "${rel.relation}" relation to ${target}? Both directions will be deleted.`
+      )
+    )
+      return;
     setBusy(true);
     try {
       await apiFetch<void>(`/npcs/${npc.id}/relations/${rel.id}`, { method: 'DELETE' });

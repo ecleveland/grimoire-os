@@ -103,7 +103,7 @@ export class NpcsController {
 
   @Post(':id/relations/generate')
   @ApiOperation({
-    summary: "Generate a new NPC related to this one and persist the relation pair atomically",
+    summary: 'Generate a new NPC related to this one and persist the relation pair atomically',
   })
   generateRelated(
     @Param('id') id: string,

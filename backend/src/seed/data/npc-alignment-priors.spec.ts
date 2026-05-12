@@ -1,7 +1,4 @@
-import {
-  npcAlignmentPriors,
-  NPC_ALIGNMENT_ORDER,
-} from './npc-alignment-priors';
+import { npcAlignmentPriors, NPC_ALIGNMENT_ORDER } from './npc-alignment-priors';
 
 const SRD_521_SPECIES = [
   'Dragonborn',

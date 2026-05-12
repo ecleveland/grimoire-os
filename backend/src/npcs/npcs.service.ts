@@ -21,10 +21,7 @@ import {
   swapFamilyName,
 } from './relation-constraints';
 import { NpcGeneratorService } from './generator/npc-generator.service';
-import {
-  GeneratedNpc,
-  NpcGenerationConstraints,
-} from './generator/npc-generator.types';
+import { GeneratedNpc, NpcGenerationConstraints } from './generator/npc-generator.types';
 
 const JSON_FIELDS = ['statBlock', 'loot', 'lootOverrides', 'generationParams'] as const;
 
