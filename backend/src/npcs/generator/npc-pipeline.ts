@@ -118,6 +118,12 @@ export type GameRulesRef = {
   coinageMultiplier: number;
 };
 
+export type CustomPersonalityRef = {
+  background: string;
+  kind: 'personalityTraits' | 'ideals' | 'bonds' | 'flaws';
+  value: string;
+};
+
 export type NpcRefData = {
   species: SpeciesRef[];
   backgrounds: BackgroundRef[];
@@ -126,6 +132,7 @@ export type NpcRefData = {
   appearanceTraits: AppearanceTraitRef[];
   lootTemplates: LootTemplateRef[];
   trinkets: TrinketRef[];
+  customPersonality: CustomPersonalityRef[];
   itemsByName: Map<string, ItemRef>;
   magicItems: ItemRef[];
   monsters: MonsterRef[];
@@ -391,11 +398,17 @@ export class NpcPipeline {
     if (!bg) return empty;
     const ref = this.data.backgrounds.find(b => b.name === bg);
     if (!ref) return empty;
+    const customForBg = this.data.customPersonality.filter(c => c.background === bg);
+    const customByKind = (kind: CustomPersonalityRef['kind']) =>
+      customForBg.filter(c => c.kind === kind).map(c => c.value);
     return {
-      traits: rng.sampleDistinct(ref.personalityTraits, SAMPLE_COUNTS.traits),
-      ideals: rng.sampleDistinct(ref.ideals, SAMPLE_COUNTS.ideals),
-      bonds: rng.sampleDistinct(ref.bonds, SAMPLE_COUNTS.bonds),
-      flaws: rng.sampleDistinct(ref.flaws, SAMPLE_COUNTS.flaws),
+      traits: rng.sampleDistinct(
+        [...ref.personalityTraits, ...customByKind('personalityTraits')],
+        SAMPLE_COUNTS.traits
+      ),
+      ideals: rng.sampleDistinct([...ref.ideals, ...customByKind('ideals')], SAMPLE_COUNTS.ideals),
+      bonds: rng.sampleDistinct([...ref.bonds, ...customByKind('bonds')], SAMPLE_COUNTS.bonds),
+      flaws: rng.sampleDistinct([...ref.flaws, ...customByKind('flaws')], SAMPLE_COUNTS.flaws),
     };
   }
 

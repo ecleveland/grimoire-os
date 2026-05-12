@@ -60,6 +60,7 @@ export type MockPrismaService = {
     | 'npcAppearanceTrait'
     | 'npcLootTemplate'
     | 'npcAlignmentPrior'
+    | 'npcCustomPersonality'
     | 'trinket']: MockModel;
 } & {
   $transaction: jest.Mock;
@@ -98,6 +99,7 @@ export function createMockPrismaService(): MockPrismaService {
     npcAppearanceTrait: mockModel(),
     npcLootTemplate: mockModel(),
     npcAlignmentPrior: mockModel(),
+    npcCustomPersonality: mockModel(),
     trinket: mockModel(),
     $queryRaw: jest.fn(),
   } as unknown as MockPrismaService;
