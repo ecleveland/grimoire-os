@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import AdminSubnav from '@/components/AdminSubnav';
 import type { User, PaginatedResponse } from '@/lib/types';
 
 const LIMIT = 20;
@@ -72,6 +73,7 @@ export default function AdminUsersPage() {
 
   return (
     <div>
+      <AdminSubnav />
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">User Management</h1>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">

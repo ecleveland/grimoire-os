@@ -11,6 +11,7 @@ vi.mock('@/lib/api', () => ({
 const mockReplace = vi.fn();
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: mockReplace }),
+  usePathname: () => '/admin/npc-data',
 }));
 
 const mockUseAuth = vi.fn();
