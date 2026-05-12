@@ -33,7 +33,9 @@ export type FormFieldProps = InputFieldProps | TextareaFieldProps | SelectFieldP
 
 const SHARED_KEYS = ['label', 'helperText', 'error', 'className', 'id', 'as'] as const;
 
-function stripShared<T extends Record<string, unknown>>(props: T): Omit<T, (typeof SHARED_KEYS)[number]> {
+function stripShared<T extends Record<string, unknown>>(
+  props: T
+): Omit<T, (typeof SHARED_KEYS)[number]> {
   const out: Record<string, unknown> = {};
   for (const key in props) {
     if (!SHARED_KEYS.includes(key as (typeof SHARED_KEYS)[number])) {
@@ -46,9 +48,7 @@ function stripShared<T extends Record<string, unknown>>(props: T): Omit<T, (type
 export default function FormField(props: FormFieldProps) {
   const reactId = useId();
   const fieldId = props.id ?? reactId;
-  const elementClass = props.className
-    ? `${inputClasses} ${props.className}`
-    : inputClasses;
+  const elementClass = props.className ? `${inputClasses} ${props.className}` : inputClasses;
 
   return (
     <div>

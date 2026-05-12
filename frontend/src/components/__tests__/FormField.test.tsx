@@ -54,14 +54,7 @@ describe('FormField', () => {
 
   describe('helperText', () => {
     it('renders helper text below the input when provided', () => {
-      render(
-        <FormField
-          label="Password"
-          helperText="Min 12 chars"
-          value=""
-          onChange={() => {}}
-        />
-      );
+      render(<FormField label="Password" helperText="Min 12 chars" value="" onChange={() => {}} />);
       expect(screen.getByText('Min 12 chars')).toBeInTheDocument();
     });
 
@@ -73,9 +66,7 @@ describe('FormField', () => {
 
   describe('error state', () => {
     it('renders error message when error prop is provided', () => {
-      render(
-        <FormField label="Email" error="Invalid email" value="" onChange={() => {}} />
-      );
+      render(<FormField label="Email" error="Invalid email" value="" onChange={() => {}} />);
       expect(screen.getByText('Invalid email')).toBeInTheDocument();
     });
 
@@ -124,9 +115,7 @@ describe('FormField', () => {
     });
 
     it('forwards placeholder', () => {
-      render(
-        <FormField label="Name" placeholder="Enter name" value="" onChange={() => {}} />
-      );
+      render(<FormField label="Name" placeholder="Enter name" value="" onChange={() => {}} />);
       expect(screen.getByPlaceholderText('Enter name')).toBeInTheDocument();
     });
 
@@ -136,22 +125,13 @@ describe('FormField', () => {
     });
 
     it('appends className to the input element', () => {
-      render(
-        <FormField label="STR" className="text-center" value="" onChange={() => {}} />
-      );
+      render(<FormField label="STR" className="text-center" value="" onChange={() => {}} />);
       expect(screen.getByLabelText('STR')).toHaveClass('text-center');
     });
 
     it('forwards min and max for number inputs', () => {
       render(
-        <FormField
-          label="Level"
-          type="number"
-          min={1}
-          max={20}
-          value={1}
-          onChange={() => {}}
-        />
+        <FormField label="Level" type="number" min={1} max={20} value={1} onChange={() => {}} />
       );
       const input = screen.getByLabelText('Level');
       expect(input).toHaveAttribute('min', '1');
@@ -161,26 +141,20 @@ describe('FormField', () => {
 
   describe('as=textarea', () => {
     it('renders a textarea when as="textarea"', () => {
-      render(
-        <FormField as="textarea" label="Description" value="" onChange={() => {}} />
-      );
+      render(<FormField as="textarea" label="Description" value="" onChange={() => {}} />);
       const el = screen.getByLabelText('Description');
       expect(el.tagName).toBe('TEXTAREA');
     });
 
     it('forwards rows to textarea', () => {
-      render(
-        <FormField as="textarea" label="Bio" rows={5} value="" onChange={() => {}} />
-      );
+      render(<FormField as="textarea" label="Bio" rows={5} value="" onChange={() => {}} />);
       expect(screen.getByLabelText('Bio')).toHaveAttribute('rows', '5');
     });
 
     it('calls onChange when user types in textarea', async () => {
       const onChange = vi.fn();
       const user = userEvent.setup();
-      render(
-        <FormField as="textarea" label="Bio" value="" onChange={onChange} />
-      );
+      render(<FormField as="textarea" label="Bio" value="" onChange={onChange} />);
       await user.type(screen.getByLabelText('Bio'), 'h');
       expect(onChange).toHaveBeenCalled();
     });

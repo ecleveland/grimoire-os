@@ -23,9 +23,12 @@ describe('inverseOf', () => {
   const roundtripCases = [...mapped, ...mapped.map(([a, b]) => [b, a] as [string, string])].map(
     ([forward]) => [forward] as [string]
   );
-  it.each(roundtripCases)('is its own involution: inverseOf(inverseOf(%s)) returns input', forward => {
-    expect(inverseOf(inverseOf(forward))).toBe(forward);
-  });
+  it.each(roundtripCases)(
+    'is its own involution: inverseOf(inverseOf(%s)) returns input',
+    forward => {
+      expect(inverseOf(inverseOf(forward))).toBe(forward);
+    }
+  );
 
   it('falls back to symmetric for unknown (custom) relations', () => {
     expect(inverseOf('blood-bound')).toBe('blood-bound');

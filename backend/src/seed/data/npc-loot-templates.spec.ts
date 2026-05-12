@@ -54,15 +54,12 @@ describe('NPC loot templates seed data', () => {
     }
   });
 
-  it.each(NPC_LOOT_CR_BUCKETS)(
-    'has a __generic__ fallback for CR bucket %s',
-    crBucket => {
-      const generic = npcLootTemplates.find(
-        t => t.profession === NPC_LOOT_GENERIC_PROFESSION && t.crBucket === crBucket
-      );
-      expect(generic).toBeDefined();
-    }
-  );
+  it.each(NPC_LOOT_CR_BUCKETS)('has a __generic__ fallback for CR bucket %s', crBucket => {
+    const generic = npcLootTemplates.find(
+      t => t.profession === NPC_LOOT_GENERIC_PROFESSION && t.crBucket === crBucket
+    );
+    expect(generic).toBeDefined();
+  });
 
   it('exports __generic__ as the documented sentinel', () => {
     expect(NPC_LOOT_GENERIC_PROFESSION).toBe('__generic__');

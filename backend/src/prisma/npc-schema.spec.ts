@@ -2,10 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('NPC Generator schema (VEG-243)', () => {
-  const schema = readFileSync(
-    join(__dirname, '..', '..', 'prisma', 'schema.prisma'),
-    'utf-8',
-  );
+  const schema = readFileSync(join(__dirname, '..', '..', 'prisma', 'schema.prisma'), 'utf-8');
 
   const modelBlock = (name: string): string => {
     const re = new RegExp(`model\\s+${name}\\s*{([\\s\\S]*?)\\n}`, 'm');
@@ -72,8 +69,12 @@ describe('NPC Generator schema (VEG-243)', () => {
     });
 
     it('relates to Campaign and User', () => {
-      expect(body).toMatch(/campaign\s+Campaign\s+@relation\(fields: \[campaignId\], references: \[id\]\)/);
-      expect(body).toMatch(/createdBy\s+User\s+@relation\(fields: \[createdById\], references: \[id\]\)/);
+      expect(body).toMatch(
+        /campaign\s+Campaign\s+@relation\(fields: \[campaignId\], references: \[id\]\)/
+      );
+      expect(body).toMatch(
+        /createdBy\s+User\s+@relation\(fields: \[createdById\], references: \[id\]\)/
+      );
     });
 
     it('has bidirectional relation backrefs to NpcRelation', () => {
@@ -108,10 +109,10 @@ describe('NPC Generator schema (VEG-243)', () => {
 
     it('cascades on delete from both sides', () => {
       expect(body).toMatch(
-        /fromNpc\s+Npc\s+@relation\("FromNpc",\s*fields: \[fromNpcId\],\s*references: \[id\],\s*onDelete: Cascade\)/,
+        /fromNpc\s+Npc\s+@relation\("FromNpc",\s*fields: \[fromNpcId\],\s*references: \[id\],\s*onDelete: Cascade\)/
       );
       expect(body).toMatch(
-        /toNpc\s+Npc\s+@relation\("ToNpc",\s*fields: \[toNpcId\],\s*references: \[id\],\s*onDelete: Cascade\)/,
+        /toNpc\s+Npc\s+@relation\("ToNpc",\s*fields: \[toNpcId\],\s*references: \[id\],\s*onDelete: Cascade\)/
       );
     });
 
