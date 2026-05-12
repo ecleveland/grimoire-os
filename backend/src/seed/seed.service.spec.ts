@@ -446,13 +446,20 @@ describe('SeedService', () => {
     expect(call.data.length).toBeGreaterThanOrEqual(100);
   });
 
+  it('never touches npc_custom_personality rows on reseed (user contributions survive)', async () => {
+    await service.seed();
+
+    expect(prisma.npcCustomPersonality.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.npcCustomPersonality.createMany).not.toHaveBeenCalled();
+    expect(prisma.npcCustomPersonality.delete).not.toHaveBeenCalled();
+    expect(prisma.npcCustomPersonality.update).not.toHaveBeenCalled();
+  });
+
   it('seeds the four new npc-generation game-rule rows via createMany', async () => {
     await service.seed();
 
     const allCalls = prisma.gameRule.createMany.mock.calls.flatMap(c => c[0].data);
-    const npcRules = allCalls.filter(
-      (r: { category: string }) => r.category === 'npc-generation'
-    );
+    const npcRules = allCalls.filter((r: { category: string }) => r.category === 'npc-generation');
     const keys = npcRules.map((r: { key: string }) => r.key).sort();
     expect(keys).toEqual(
       ['coinage-multiplier', 'item-count-die', 'magic-item-chance-by-cr', 'trinket-chance'].sort()

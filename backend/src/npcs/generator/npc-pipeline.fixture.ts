@@ -63,6 +63,7 @@ export function buildSeedRefData(overrides: Partial<NpcRefData> = {}): NpcRefDat
       items: t.items,
     })),
     trinkets: trinketSeed.map(t => ({ description: t.description })),
+    customPersonality: [],
     itemsByName,
     magicItems,
     settingBiases: npcSettingBiases,

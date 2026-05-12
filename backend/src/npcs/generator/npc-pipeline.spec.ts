@@ -244,6 +244,31 @@ describe('NpcPipeline — pickPersonality', () => {
     expect(result.bonds).toEqual([]);
     expect(result.flaws).toEqual([]);
   });
+
+  it('merges custom personality rows into the sample pool for matching background+kind', () => {
+    const customValue = '__CUSTOM_BOND_VALUE__';
+    const data = buildSeedRefData({
+      // Empty the Acolyte's bonds so the custom row is the only choice.
+      backgrounds: buildSeedRefData().backgrounds.map(b =>
+        b.name === 'Acolyte' ? { ...b, bonds: [] } : b
+      ),
+      customPersonality: [{ background: 'Acolyte', kind: 'bonds', value: customValue }],
+    });
+    const result = new NpcPipeline(data).pickPersonality(newRng('custom'), baseConstraints(), {
+      background: 'Acolyte',
+    });
+    expect(result.bonds).toEqual([customValue]);
+  });
+
+  it('ignores custom personality rows for a different background', () => {
+    const data = buildSeedRefData({
+      customPersonality: [{ background: 'Sage', kind: 'bonds', value: '__SAGE_ONLY__' }],
+    });
+    const result = new NpcPipeline(data).pickPersonality(newRng('iso'), baseConstraints(), {
+      background: 'Acolyte',
+    });
+    expect(result.bonds).not.toContain('__SAGE_ONLY__');
+  });
 });
 
 describe('NpcPipeline — pickLoot', () => {

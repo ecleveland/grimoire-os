@@ -37,24 +37,25 @@ enum AuditAction {
 // ── Users ──────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(uuid())
-  username     String   @unique
-  passwordHash String
-  displayName  String
-  email        String?  @unique
-  avatarUrl    String?
+  id                  String    @id @default(uuid())
+  username            String    @unique
+  passwordHash        String
+  displayName         String
+  email               String?   @unique
+  avatarUrl           String?
   role                Role      @default(player)
   failedLoginAttempts Int       @default(0)
   lockoutUntil        DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  ownedCampaigns Campaign[]       @relation("CampaignOwner")
-  campaigns      CampaignPlayer[]
-  characters     Character[]
-  notes          Note[]
-  encounters     Encounter[]
-  npcs           Npc[]
+  ownedCampaigns            Campaign[]             @relation("CampaignOwner")
+  campaigns                 CampaignPlayer[]
+  characters                Character[]
+  notes                     Note[]
+  encounters                Encounter[]
+  npcs                      Npc[]
+  addedNpcCustomPersonality NpcCustomPersonality[]
 
   @@map("users")
 }
@@ -98,50 +99,50 @@ model CampaignPlayer {
 // ── Characters ─────────────────────────────────────────
 
 model Character {
-  id                String   @id @default(uuid())
-  name              String
-  userId            String
-  campaignId        String?
-  race              String?
-  class             String?
-  level             Int      @default(1)
-  subclass          String?
-  background        String?
-  alignment         String?
-  experiencePoints  Int      @default(0)
-  abilityScores     Json?
-  hitPoints         Json?
-  deathSaves        Json?
-  armorClass        Int?
-  speed             Int?
-  initiative        Int?
-  proficiencies     String[]
-  languages         String[]
-  savingThrows      String[]
-  skills            String[]
+  id                  String   @id @default(uuid())
+  name                String
+  userId              String
+  campaignId          String?
+  race                String?
+  class               String?
+  level               Int      @default(1)
+  subclass            String?
+  background          String?
+  alignment           String?
+  experiencePoints    Int      @default(0)
+  abilityScores       Json?
+  hitPoints           Json?
+  deathSaves          Json?
+  armorClass          Int?
+  speed               Int?
+  initiative          Int?
+  proficiencies       String[]
+  languages           String[]
+  savingThrows        String[]
+  skills              String[]
   spellcastingAbility String?
-  spellSaveDC       Int?
-  spellAttackBonus  Int?
-  knownSpells       String[]
-  preparedSpells    String[]
-  spellSlots        Json?
-  inventory         Json?
-  currency          Json?
-  features          Json?
-  personalityTraits String?
-  ideals            String?
-  bonds             String?
-  flaws             String?
-  backstory         String?
-  appearance        String?
-  avatarUrl         String?
-  size              String?
-  heroicInspiration Boolean  @default(false)
-  hitDice           Json?
-  armorTraining     String[]
-  weapons           Json?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  spellSaveDC         Int?
+  spellAttackBonus    Int?
+  knownSpells         String[]
+  preparedSpells      String[]
+  spellSlots          Json?
+  inventory           Json?
+  currency            Json?
+  features            Json?
+  personalityTraits   String?
+  ideals              String?
+  bonds               String?
+  flaws               String?
+  backstory           String?
+  appearance          String?
+  avatarUrl           String?
+  size                String?
+  heroicInspiration   Boolean  @default(false)
+  hitDice             Json?
+  armorTraining       String[]
+  weapons             Json?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   user     User      @relation(fields: [userId], references: [id])
   campaign Campaign? @relation(fields: [campaignId], references: [id])
@@ -281,22 +282,22 @@ model Item {
 }
 
 model SrdClass {
-  id                   String     @id @default(uuid())
-  name                 String     @unique
-  hitDie               String
-  primaryAbilities     String[]
-  savingThrows         String[]
-  armorProficiencies   String[]
-  weaponProficiencies  String[]
-  skillChoices         String[]
-  toolProficiencies    String[]
-  numSkillChoices      Int        @default(2)
-  description          String?
-  spellcasting         Json?
-  equipmentChoices     Json?
-  multiclassing        Json?
-  subclassLevel        Int?
-  source               String     @default("SRD 5.2.1")
+  id                  String   @id @default(uuid())
+  name                String   @unique
+  hitDie              String
+  primaryAbilities    String[]
+  savingThrows        String[]
+  armorProficiencies  String[]
+  weaponProficiencies String[]
+  skillChoices        String[]
+  toolProficiencies   String[]
+  numSkillChoices     Int      @default(2)
+  description         String?
+  spellcasting        Json?
+  equipmentChoices    Json?
+  multiclassing       Json?
+  subclassLevel       Int?
+  source              String   @default("SRD 5.2.1")
 
   subclasses Subclass[]
   features   ClassFeature[]
@@ -305,8 +306,8 @@ model SrdClass {
 }
 
 model Race {
-  id              String    @id @default(uuid())
-  name            String    @unique
+  id              String   @id @default(uuid())
+  name            String   @unique
   speed           Int
   size            String
   abilityBonuses  Json?
@@ -315,7 +316,7 @@ model Race {
   age             String?
   alignment       String?
   sizeDescription String?
-  source          String    @default("SRD 5.2.1")
+  source          String   @default("SRD 5.2.1")
 
   subraces Subrace[]
   traits   RaceTrait[]
@@ -324,13 +325,13 @@ model Race {
 }
 
 model Subclass {
-  id          String  @id @default(uuid())
-  name        String  @unique
-  classId     String
-  description String?
-  spellList     Json?
-  spellcasting  Json?
-  source        String  @default("SRD 5.2.1")
+  id           String  @id @default(uuid())
+  name         String  @unique
+  classId      String
+  description  String?
+  spellList    Json?
+  spellcasting Json?
+  source       String  @default("SRD 5.2.1")
 
   srdClass SrdClass          @relation(fields: [classId], references: [id])
   features SubclassFeature[]
@@ -353,18 +354,18 @@ model Subrace {
 }
 
 model Background {
-  id                String   @id @default(uuid())
-  name              String   @unique
-  description       String?
+  id                 String   @id @default(uuid())
+  name               String   @unique
+  description        String?
   skillProficiencies String[]
   toolProficiencies  String[]
-  languages         Int      @default(0)
-  equipment         String?
-  personalityTraits String[]
-  ideals            String[]
-  bonds             String[]
-  flaws             String[]
-  source            String   @default("SRD 5.2.1")
+  languages          Int      @default(0)
+  equipment          String?
+  personalityTraits  String[]
+  ideals             String[]
+  bonds              String[]
+  flaws              String[]
+  source             String   @default("SRD 5.2.1")
 
   features BackgroundFeature[]
 
@@ -453,11 +454,11 @@ model Condition {
 }
 
 model Skill {
-  id          String @id @default(uuid())
-  name        String @unique
+  id          String  @id @default(uuid())
+  name        String  @unique
   ability     String
   description String?
-  source      String @default("SRD 5.2.1")
+  source      String  @default("SRD 5.2.1")
 
   @@map("skills")
 }
@@ -489,7 +490,7 @@ model GameRule {
 // ── NPC Generator ─────────────────────────────────────
 
 model Npc {
-  id          String  @id @default(uuid())
+  id          String @id @default(uuid())
   campaignId  String
   createdById String
 
@@ -612,6 +613,21 @@ model Trinket {
   isActive    Boolean @default(true)
 
   @@map("trinkets")
+}
+
+model NpcCustomPersonality {
+  id         String   @id @default(uuid())
+  background String
+  kind       String
+  value      String
+  addedById  String
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  addedBy User @relation(fields: [addedById], references: [id])
+
+  @@index([background, kind])
+  @@map("npc_custom_personality")
 }
 
 // ── Audit Log ─────────────────────────────────────────
