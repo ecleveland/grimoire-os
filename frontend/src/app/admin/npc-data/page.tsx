@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import AdminSubnav from '@/components/AdminSubnav';
 
 type TableSlug = 'names' | 'appearance' | 'loot-templates' | 'trinkets' | 'personality';
 
@@ -243,8 +244,71 @@ export default function AdminNpcDataPage() {
 
   if (!isAdmin) return null;
 
+  const addForm = (
+    <form
+      onSubmit={handleSubmit}
+      aria-label={`Add ${tab.label.toLowerCase()} row`}
+      className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3 mb-6"
+    >
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add to {tab.label}</h2>
+      {tab.fields.map(f => {
+        const inputId = `npc-data-${tab.slug}-${f.key}`;
+        return (
+          <div key={f.key}>
+            <label
+              htmlFor={inputId}
+              className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
+            >
+              {f.label}
+              {f.required ? ' *' : ''}
+            </label>
+            {f.kind === 'select' && f.options ? (
+              <select
+                id={inputId}
+                value={form[f.key] ?? ''}
+                onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                className={inputClass}
+              >
+                <option value="">Select…</option>
+                {f.options.map(o => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            ) : f.kind === 'json' ? (
+              <textarea
+                id={inputId}
+                value={form[f.key] ?? ''}
+                onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                className={`${inputClass} font-mono text-xs h-24`}
+                placeholder='{"gp":[0,2],"sp":[2,8],"cp":[4,20]}'
+              />
+            ) : (
+              <input
+                id={inputId}
+                type="text"
+                value={form[f.key] ?? ''}
+                onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                className={inputClass}
+              />
+            )}
+          </div>
+        );
+      })}
+      <button
+        type="submit"
+        disabled={submitting}
+        className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+      >
+        {submitting ? 'Adding…' : 'Add row'}
+      </button>
+    </form>
+  );
+
   return (
     <div>
+      <AdminSubnav />
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">NPC Reference Data</h1>
 
       <div className="flex flex-wrap gap-2 mb-4" role="tablist" aria-label="NPC data tables">
@@ -267,6 +331,8 @@ export default function AdminNpcDataPage() {
           );
         })}
       </div>
+
+      {addForm}
 
       <input
         type="search"
@@ -365,66 +431,6 @@ export default function AdminNpcDataPage() {
           </table>
         </div>
       </div>
-
-      <form
-        onSubmit={handleSubmit}
-        aria-label={`Add ${tab.label.toLowerCase()} row`}
-        className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3"
-      >
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add to {tab.label}</h2>
-        {tab.fields.map(f => {
-          const inputId = `npc-data-${tab.slug}-${f.key}`;
-          return (
-            <div key={f.key}>
-              <label
-                htmlFor={inputId}
-                className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
-              >
-                {f.label}
-                {f.required ? ' *' : ''}
-              </label>
-              {f.kind === 'select' && f.options ? (
-                <select
-                  id={inputId}
-                  value={form[f.key] ?? ''}
-                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                  className={inputClass}
-                >
-                  <option value="">Select…</option>
-                  {f.options.map(o => (
-                    <option key={o} value={o}>
-                      {o}
-                    </option>
-                  ))}
-                </select>
-              ) : f.kind === 'json' ? (
-                <textarea
-                  id={inputId}
-                  value={form[f.key] ?? ''}
-                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                  className={`${inputClass} font-mono text-xs h-24`}
-                  placeholder='{"gp":[0,2],"sp":[2,8],"cp":[4,20]}'
-                />
-              ) : (
-                <input
-                  id={inputId}
-                  type="text"
-                  value={form[f.key] ?? ''}
-                  onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                  className={inputClass}
-                />
-              )}
-            </div>
-          );
-        })}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-        >
-          {submitting ? 'Adding…' : 'Add row'}
-        </button>
-      </form>
 
       <ConfirmDialog
         open={pendingDelete !== null}
