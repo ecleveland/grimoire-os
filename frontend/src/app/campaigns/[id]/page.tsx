@@ -7,6 +7,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
+import Badge from '@/components/Badge';
 import type {
   Campaign,
   Note,
@@ -267,9 +268,7 @@ export default function CampaignDetailPage() {
                   >
                     <div className="flex items-center justify-between">
                       <h3 className="font-medium text-gray-900 dark:text-white">{n.title}</h3>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-                        {n.visibility}
-                      </span>
+                      <Badge>{n.visibility}</Badge>
                     </div>
                     {n.tags.length > 0 && (
                       <div className="flex gap-1 mt-2">
@@ -374,11 +373,9 @@ export default function CampaignDetailPage() {
                   >
                     <div className="flex items-center justify-between">
                       <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${enc.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}
-                      >
+                      <Badge variant={enc.isActive ? 'success' : 'neutral'}>
                         {enc.isActive ? 'Active' : 'Inactive'}
-                      </span>
+                      </Badge>
                     </div>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                       {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
