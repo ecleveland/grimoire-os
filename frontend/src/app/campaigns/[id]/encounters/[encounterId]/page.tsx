@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import type { Encounter } from '@/lib/types';
+import Badge from '@/components/Badge';
 
 export default function InitiativeTrackerPage() {
   const { encounterId } = useParams<{ id: string; encounterId: string }>();
@@ -76,11 +77,9 @@ export default function InitiativeTrackerPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{encounter.name}</h1>
           <div className="flex items-center gap-3 mt-2">
-            <span
-              className={`px-2 py-1 text-xs font-medium rounded-full ${encounter.isActive ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'}`}
-            >
+            <Badge variant={encounter.isActive ? 'success' : 'neutral'} size="md">
               {encounter.isActive ? 'Active' : 'Inactive'}
-            </span>
+            </Badge>
             <span className="text-sm text-gray-500 dark:text-gray-400">
               Round {encounter.round}
             </span>
