@@ -107,7 +107,7 @@ export default function CampaignDetailPage() {
 
   const generateInviteCode = async () => {
     try {
-      const res = await apiFetch<InviteCodeResponse>(`/campaigns/${id}/invite`, {
+      const res = await apiFetch<InviteCodeResponse>(`/campaigns/${id}/invite-code`, {
         method: 'POST',
       });
       setInviteCode(res.inviteCode);
