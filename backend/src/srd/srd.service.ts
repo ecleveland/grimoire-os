@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Spell, Feat, Prisma } from '@prisma/client';
+import { Spell, Monster, Item, Feat, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
@@ -7,6 +7,17 @@ import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
+
+// Minimum query length that triggers pg_trgm similarity matching. Below this we
+// fall back to plain ILIKE substring matching — single-char fuzzy queries return
+// too much noise (every word has at least one character of overlap).
+const FUZZY_MIN_QUERY_LENGTH = 2;
+
+// Per-entity similarity thresholds. Tune independently if one resource grows
+// noisier than another (spells skew long, items skew short, etc.).
+const SPELL_FUZZY_THRESHOLD = 0.2;
+const MONSTER_FUZZY_THRESHOLD = 0.2;
+const ITEM_FUZZY_THRESHOLD = 0.2;
 
 export type UnifiedFeatureData = {
   id: string;
@@ -78,6 +89,37 @@ function joinWhere(conditions: Prisma.Sql[]): Prisma.Sql {
   return Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}`;
 }
 
+function shouldUseFuzzy(q?: string): q is string {
+  return typeof q === 'string' && q.length >= FUZZY_MIN_QUERY_LENGTH;
+}
+
+// Builds a fuzzy text-match condition that combines case-insensitive substring
+// matching (so exact matches always qualify) with pg_trgm similarity (so typos
+// and partial fragments still match). The matching CASE expression mirrors the
+// branches so substring hits score 1.0 / 0.9 and similarity hits fall below.
+function buildFuzzyMatchSql(query: string, threshold: number): Prisma.Sql {
+  const like = `%${query}%`;
+  return Prisma.sql`(
+    "name" ILIKE ${like}
+    OR "description" ILIKE ${like}
+    OR similarity("name", ${query}) >= ${threshold}
+    OR similarity(coalesce("description", ''), ${query}) >= ${threshold}
+  )`;
+}
+
+function buildFuzzyScoreSql(query: string): Prisma.Sql {
+  const like = `%${query}%`;
+  return Prisma.sql`CASE
+    WHEN LOWER("name") = LOWER(${query}) THEN 2.0
+    WHEN "name" ILIKE ${like} THEN 1.0
+    WHEN "description" ILIKE ${like} THEN 0.9
+    ELSE GREATEST(
+      similarity("name", ${query}),
+      similarity(coalesce("description", ''), ${query})
+    )
+  END`;
+}
+
 @Injectable()
 export class SrdService {
   constructor(private prisma: PrismaService) {}
@@ -87,6 +129,11 @@ export class SrdService {
   async searchSpells(dto: QuerySpellsDto) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
+
+    if (shouldUseFuzzy(dto.q)) {
+      return this.fuzzySearchSpells(dto, dto.q, page, limit);
+    }
+
     const where: Record<string, unknown> = {};
     if (dto.q) {
       where.OR = [
@@ -111,6 +158,28 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
+  private async fuzzySearchSpells(dto: QuerySpellsDto, q: string, page: number, limit: number) {
+    const conds: Prisma.Sql[] = [buildFuzzyMatchSql(q, SPELL_FUZZY_THRESHOLD)];
+    if (dto.class) conds.push(Prisma.sql`${dto.class} = ANY("classes")`);
+    if (dto.level !== undefined) conds.push(Prisma.sql`"level" = ${dto.level}`);
+    if (dto.school) conds.push(Prisma.sql`"school" = ${dto.school}`);
+    const whereSql = joinWhere(conds);
+    const score = buildFuzzyScoreSql(q);
+    const offset = (page - 1) * limit;
+
+    const [data, countRows] = await Promise.all([
+      this.prisma.$queryRaw<Spell[]>(
+        Prisma.sql`SELECT * FROM "spells" ${whereSql} ORDER BY ${score} DESC, "name" ASC LIMIT ${limit} OFFSET ${offset}`
+      ),
+      this.prisma.$queryRaw<{ total: number }[]>(
+        Prisma.sql`SELECT COUNT(*)::int AS total FROM "spells" ${whereSql}`
+      ),
+    ]);
+
+    const total = Number(countRows[0]?.total ?? 0);
+    return buildPaginatedResponse(data, total, page, limit);
+  }
+
   async findSpell(id: string) {
     return this.prisma.spell.findUnique({ where: { id } });
   }
@@ -120,6 +189,11 @@ export class SrdService {
   async searchMonsters(dto: QueryMonstersDto) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
+
+    if (shouldUseFuzzy(dto.q)) {
+      return this.fuzzySearchMonsters(dto, dto.q, page, limit);
+    }
+
     const where: Record<string, unknown> = {};
     if (dto.q) {
       where.OR = [
@@ -150,6 +224,30 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
+  private async fuzzySearchMonsters(dto: QueryMonstersDto, q: string, page: number, limit: number) {
+    const conds: Prisma.Sql[] = [buildFuzzyMatchSql(q, MONSTER_FUZZY_THRESHOLD)];
+    if (dto.type) conds.push(Prisma.sql`"type" = ${dto.type}`);
+    if (dto.size) conds.push(Prisma.sql`"size" = ${dto.size}`);
+    if (dto.cr) conds.push(Prisma.sql`"challengeRating" = ${parseFloat(dto.cr)}`);
+    if (dto.minCr) conds.push(Prisma.sql`"challengeRating" >= ${parseFloat(dto.minCr)}`);
+    if (dto.maxCr) conds.push(Prisma.sql`"challengeRating" <= ${parseFloat(dto.maxCr)}`);
+    const whereSql = joinWhere(conds);
+    const score = buildFuzzyScoreSql(q);
+    const offset = (page - 1) * limit;
+
+    const [data, countRows] = await Promise.all([
+      this.prisma.$queryRaw<Monster[]>(
+        Prisma.sql`SELECT * FROM "monsters" ${whereSql} ORDER BY ${score} DESC, "name" ASC LIMIT ${limit} OFFSET ${offset}`
+      ),
+      this.prisma.$queryRaw<{ total: number }[]>(
+        Prisma.sql`SELECT COUNT(*)::int AS total FROM "monsters" ${whereSql}`
+      ),
+    ]);
+
+    const total = Number(countRows[0]?.total ?? 0);
+    return buildPaginatedResponse(data, total, page, limit);
+  }
+
   async findMonster(id: string) {
     return this.prisma.monster.findUnique({ where: { id } });
   }
@@ -159,6 +257,11 @@ export class SrdService {
   async searchItems(dto: QueryItemsDto) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
+
+    if (shouldUseFuzzy(dto.q)) {
+      return this.fuzzySearchItems(dto, dto.q, page, limit);
+    }
+
     const where: Record<string, unknown> = {};
     if (dto.q) {
       where.OR = [
@@ -180,6 +283,28 @@ export class SrdService {
       this.prisma.item.count({ where }),
     ]);
 
+    return buildPaginatedResponse(data, total, page, limit);
+  }
+
+  private async fuzzySearchItems(dto: QueryItemsDto, q: string, page: number, limit: number) {
+    const conds: Prisma.Sql[] = [buildFuzzyMatchSql(q, ITEM_FUZZY_THRESHOLD)];
+    if (dto.category) conds.push(Prisma.sql`"category" = ${dto.category}`);
+    if (dto.rarity) conds.push(Prisma.sql`"rarity" = ${dto.rarity}`);
+    if (dto.isMagic !== undefined) conds.push(Prisma.sql`"isMagic" = ${dto.isMagic === 'true'}`);
+    const whereSql = joinWhere(conds);
+    const score = buildFuzzyScoreSql(q);
+    const offset = (page - 1) * limit;
+
+    const [data, countRows] = await Promise.all([
+      this.prisma.$queryRaw<Item[]>(
+        Prisma.sql`SELECT * FROM "items" ${whereSql} ORDER BY ${score} DESC, "name" ASC LIMIT ${limit} OFFSET ${offset}`
+      ),
+      this.prisma.$queryRaw<{ total: number }[]>(
+        Prisma.sql`SELECT COUNT(*)::int AS total FROM "items" ${whereSql}`
+      ),
+    ]);
+
+    const total = Number(countRows[0]?.total ?? 0);
     return buildPaginatedResponse(data, total, page, limit);
   }
 
