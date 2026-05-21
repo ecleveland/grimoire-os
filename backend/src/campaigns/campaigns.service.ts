@@ -92,12 +92,15 @@ export class CampaignsService {
     await this.prisma.campaign.delete({ where: { id } });
   }
 
+  static readonly INVITE_CODE_TTL_MS = 48 * 60 * 60 * 1000;
+
   async generateInviteCode(id: string, userId: string): Promise<string> {
     await this.campaignAuth.assertCampaignOwner(id, userId);
-    const code = crypto.randomBytes(4).toString('hex');
+    const code = crypto.randomBytes(16).toString('hex');
+    const inviteCodeExpiresAt = new Date(Date.now() + CampaignsService.INVITE_CODE_TTL_MS);
     await this.prisma.campaign.update({
       where: { id },
-      data: { inviteCode: code },
+      data: { inviteCode: code, inviteCodeExpiresAt },
     });
     return code;
   }

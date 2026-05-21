@@ -208,22 +208,33 @@ describe('CampaignsService', () => {
       );
     });
 
-    it('generates code using crypto.randomBytes', async () => {
+    it('generates a 32-char hex code from crypto.randomBytes(16) and stores it with a 48h expiration', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.update.mockResolvedValue(mockCampaign);
 
-      const mockBuffer = Buffer.from('abcd1234', 'hex');
+      const hex32 = 'abcd1234'.repeat(4);
+      const mockBuffer = Buffer.from(hex32, 'hex');
       (crypto.randomBytes as jest.Mock).mockReturnValue(mockBuffer);
 
+      const before = Date.now();
       const code = await service.generateInviteCode(CAMPAIGN_ID, USER_ID);
+      const after = Date.now();
 
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
-      expect(crypto.randomBytes).toHaveBeenCalledWith(4);
-      expect(code).toBe('abcd1234');
-      expect(prisma.campaign.update).toHaveBeenCalledWith({
-        where: { id: CAMPAIGN_ID },
-        data: { inviteCode: 'abcd1234' },
-      });
+      expect(crypto.randomBytes).toHaveBeenCalledWith(16);
+      expect(code).toBe(hex32);
+      expect(code).toHaveLength(32);
+
+      const updateCall = prisma.campaign.update.mock.calls[0][0] as {
+        where: { id: string };
+        data: { inviteCode: string; inviteCodeExpiresAt: Date };
+      };
+      expect(updateCall.where).toEqual({ id: CAMPAIGN_ID });
+      expect(updateCall.data.inviteCode).toBe(hex32);
+      const expiresAt = updateCall.data.inviteCodeExpiresAt.getTime();
+      const fortyEightHoursMs = 48 * 60 * 60 * 1000;
+      expect(expiresAt).toBeGreaterThanOrEqual(before + fortyEightHoursMs);
+      expect(expiresAt).toBeLessThanOrEqual(after + fortyEightHoursMs);
     });
   });
 

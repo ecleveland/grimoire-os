@@ -363,7 +363,7 @@ export class SeedService {
       return;
     }
 
-    const passwordHash = await bcrypt.hash('admin', 10);
+    const passwordHash = await bcrypt.hash('admin', 12);
     await this.prisma.user.create({
       data: {
         username,

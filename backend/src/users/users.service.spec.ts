@@ -39,7 +39,7 @@ describe('UsersService', () => {
 
       const result = await service.create(createUserDto);
 
-      expect(bcrypt.hash).toHaveBeenCalledWith(createUserDto.password, 10);
+      expect(bcrypt.hash).toHaveBeenCalledWith(createUserDto.password, 12);
       expect(prisma.user.create).toHaveBeenCalledWith({
         data: {
           username: createUserDto.username,
@@ -198,7 +198,7 @@ describe('UsersService', () => {
       await service.changePassword(USER_ID, 'correctpassword', 'newpassword');
 
       expect(bcrypt.compare).toHaveBeenCalledWith('correctpassword', mockUser.passwordHash);
-      expect(bcrypt.hash).toHaveBeenCalledWith('newpassword', 10);
+      expect(bcrypt.hash).toHaveBeenCalledWith('newpassword', 12);
       expect(prisma.user.update).toHaveBeenCalledWith({
         where: { id: USER_ID },
         data: { passwordHash: 'new_hashed_pw' },

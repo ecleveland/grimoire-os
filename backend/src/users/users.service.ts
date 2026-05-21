@@ -14,12 +14,14 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
 
+const BCRYPT_ROUNDS = 12;
+
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   async create(createUserDto: CreateUserDto) {
-    const passwordHash = await bcrypt.hash(createUserDto.password, 10);
+    const passwordHash = await bcrypt.hash(createUserDto.password, BCRYPT_ROUNDS);
     try {
       return await this.prisma.user.create({
         data: {
@@ -108,7 +110,7 @@ export class UsersService {
     if (!isValid) {
       throw new UnauthorizedException('Current password is incorrect');
     }
-    const passwordHash = await bcrypt.hash(newPassword, 10);
+    const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
     await this.prisma.user.update({
       where: { id },
       data: { passwordHash },
