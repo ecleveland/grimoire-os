@@ -71,6 +71,7 @@ model Campaign {
   setting        String?
   currentSession Int            @default(0)
   inviteCode     String?        @unique
+  inviteCodeExpiresAt DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
