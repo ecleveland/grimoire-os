@@ -1,10 +1,12 @@
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm]
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 // ── Enums ──────────────────────────────────────────────
@@ -217,6 +219,8 @@ model Spell {
 
   @@index([level])
   @@index([school])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "spells_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "spells_description_trgm_idx")
   @@map("spells")
 }
 
@@ -257,6 +261,8 @@ model Monster {
 
   @@index([type])
   @@index([challengeRating])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "monsters_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "monsters_description_trgm_idx")
   @@map("monsters")
 }
 
@@ -279,6 +285,8 @@ model Item {
   source              String   @default("SRD 5.2.1")
 
   @@index([category])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_description_trgm_idx")
   @@map("items")
 }
 

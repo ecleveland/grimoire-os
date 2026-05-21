@@ -23,6 +23,16 @@ describe('SrdService', () => {
   // ── Spells ──────────────────────────────────────────
 
   describe('searchSpells', () => {
+    type SqlFragment = { sql: string; values: unknown[] };
+
+    function captureSql() {
+      const calls = prisma.$queryRaw.mock.calls;
+      return {
+        dataQuery: calls[0]?.[0] as SqlFragment | undefined,
+        countQuery: calls[1]?.[0] as SqlFragment | undefined,
+      };
+    }
+
     it('passes empty where when no filters provided', async () => {
       prisma.spell.findMany.mockResolvedValue([]);
       prisma.spell.count.mockResolvedValue(0);
@@ -38,23 +48,84 @@ describe('SrdService', () => {
       expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
     });
 
-    it('builds OR contains insensitive when query provided', async () => {
-      prisma.spell.findMany.mockResolvedValue([]);
-      prisma.spell.count.mockResolvedValue(0);
+    it('uses pg_trgm similarity via $queryRaw when query is ≥2 chars', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
 
       await service.searchSpells({ q: 'fire' });
 
+      expect(prisma.spell.findMany).not.toHaveBeenCalled();
+      const { dataQuery, countQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"spells"');
+      expect(dataQuery?.sql).toContain('similarity');
+      expect(dataQuery?.sql).toContain('ILIKE');
+      expect(dataQuery?.sql).toContain('ORDER BY');
+      expect(dataQuery?.sql).toContain('LIMIT');
+      expect(dataQuery?.sql).toContain('OFFSET');
+      expect(dataQuery?.values).toContain('fire');
+      expect(dataQuery?.values).toContain('%fire%');
+      expect(countQuery?.sql).toContain('COUNT');
+      expect(countQuery?.sql).toContain('"spells"');
+    });
+
+    it('keeps exact substring matches scored highest (ILIKE branch beats similarity)', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchSpells({ q: 'Fireball' });
+
+      const { dataQuery } = captureSql();
+      // ILIKE substring branch must precede similarity branch in the score CASE.
+      const ilikeIdx = dataQuery?.sql.indexOf('ILIKE') ?? -1;
+      const simIdx = dataQuery?.sql.indexOf('similarity') ?? -1;
+      expect(ilikeIdx).toBeGreaterThanOrEqual(0);
+      expect(simIdx).toBeGreaterThanOrEqual(0);
+      expect(ilikeIdx).toBeLessThan(simIdx);
+    });
+
+    it('falls back to legacy findMany substring path for single-char queries', async () => {
+      prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
+
+      await service.searchSpells({ q: 'a' });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
           OR: [
-            { name: { contains: 'fire', mode: 'insensitive' } },
-            { description: { contains: 'fire', mode: 'insensitive' } },
+            { name: { contains: 'a', mode: 'insensitive' } },
+            { description: { contains: 'a', mode: 'insensitive' } },
           ],
         },
         orderBy: { name: 'asc' },
         skip: 0,
         take: 20,
       });
+    });
+
+    it('applies class/level/school filters alongside fuzzy search SQL', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchSpells({ q: 'fire', class: 'Wizard', level: 3, school: 'Evocation' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).toMatch(/ANY\s*\(\s*"classes"\s*\)/);
+      expect(dataQuery?.sql).toContain('"level"');
+      expect(dataQuery?.sql).toContain('"school"');
+      expect(dataQuery?.values).toContain('Wizard');
+      expect(dataQuery?.values).toContain(3);
+      expect(dataQuery?.values).toContain('Evocation');
+    });
+
+    it('paginates fuzzy results via SQL LIMIT/OFFSET and returns total from count query', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 42 }]);
+
+      const result = await service.searchSpells({ q: 'fire', page: 3, limit: 10 });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.values).toContain(10);
+      expect(dataQuery?.values).toContain(20);
+      expect(result.total).toBe(42);
+      expect(result.page).toBe(3);
+      expect(result.lastPage).toBe(Math.ceil(42 / 10));
     });
 
     it('adds classes has filter when classFilter provided', async () => {
@@ -93,6 +164,76 @@ describe('SrdService', () => {
   // ── Monsters ────────────────────────────────────────
 
   describe('searchMonsters', () => {
+    type SqlFragment = { sql: string; values: unknown[] };
+
+    function captureSql() {
+      const calls = prisma.$queryRaw.mock.calls;
+      return {
+        dataQuery: calls[0]?.[0] as SqlFragment | undefined,
+        countQuery: calls[1]?.[0] as SqlFragment | undefined,
+      };
+    }
+
+    it('uses pg_trgm similarity via $queryRaw when query is ≥2 chars', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchMonsters({ q: 'drg' });
+
+      expect(prisma.monster.findMany).not.toHaveBeenCalled();
+      const { dataQuery, countQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"monsters"');
+      expect(dataQuery?.sql).toContain('similarity');
+      expect(dataQuery?.values).toContain('drg');
+      expect(dataQuery?.values).toContain('%drg%');
+      expect(countQuery?.sql).toContain('"monsters"');
+    });
+
+    it('falls back to legacy findMany substring path for single-char queries', async () => {
+      prisma.monster.findMany.mockResolvedValue([]);
+      prisma.monster.count.mockResolvedValue(0);
+
+      await service.searchMonsters({ q: 'a' });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.monster.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { name: { contains: 'a', mode: 'insensitive' } },
+            { description: { contains: 'a', mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('applies type/size/cr filters alongside fuzzy search SQL', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchMonsters({ q: 'drg', type: 'Dragon', size: 'Large', cr: '5' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"type"');
+      expect(dataQuery?.sql).toContain('"size"');
+      expect(dataQuery?.sql).toContain('"challengeRating"');
+      expect(dataQuery?.values).toContain('Dragon');
+      expect(dataQuery?.values).toContain('Large');
+      expect(dataQuery?.values).toContain(5);
+    });
+
+    it('applies minCr/maxCr range alongside fuzzy SQL', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchMonsters({ q: 'drg', minCr: '5', maxCr: '10' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"challengeRating" >=');
+      expect(dataQuery?.sql).toContain('"challengeRating" <=');
+      expect(dataQuery?.values).toContain(5);
+      expect(dataQuery?.values).toContain(10);
+    });
+
     it('applies parseFloat on cr filter', async () => {
       prisma.monster.findMany.mockResolvedValue([]);
       prisma.monster.count.mockResolvedValue(0);
@@ -145,6 +286,64 @@ describe('SrdService', () => {
   // ── Items ───────────────────────────────────────────
 
   describe('searchItems', () => {
+    type SqlFragment = { sql: string; values: unknown[] };
+
+    function captureSql() {
+      const calls = prisma.$queryRaw.mock.calls;
+      return {
+        dataQuery: calls[0]?.[0] as SqlFragment | undefined,
+        countQuery: calls[1]?.[0] as SqlFragment | undefined,
+      };
+    }
+
+    it('uses pg_trgm similarity via $queryRaw when query is ≥2 chars', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchItems({ q: 'ptn' });
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+      const { dataQuery, countQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"items"');
+      expect(dataQuery?.sql).toContain('similarity');
+      expect(dataQuery?.values).toContain('ptn');
+      expect(dataQuery?.values).toContain('%ptn%');
+      expect(countQuery?.sql).toContain('"items"');
+    });
+
+    it('falls back to legacy findMany substring path for single-char queries', async () => {
+      prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
+
+      await service.searchItems({ q: 'a' });
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: {
+          OR: [
+            { name: { contains: 'a', mode: 'insensitive' } },
+            { description: { contains: 'a', mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('applies category/rarity/isMagic filters alongside fuzzy SQL', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchItems({ q: 'ptn', category: 'Potion', rarity: 'Rare', isMagic: 'true' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"category"');
+      expect(dataQuery?.sql).toContain('"rarity"');
+      expect(dataQuery?.sql).toContain('"isMagic"');
+      expect(dataQuery?.values).toContain('Potion');
+      expect(dataQuery?.values).toContain('Rare');
+      expect(dataQuery?.values).toContain(true);
+    });
+
     it('adds category filter when provided', async () => {
       prisma.item.findMany.mockResolvedValue([]);
       prisma.item.count.mockResolvedValue(0);
