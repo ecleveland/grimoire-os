@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from './api';
+import { disconnectSocket } from './socket';
 import { Role } from './types';
 import type { AccessTokenResponse, User } from './types';
 
@@ -160,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    disconnectSocket();
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     document.cookie = 'auth-flag=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
