@@ -15,6 +15,11 @@ vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
+const mockDisconnectSocket = vi.fn();
+vi.mock('@/lib/socket', () => ({
+  disconnectSocket: () => mockDisconnectSocket(),
+}));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function createMockJwt(payload: { sub: string; username: string; role: string }): string {
@@ -112,6 +117,7 @@ describe('AuthProvider', () => {
     vi.stubGlobal('fetch', vi.fn());
     mockPush.mockReset();
     mockApiFetch.mockReset();
+    mockDisconnectSocket.mockReset();
     document.cookie = '';
   });
 
@@ -533,6 +539,19 @@ describe('AuthProvider', () => {
 
       await waitFor(() => {
         expect(mockPush).toHaveBeenCalledWith('/login');
+      });
+    });
+
+    it('tears down the WebSocket connection', async () => {
+      mockLocalStorage.setItem('token', TEST_JWT);
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+
+      await user.click(screen.getByText('Logout'));
+
+      await waitFor(() => {
+        expect(mockDisconnectSocket).toHaveBeenCalled();
       });
     });
   });

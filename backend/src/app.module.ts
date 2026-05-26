@@ -16,6 +16,7 @@ import { AdminModule } from './admin/admin.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { AuditLogInterceptor } from './audit-log/audit-log.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { WebsocketModule } from './websocket/websocket.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     SrdModule,
     AdminModule,
     AuditLogModule,
+    WebsocketModule,
   ],
   providers: [
     {
