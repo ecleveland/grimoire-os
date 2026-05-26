@@ -4,13 +4,17 @@ import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { configureBodyParsers } from './bootstrap-config';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Nest's default body parser is disabled so configureBodyParsers can install
+  // route-scoped JSON limits (100KB on auth endpoints, 1MB everywhere else).
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   const configService = app.get(ConfigService);
 
   app.setGlobalPrefix('api');
+  configureBodyParsers(app);
 
   app.useGlobalPipes(
     new ValidationPipe({
