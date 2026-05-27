@@ -144,6 +144,45 @@ describe('WebsocketGateway', () => {
       expect(jwtService.verify).not.toHaveBeenCalled();
       expect(client.disconnect).toHaveBeenCalledWith(true);
     });
+
+    it('extracts the JWT from the access_token cookie in the handshake', async () => {
+      jwtService.verify.mockReturnValue({
+        sub: mockUser.id,
+        username: mockUser.username,
+        role: mockUser.role,
+      });
+      usersService.findOne.mockResolvedValue(mockUser);
+      const client = makeClient({
+        headers: { cookie: 'other=foo; access_token=cookie.jwt.token; bar=baz' },
+      });
+
+      await gateway.handleConnection(client as never);
+
+      expect(jwtService.verify).toHaveBeenCalledWith('cookie.jwt.token');
+      expect(client.data.user).toEqual({
+        userId: mockUser.id,
+        username: mockUser.username,
+        role: mockUser.role,
+      });
+      expect(client.disconnect).not.toHaveBeenCalled();
+    });
+
+    it('prefers handshake.auth.token over the cookie when both are present', async () => {
+      jwtService.verify.mockReturnValue({
+        sub: mockUser.id,
+        username: mockUser.username,
+        role: mockUser.role,
+      });
+      usersService.findOne.mockResolvedValue(mockUser);
+      const client = makeClient({
+        auth: { token: 'auth.jwt.token' },
+        headers: { cookie: 'access_token=cookie.jwt.token' },
+      });
+
+      await gateway.handleConnection(client as never);
+
+      expect(jwtService.verify).toHaveBeenCalledWith('auth.jwt.token');
+    });
   });
 
   describe('handleDisconnect', () => {

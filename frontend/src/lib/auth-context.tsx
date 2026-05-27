@@ -2,18 +2,18 @@
 
 import {
   createContext,
-  useContext,
-  useState,
-  useEffect,
   useCallback,
+  useContext,
+  useEffect,
   useMemo,
+  useState,
   ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from './api';
 import { disconnectSocket } from './socket';
 import { Role } from './types';
-import type { AccessTokenResponse, User } from './types';
+import type { User } from './types';
 
 interface UserInfo {
   userId: string;
@@ -36,7 +36,7 @@ interface AuthContextType {
     displayName?: string;
     email?: string;
   }) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -44,77 +44,51 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-function parseJwt(token: string): {
-  sub: string;
-  username: string;
-  role: string;
-} {
-  const base64Url = token.split('.')[1];
-  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-  const jsonPayload = decodeURIComponent(
-    atob(base64)
-      .split('')
-      .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-      .join('')
-  );
-  return JSON.parse(jsonPayload);
+function toUserInfo(profile: User & { id: string }): UserInfo {
+  return {
+    userId: profile.id,
+    username: profile.username,
+    role: profile.role,
+    displayName: profile.displayName ?? undefined,
+    email: profile.email ?? undefined,
+    avatarUrl: profile.avatarUrl ?? undefined,
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const router = useRouter();
 
-  /* eslint-disable react-hooks/set-state-in-effect -- Hydrating from localStorage on mount is intentional */
+  // Hydration: ask the backend whether the cookie still represents a valid
+  // session. Use a raw fetch (not apiFetch) so a 401 here does NOT trigger
+  // apiFetch's redirect-to-login — we want hydration on public pages to leave
+  // the user where they were.
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      setIsAuthenticated(true);
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        try {
-          setUser(JSON.parse(storedUser) as UserInfo);
-        } catch {
-          localStorage.removeItem('user');
-        }
-      }
-    }
-    setHydrated(true);
-  }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const fetchAndStoreProfile = useCallback(
-    async (tokenPayload: { sub: string; username: string; role: string }) => {
+    let cancelled = false;
+    void (async () => {
       try {
-        const profile = await apiFetch<User>('/users/me');
-        const userInfo: UserInfo = {
-          userId: tokenPayload.sub,
-          username: tokenPayload.username,
-          role: tokenPayload.role as UserInfo['role'],
-          displayName: profile.displayName,
-          email: profile.email,
-          avatarUrl: profile.avatarUrl,
-        };
-        localStorage.setItem('user', JSON.stringify(userInfo));
-        setUser(userInfo);
+        const res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+        if (!cancelled && res.ok) {
+          const profile = (await res.json()) as User & { id: string };
+          setUser(toUserInfo(profile));
+        }
       } catch {
-        const userInfo: UserInfo = {
-          userId: tokenPayload.sub,
-          username: tokenPayload.username,
-          role: tokenPayload.role as UserInfo['role'],
-        };
-        localStorage.setItem('user', JSON.stringify(userInfo));
-        setUser(userInfo);
+        // Network errors stay logged out.
+      } finally {
+        if (!cancelled) setHydrated(true);
       }
-    },
-    []
-  );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const login = useCallback(
     async (username: string, password: string) => {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       });
@@ -123,22 +97,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error('Invalid credentials');
       }
 
-      const data: AccessTokenResponse = await res.json();
-      localStorage.setItem('token', data.access_token);
-      document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
-      setIsAuthenticated(true);
-
-      const payload = parseJwt(data.access_token);
-      await fetchAndStoreProfile(payload);
+      const { user: profile } = (await res.json()) as { user: User & { id: string } };
+      setUser(toUserInfo(profile));
       router.push('/');
     },
-    [router, fetchAndStoreProfile]
+    [router]
   );
 
   const register = useCallback(
     async (data: { username: string; password: string; displayName?: string; email?: string }) => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
@@ -148,38 +118,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(body.message || 'Registration failed');
       }
 
-      const responseData: AccessTokenResponse = await res.json();
-      localStorage.setItem('token', responseData.access_token);
-      document.cookie = 'auth-flag=1; path=/; SameSite=Lax';
-      setIsAuthenticated(true);
-
-      const payload = parseJwt(responseData.access_token);
-      await fetchAndStoreProfile(payload);
+      const { user: profile } = (await res.json()) as { user: User & { id: string } };
+      setUser(toUserInfo(profile));
       router.push('/');
     },
-    [router, fetchAndStoreProfile]
+    [router]
   );
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     disconnectSocket();
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    document.cookie = 'auth-flag=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    setIsAuthenticated(false);
+    try {
+      await fetch(`${API_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch {
+      // Even if the server call fails, clear local state.
+    }
     setUser(null);
     router.push('/login');
   }, [router]);
 
   const refreshProfile = useCallback(async () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    const payload = parseJwt(token);
-    await fetchAndStoreProfile(payload);
-  }, [fetchAndStoreProfile]);
+    try {
+      const profile = await apiFetch<User & { id: string }>('/users/me');
+      setUser(toUserInfo(profile));
+    } catch {
+      // apiFetch handles 401 redirect; other errors leave state unchanged.
+    }
+  }, []);
 
   const contextValue = useMemo(
     () => ({
-      isAuthenticated,
+      isAuthenticated: user !== null,
       user,
       isAdmin: user?.role === Role.ADMIN,
       isDm: user?.role === Role.DUNGEON_MASTER || user?.role === Role.ADMIN,
@@ -188,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshProfile,
     }),
-    [isAuthenticated, user, login, register, logout, refreshProfile]
+    [user, login, register, logout, refreshProfile]
   );
 
   if (!hydrated) {

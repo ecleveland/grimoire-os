@@ -11,34 +11,11 @@ function mockResponse(status: number, body?: unknown) {
   };
 }
 
-function createMockLocalStorage() {
-  const store: Record<string, string> = {};
-  return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      store[key] = value;
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete store[key];
-    }),
-    clear: vi.fn(() => {
-      Object.keys(store).forEach(k => delete store[k]);
-    }),
-    get length() {
-      return Object.keys(store).length;
-    },
-    key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
-  };
-}
-
 describe('apiFetch', () => {
-  let mockLocalStorage: ReturnType<typeof createMockLocalStorage>;
   const originalLocation = window.location;
 
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
-    mockLocalStorage = createMockLocalStorage();
-    vi.stubGlobal('localStorage', mockLocalStorage);
     Object.defineProperty(window, 'location', {
       writable: true,
       value: { ...originalLocation, href: '' },
@@ -78,23 +55,18 @@ describe('apiFetch', () => {
       );
     });
 
-    it('attaches Authorization header when token exists in localStorage', async () => {
-      mockLocalStorage.setItem('token', 'my-jwt-token');
+    it('sends credentials so the httpOnly auth cookie rides along', async () => {
       vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
 
       await apiFetch('/test');
 
       expect(fetch).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({
-          headers: expect.objectContaining({
-            Authorization: 'Bearer my-jwt-token',
-          }),
-        })
+        expect.objectContaining({ credentials: 'include' })
       );
     });
 
-    it('omits Authorization header when no token in localStorage', async () => {
+    it('never attaches an Authorization header (cookie auth only)', async () => {
       vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
 
       await apiFetch('/test');
@@ -164,33 +136,6 @@ describe('apiFetch', () => {
       vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
-    });
-
-    it('removes token from localStorage', async () => {
-      mockLocalStorage.setItem('token', 'old-token');
-      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
-
-      await apiFetch('/test').catch(() => {});
-
-      expect(mockLocalStorage.removeItem).toHaveBeenCalledWith('token');
-    });
-
-    it('removes user from localStorage', async () => {
-      mockLocalStorage.setItem('user', '{"id":"1"}');
-      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
-
-      await apiFetch('/test').catch(() => {});
-
-      expect(mockLocalStorage.removeItem).toHaveBeenCalledWith('user');
-    });
-
-    it('clears auth-flag cookie', async () => {
-      document.cookie = 'auth-flag=1; path=/';
-      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
-
-      await apiFetch('/test').catch(() => {});
-
-      expect(document.cookie).not.toContain('auth-flag=1');
     });
 
     it('redirects to /login via window.location.href', async () => {

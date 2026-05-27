@@ -1,5 +1,7 @@
 import { ConfigService } from '@nestjs/config';
-import { JwtStrategy } from './jwt.strategy';
+import type { Request } from 'express';
+import { cookieExtractor, JwtStrategy } from './jwt.strategy';
+import { AUTH_COOKIE_NAME } from '../auth-cookie.config';
 import { Role } from '../../common/enums';
 
 describe('JwtStrategy', () => {
@@ -61,6 +63,27 @@ describe('JwtStrategy', () => {
 
       expect(result.userId).toBe('abc-def');
       expect(result).not.toHaveProperty('sub');
+    });
+  });
+
+  describe('cookieExtractor', () => {
+    it('returns the access_token cookie value when present', () => {
+      const req = { cookies: { [AUTH_COOKIE_NAME]: 'cookie.jwt.token' } } as unknown as Request;
+      expect(cookieExtractor(req)).toBe('cookie.jwt.token');
+    });
+
+    it('returns null when the cookie is missing', () => {
+      const req = { cookies: {} } as unknown as Request;
+      expect(cookieExtractor(req)).toBeNull();
+    });
+
+    it('returns null when req is undefined', () => {
+      expect(cookieExtractor(undefined)).toBeNull();
+    });
+
+    it('returns null when req has no cookies object (cookie-parser not wired)', () => {
+      const req = {} as unknown as Request;
+      expect(cookieExtractor(req)).toBeNull();
     });
   });
 });

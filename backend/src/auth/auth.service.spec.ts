@@ -3,7 +3,7 @@ import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
-import { mockUser } from '../test/fixtures';
+import { mockUser, mockUserPublic } from '../test/fixtures';
 
 jest.mock('bcryptjs', () => ({
   hash: jest.fn(),
@@ -42,7 +42,7 @@ describe('AuthService', () => {
   });
 
   describe('login', () => {
-    it('should return an access_token on valid credentials', async () => {
+    it('should return access_token and public user on valid credentials', async () => {
       usersService.findByUsername.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       jwtService.sign.mockReturnValue('signed.jwt.token');
@@ -56,7 +56,18 @@ describe('AuthService', () => {
         username: mockUser.username,
         role: mockUser.role,
       });
-      expect(result).toEqual({ access_token: 'signed.jwt.token' });
+      expect(result.access_token).toBe('signed.jwt.token');
+      expect(result.user).toEqual(mockUserPublic);
+    });
+
+    it('should not include passwordHash in returned user', async () => {
+      usersService.findByUsername.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      jwtService.sign.mockReturnValue('token');
+
+      const result = await service.login('testuser', 'password');
+
+      expect(result.user).not.toHaveProperty('passwordHash');
     });
 
     it('should throw UnauthorizedException when user is not found', async () => {
@@ -115,7 +126,7 @@ describe('AuthService', () => {
 
       const result = await service.login('testuser', 'password');
 
-      expect(result).toEqual({ access_token: 'token' });
+      expect(result.access_token).toBe('token');
       expect(usersService.resetFailedLogin).toHaveBeenCalledWith(mockUser.id);
     });
 

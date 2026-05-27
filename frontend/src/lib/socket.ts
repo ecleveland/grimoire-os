@@ -15,12 +15,7 @@ export function getSocket(): Socket | null {
   if (socket) {
     return socket;
   }
-  const token = window.localStorage.getItem('token');
-  if (!token) {
-    return null;
-  }
   socket = io(getSocketOrigin(), {
-    auth: { token },
     withCredentials: true,
     transports: ['websocket', 'polling'],
   });
