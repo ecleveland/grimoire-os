@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UsersService } from '../users/users.service';
@@ -13,6 +13,17 @@ export interface PublicUser {
   createdAt: Date;
   updatedAt: Date;
 }
+
+type UserRow = {
+  id: string;
+  username: string;
+  displayName: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 @Injectable()
 export class AuthService {
@@ -48,23 +59,50 @@ export class AuthService {
       await this.usersService.resetFailedLogin(user.id);
     }
 
-    const payload = {
+    return {
+      access_token: this.signAccessToken(user),
+      user: this.toPublicUser(user),
+    };
+  }
+
+  // Used by /auth/refresh: the refresh-token table's userId is authoritative;
+  // here we just need the user's current username + role to mint a new JWT
+  // payload. Treat a missing user as Unauthorized (account deleted mid-session).
+  async signAccessTokenForUserId(
+    userId: string
+  ): Promise<{ access_token: string; user: PublicUser }> {
+    try {
+      const user = await this.usersService.findOne(userId);
+      return {
+        access_token: this.signAccessToken(user),
+        user: this.toPublicUser(user),
+      };
+    } catch (err) {
+      if (err instanceof NotFoundException) {
+        throw new UnauthorizedException('User no longer exists');
+      }
+      throw err;
+    }
+  }
+
+  private signAccessToken(user: { id: string; username: string; role: string }): string {
+    return this.jwtService.sign({
       sub: user.id,
       username: user.username,
       role: user.role,
-    };
+    });
+  }
+
+  private toPublicUser(user: UserRow): PublicUser {
     return {
-      access_token: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        username: user.username,
-        displayName: user.displayName,
-        email: user.email,
-        avatarUrl: user.avatarUrl,
-        role: user.role,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-      },
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      role: user.role,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
     };
   }
 }

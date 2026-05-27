@@ -10,7 +10,8 @@ export default () => {
     },
     auth: {
       jwtSecret: process.env.JWT_SECRET,
-      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
+      jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',
+      refreshTokenTtlMs: 7 * 24 * 60 * 60 * 1000,
     },
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
     cors: {
