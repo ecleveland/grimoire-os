@@ -84,6 +84,13 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     if (typeof header === 'string' && header.startsWith('Bearer ')) {
       return header.slice('Bearer '.length);
     }
+    const cookieHeader = client.handshake?.headers?.cookie;
+    if (typeof cookieHeader === 'string' && cookieHeader.length > 0) {
+      const cookieToken = parseCookie(cookieHeader, 'access_token');
+      if (cookieToken) {
+        return cookieToken;
+      }
+    }
     return undefined;
   }
 
@@ -92,4 +99,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     client.emit('error', { message: reason });
     client.disconnect(true);
   }
+}
+
+function parseCookie(header: string, name: string): string | undefined {
+  for (const part of header.split(';')) {
+    const [rawKey, ...rest] = part.split('=');
+    if (rawKey?.trim() === name) {
+      return rest.join('=').trim() || undefined;
+    }
+  }
+  return undefined;
 }

@@ -4,16 +4,19 @@ import type { NextRequest } from 'next/server';
 const PUBLIC_PATHS = ['/login', '/register', '/srd'];
 
 export function middleware(request: NextRequest) {
-  const token = request.cookies.get('auth-flag');
+  // Presence-only check — the backend remains the source of truth for the
+  // actual JWT validity. The middleware just decides whether to show /login
+  // versus an authenticated route based on whether the cookie was issued.
+  const hasAuthCookie = Boolean(request.cookies.get('access_token'));
   const { pathname } = request.nextUrl;
 
   const isPublicPath = PUBLIC_PATHS.some(p => pathname.startsWith(p));
 
-  if (!token && !isPublicPath) {
+  if (!hasAuthCookie && !isPublicPath) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (token && (pathname === '/login' || pathname === '/register')) {
+  if (hasAuthCookie && (pathname === '/login' || pathname === '/register')) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 

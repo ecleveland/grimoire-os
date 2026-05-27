@@ -19,33 +19,9 @@ const makeFakeSocket = (): FakeSocket => ({
   off: vi.fn(),
 });
 
-function createMockLocalStorage() {
-  const store: Record<string, string> = {};
-  return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      store[key] = value;
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete store[key];
-    }),
-    clear: vi.fn(() => {
-      Object.keys(store).forEach(k => delete store[k]);
-    }),
-    get length() {
-      return Object.keys(store).length;
-    },
-    key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
-  };
-}
-
 describe('socket', () => {
-  let mockLocalStorage: ReturnType<typeof createMockLocalStorage>;
-
   beforeEach(async () => {
     vi.resetModules();
-    mockLocalStorage = createMockLocalStorage();
-    vi.stubGlobal('localStorage', mockLocalStorage);
     vi.mocked(ioMock).mockReset();
   });
 
@@ -56,7 +32,6 @@ describe('socket', () => {
 
   describe('getSocket', () => {
     it('creates a socket using the API origin stripped of the /api suffix', async () => {
-      mockLocalStorage.setItem('token', 'test-token');
       const fake = makeFakeSocket();
       vi.mocked(ioMock).mockReturnValue(fake as never);
 
@@ -68,20 +43,32 @@ describe('socket', () => {
       expect(url).toBe('http://localhost:3001');
     });
 
-    it('passes the JWT from localStorage in the auth handshake', async () => {
-      mockLocalStorage.setItem('token', 'my.jwt.token');
+    it('opens the connection with withCredentials so the cookie rides along', async () => {
       const fake = makeFakeSocket();
       vi.mocked(ioMock).mockReturnValue(fake as never);
 
       const { getSocket } = await import('../socket');
       getSocket();
 
-      const [, opts] = vi.mocked(ioMock).mock.calls[0] as [string, { auth: { token: string } }];
-      expect(opts.auth).toEqual({ token: 'my.jwt.token' });
+      const [, opts] = vi.mocked(ioMock).mock.calls[0] as [
+        string,
+        { withCredentials: boolean; auth?: unknown },
+      ];
+      expect(opts.withCredentials).toBe(true);
+    });
+
+    it('does NOT pass an auth handshake (cookie is the auth mechanism)', async () => {
+      const fake = makeFakeSocket();
+      vi.mocked(ioMock).mockReturnValue(fake as never);
+
+      const { getSocket } = await import('../socket');
+      getSocket();
+
+      const [, opts] = vi.mocked(ioMock).mock.calls[0] as [string, { auth?: { token?: string } }];
+      expect(opts.auth).toBeUndefined();
     });
 
     it('returns the same socket instance on subsequent calls', async () => {
-      mockLocalStorage.setItem('token', 'token-a');
       const fake = makeFakeSocket();
       vi.mocked(ioMock).mockReturnValue(fake as never);
 
@@ -93,17 +80,7 @@ describe('socket', () => {
       expect(ioMock).toHaveBeenCalledTimes(1);
     });
 
-    it('returns null when no token is in localStorage', async () => {
-      const { getSocket } = await import('../socket');
-
-      const socket = getSocket();
-
-      expect(socket).toBeNull();
-      expect(ioMock).not.toHaveBeenCalled();
-    });
-
     it('returns null in non-browser environments', async () => {
-      vi.unstubAllGlobals();
       vi.stubGlobal('window', undefined);
 
       const { getSocket } = await import('../socket');
@@ -117,7 +94,6 @@ describe('socket', () => {
 
   describe('disconnectSocket', () => {
     it('disconnects the current socket and clears the singleton', async () => {
-      mockLocalStorage.setItem('token', 'token-a');
       const fake = makeFakeSocket();
       const replacement = makeFakeSocket();
       vi.mocked(ioMock)
