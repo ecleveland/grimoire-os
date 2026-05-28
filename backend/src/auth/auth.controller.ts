@@ -25,6 +25,13 @@ import {
   clearRefreshCookieOptions,
   refreshCookieOptions,
 } from './auth-cookie.config';
+import {
+  CSRF_COOKIE_NAME,
+  clearCsrfCookieOptions,
+  csrfCookieOptions,
+  generateCsrfToken,
+} from './csrf-cookie.config';
+import { SkipCsrf } from './guards/csrf.guard';
 
 // Per-endpoint throttle defaults are tighter than the global limit because
 // login/register are abuse-prone. THROTTLE_AUTH_LIMIT lifts both for trusted
@@ -47,6 +54,7 @@ export class AuthController {
   ) {}
 
   @Post('login')
+  @SkipCsrf()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: LOGIN_LIMIT, ttl: 60000 } })
   @ApiOperation({ summary: 'Log in with username and password' })
@@ -63,10 +71,12 @@ export class AuthController {
     const { token: refresh_token } = await this.refreshTokenService.issue(user.id);
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, refresh_token, refreshCookieOptions());
+    res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
     return { user };
   }
 
   @Post('register')
+  @SkipCsrf()
   @Throttle({ default: { limit: REGISTER_LIMIT, ttl: 60000 } })
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({
@@ -88,10 +98,12 @@ export class AuthController {
     const { token: refresh_token } = await this.refreshTokenService.issue(user.id);
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, refresh_token, refreshCookieOptions());
+    res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
     return { user };
   }
 
   @Post('refresh')
+  @SkipCsrf()
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: REFRESH_LIMIT, ttl: 60000 } })
   @ApiOperation({ summary: 'Rotate refresh + access tokens' })
@@ -109,10 +121,12 @@ export class AuthController {
     const { access_token, user } = await this.authService.signAccessTokenForUserId(userId);
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, newRefresh, refreshCookieOptions());
+    res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
     return { user };
   }
 
   @Post('logout')
+  @SkipCsrf()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Revoke the refresh token and clear auth cookies' })
   @ApiResponse({ status: 204, description: 'Logged out' })
@@ -128,5 +142,6 @@ export class AuthController {
     }
     res.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
     res.clearCookie(REFRESH_COOKIE_NAME, clearRefreshCookieOptions());
+    res.clearCookie(CSRF_COOKIE_NAME, clearCsrfCookieOptions());
   }
 }
