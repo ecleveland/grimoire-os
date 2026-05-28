@@ -13,6 +13,14 @@ function mockResponse(status: number, body?: unknown) {
 
 describe('apiFetch', () => {
   const originalLocation = window.location;
+  const originalCookie = Object.getOwnPropertyDescriptor(document, 'cookie');
+
+  function setCookie(value: string) {
+    Object.defineProperty(document, 'cookie', {
+      configurable: true,
+      get: () => value,
+    });
+  }
 
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
@@ -20,6 +28,7 @@ describe('apiFetch', () => {
       writable: true,
       value: { ...originalLocation, href: '' },
     });
+    setCookie('');
   });
 
   afterEach(() => {
@@ -29,6 +38,7 @@ describe('apiFetch', () => {
       writable: true,
       value: originalLocation,
     });
+    if (originalCookie) Object.defineProperty(document, 'cookie', originalCookie);
   });
 
   describe('request construction', () => {
@@ -108,6 +118,70 @@ describe('apiFetch', () => {
           body: JSON.stringify({ key: 'value' }),
         })
       );
+    });
+  });
+
+  describe('CSRF double-submit', () => {
+    it('attaches the x-csrf-token header from the csrf_token cookie on POST', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
+      setCookie('csrf_token=secret-csrf-value');
+
+      await apiFetch('/things', { method: 'POST', body: '{}' });
+
+      const headers = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+      expect(headers['x-csrf-token']).toBe('secret-csrf-value');
+    });
+
+    it.each(['PUT', 'PATCH', 'DELETE'])('attaches the x-csrf-token header on %s', async method => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
+      setCookie('csrf_token=tok');
+
+      await apiFetch('/things/1', { method });
+
+      const headers = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+      expect(headers['x-csrf-token']).toBe('tok');
+    });
+
+    it('does not attach the header on GET', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
+      setCookie('csrf_token=tok');
+
+      await apiFetch('/things');
+
+      const headers = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+      expect(headers).not.toHaveProperty('x-csrf-token');
+    });
+
+    it('omits the header when no csrf_token cookie is present (avoids sending empty values)', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
+
+      await apiFetch('/things', { method: 'POST' });
+
+      const headers = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+      expect(headers).not.toHaveProperty('x-csrf-token');
+    });
+
+    it('parses csrf_token correctly when other cookies are present', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
+      setCookie('foo=bar; csrf_token=abc; baz=qux');
+
+      await apiFetch('/things', { method: 'POST' });
+
+      const headers = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+      expect(headers['x-csrf-token']).toBe('abc');
+    });
+
+    it('lets a caller-provided x-csrf-token header take precedence', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(200) as unknown as Response);
+      setCookie('csrf_token=from-cookie');
+
+      await apiFetch('/things', {
+        method: 'POST',
+        headers: { 'x-csrf-token': 'caller-override' },
+      });
+
+      const headers = vi.mocked(fetch).mock.calls[0][1]?.headers as Record<string, string>;
+      expect(headers['x-csrf-token']).toBe('caller-override');
     });
   });
 

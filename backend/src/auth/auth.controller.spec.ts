@@ -13,6 +13,7 @@ import {
   REFRESH_COOKIE_NAME,
   REFRESH_COOKIE_PATH,
 } from './auth-cookie.config';
+import { CSRF_COOKIE_NAME, CSRF_TOKEN_HEX_LENGTH } from './csrf-cookie.config';
 import { mockUserPublic } from '../test/fixtures';
 
 function createMockResponse(): Response {
@@ -99,6 +100,21 @@ describe('AuthController', () => {
       expect(result).not.toHaveProperty('refresh_token');
     });
 
+    it('also issues a JS-readable csrf_token cookie alongside the auth cookies', async () => {
+      authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
+      refreshTokenService.issue.mockResolvedValue({ token: 'r', id: 'r1' });
+      const res = createMockResponse();
+
+      await controller.login({ username: 'u', password: 'p' }, res);
+
+      const csrf = (res.cookie as jest.Mock).mock.calls.find(c => c[0] === CSRF_COOKIE_NAME);
+      expect(csrf).toBeDefined();
+      expect(typeof csrf[1]).toBe('string');
+      expect(csrf[1]).toHaveLength(CSRF_TOKEN_HEX_LENGTH);
+      // Must be readable by JS — that's the whole point of double-submit.
+      expect(csrf[2]).toEqual(expect.objectContaining({ httpOnly: false }));
+    });
+
     it('marks both cookies secure when NODE_ENV=production', async () => {
       process.env.NODE_ENV = 'production';
       authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
@@ -148,6 +164,7 @@ describe('AuthController', () => {
       const calls = (res.cookie as jest.Mock).mock.calls;
       expect(calls.some(c => c[0] === AUTH_COOKIE_NAME && c[1] === 'new-jwt')).toBe(true);
       expect(calls.some(c => c[0] === REFRESH_COOKIE_NAME && c[1] === 'refresh-xyz')).toBe(true);
+      expect(calls.some(c => c[0] === CSRF_COOKIE_NAME)).toBe(true);
       expect(result).toEqual({ user: mockUserPublic });
     });
 
@@ -187,6 +204,9 @@ describe('AuthController', () => {
       expect(calls.some(c => c[0] === REFRESH_COOKIE_NAME && c[1] === 'rotated-refresh')).toBe(
         true
       );
+      // CSRF token is rotated on refresh so a leaked token can't be replayed
+      // after the access token has been rotated.
+      expect(calls.some(c => c[0] === CSRF_COOKIE_NAME)).toBe(true);
       expect(result).toEqual({ user: mockUserPublic });
     });
 
@@ -220,6 +240,7 @@ describe('AuthController', () => {
       const calls = (res.clearCookie as jest.Mock).mock.calls;
       expect(calls.some(c => c[0] === AUTH_COOKIE_NAME)).toBe(true);
       expect(calls.some(c => c[0] === REFRESH_COOKIE_NAME)).toBe(true);
+      expect(calls.some(c => c[0] === CSRF_COOKIE_NAME)).toBe(true);
     });
 
     it('revokes the refresh token then clears both cookies when refresh cookie present', async () => {
