@@ -7,6 +7,7 @@ type MockModel = {
   create: jest.Mock;
   createMany: jest.Mock;
   update: jest.Mock;
+  updateMany: jest.Mock;
   delete: jest.Mock;
   deleteMany: jest.Mock;
   upsert: jest.Mock;
@@ -21,6 +22,7 @@ function mockModel(): MockModel {
     create: jest.fn(),
     createMany: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     delete: jest.fn(),
     deleteMany: jest.fn(),
     upsert: jest.fn(),
@@ -61,7 +63,8 @@ export type MockPrismaService = {
     | 'npcLootTemplate'
     | 'npcAlignmentPrior'
     | 'npcCustomPersonality'
-    | 'trinket']: MockModel;
+    | 'trinket'
+    | 'refreshToken']: MockModel;
 } & {
   $transaction: jest.Mock;
   $queryRaw: jest.Mock;
@@ -101,6 +104,7 @@ export function createMockPrismaService(): MockPrismaService {
     npcAlignmentPrior: mockModel(),
     npcCustomPersonality: mockModel(),
     trinket: mockModel(),
+    refreshToken: mockModel(),
     $queryRaw: jest.fn(),
   } as unknown as MockPrismaService;
   mock.$transaction = jest.fn(

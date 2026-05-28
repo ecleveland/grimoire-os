@@ -4,7 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Prisma } from '@prisma/client';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { AuthModule } from './auth.module';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
@@ -13,13 +13,17 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { mockUser, USER_ID } from '../test/fixtures';
-import { AUTH_COOKIE_NAME } from './auth-cookie.config';
+import { AUTH_COOKIE_NAME, REFRESH_COOKIE_NAME } from './auth-cookie.config';
 
 function createMockResponse(): Response {
   return {
     cookie: jest.fn().mockReturnThis(),
     clearCookie: jest.fn().mockReturnThis(),
   } as unknown as Response;
+}
+
+function reqWithCookies(cookies: Record<string, string>): Request {
+  return { cookies } as unknown as Request;
 }
 
 jest.mock('bcryptjs', () => ({
@@ -48,7 +52,11 @@ describe('Auth Integration', () => {
           isGlobal: true,
           load: [
             () => ({
-              auth: { jwtSecret: TEST_SECRET, jwtExpiresIn: '1h' },
+              auth: {
+                jwtSecret: TEST_SECRET,
+                jwtExpiresIn: '1h',
+                refreshTokenTtlMs: 7 * 24 * 60 * 60 * 1000,
+              },
             }),
           ],
         }),
@@ -73,13 +81,14 @@ describe('Auth Integration', () => {
   });
 
   describe('register → login flow', () => {
-    it('should register a user, set the auth cookie, and return the public user', async () => {
+    it('should register a user, set access + refresh cookies, and return the public user', async () => {
       const createdUser = {
         ...mockUser,
         passwordHash: 'hashed-password',
       };
       prisma.user.create.mockResolvedValue(createdUser);
       prisma.user.findFirst.mockResolvedValue(createdUser);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'r-1' });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       const res = createMockResponse();
 
@@ -109,15 +118,20 @@ describe('Auth Integration', () => {
         }),
       });
 
-      // The cookie value must be a JWT the server can verify.
+      // Both cookies must be set; the access cookie value must be a JWT the
+      // server can verify and the refresh token must have been persisted.
       const cookieCalls = (res.cookie as jest.Mock).mock.calls;
-      expect(cookieCalls).toHaveLength(1);
-      const [name, token] = cookieCalls[0];
-      expect(name).toBe(AUTH_COOKIE_NAME);
-      expect(jwtService.verify(token)).toMatchObject({
+      const access = cookieCalls.find(c => c[0] === AUTH_COOKIE_NAME);
+      const refresh = cookieCalls.find(c => c[0] === REFRESH_COOKIE_NAME);
+      expect(access).toBeDefined();
+      expect(refresh).toBeDefined();
+      expect(jwtService.verify(access[1])).toMatchObject({
         sub: USER_ID,
         username: 'testuser',
         role: 'player',
+      });
+      expect(prisma.refreshToken.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ userId: USER_ID }),
       });
     });
 
@@ -140,6 +154,7 @@ describe('Auth Integration', () => {
       const createdUser = { ...mockUser, passwordHash: 'hashed-password' };
       prisma.user.create.mockResolvedValue(createdUser);
       prisma.user.findFirst.mockResolvedValue(createdUser);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'r-1' });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       const regRes = createMockResponse();
       const loginRes = createMockResponse();
@@ -147,18 +162,23 @@ describe('Auth Integration', () => {
       await controller.register({ username: 'testuser', password: 'SecurePass1!23' }, regRes);
       await controller.login({ username: 'testuser', password: 'SecurePass1!23' }, loginRes);
 
-      const regToken = (regRes.cookie as jest.Mock).mock.calls[0][1];
-      const loginToken = (loginRes.cookie as jest.Mock).mock.calls[0][1];
-      const registerDecoded = jwtService.verify(regToken);
-      const loginDecoded = jwtService.verify(loginToken);
+      const regAccess = (regRes.cookie as jest.Mock).mock.calls.find(
+        c => c[0] === AUTH_COOKIE_NAME
+      )[1];
+      const loginAccess = (loginRes.cookie as jest.Mock).mock.calls.find(
+        c => c[0] === AUTH_COOKIE_NAME
+      )[1];
+      const registerDecoded = jwtService.verify(regAccess);
+      const loginDecoded = jwtService.verify(loginAccess);
       expect(registerDecoded.sub).toBe(loginDecoded.sub);
       expect(registerDecoded.username).toBe(loginDecoded.username);
     });
   });
 
   describe('login', () => {
-    it('should set a valid JWT cookie and return the public user', async () => {
+    it('should set access + refresh cookies and return the public user', async () => {
       prisma.user.findFirst.mockResolvedValue(mockUser);
+      prisma.refreshToken.create.mockResolvedValue({ id: 'r-1' });
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       const res = createMockResponse();
 
@@ -169,10 +189,11 @@ describe('Auth Integration', () => {
 
       expect(result).not.toHaveProperty('access_token');
       expect(result.user.id).toBe(USER_ID);
-      expect(res.cookie).toHaveBeenCalledTimes(1);
-      const [name, token] = (res.cookie as jest.Mock).mock.calls[0];
-      expect(name).toBe(AUTH_COOKIE_NAME);
-      expect(typeof token).toBe('string');
+      expect(res.cookie).toHaveBeenCalledTimes(2);
+      const calls = (res.cookie as jest.Mock).mock.calls;
+      const names = calls.map(c => c[0]);
+      expect(names).toContain(AUTH_COOKIE_NAME);
+      expect(names).toContain(REFRESH_COOKIE_NAME);
     });
 
     it('should throw UnauthorizedException for unknown user', async () => {
@@ -198,10 +219,114 @@ describe('Auth Integration', () => {
   });
 
   describe('logout', () => {
-    it('clears the auth cookie', () => {
+    it('clears both auth cookies', async () => {
       const res = createMockResponse();
-      controller.logout(res);
-      expect(res.clearCookie).toHaveBeenCalledWith(AUTH_COOKIE_NAME, expect.any(Object));
+      await controller.logout(reqWithCookies({}), res);
+      const cleared = (res.clearCookie as jest.Mock).mock.calls.map(c => c[0]);
+      expect(cleared).toContain(AUTH_COOKIE_NAME);
+      expect(cleared).toContain(REFRESH_COOKIE_NAME);
+    });
+
+    it('revokes the refresh row when a refresh cookie is present', async () => {
+      prisma.refreshToken.create.mockResolvedValue({ id: 'r-1' });
+      prisma.user.findFirst.mockResolvedValue(mockUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      // First login to capture an issued refresh token from the cookie.
+      const loginRes = createMockResponse();
+      await controller.login({ username: 'testuser', password: 'pw' }, loginRes);
+      const refreshCookie = (loginRes.cookie as jest.Mock).mock.calls.find(
+        c => c[0] === REFRESH_COOKIE_NAME
+      )[1] as string;
+
+      // Now logout with that refresh cookie present.
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'r-1',
+        userId: USER_ID,
+        tokenHash: 'irrelevant',
+        expiresAt: new Date(Date.now() + 60_000),
+        revokedAt: null,
+        replacedById: null,
+      });
+      prisma.refreshToken.update.mockResolvedValue({});
+      const logoutRes = createMockResponse();
+      await controller.logout(reqWithCookies({ [REFRESH_COOKIE_NAME]: refreshCookie }), logoutRes);
+
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 'r-1' },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+  });
+
+  describe('refresh', () => {
+    it('rotates the refresh row, mints a new JWT, sets both cookies', async () => {
+      const presentedRefresh = 'presented-refresh-cookie-value';
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'r-old',
+        userId: USER_ID,
+        tokenHash: 'whatever',
+        expiresAt: new Date(Date.now() + 60_000),
+        revokedAt: null,
+        replacedById: null,
+      });
+      prisma.refreshToken.create.mockResolvedValue({ id: 'r-new' });
+      prisma.refreshToken.update.mockResolvedValue({});
+      prisma.user.findUnique.mockResolvedValue(mockUser);
+
+      const res = createMockResponse();
+      const result = await controller.refresh(
+        reqWithCookies({ [REFRESH_COOKIE_NAME]: presentedRefresh }),
+        res
+      );
+
+      expect(result.user.id).toBe(USER_ID);
+      // Old token marked revoked + chained to new token id.
+      expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 'r-old' },
+        data: expect.objectContaining({
+          revokedAt: expect.any(Date),
+          replacedById: 'r-new',
+        }),
+      });
+      const calls = (res.cookie as jest.Mock).mock.calls;
+      const access = calls.find(c => c[0] === AUTH_COOKIE_NAME);
+      const refresh = calls.find(c => c[0] === REFRESH_COOKIE_NAME);
+      expect(access).toBeDefined();
+      expect(refresh).toBeDefined();
+      // New access cookie must verify with the configured secret.
+      expect(jwtService.verify(access[1])).toMatchObject({ sub: USER_ID });
+      // New refresh cookie value is different from what was presented.
+      expect(refresh[1]).not.toBe(presentedRefresh);
+    });
+
+    it('throws Unauthorized + revokes the whole chain when a revoked token is presented (reuse)', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue({
+        id: 'r-old',
+        userId: USER_ID,
+        tokenHash: 'whatever',
+        expiresAt: new Date(Date.now() + 60_000),
+        revokedAt: new Date(Date.now() - 1000),
+        replacedById: 'r-newer',
+      });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 3 });
+
+      const res = createMockResponse();
+      await expect(
+        controller.refresh(reqWithCookies({ [REFRESH_COOKIE_NAME]: 'stolen' }), res)
+      ).rejects.toThrow(UnauthorizedException);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(res.cookie).not.toHaveBeenCalled();
+    });
+
+    it('throws Unauthorized when no refresh cookie is present', async () => {
+      const res = createMockResponse();
+      await expect(controller.refresh(reqWithCookies({}), res)).rejects.toThrow(
+        UnauthorizedException
+      );
     });
   });
 

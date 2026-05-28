@@ -58,8 +58,29 @@ model User {
   encounters                Encounter[]
   npcs                      Npc[]
   addedNpcCustomPersonality NpcCustomPersonality[]
+  refreshTokens             RefreshToken[]
 
   @@map("users")
+}
+
+// ── Refresh Tokens ─────────────────────────────────────
+
+model RefreshToken {
+  id           String    @id @default(uuid())
+  userId       String
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?   @unique
+  createdAt    DateTime  @default(now())
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("RefreshTokenRotation", fields: [replacedById], references: [id])
+  replaces   RefreshToken? @relation("RefreshTokenRotation")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }
 
 // ── Campaigns ──────────────────────────────────────────

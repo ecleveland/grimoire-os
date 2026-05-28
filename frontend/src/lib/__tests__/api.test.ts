@@ -131,18 +131,62 @@ describe('apiFetch', () => {
     });
   });
 
-  describe('401 handling', () => {
-    it('throws Error with message "Unauthorized"', async () => {
-      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
+  describe('401 handling with refresh', () => {
+    it('attempts /auth/refresh on 401 and retries the original request on success', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
+        .mockResolvedValueOnce(mockResponse(200) as unknown as Response) // /auth/refresh
+        .mockResolvedValueOnce(mockResponse(200, { ok: true }) as unknown as Response); // retry
 
-      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+      const result = await apiFetch('/test');
+
+      expect(result).toEqual({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      const refreshCall = fetchMock.mock.calls[1];
+      expect(refreshCall[0]).toBe(`${API_URL}/auth/refresh`);
+      expect(refreshCall[1]).toEqual(
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
     });
 
-    it('redirects to /login via window.location.href', async () => {
-      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
+    it('redirects to /login when /auth/refresh also returns 401', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response); // refresh fails
 
-      await apiFetch('/test').catch(() => {});
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+      expect(window.location.href).toBe('/login');
+    });
 
+    it('redirects to /login when /auth/refresh request itself throws', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockRejectedValueOnce(new Error('network down'));
+
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+      expect(window.location.href).toBe('/login');
+    });
+
+    it('does not refresh on 401 from the refresh endpoint itself (no recursion)', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(mockResponse(401) as unknown as Response);
+
+      await expect(apiFetch('/auth/refresh', { method: 'POST' })).rejects.toThrow('Unauthorized');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(window.location.href).toBe('/login');
+    });
+
+    it('throws when retry after refresh still returns 401 and redirects', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockResolvedValueOnce(mockResponse(200) as unknown as Response)
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response);
+
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
       expect(window.location.href).toBe('/login');
     });
   });

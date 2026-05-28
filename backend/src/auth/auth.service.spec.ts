@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
@@ -16,6 +16,7 @@ describe('AuthService', () => {
   let service: AuthService;
   let usersService: {
     findByUsername: jest.Mock;
+    findOne: jest.Mock;
     recordFailedLogin: jest.Mock;
     resetFailedLogin: jest.Mock;
   };
@@ -24,6 +25,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     usersService = {
       findByUsername: jest.fn(),
+      findOne: jest.fn(),
       recordFailedLogin: jest.fn(),
       resetFailedLogin: jest.fn(),
     };
@@ -159,6 +161,31 @@ describe('AuthService', () => {
       await service.login('testuser', 'password');
 
       expect(usersService.resetFailedLogin).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('signAccessTokenForUserId', () => {
+    it('signs a token and returns the public user for the given id', async () => {
+      usersService.findOne.mockResolvedValue(mockUser);
+      jwtService.sign.mockReturnValue('rotated.jwt');
+
+      const result = await service.signAccessTokenForUserId(mockUser.id);
+
+      expect(usersService.findOne).toHaveBeenCalledWith(mockUser.id);
+      expect(jwtService.sign).toHaveBeenCalledWith({
+        sub: mockUser.id,
+        username: mockUser.username,
+        role: mockUser.role,
+      });
+      expect(result).toEqual({ access_token: 'rotated.jwt', user: mockUserPublic });
+    });
+
+    it('throws Unauthorized when the user no longer exists', async () => {
+      usersService.findOne.mockRejectedValue(new NotFoundException('gone'));
+
+      await expect(service.signAccessTokenForUserId('missing')).rejects.toThrow(
+        UnauthorizedException
+      );
     });
   });
 });

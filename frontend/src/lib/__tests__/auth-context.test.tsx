@@ -141,12 +141,43 @@ describe('AuthProvider', () => {
         expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
       });
     });
+
+    it('hydrates via /auth/refresh when /users/me 401s but refresh succeeds', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access cookie expired
+        .mockResolvedValueOnce(mockFetchResponse(200)) // /auth/refresh — refresh cookie still valid
+        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)); // /users/me retry
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+        expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+      });
+      const calls = vi.mocked(fetch).mock.calls;
+      expect(calls[1][0]).toMatch(/\/auth\/refresh$/);
+      expect(calls[1][1]).toEqual(expect.objectContaining({ method: 'POST' }));
+    });
+
+    it('stays unauthenticated when /auth/refresh also 401s', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+      expect(mockPush).not.toHaveBeenCalledWith('/login');
+    });
   });
 
   describe('login', () => {
     beforeEach(() => {
       vi.mocked(fetch)
-        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration call
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
         .mockResolvedValueOnce(mockFetchResponse(200, { user: TEST_PROFILE })); // login call
     });
 
@@ -198,7 +229,8 @@ describe('AuthProvider', () => {
     it('throws "Invalid credentials" on non-ok response', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)
-        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
         .mockResolvedValueOnce(mockFetchResponse(401)); // login
       const user = userEvent.setup();
 
@@ -238,7 +270,8 @@ describe('AuthProvider', () => {
   describe('register', () => {
     beforeEach(() => {
       vi.mocked(fetch)
-        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
         .mockResolvedValueOnce(mockFetchResponse(200, { user: TEST_PROFILE })); // register
     });
 
@@ -278,7 +311,8 @@ describe('AuthProvider', () => {
     it('throws error message from response body when registration fails', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)
-        .mockResolvedValueOnce(mockFetchResponse(401))
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
         .mockResolvedValueOnce(mockFetchResponse(400, { message: 'Username taken' }));
       const user = userEvent.setup();
 
@@ -317,7 +351,8 @@ describe('AuthProvider', () => {
     it('falls back to "Registration failed" when error body has no message', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)
-        .mockResolvedValueOnce(mockFetchResponse(401))
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
         .mockResolvedValueOnce({
           ok: false,
           status: 500,

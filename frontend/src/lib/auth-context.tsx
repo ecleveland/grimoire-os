@@ -60,15 +60,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const router = useRouter();
 
-  // Hydration: ask the backend whether the cookie still represents a valid
-  // session. Use a raw fetch (not apiFetch) so a 401 here does NOT trigger
-  // apiFetch's redirect-to-login — we want hydration on public pages to leave
-  // the user where they were.
+  // Hydration: ask the backend whether the access cookie still represents a
+  // valid session. Use raw fetch (not apiFetch) so a 401 here does NOT trigger
+  // apiFetch's redirect-to-login — public pages should remain reachable. If
+  // /users/me 401s, try /auth/refresh once: the user may still have a valid
+  // refresh cookie even though the 15-minute access token has expired.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+        let res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+        if (res.status === 401) {
+          const refreshed = await fetch(`${API_URL}/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (refreshed.ok) {
+            res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+          }
+        }
         if (!cancelled && res.ok) {
           const profile = (await res.json()) as User & { id: string };
           setUser(toUserInfo(profile));
