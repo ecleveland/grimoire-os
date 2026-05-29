@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import type { Npc, NpcRelation, PaginatedResponse } from '@/lib/types';
 
 const RELATION_TYPES = [
@@ -30,15 +31,9 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'view' | 'add' | 'generate'>('view');
+  const [pendingRemoval, setPendingRemoval] = useState<NpcRelation | null>(null);
 
-  const handleRemove = async (rel: NpcRelation) => {
-    const target = rel.toNpc?.name ?? rel.toNpcId;
-    if (
-      !window.confirm(
-        `Remove the "${rel.relation}" relation to ${target}? Both directions will be deleted.`
-      )
-    )
-      return;
+  const performRemove = async (rel: NpcRelation) => {
     setBusy(true);
     try {
       await apiFetch<void>(`/npcs/${npc.id}/relations/${rel.id}`, { method: 'DELETE' });
@@ -131,7 +126,7 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
               <button
                 type="button"
                 aria-label={`Remove relation ${rel.relation} to ${rel.toNpc?.name ?? rel.toNpcId}`}
-                onClick={() => handleRemove(rel)}
+                onClick={() => setPendingRemoval(rel)}
                 disabled={busy}
                 className="px-2 py-1 text-xs border border-red-300 dark:border-red-700 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
               >
@@ -141,6 +136,23 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
           ))}
         </ul>
       )}
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        onOpenChange={open => {
+          if (!open) setPendingRemoval(null);
+        }}
+        title="Remove relation?"
+        description={
+          pendingRemoval
+            ? `Remove the "${pendingRemoval.relation}" relation to ${pendingRemoval.toNpc?.name ?? pendingRemoval.toNpcId}? Both directions will be deleted.`
+            : ''
+        }
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingRemoval) performRemove(pendingRemoval);
+        }}
+      />
     </div>
   );
 }

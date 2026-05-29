@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import NpcDetailPage from '../page';
 import type { Npc } from '@/lib/types';
@@ -7,7 +7,6 @@ import type { Npc } from '@/lib/types';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 const mockApiFetch = vi.fn();
 const mockPush = vi.fn();
-const mockConfirm = vi.fn();
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
@@ -57,8 +56,6 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
-  mockConfirm.mockReset();
-  vi.spyOn(window, 'confirm').mockImplementation(mockConfirm);
 });
 
 describe('NpcDetailPage', () => {
@@ -109,18 +106,38 @@ describe('NpcDetailPage', () => {
     );
   });
 
-  it('reroll-all confirms when fields are locked', async () => {
+  it('reroll-all opens a confirm dialog when fields are locked and cancels safely', async () => {
     const user = userEvent.setup();
-    mockConfirm.mockReturnValue(false);
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: ['name'] }));
     render(<NpcDetailPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
     await user.click(screen.getByRole('button', { name: /reroll all/i }));
-    expect(mockConfirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/1 field\(s\) are locked/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     // Should not have made the reroll call since user cancelled
     expect(mockApiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('reroll-all proceeds with reroll when the locked-fields confirm is accepted', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: ['name'] }));
+    mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'Old Maelin', lockedFields: ['name'] }));
+    render(<NpcDetailPage />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /reroll all/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /continue/i }));
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+    expect(mockApiFetch).toHaveBeenLastCalledWith(
+      '/npcs/npc-1/reroll',
+      expect.objectContaining({ body: JSON.stringify({ field: 'all' }) })
+    );
   });
 
   it('reroll-all skips confirmation when no fields are locked', async () => {
@@ -133,29 +150,46 @@ describe('NpcDetailPage', () => {
     );
     await user.click(screen.getByRole('button', { name: /reroll all/i }));
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
-    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(mockApiFetch).toHaveBeenLastCalledWith(
       '/npcs/npc-1/reroll',
       expect.objectContaining({ body: JSON.stringify({ field: 'all' }) })
     );
   });
 
-  it('deletes the NPC and redirects to list', async () => {
+  it('deletes the NPC after confirming and redirects to list', async () => {
     const user = userEvent.setup();
-    mockConfirm.mockReturnValue(true);
     mockApiFetch.mockResolvedValueOnce(makeNpc());
     mockApiFetch.mockResolvedValueOnce(undefined);
     render(<NpcDetailPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
-    await user.click(screen.getByRole('button', { name: /delete/i }));
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/delete "old maelin"/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
     expect(mockApiFetch).toHaveBeenLastCalledWith(
       '/npcs/npc-1',
       expect.objectContaining({ method: 'DELETE' })
     );
     expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs');
+  });
+
+  it('cancelling the delete confirm leaves the NPC alone', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(makeNpc());
+    render(<NpcDetailPage />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it('shows edit link', async () => {
@@ -226,14 +260,15 @@ describe('NpcDetailPage', () => {
       ).not.toBeInTheDocument();
     });
 
-    it('Remove Stat Block PATCHes statBlock: null after confirmation', async () => {
+    it('Remove Stat Block PATCHes statBlock: null after confirming the dialog', async () => {
       const user = userEvent.setup();
-      mockConfirm.mockReturnValue(true);
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: SAMPLE_STAT_BLOCK }));
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: null }));
       render(<NpcDetailPage />);
       await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /remove stat block/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /^remove$/i }));
       await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
       expect(mockApiFetch).toHaveBeenLastCalledWith(
         '/npcs/npc-1',
@@ -244,14 +279,15 @@ describe('NpcDetailPage', () => {
       );
     });
 
-    it('Remove Stat Block skips API call when the user cancels confirmation', async () => {
+    it('Remove Stat Block skips API call when the user cancels the confirm dialog', async () => {
       const user = userEvent.setup();
-      mockConfirm.mockReturnValue(false);
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: SAMPLE_STAT_BLOCK }));
       render(<NpcDetailPage />);
       await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /remove stat block/i }));
-      expect(mockConfirm).toHaveBeenCalled();
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
       expect(mockApiFetch).toHaveBeenCalledTimes(1);
     });
   });

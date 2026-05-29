@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import NpcFieldRow from '@/components/NpcFieldRow';
 import NpcRelationsPanel from '@/components/NpcRelationsPanel';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
@@ -49,6 +50,9 @@ export default function NpcDetailPage() {
   const [npc, setNpc] = useState<Npc | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [confirmRerollAllOpen, setConfirmRerollAllOpen] = useState(false);
+  const [confirmRemoveStatBlockOpen, setConfirmRemoveStatBlockOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   const fetchNpc = useCallback(() => {
     apiFetch<Npc>(`/npcs/${npcId}`)
@@ -97,20 +101,17 @@ export default function NpcDetailPage() {
     }
   };
 
-  const handleRerollAll = async () => {
+  const handleRerollAll = () => {
     if (!npc) return;
     if (npc.lockedFields.length > 0) {
-      const proceed = window.confirm(
-        `${npc.lockedFields.length} field(s) are locked and will be preserved. Continue?`
-      );
-      if (!proceed) return;
+      setConfirmRerollAllOpen(true);
+      return;
     }
-    await reroll('all');
+    reroll('all');
   };
 
-  const handleRemoveStatBlock = async () => {
+  const performRemoveStatBlock = async () => {
     if (!npc) return;
-    if (!window.confirm('Remove the stat block from this NPC?')) return;
     setBusy(true);
     try {
       const updated = await apiFetch<Npc>(`/npcs/${npcId}`, {
@@ -128,9 +129,8 @@ export default function NpcDetailPage() {
 
   const handleGenerateStatBlock = () => reroll('statBlock');
 
-  const handleDelete = async () => {
+  const performDelete = async () => {
     if (!npc) return;
-    if (!window.confirm(`Delete "${npc.name}"? This cannot be undone.`)) return;
     setBusy(true);
     try {
       await apiFetch<void>(`/npcs/${npcId}`, { method: 'DELETE' });
@@ -189,7 +189,7 @@ export default function NpcDetailPage() {
           </Link>
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => setConfirmDeleteOpen(true)}
             disabled={busy}
             className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
           >
@@ -289,7 +289,7 @@ export default function NpcDetailPage() {
           {statBlockShape(npc.statBlock) ? (
             <button
               type="button"
-              onClick={handleRemoveStatBlock}
+              onClick={() => setConfirmRemoveStatBlockOpen(true)}
               disabled={busy}
               className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
             >
@@ -316,6 +316,34 @@ export default function NpcDetailPage() {
       </div>
 
       <NpcRelationsPanel npc={npc} onRefetch={fetchNpc} />
+
+      <ConfirmDialog
+        open={confirmRerollAllOpen}
+        onOpenChange={setConfirmRerollAllOpen}
+        title="Reroll all fields?"
+        description={`${npc.lockedFields.length} field(s) are locked and will be preserved. Continue?`}
+        confirmLabel="Continue"
+        variant="default"
+        onConfirm={() => reroll('all')}
+      />
+      <ConfirmDialog
+        open={confirmRemoveStatBlockOpen}
+        onOpenChange={setConfirmRemoveStatBlockOpen}
+        title="Remove stat block?"
+        description="Remove the stat block from this NPC?"
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={performRemoveStatBlock}
+      />
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete NPC?"
+        description={`Delete "${npc.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={performDelete}
+      />
     </div>
   );
 }
