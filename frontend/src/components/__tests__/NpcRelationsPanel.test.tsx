@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import NpcRelationsPanel from '../NpcRelationsPanel';
 import type { Npc, NpcRelation, PaginatedResponse } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockPush = vi.fn();
-const mockConfirm = vi.fn();
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
@@ -68,8 +67,6 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
-  mockConfirm.mockReset();
-  vi.spyOn(window, 'confirm').mockImplementation(mockConfirm);
 });
 
 describe('NpcRelationsPanel', () => {
@@ -94,14 +91,15 @@ describe('NpcRelationsPanel', () => {
   it('removes a relation when delete is confirmed (DELETE + onRefetch)', async () => {
     const user = userEvent.setup();
     const onRefetch = vi.fn();
-    mockConfirm.mockReturnValue(true);
     mockApiFetch.mockResolvedValueOnce(undefined);
 
     const rel = makeRelation({ id: 'rel-99' });
     render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={onRefetch} />);
 
     await user.click(screen.getByRole('button', { name: /remove relation/i }));
-    expect(mockConfirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/"parent" relation to aria stormwind/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /^remove$/i }));
     await waitFor(() => expect(onRefetch).toHaveBeenCalled());
     expect(mockApiFetch).toHaveBeenCalledWith(
       '/npcs/npc-1/relations/rel-99',
@@ -109,13 +107,14 @@ describe('NpcRelationsPanel', () => {
     );
   });
 
-  it('skips delete when the confirmation is cancelled', async () => {
+  it('skips delete when the confirmation dialog is cancelled', async () => {
     const user = userEvent.setup();
-    mockConfirm.mockReturnValue(false);
     const rel = makeRelation();
     render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /remove relation/i }));
-    expect(mockConfirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(mockApiFetch).not.toHaveBeenCalled();
   });
 
