@@ -48,10 +48,12 @@ export DATABASE_URL="postgresql://grimoire:grimoire@localhost:5432/${E2E_DB_NAME
 export FRONTEND_URL="http://localhost:${E2E_FRONTEND_PORT}"
 export NEXT_PUBLIC_API_URL="http://localhost:${E2E_BACKEND_PORT}/api"
 
-# Lift the API throttle for E2E. The prod global default (60 req/min) and the
-# tighter auth-endpoint defaults (3 register / 5 login per minute) both trip
-# when multiple Playwright workers register users / log in in parallel.
-export THROTTLE_LIMIT="${THROTTLE_LIMIT:-10000}"
+# Lift the API throttle for E2E. The prod anon (30/min) and authed (120/min)
+# global defaults and the tighter auth-endpoint defaults (3 register / 5 login
+# per minute) all trip when multiple Playwright workers register users / log
+# in in parallel.
+export THROTTLE_ANON_LIMIT="${THROTTLE_ANON_LIMIT:-10000}"
+export THROTTLE_AUTHED_LIMIT="${THROTTLE_AUTHED_LIMIT:-10000}"
 export THROTTLE_AUTH_LIMIT="${THROTTLE_AUTH_LIMIT:-10000}"
 
 echo "Starting PostgreSQL..."

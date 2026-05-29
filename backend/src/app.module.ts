@@ -18,6 +18,12 @@ import { AuditLogInterceptor } from './audit-log/audit-log.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { WebsocketModule } from './websocket/websocket.module';
 import { CsrfGuard } from './auth/guards/csrf.guard';
+import { RateLimitGuard } from './common/guards/rate-limit.guard';
+
+// The module-level limit only matters when RateLimitGuard isn't applied (e.g.
+// in tests that import ThrottlerModule directly). At runtime, RateLimitGuard
+// swaps in per-request anon/authed limits, so this default is a safe ceiling.
+const RUNTIME_DEFAULT_LIMIT = parseInt(process.env.THROTTLE_AUTHED_LIMIT ?? '120', 10);
 
 @Module({
   imports: [
@@ -25,12 +31,15 @@ import { CsrfGuard } from './auth/guards/csrf.guard';
       isGlobal: true,
       load: [configuration],
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
-        limit: parseInt(process.env.THROTTLE_LIMIT ?? '60', 10),
-      },
-    ]),
+    ThrottlerModule.forRoot({
+      throttlers: [
+        {
+          name: 'default',
+          ttl: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+          limit: RUNTIME_DEFAULT_LIMIT,
+        },
+      ],
+    }),
     PrismaModule,
     AuthModule,
     UsersModule,
@@ -48,6 +57,12 @@ import { CsrfGuard } from './auth/guards/csrf.guard';
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
+    },
+    // RateLimitGuard runs before CsrfGuard so abusive clients trip a cheap 429
+    // before we spend cycles validating CSRF tokens.
+    {
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
     },
     {
       provide: APP_GUARD,
