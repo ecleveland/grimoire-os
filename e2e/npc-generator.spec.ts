@@ -4,8 +4,9 @@ const BACKEND = process.env.E2E_API_URL ?? 'http://localhost:3001';
 
 // Registering via page.request stores the Set-Cookie from /auth/register in the
 // page's browser context, so subsequent page navigations and page.request calls
-// are automatically authenticated.
-async function setupDmWithCampaign(page: Page): Promise<{ campaignId: string }> {
+// are automatically authenticated. The csrf_token cookie is non-httpOnly so we
+// can read it here and forward it as x-csrf-token on every mutating request.
+async function setupDmWithCampaign(page: Page): Promise<{ campaignId: string; csrf: string }> {
   const username = `dm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const password = 'TestPass1!';
 
@@ -14,13 +15,17 @@ async function setupDmWithCampaign(page: Page): Promise<{ campaignId: string }> 
   });
   expect(reg.ok(), `register failed: ${reg.status()}`).toBeTruthy();
 
+  const csrf = (await page.context().cookies()).find(c => c.name === 'csrf_token')?.value;
+  expect(csrf, 'csrf_token cookie missing after register').toBeTruthy();
+
   const camp = await page.request.post(`${BACKEND}/api/campaigns`, {
     data: { name: `E2E Campaign ${Date.now()}`, status: 'active' },
+    headers: { 'x-csrf-token': csrf! },
   });
   expect(camp.ok(), `campaign create failed: ${camp.status()}`).toBeTruthy();
   const { id: campaignId } = await camp.json();
 
-  return { campaignId };
+  return { campaignId, csrf: csrf! };
 }
 
 test.describe('NPC Generator', () => {
@@ -54,15 +59,17 @@ test.describe('NPC Generator', () => {
   });
 
   test('Generate Stat Block button promotes a Lite NPC to Full', async ({ page }) => {
-    const { campaignId } = await setupDmWithCampaign(page);
+    const { campaignId, csrf } = await setupDmWithCampaign(page);
 
     const npcRes = await page.request.post(`${BACKEND}/api/npcs/generate`, {
       data: { campaignId, profession: 'guard' },
+      headers: { 'x-csrf-token': csrf },
     });
     expect(npcRes.ok(), `generate failed: ${npcRes.status()}`).toBeTruthy();
     const preview = await npcRes.json();
     const saveRes = await page.request.post(`${BACKEND}/api/npcs`, {
       data: preview,
+      headers: { 'x-csrf-token': csrf },
     });
     expect(saveRes.ok(), `save failed: ${saveRes.status()}`).toBeTruthy();
     const saved = await saveRes.json();
@@ -77,10 +84,11 @@ test.describe('NPC Generator', () => {
   });
 
   test('list page shows saved NPC and links to detail', async ({ page }) => {
-    const { campaignId } = await setupDmWithCampaign(page);
+    const { campaignId, csrf } = await setupDmWithCampaign(page);
 
     const npcRes = await page.request.post(`${BACKEND}/api/npcs`, {
       data: { campaignId, name: 'E2E Listed NPC', race: 'Human', profession: 'Peasant' },
+      headers: { 'x-csrf-token': csrf },
     });
     expect(npcRes.ok(), `npc create failed: ${npcRes.status()}`).toBeTruthy();
 
