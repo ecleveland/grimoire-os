@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
@@ -46,25 +46,30 @@ export class EncountersService {
   }
 
   async findOne(id: string, userId: string) {
-    const encounter = await this.prisma.encounter.findUnique({
+    const result = await this.prisma.encounter.findUnique({
       where: { id },
+      include: { campaign: { select: campaignAuthSelect } },
     });
-    if (!encounter) {
+    if (!result) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    await this.campaignAuth.assertCampaignMember(encounter.campaignId, userId);
+    const { campaign, ...encounter } = result;
+    this.campaignAuth.assertMemberOnCampaign(campaign, userId);
     return encounter;
   }
 
   async update(id: string, userId: string, dto: UpdateEncounterDto) {
     const encounter = await this.prisma.encounter.findUnique({
       where: { id },
-      select: { id: true, campaignId: true },
+      select: {
+        id: true,
+        campaign: { select: campaignAuthSelect },
+      },
     });
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    await this.campaignAuth.assertCampaignOwner(encounter.campaignId, userId);
+    this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
     const { combatants, ...rest } = dto;
     return this.prisma.encounter.update({
       where: { id },
@@ -80,12 +85,15 @@ export class EncountersService {
   async remove(id: string, userId: string): Promise<void> {
     const encounter = await this.prisma.encounter.findUnique({
       where: { id },
-      select: { id: true, campaignId: true },
+      select: {
+        id: true,
+        campaign: { select: campaignAuthSelect },
+      },
     });
     if (!encounter) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    await this.campaignAuth.assertCampaignOwner(encounter.campaignId, userId);
+    this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
     await this.prisma.encounter.delete({ where: { id } });
   }
 }
