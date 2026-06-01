@@ -64,11 +64,18 @@ export class CampaignsController {
   }
 
   @Post(':id/invite-code')
-  @ApiOperation({ summary: 'Generate invite code for campaign' })
+  @ApiOperation({ summary: 'Generate (or regenerate) invite code for campaign' })
   generateInviteCode(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.campaignsService
       .generateInviteCode(id, req.user.userId)
       .then(code => ({ inviteCode: code }));
+  }
+
+  @Delete(':id/invite-code')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Revoke the active invite code for campaign' })
+  revokeInviteCode(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.campaignsService.revokeInviteCode(id, req.user.userId);
   }
 
   @Post('join/:code')

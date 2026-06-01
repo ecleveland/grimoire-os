@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -113,6 +113,9 @@ export class CampaignsService {
     if (!campaign) {
       throw new NotFoundException('Invalid invite code');
     }
+    if (campaign.inviteCodeExpiresAt && campaign.inviteCodeExpiresAt.getTime() <= Date.now()) {
+      throw new GoneException('Invite code has expired');
+    }
     await this.prisma.campaignPlayer.upsert({
       where: {
         campaignId_userId: { campaignId: campaign.id, userId },
@@ -121,6 +124,14 @@ export class CampaignsService {
       update: {},
     });
     return this.findOne(campaign.id);
+  }
+
+  async revokeInviteCode(id: string, userId: string): Promise<void> {
+    await this.campaignAuth.assertCampaignOwner(id, userId);
+    await this.prisma.campaign.update({
+      where: { id },
+      data: { inviteCode: null, inviteCodeExpiresAt: null },
+    });
   }
 
   async addCharacter(campaignId: string, characterId: string, userId: string) {

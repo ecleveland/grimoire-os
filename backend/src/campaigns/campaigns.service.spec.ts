@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -261,6 +261,78 @@ describe('CampaignsService', () => {
         },
         create: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
         update: {},
+      });
+    });
+
+    it('throws GoneException when the invite code has expired', async () => {
+      const expiredCampaign = {
+        ...mockCampaign,
+        inviteCode: 'expiredcode',
+        inviteCodeExpiresAt: new Date(Date.now() - 60_000),
+      };
+      prisma.campaign.findUnique.mockResolvedValueOnce(expiredCampaign);
+
+      await expect(service.joinByInviteCode('expiredcode', USER_ID_2)).rejects.toThrow(
+        GoneException
+      );
+      expect(prisma.campaignPlayer.upsert).not.toHaveBeenCalled();
+    });
+
+    it('accepts the code when inviteCodeExpiresAt is in the future', async () => {
+      const futureCampaign = {
+        ...mockCampaign,
+        inviteCode: 'futurecode',
+        inviteCodeExpiresAt: new Date(Date.now() + 60_000),
+      };
+      prisma.campaign.findUnique
+        .mockResolvedValueOnce(futureCampaign)
+        .mockResolvedValueOnce(futureCampaign);
+      prisma.campaignPlayer.upsert.mockResolvedValue({});
+
+      await service.joinByInviteCode('futurecode', USER_ID_2);
+
+      expect(prisma.campaignPlayer.upsert).toHaveBeenCalled();
+    });
+
+    it('treats null inviteCodeExpiresAt as never-expires (legacy codes)', async () => {
+      const legacyCampaign = {
+        ...mockCampaign,
+        inviteCode: 'legacycode',
+        inviteCodeExpiresAt: null,
+      };
+      prisma.campaign.findUnique
+        .mockResolvedValueOnce(legacyCampaign)
+        .mockResolvedValueOnce(legacyCampaign);
+      prisma.campaignPlayer.upsert.mockResolvedValue({});
+
+      await service.joinByInviteCode('legacycode', USER_ID_2);
+
+      expect(prisma.campaignPlayer.upsert).toHaveBeenCalled();
+    });
+  });
+
+  describe('revokeInviteCode', () => {
+    it('throws ForbiddenException for non-owner', async () => {
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
+
+      await expect(service.revokeInviteCode(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.campaign.update).not.toHaveBeenCalled();
+    });
+
+    it('clears both inviteCode and inviteCodeExpiresAt for owner', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.campaign.update.mockResolvedValue(mockCampaign);
+
+      await service.revokeInviteCode(CAMPAIGN_ID, USER_ID);
+
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.campaign.update).toHaveBeenCalledWith({
+        where: { id: CAMPAIGN_ID },
+        data: { inviteCode: null, inviteCodeExpiresAt: null },
       });
     });
   });
