@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
@@ -31,10 +32,13 @@ const mockLoadSpecies = loadSpeciesAsRacesFromJson as jest.MockedFunction<
 describe('SeedService', () => {
   let service: SeedService;
   let prisma: MockPrismaService;
+  let cache: { clear: jest.Mock };
 
   beforeEach(async () => {
+    cache = { clear: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SeedService, prismaMockProvider()],
+      providers: [SeedService, prismaMockProvider(), { provide: CACHE_MANAGER, useValue: cache }],
     }).compile();
 
     service = module.get<SeedService>(SeedService);
@@ -477,5 +481,10 @@ describe('SeedService', () => {
       expect(Array.isArray(args.create.personalityTraits)).toBe(true);
       expect(args.create.personalityTraits.length).toBeGreaterThanOrEqual(6);
     }
+  });
+
+  it('invalidates the cache after a successful seed', async () => {
+    await service.seed();
+    expect(cache.clear).toHaveBeenCalledTimes(1);
   });
 });

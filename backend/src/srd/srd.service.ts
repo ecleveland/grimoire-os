@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { Spell, Monster, Item, Feat, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -122,7 +124,14 @@ function buildFuzzyScoreSql(query: string): Prisma.Sql {
 
 @Injectable()
 export class SrdService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(CACHE_MANAGER) private cache: Cache
+  ) {}
+
+  async invalidateCache(): Promise<void> {
+    await this.cache.clear();
+  }
 
   // ── Spells ──────────────────────────────────────────
 

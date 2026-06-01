@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CacheModule } from '@nestjs/cache-manager';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 
@@ -39,6 +40,7 @@ describe('SrdController', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
+      imports: [CacheModule.register()],
       controllers: [SrdController],
       providers: [{ provide: SrdService, useValue: service }],
     }).compile();

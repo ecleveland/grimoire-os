@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import type { Cache } from 'cache-manager';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -27,7 +29,10 @@ import { trinkets } from './data/trinkets';
 
 @Injectable()
 export class SeedService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(CACHE_MANAGER) private cache: Cache
+  ) {}
 
   async seed(): Promise<void> {
     // ── Load data from JSON files ──────────────────────
@@ -351,6 +356,13 @@ export class SeedService {
     if (process.env.NODE_ENV !== 'production') {
       await this.seedDevAdmin();
     }
+
+    // Drop any cached SRD reads. With the default in-memory store the seed
+    // runs in its own Nest context (see run-seed.ts), so this only clears the
+    // seed process's local cache — the running backend's cache is independent
+    // and falls back to the CacheModule's 24h TTL. Swap in a shared Keyv
+    // adapter (Redis, etc.) in app.module.ts to make this cross-process.
+    await this.cache.clear();
   }
 
   private async seedDevAdmin(): Promise<void> {
