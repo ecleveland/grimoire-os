@@ -23,6 +23,7 @@ describe('CampaignsController', () => {
       update: jest.fn(),
       remove: jest.fn(),
       generateInviteCode: jest.fn(),
+      revokeInviteCode: jest.fn(),
       joinByInviteCode: jest.fn(),
       addCharacter: jest.fn(),
       removeCharacter: jest.fn(),
@@ -103,6 +104,16 @@ describe('CampaignsController', () => {
 
       expect(service.generateInviteCode).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(result).toEqual({ inviteCode: 'abc123' });
+    });
+  });
+
+  describe('revokeInviteCode', () => {
+    it('delegates to service with id and userId', async () => {
+      service.revokeInviteCode.mockResolvedValue(undefined);
+
+      await controller.revokeInviteCode(CAMPAIGN_ID, mockReq);
+
+      expect(service.revokeInviteCode).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
     });
   });
 

@@ -304,6 +304,34 @@ describe('CampaignDetailPage', () => {
       await user.click(screen.getByRole('button', { name: /generate invite code/i }));
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('rate limited'));
     });
+
+    it('revokes the invite code via DELETE and shows the Generate button again on success', async () => {
+      mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: 'ABCD-1234' }));
+      mockApiFetch.mockResolvedValueOnce(undefined);
+      const user = userEvent.setup();
+      render(<CampaignDetailPage />);
+      await waitFor(() => expect(screen.getByText('ABCD-1234')).toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: /revoke/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /generate invite code/i })).toBeInTheDocument()
+      );
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/campaigns/camp-1/invite-code',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(mockToastSuccess).toHaveBeenCalledWith('Invite code revoked');
+    });
+
+    it('toasts an error if revoke fails and keeps the existing code visible', async () => {
+      mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: 'STAY-PUT' }));
+      mockApiFetch.mockRejectedValueOnce(new Error('server down'));
+      const user = userEvent.setup();
+      render(<CampaignDetailPage />);
+      await waitFor(() => expect(screen.getByText('STAY-PUT')).toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: /revoke/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('server down'));
+      expect(screen.getByText('STAY-PUT')).toBeInTheDocument();
+    });
   });
 
   it('hides the invite-code panel for non-owners', async () => {

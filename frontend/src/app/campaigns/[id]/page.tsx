@@ -117,6 +117,16 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const revokeInviteCode = async () => {
+    try {
+      await apiFetch(`/campaigns/${id}/invite-code`, { method: 'DELETE' });
+      setInviteCode(null);
+      toast.success('Invite code revoked');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke invite code');
+    }
+  };
+
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   if (!campaign) return <div className="text-gray-500 dark:text-gray-400">Campaign not found.</div>;
 
@@ -183,6 +193,12 @@ export default function CampaignDetailPage() {
                 className="text-sm text-indigo-600 hover:text-indigo-700"
               >
                 Copy
+              </button>
+              <button
+                onClick={revokeInviteCode}
+                className="text-sm text-red-600 hover:text-red-700"
+              >
+                Revoke
               </button>
             </div>
           ) : (
