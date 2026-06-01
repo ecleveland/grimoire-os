@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/commo
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoteVisibility } from '../prisma/enums';
-import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
@@ -55,12 +55,17 @@ export class NotesService {
   }
 
   async findOne(id: string, userId: string) {
-    const note = await this.prisma.note.findUnique({ where: { id } });
-    if (!note) {
+    const result = await this.prisma.note.findUnique({
+      where: { id },
+      include: { campaign: { select: campaignAuthSelect } },
+    });
+    if (!result) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
-    const campaign = await this.campaignAuth.assertCampaignMember(note.campaignId, userId);
+    const { campaign, ...note } = result;
+    this.campaignAuth.assertMemberOnCampaign(campaign, userId);
+
     const isDm = campaign.ownerId === userId;
     const isAuthor = note.authorId === userId;
 
@@ -91,14 +96,17 @@ export class NotesService {
   async remove(id: string, userId: string): Promise<void> {
     const note = await this.prisma.note.findUnique({
       where: { id },
-      select: { id: true, authorId: true, campaignId: true },
+      select: {
+        id: true,
+        authorId: true,
+        campaign: { select: campaignAuthSelect },
+      },
     });
     if (!note) {
       throw new NotFoundException(`Note "${id}" not found`);
     }
 
-    const campaign = await this.campaignAuth.findCampaignForAuth(note.campaignId);
-    this.campaignAuth.assertAuthorOrDm(note.authorId, campaign.ownerId, userId);
+    this.campaignAuth.assertAuthorOrDm(note.authorId, note.campaign.ownerId, userId);
     await this.prisma.note.delete({ where: { id } });
   }
 }

@@ -99,6 +99,56 @@ describe('CampaignAuthService', () => {
     });
   });
 
+  describe('assertOwnerOnCampaign', () => {
+    it('passes when userId matches ownerId', () => {
+      expect(() =>
+        service.assertOwnerOnCampaign({ id: CAMPAIGN_ID, ownerId: USER_ID, players: [] }, USER_ID)
+      ).not.toThrow();
+    });
+
+    it('throws ForbiddenException when userId does not match ownerId', () => {
+      expect(() =>
+        service.assertOwnerOnCampaign({ id: CAMPAIGN_ID, ownerId: USER_ID, players: [] }, USER_ID_2)
+      ).toThrow(ForbiddenException);
+    });
+
+    it('does not query the database', () => {
+      service.assertOwnerOnCampaign({ id: CAMPAIGN_ID, ownerId: USER_ID, players: [] }, USER_ID);
+      expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('assertMemberOnCampaign', () => {
+    it('passes when userId matches ownerId', () => {
+      expect(() =>
+        service.assertMemberOnCampaign({ id: CAMPAIGN_ID, ownerId: USER_ID, players: [] }, USER_ID)
+      ).not.toThrow();
+    });
+
+    it('passes when userId is in players', () => {
+      expect(() =>
+        service.assertMemberOnCampaign(
+          { id: CAMPAIGN_ID, ownerId: 'someone-else', players: [{ userId: USER_ID_2 }] },
+          USER_ID_2
+        )
+      ).not.toThrow();
+    });
+
+    it('throws ForbiddenException when userId is neither owner nor player', () => {
+      expect(() =>
+        service.assertMemberOnCampaign(
+          { id: CAMPAIGN_ID, ownerId: USER_ID, players: [] },
+          USER_ID_2
+        )
+      ).toThrow(ForbiddenException);
+    });
+
+    it('does not query the database', () => {
+      service.assertMemberOnCampaign({ id: CAMPAIGN_ID, ownerId: USER_ID, players: [] }, USER_ID);
+      expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   describe('assertAuthorOrDm', () => {
     it('passes when userId equals authorId', () => {
       expect(() => service.assertAuthorOrDm(USER_ID, 'some-dm-id', USER_ID)).not.toThrow();
