@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { CacheModule } from '@nestjs/cache-manager';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
@@ -39,6 +40,14 @@ const RUNTIME_DEFAULT_LIMIT = parseInt(process.env.THROTTLE_AUTHED_LIMIT ?? '120
           limit: RUNTIME_DEFAULT_LIMIT,
         },
       ],
+    }),
+    // SRD data is static between seeds, so a 24h in-memory cache covers
+    // realistic refresh windows. Cross-process invalidation isn't possible
+    // with the default Map store; the TTL is the backstop. Swap in a Keyv
+    // adapter (Redis, etc.) here if SRD reads ever fan out across replicas.
+    CacheModule.register({
+      isGlobal: true,
+      ttl: 24 * 60 * 60 * 1000,
     }),
     PrismaModule,
     AuthModule,

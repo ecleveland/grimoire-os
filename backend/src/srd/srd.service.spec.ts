@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { SrdService } from './srd.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
@@ -6,10 +7,13 @@ import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.facto
 describe('SrdService', () => {
   let service: SrdService;
   let prisma: MockPrismaService;
+  let cache: { clear: jest.Mock };
 
   beforeEach(async () => {
+    cache = { clear: jest.fn().mockResolvedValue(undefined) };
+
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SrdService, prismaMockProvider()],
+      providers: [SrdService, prismaMockProvider(), { provide: CACHE_MANAGER, useValue: cache }],
     }).compile();
 
     service = module.get<SrdService>(SrdService);
@@ -1189,6 +1193,13 @@ describe('SrdService', () => {
         'Bless',
         'Cunning Action',
       ]);
+    });
+  });
+
+  describe('invalidateCache', () => {
+    it('calls clear() on the injected cache manager', async () => {
+      await service.invalidateCache();
+      expect(cache.clear).toHaveBeenCalledTimes(1);
     });
   });
 });

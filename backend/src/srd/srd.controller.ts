@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
+import { CacheInterceptor } from '@nestjs/cache-manager';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
 import { QuerySpellsDto } from './dto/query-spells.dto';
@@ -9,6 +10,7 @@ import { QuerySearchDto } from './dto/query-search.dto';
 
 @ApiTags('SRD')
 @Controller('srd')
+@UseInterceptors(CacheInterceptor)
 export class SrdController {
   constructor(private readonly srdService: SrdService) {}
 
