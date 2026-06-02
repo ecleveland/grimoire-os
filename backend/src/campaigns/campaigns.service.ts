@@ -7,6 +7,8 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
+import { CampaignDto, CampaignListItemDto } from './dto/campaign-response.dto';
+import { toDto } from '../common/serialization/to-dto';
 
 const campaignInclude = {
   players: true,
@@ -27,21 +29,21 @@ const campaignListSelect = {
   players: { select: { userId: true } },
 } satisfies Prisma.CampaignSelect;
 
-function serialize(campaign: any) {
+function serialize(campaign: any): CampaignDto {
   const { players, characters, ...rest } = campaign;
-  return {
+  return toDto(CampaignDto, {
     ...rest,
     playerIds: players?.map((p: any) => p.userId) ?? [],
     characterIds: characters?.map((c: any) => c.id) ?? [],
-  };
+  });
 }
 
-function serializeListItem(campaign: any) {
+function serializeListItem(campaign: any): CampaignListItemDto {
   const { players, ...rest } = campaign;
-  return {
+  return toDto(CampaignListItemDto, {
     ...rest,
     playerIds: players?.map((p: any) => p.userId) ?? [],
-  };
+  });
 }
 
 @Injectable()

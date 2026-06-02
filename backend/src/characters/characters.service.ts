@@ -5,6 +5,8 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
+import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
+import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -24,7 +26,7 @@ export class CharactersService {
   constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateCharacterDto) {
-    return this.prisma.character.create({
+    const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
       // Prisma's InputJsonValue for JSON fields (abilityScores, hitPoints, etc.).
       // Safe because CreateCharacterDto only declares whitelisted fields.
@@ -33,6 +35,7 @@ export class CharactersService {
         userId,
       },
     });
+    return toDto(CharacterDto, character);
   }
 
   async findAllForUser(userId: string, pagination: PaginationDto) {
@@ -51,7 +54,7 @@ export class CharactersService {
       this.prisma.character.count({ where }),
     ]);
 
-    return buildPaginatedResponse(data, total, page, limit);
+    return buildPaginatedResponse(toDtoArray(CharacterListItemDto, data), total, page, limit);
   }
 
   async findOne(id: string) {
@@ -59,7 +62,7 @@ export class CharactersService {
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return character;
+    return toDto(CharacterDto, character);
   }
 
   async findOneForUser(id: string, userId: string) {
@@ -72,12 +75,13 @@ export class CharactersService {
 
   async update(id: string, userId: string, dto: UpdateCharacterDto) {
     await this.findOneForUser(id, userId);
-    return this.prisma.character.update({
+    const character = await this.prisma.character.update({
       where: { id },
       // Cast needed for JSON field compatibility (see create method comment).
       // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
       data: dto as unknown as Prisma.CharacterUncheckedUpdateInput,
     });
+    return toDto(CharacterDto, character);
   }
 
   async remove(id: string, userId: string): Promise<void> {

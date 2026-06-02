@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
 import { NoteVisibility } from '../common/enums';
+import { NoteDto, NoteListItemDto } from './dto/note-response.dto';
 
 describe('NotesService', () => {
   let service: NotesService;
@@ -60,6 +61,17 @@ describe('NotesService', () => {
     title: 'DM Secret Note',
   };
 
+  // Slim list projection (no content/authorId/sessionNumber).
+  const listItemOf = (note: typeof mockNote | typeof mockPrivateNote) => ({
+    id: note.id,
+    campaignId: note.campaignId,
+    title: note.title,
+    visibility: note.visibility,
+    tags: note.tags,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+  });
+
   beforeEach(async () => {
     campaignAuth = {
       assertCampaignMember: jest.fn(),
@@ -105,6 +117,7 @@ describe('NotesService', () => {
         },
       });
       expect(result).toEqual(mockNote);
+      expect(result).toBeInstanceOf(NoteDto);
     });
   });
 
@@ -134,11 +147,14 @@ describe('NotesService', () => {
         take: 20,
       });
       expect(result).toEqual({
-        data: [mockNote, mockPrivateNote],
+        data: [listItemOf(mockNote), listItemOf(mockPrivateNote)],
         total: 2,
         page: 1,
         lastPage: 1,
       });
+      expect(result.data[0]).toBeInstanceOf(NoteListItemDto);
+      // The note body never reaches the list payload.
+      expect((result.data[0] as unknown as Record<string, unknown>).content).toBeUndefined();
     });
 
     it('player sees PARTY notes and own PRIVATE notes only', async () => {
@@ -167,7 +183,7 @@ describe('NotesService', () => {
         take: 20,
       });
       expect(result).toEqual({
-        data: [mockNote],
+        data: [listItemOf(mockNote)],
         total: 1,
         page: 1,
         lastPage: 1,

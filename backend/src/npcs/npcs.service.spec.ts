@@ -12,6 +12,7 @@ import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
+import { NpcDto, NpcListItemDto, NpcRelationDto } from './dto/npc-response.dto';
 
 describe('NpcsService', () => {
   let service: NpcsService;
@@ -117,6 +118,7 @@ describe('NpcsService', () => {
         },
       });
       expect(result).toEqual(mockNpc);
+      expect(result).toBeInstanceOf(NpcDto);
     });
 
     it('passes JSON fields through as InputJsonValue', async () => {
@@ -169,7 +171,27 @@ describe('NpcsService', () => {
         skip: 0,
         take: 20,
       });
-      expect(result).toEqual({ data: [mockNpc], total: 1, page: 1, lastPage: 1 });
+      expect(result).toEqual({
+        data: [
+          {
+            id: mockNpc.id,
+            campaignId: mockNpc.campaignId,
+            name: mockNpc.name,
+            race: mockNpc.race,
+            profession: mockNpc.profession,
+            alignment: mockNpc.alignment,
+            createdAt: mockNpc.createdAt,
+            updatedAt: mockNpc.updatedAt,
+          },
+        ],
+        total: 1,
+        page: 1,
+        lastPage: 1,
+      });
+      expect(result.data[0]).toBeInstanceOf(NpcListItemDto);
+      // Heavy JSON/prose columns never reach the list payload.
+      expect((result.data[0] as unknown as Record<string, unknown>).statBlock).toBeUndefined();
+      expect((result.data[0] as unknown as Record<string, unknown>).appearance).toBeUndefined();
     });
 
     it('applies race + profession filters', async () => {
@@ -240,6 +262,7 @@ describe('NpcsService', () => {
       });
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(result).toEqual(withRelations);
+      expect(result).toBeInstanceOf(NpcDto);
     });
 
     it('throws NotFoundException when NPC does not exist', async () => {
@@ -367,6 +390,7 @@ describe('NpcsService', () => {
         data: { fromNpcId: TARGET_NPC_ID, toNpcId: NPC_ID, relation: 'child' },
       });
       expect(result).toEqual(forwardRow);
+      expect(result).toBeInstanceOf(NpcRelationDto);
     });
 
     it('mirrors notes onto the inverse row', async () => {

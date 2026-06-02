@@ -13,6 +13,8 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AdminUpdateUserDto } from './dto/admin-update-user.dto';
+import { UserDto } from './dto/user-response.dto';
+import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -55,7 +57,7 @@ export class UsersService {
       this.prisma.user.count(),
     ]);
 
-    return buildPaginatedResponse(data, total, page, limit);
+    return buildPaginatedResponse(toDtoArray(UserDto, data), total, page, limit);
   }
 
   async findOne(id: string) {
@@ -74,7 +76,7 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User with ID "${id}" not found`);
     }
-    return user;
+    return toDto(UserDto, user);
   }
 
   async findByUsername(username: string) {
@@ -91,11 +93,12 @@ export class UsersService {
 
   async update(id: string, updateDto: UpdateUserDto | AdminUpdateUserDto) {
     try {
-      return await this.prisma.user.update({
+      const user = await this.prisma.user.update({
         where: { id },
         data: updateDto,
         omit: { passwordHash: true },
       });
+      return toDto(UserDto, user);
     } catch (error: unknown) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);

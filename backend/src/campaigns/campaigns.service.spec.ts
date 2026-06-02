@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CHARACTER_ID, CAMPAIGN_ID } from '../test/fixtures';
 import { CampaignStatus } from '../common/enums';
+import { CampaignDto, CampaignListItemDto } from './dto/campaign-response.dto';
 
 jest.mock('crypto', () => ({
   ...jest.requireActual('crypto'),
@@ -153,6 +154,7 @@ describe('CampaignsService', () => {
         page: 1,
         lastPage: 1,
       });
+      expect(result.data[0]).toBeInstanceOf(CampaignListItemDto);
     });
   });
 
@@ -169,6 +171,20 @@ describe('CampaignsService', () => {
       prisma.campaign.findUnique.mockResolvedValue(null);
 
       await expect(service.findOne('nonexistent')).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns a CampaignDto and never leaks inviteCodeExpiresAt', async () => {
+      prisma.campaign.findUnique.mockResolvedValue({
+        ...mockCampaign,
+        inviteCode: 'secret',
+        inviteCodeExpiresAt: new Date('2025-03-01T00:00:00Z'),
+      });
+
+      const result = await service.findOne(CAMPAIGN_ID);
+
+      expect(result).toBeInstanceOf(CampaignDto);
+      expect(result.inviteCode).toBe('secret');
+      expect((result as unknown as Record<string, unknown>).inviteCodeExpiresAt).toBeUndefined();
     });
   });
 
