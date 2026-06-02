@@ -13,6 +13,7 @@ import {
   mockCharacter,
   createCharacterDto,
 } from '../test/fixtures';
+import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
 
 describe('CharactersService', () => {
   let service: CharactersService;
@@ -41,6 +42,7 @@ describe('CharactersService', () => {
         },
       });
       expect(result).toEqual(mockCharacter);
+      expect(result).toBeInstanceOf(CharacterDto);
     });
   });
 
@@ -69,11 +71,25 @@ describe('CharactersService', () => {
       });
       expect(prisma.character.count).toHaveBeenCalledWith({ where: { userId: USER_ID } });
       expect(result).toEqual({
-        data: [mockCharacter],
+        data: [
+          {
+            id: mockCharacter.id,
+            userId: mockCharacter.userId,
+            name: mockCharacter.name,
+            race: mockCharacter.race,
+            class: mockCharacter.class,
+            level: mockCharacter.level,
+            createdAt: mockCharacter.createdAt,
+            updatedAt: mockCharacter.updatedAt,
+          },
+        ],
         total: 1,
         page: 1,
         lastPage: 1,
       });
+      expect(result.data[0]).toBeInstanceOf(CharacterListItemDto);
+      // Heavy columns never reach the list payload.
+      expect((result.data[0] as unknown as Record<string, unknown>).abilityScores).toBeUndefined();
     });
   });
 

@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { USER_ID, mockUser, mockUserPublic, createUserDto } from '../test/fixtures';
 import { Role } from '../common/enums';
+import { UserDto } from './dto/user-response.dto';
 
 jest.mock('bcryptjs', () => ({
   hash: jest.fn(),
@@ -96,6 +97,18 @@ describe('UsersService', () => {
         lastPage: 1,
       });
     });
+
+    it('maps each row to a UserDto, dropping internal columns', async () => {
+      prisma.user.findMany.mockResolvedValue([
+        { ...mockUserPublic, failedLoginAttempts: 9, lockoutUntil: new Date() },
+      ]);
+      prisma.user.count.mockResolvedValue(1);
+
+      const result = await service.findAll({ page: 1, limit: 20 });
+
+      expect(result.data[0]).toBeInstanceOf(UserDto);
+      expect(result.data[0]).toEqual(mockUserPublic);
+    });
   });
 
   describe('findOne', () => {
@@ -134,6 +147,22 @@ describe('UsersService', () => {
       prisma.user.findUnique.mockResolvedValue(null);
 
       await expect(service.findOnePublic(USER_ID)).rejects.toThrow(NotFoundException);
+    });
+
+    it('strips failedLoginAttempts and lockoutUntil even if the row carries them', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        ...mockUserPublic,
+        failedLoginAttempts: 3,
+        lockoutUntil: new Date('2025-02-01T00:00:00Z'),
+      });
+
+      const result = await service.findOnePublic(USER_ID);
+
+      expect(result).toBeInstanceOf(UserDto);
+      expect(result).toEqual(mockUserPublic);
+      expect((result as unknown as Record<string, unknown>).failedLoginAttempts).toBeUndefined();
+      expect((result as unknown as Record<string, unknown>).lockoutUntil).toBeUndefined();
+      expect((result as unknown as Record<string, unknown>).passwordHash).toBeUndefined();
     });
   });
 
@@ -176,6 +205,7 @@ describe('UsersService', () => {
         omit: { passwordHash: true },
       });
       expect(result).toEqual(updated);
+      expect(result).toBeInstanceOf(UserDto);
     });
   });
 

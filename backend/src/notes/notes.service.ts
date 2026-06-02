@@ -7,6 +7,8 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
+import { NoteDto, NoteListItemDto } from './dto/note-response.dto';
+import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 // Slim projection for the notes list view (VEG-125): omits the (potentially
 // large) note body, which the list never renders.
@@ -29,12 +31,13 @@ export class NotesService {
 
   async create(userId: string, dto: CreateNoteDto) {
     await this.campaignAuth.assertCampaignMember(dto.campaignId, userId);
-    return this.prisma.note.create({
+    const note = await this.prisma.note.create({
       data: {
         ...dto,
         authorId: userId,
       },
     });
+    return toDto(NoteDto, note);
   }
 
   async findAllForCampaign(campaignId: string, userId: string, pagination: PaginationDto) {
@@ -64,7 +67,7 @@ export class NotesService {
       this.prisma.note.count({ where }),
     ]);
 
-    return buildPaginatedResponse(data, total, page, limit);
+    return buildPaginatedResponse(toDtoArray(NoteListItemDto, data), total, page, limit);
   }
 
   async findOne(id: string, userId: string) {
@@ -86,7 +89,7 @@ export class NotesService {
       throw new ForbiddenException('You do not have access to this note');
     }
 
-    return note;
+    return toDto(NoteDto, note);
   }
 
   async update(id: string, userId: string, dto: UpdateNoteDto) {
@@ -100,10 +103,11 @@ export class NotesService {
     if (note.authorId !== userId) {
       throw new ForbiddenException('Only the author can edit this note');
     }
-    return this.prisma.note.update({
+    const updated = await this.prisma.note.update({
       where: { id },
       data: dto,
     });
+    return toDto(NoteDto, updated);
   }
 
   async remove(id: string, userId: string): Promise<void> {

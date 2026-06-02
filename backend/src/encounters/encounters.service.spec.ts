@@ -5,6 +5,7 @@ import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
+import { EncounterDto, EncounterListItemDto } from './dto/encounter-response.dto';
 
 describe('EncountersService', () => {
   let service: EncountersService;
@@ -116,6 +117,7 @@ describe('EncountersService', () => {
         },
       });
       expect(result).toEqual(mockEncounter);
+      expect(result).toBeInstanceOf(EncounterDto);
     });
   });
 
@@ -146,11 +148,26 @@ describe('EncountersService', () => {
         take: 20,
       });
       expect(result).toEqual({
-        data: [mockEncounter],
+        data: [
+          {
+            id: mockEncounter.id,
+            campaignId: mockEncounter.campaignId,
+            name: mockEncounter.name,
+            combatants: mockEncounter.combatants,
+            round: mockEncounter.round,
+            isActive: mockEncounter.isActive,
+            createdAt: mockEncounter.createdAt,
+            updatedAt: mockEncounter.updatedAt,
+          },
+        ],
         total: 1,
         page: 1,
         lastPage: 1,
       });
+      expect(result.data[0]).toBeInstanceOf(EncounterListItemDto);
+      // currentTurn / createdById never reach the list payload.
+      expect((result.data[0] as unknown as Record<string, unknown>).createdById).toBeUndefined();
+      expect((result.data[0] as unknown as Record<string, unknown>).currentTurn).toBeUndefined();
     });
   });
 

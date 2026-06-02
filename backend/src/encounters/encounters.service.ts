@@ -6,6 +6,8 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
+import { EncounterDto, EncounterListItemDto } from './dto/encounter-response.dto';
+import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 // Slim projection for the encounters list view (VEG-125): drops currentTurn and
 // createdById, which the list does not render.
@@ -30,13 +32,14 @@ export class EncountersService {
   async create(userId: string, dto: CreateEncounterDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
     const { combatants, ...rest } = dto;
-    return this.prisma.encounter.create({
+    const encounter = await this.prisma.encounter.create({
       data: {
         ...rest,
         createdById: userId,
         combatants: combatants as unknown as Prisma.InputJsonValue,
       },
     });
+    return toDto(EncounterDto, encounter);
   }
 
   async findAllForCampaign(campaignId: string, userId: string, pagination: PaginationDto) {
@@ -56,7 +59,7 @@ export class EncountersService {
       this.prisma.encounter.count({ where }),
     ]);
 
-    return buildPaginatedResponse(data, total, page, limit);
+    return buildPaginatedResponse(toDtoArray(EncounterListItemDto, data), total, page, limit);
   }
 
   async findOne(id: string, userId: string) {
@@ -69,7 +72,7 @@ export class EncountersService {
     }
     const { campaign, ...encounter } = result;
     this.campaignAuth.assertMemberOnCampaign(campaign, userId);
-    return encounter;
+    return toDto(EncounterDto, encounter);
   }
 
   async update(id: string, userId: string, dto: UpdateEncounterDto) {
@@ -85,7 +88,7 @@ export class EncountersService {
     }
     this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
     const { combatants, ...rest } = dto;
-    return this.prisma.encounter.update({
+    const updated = await this.prisma.encounter.update({
       where: { id },
       data: {
         ...rest,
@@ -94,6 +97,7 @@ export class EncountersService {
         }),
       },
     });
+    return toDto(EncounterDto, updated);
   }
 
   async remove(id: string, userId: string): Promise<void> {

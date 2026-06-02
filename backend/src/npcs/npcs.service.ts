@@ -22,6 +22,8 @@ import {
 } from './relation-constraints';
 import { NpcGeneratorService } from './generator/npc-generator.service';
 import { GeneratedNpc, NpcGenerationConstraints } from './generator/npc-generator.types';
+import { NpcDto, NpcListItemDto, NpcRelationDto } from './dto/npc-response.dto';
+import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const JSON_FIELDS = ['statBlock', 'loot', 'lootOverrides', 'generationParams'] as const;
 
@@ -71,9 +73,10 @@ export class NpcsService {
   async create(userId: string, dto: CreateNpcDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
     const { rest, jsonData } = extractJsonFields(dto);
-    return this.prisma.npc.create({
+    const npc = await this.prisma.npc.create({
       data: { ...rest, createdById: userId, ...jsonData },
     });
+    return toDto(NpcDto, npc);
   }
 
   async findAllForCampaign(campaignId: string, userId: string, query: NpcFilterDto) {
@@ -94,7 +97,7 @@ export class NpcsService {
       }),
       this.prisma.npc.count({ where }),
     ]);
-    return buildPaginatedResponse(data, total, page, limit);
+    return buildPaginatedResponse(toDtoArray(NpcListItemDto, data), total, page, limit);
   }
 
   async findOne(id: string, userId: string) {
@@ -110,7 +113,7 @@ export class NpcsService {
     });
     if (!npc) throw new NotFoundException(`Npc "${id}" not found`);
     await this.campaignAuth.assertCampaignOwner(npc.campaignId, userId);
-    return npc;
+    return toDto(NpcDto, npc);
   }
 
   async update(id: string, userId: string, dto: UpdateNpcDto) {
@@ -121,10 +124,11 @@ export class NpcsService {
     if (!npc) throw new NotFoundException(`Npc "${id}" not found`);
     await this.campaignAuth.assertCampaignOwner(npc.campaignId, userId);
     const { rest, jsonData } = extractJsonFields(dto);
-    return this.prisma.npc.update({
+    const updated = await this.prisma.npc.update({
       where: { id },
       data: { ...rest, ...jsonData },
     });
+    return toDto(NpcDto, updated);
   }
 
   async remove(id: string, userId: string): Promise<void> {
@@ -165,7 +169,7 @@ export class NpcsService {
         const inverseRow = await tx.npcRelation.create({ data: inverseData });
         return [forwardRow, inverseRow];
       });
-      return forward;
+      return toDto(NpcRelationDto, forward);
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         throw new ConflictException('Relation already exists between these NPCs');
@@ -256,18 +260,19 @@ export class NpcsService {
       generationParams: finalGenerationParams as GeneratedNpc['generationParams'],
     };
 
-    return this.prisma.$transaction(async tx => {
-      const npc = await tx.npc.create({
+    const npc = await this.prisma.$transaction(async tx => {
+      const created = await tx.npc.create({
         data: this.toCreateData(finalPayload, userId),
       });
       await tx.npcRelation.create({
-        data: { fromNpcId: npc.id, toNpcId: source.id, relation },
+        data: { fromNpcId: created.id, toNpcId: source.id, relation },
       });
       await tx.npcRelation.create({
-        data: { fromNpcId: source.id, toNpcId: npc.id, relation: inverseOf(relation) },
+        data: { fromNpcId: source.id, toNpcId: created.id, relation: inverseOf(relation) },
       });
-      return npc;
+      return created;
     });
+    return toDto(NpcDto, npc);
   }
 
   private toCreateData(payload: GeneratedNpc, userId: string): Prisma.NpcUncheckedCreateInput {
