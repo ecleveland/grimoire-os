@@ -1,4 +1,5 @@
 import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -12,12 +13,34 @@ const campaignInclude = {
   characters: true,
 } as const;
 
+// Slim projection for the campaigns list view (VEG-125): only the scalar fields
+// the list renders, plus player userIds for the member count. Notably omits the
+// full players/characters rows and the invite code.
+const campaignListSelect = {
+  id: true,
+  name: true,
+  description: true,
+  ownerId: true,
+  status: true,
+  createdAt: true,
+  updatedAt: true,
+  players: { select: { userId: true } },
+} satisfies Prisma.CampaignSelect;
+
 function serialize(campaign: any) {
   const { players, characters, ...rest } = campaign;
   return {
     ...rest,
     playerIds: players?.map((p: any) => p.userId) ?? [],
     characterIds: characters?.map((c: any) => c.id) ?? [],
+  };
+}
+
+function serializeListItem(campaign: any) {
+  const { players, ...rest } = campaign;
+  return {
+    ...rest,
+    playerIds: players?.map((p: any) => p.userId) ?? [],
   };
 }
 
@@ -50,7 +73,7 @@ export class CampaignsService {
     const [campaigns, total] = await Promise.all([
       this.prisma.campaign.findMany({
         where,
-        include: campaignInclude,
+        select: campaignListSelect,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -58,7 +81,7 @@ export class CampaignsService {
       this.prisma.campaign.count({ where }),
     ]);
 
-    return buildPaginatedResponse(campaigns.map(serialize), total, page, limit);
+    return buildPaginatedResponse(campaigns.map(serializeListItem), total, page, limit);
   }
 
   async findOne(id: string) {

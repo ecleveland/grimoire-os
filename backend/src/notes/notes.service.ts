@@ -8,6 +8,18 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateNoteDto } from './dto/create-note.dto';
 import { UpdateNoteDto } from './dto/update-note.dto';
 
+// Slim projection for the notes list view (VEG-125): omits the (potentially
+// large) note body, which the list never renders.
+const noteListSelect = {
+  id: true,
+  campaignId: true,
+  title: true,
+  visibility: true,
+  tags: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.NoteSelect;
+
 @Injectable()
 export class NotesService {
   constructor(
@@ -44,6 +56,7 @@ export class NotesService {
     const [data, total] = await Promise.all([
       this.prisma.note.findMany({
         where,
+        select: noteListSelect,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import CampaignsPage from '../page';
-import type { Campaign, PaginatedResponse } from '@/lib/types';
+import type { CampaignListItem, PaginatedResponse } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -15,23 +15,24 @@ vi.mock('sonner', () => ({
   },
 }));
 
-function makeCampaign(over: Partial<Campaign> = {}): Campaign {
+function makeCampaign(over: Partial<CampaignListItem> = {}): CampaignListItem {
   return {
     id: 'camp-1',
     name: 'The Lost Mines',
     description: 'A starter adventure',
     ownerId: 'user-1',
     playerIds: ['user-2', 'user-3'],
-    characterIds: [],
     status: 'active',
-    setting: 'Forgotten Realms',
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...over,
   };
 }
 
-function makeResponse(data: Campaign[], over: Partial<PaginatedResponse<Campaign>> = {}) {
+function makeResponse(
+  data: CampaignListItem[],
+  over: Partial<PaginatedResponse<CampaignListItem>> = {}
+) {
   return {
     data,
     total: data.length,
@@ -39,7 +40,7 @@ function makeResponse(data: Campaign[], over: Partial<PaginatedResponse<Campaign
     lastPage: 1,
     limit: 20,
     ...over,
-  } as PaginatedResponse<Campaign>;
+  } as PaginatedResponse<CampaignListItem>;
 }
 
 beforeEach(() => {

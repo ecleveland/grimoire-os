@@ -6,6 +6,19 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 
+// Slim projection for the characters list view (VEG-125). Characters carry
+// 40+ columns; the list only renders name/race/class/level.
+const characterListSelect = {
+  id: true,
+  userId: true,
+  name: true,
+  race: true,
+  class: true,
+  level: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.CharacterSelect;
+
 @Injectable()
 export class CharactersService {
   constructor(private prisma: PrismaService) {}
@@ -30,6 +43,7 @@ export class CharactersService {
     const [data, total] = await Promise.all([
       this.prisma.character.findMany({
         where,
+        select: characterListSelect,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

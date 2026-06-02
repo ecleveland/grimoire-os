@@ -101,8 +101,18 @@ describe('CampaignsService', () => {
   });
 
   describe('findAllForUser', () => {
-    it('uses OR condition with ownerId and players.some, with pagination', async () => {
-      prisma.campaign.findMany.mockResolvedValue([mockCampaign]);
+    it('projects a slim list shape with playerIds, with pagination', async () => {
+      const listRow = {
+        id: CAMPAIGN_ID,
+        name: 'Dragon Campaign',
+        description: 'A test campaign',
+        ownerId: USER_ID,
+        status: CampaignStatus.ACTIVE,
+        createdAt: new Date('2025-01-01T00:00:00Z'),
+        updatedAt: new Date('2025-01-01T00:00:00Z'),
+        players: [{ userId: USER_ID }],
+      };
+      prisma.campaign.findMany.mockResolvedValue([listRow]);
       prisma.campaign.count.mockResolvedValue(1);
 
       const result = await service.findAllForUser(USER_ID, { page: 1, limit: 20 });
@@ -111,14 +121,34 @@ describe('CampaignsService', () => {
         where: {
           OR: [{ ownerId: USER_ID }, { players: { some: { userId: USER_ID } } }],
         },
-        include: { players: true, characters: true },
+        select: {
+          id: true,
+          name: true,
+          description: true,
+          ownerId: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+          players: { select: { userId: true } },
+        },
         orderBy: { updatedAt: 'desc' },
         skip: 0,
         take: 20,
       });
       expect(prisma.campaign.count).toHaveBeenCalled();
       expect(result).toEqual({
-        data: [serializedMockCampaign],
+        data: [
+          {
+            id: CAMPAIGN_ID,
+            name: 'Dragon Campaign',
+            description: 'A test campaign',
+            ownerId: USER_ID,
+            status: CampaignStatus.ACTIVE,
+            createdAt: new Date('2025-01-01T00:00:00Z'),
+            updatedAt: new Date('2025-01-01T00:00:00Z'),
+            playerIds: [USER_ID],
+          },
+        ],
         total: 1,
         page: 1,
         lastPage: 1,

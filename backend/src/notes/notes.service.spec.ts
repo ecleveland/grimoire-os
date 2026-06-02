@@ -120,6 +120,15 @@ describe('NotesService', () => {
 
       expect(prisma.note.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
+        select: {
+          id: true,
+          campaignId: true,
+          title: true,
+          visibility: true,
+          tags: true,
+          createdAt: true,
+          updatedAt: true,
+        },
         orderBy: { updatedAt: 'desc' },
         skip: 0,
         take: 20,
@@ -143,6 +152,15 @@ describe('NotesService', () => {
         where: {
           campaignId: CAMPAIGN_ID,
           OR: [{ visibility: 'party' }, { authorId: USER_ID_2, visibility: 'private' }],
+        },
+        select: {
+          id: true,
+          campaignId: true,
+          title: true,
+          visibility: true,
+          tags: true,
+          createdAt: true,
+          updatedAt: true,
         },
         orderBy: { updatedAt: 'desc' },
         skip: 0,

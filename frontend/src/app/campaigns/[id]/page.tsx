@@ -10,9 +10,9 @@ import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
 import type {
   Campaign,
-  Note,
-  Encounter,
-  Npc,
+  NoteListItem,
+  EncounterListItem,
+  NpcListItem,
   PaginatedResponse,
   InviteCodeResponse,
 } from '@/lib/types';
@@ -31,15 +31,15 @@ export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
+  const [notes, setNotes] = useState<NoteListItem[]>([]);
   const [notesTotal, setNotesTotal] = useState(0);
   const [notesLastPage, setNotesLastPage] = useState(1);
   const [notesPage, setNotesPage] = useState(1);
-  const [encounters, setEncounters] = useState<Encounter[]>([]);
+  const [encounters, setEncounters] = useState<EncounterListItem[]>([]);
   const [encountersTotal, setEncountersTotal] = useState(0);
   const [encountersLastPage, setEncountersLastPage] = useState(1);
   const [encountersPage, setEncountersPage] = useState(1);
-  const [recentNpcs, setRecentNpcs] = useState<Npc[]>([]);
+  const [recentNpcs, setRecentNpcs] = useState<NpcListItem[]>([]);
   const [npcsTotal, setNpcsTotal] = useState(0);
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(true);
@@ -59,7 +59,9 @@ export default function CampaignDetailPage() {
 
   useEffect(() => {
     if (tab === 'notes') {
-      apiFetch<PaginatedResponse<Note>>(`/notes?campaignId=${id}&page=${notesPage}&limit=${LIMIT}`)
+      apiFetch<PaginatedResponse<NoteListItem>>(
+        `/notes?campaignId=${id}&page=${notesPage}&limit=${LIMIT}`
+      )
         .then(res => {
           setNotes(res.data);
           setNotesTotal(res.total);
@@ -71,7 +73,7 @@ export default function CampaignDetailPage() {
         });
     }
     if (tab === 'encounters') {
-      apiFetch<PaginatedResponse<Encounter>>(
+      apiFetch<PaginatedResponse<EncounterListItem>>(
         `/encounters?campaignId=${id}&page=${encountersPage}&limit=${LIMIT}`
       )
         .then(res => {
@@ -85,7 +87,7 @@ export default function CampaignDetailPage() {
         });
     }
     if (tab === 'npcs') {
-      apiFetch<PaginatedResponse<Npc>>(`/npcs?campaignId=${id}&page=1&limit=3`)
+      apiFetch<PaginatedResponse<NpcListItem>>(`/npcs?campaignId=${id}&page=1&limit=3`)
         .then(res => {
           setRecentNpcs(res.data);
           setNpcsTotal(res.total);

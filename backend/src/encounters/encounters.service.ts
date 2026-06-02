@@ -7,6 +7,19 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
 
+// Slim projection for the encounters list view (VEG-125): drops currentTurn and
+// createdById, which the list does not render.
+const encounterListSelect = {
+  id: true,
+  campaignId: true,
+  name: true,
+  combatants: true,
+  round: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.EncounterSelect;
+
 @Injectable()
 export class EncountersService {
   constructor(
@@ -35,6 +48,7 @@ export class EncountersService {
     const [data, total] = await Promise.all([
       this.prisma.encounter.findMany({
         where,
+        select: encounterListSelect,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

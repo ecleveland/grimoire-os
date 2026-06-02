@@ -7,13 +7,13 @@ import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
 import { NPC_PROFESSIONS, NPC_RACES } from '@/lib/npc-constants';
-import type { Npc, PaginatedResponse } from '@/lib/types';
+import type { NpcListItem, PaginatedResponse } from '@/lib/types';
 
 const LIMIT = 20;
 
 export default function NpcsListPage() {
   const { id } = useParams<{ id: string }>();
-  const [npcs, setNpcs] = useState<Npc[]>([]);
+  const [npcs, setNpcs] = useState<NpcListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
   const [page, setPage] = useState(1);
@@ -30,7 +30,7 @@ export default function NpcsListPage() {
     if (race) params.set('race', race);
     if (profession) params.set('profession', profession);
     setLoading(true);
-    apiFetch<PaginatedResponse<Npc>>(`/npcs?${params.toString()}`)
+    apiFetch<PaginatedResponse<NpcListItem>>(`/npcs?${params.toString()}`)
       .then(res => {
         setNpcs(res.data);
         setTotal(res.total);

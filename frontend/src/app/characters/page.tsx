@@ -5,12 +5,12 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
-import type { Character, PaginatedResponse } from '@/lib/types';
+import type { CharacterListItem, PaginatedResponse } from '@/lib/types';
 
 const LIMIT = 20;
 
 export default function CharactersPage() {
-  const [characters, setCharacters] = useState<Character[]>([]);
+  const [characters, setCharacters] = useState<CharacterListItem[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
@@ -18,7 +18,7 @@ export default function CharactersPage() {
 
   useEffect(() => {
     setLoading(true);
-    apiFetch<PaginatedResponse<Character>>(`/characters?page=${page}&limit=${LIMIT}`)
+    apiFetch<PaginatedResponse<CharacterListItem>>(`/characters?page=${page}&limit=${LIMIT}`)
       .then(res => {
         setCharacters(res.data);
         setTotal(res.total);

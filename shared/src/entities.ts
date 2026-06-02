@@ -85,6 +85,32 @@ export interface Character {
   updatedAt: string;
 }
 
+// ── List projections ─────────────────────────────────
+// Slim shapes returned by list endpoints (GET collections). Detail endpoints
+// return the full entity above. See VEG-125.
+
+export interface CampaignListItem {
+  id: string;
+  name: string;
+  description?: string;
+  ownerId: string;
+  status: CampaignStatus;
+  playerIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CharacterListItem {
+  id: string;
+  userId: string;
+  name: string;
+  race?: string;
+  class?: string;
+  level: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Note {
   id: string;
   campaignId: string;
@@ -105,6 +131,27 @@ export interface Encounter {
   name: string;
   combatants: Combatant[];
   currentTurn: number;
+  round: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NoteListItem {
+  id: string;
+  campaignId: string;
+  title: string;
+  visibility: NoteVisibility;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EncounterListItem {
+  id: string;
+  campaignId: string;
+  name: string;
+  combatants: Combatant[];
   round: number;
   isActive: boolean;
   createdAt: string;
@@ -168,6 +215,17 @@ export interface Npc {
   isManual: boolean;
   outgoingLinks?: NpcRelation[];
   incomingLinks?: NpcRelation[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NpcListItem {
+  id: string;
+  campaignId: string;
+  name: string;
+  race: string;
+  profession?: string | null;
+  alignment?: string | null;
   createdAt: string;
   updatedAt: string;
 }

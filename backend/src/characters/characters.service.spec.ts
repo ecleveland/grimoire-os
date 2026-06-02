@@ -53,6 +53,16 @@ describe('CharactersService', () => {
 
       expect(prisma.character.findMany).toHaveBeenCalledWith({
         where: { userId: USER_ID },
+        select: {
+          id: true,
+          userId: true,
+          name: true,
+          race: true,
+          class: true,
+          level: true,
+          createdAt: true,
+          updatedAt: true,
+        },
         orderBy: { updatedAt: 'desc' },
         skip: 0,
         take: 20,
