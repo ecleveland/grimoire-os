@@ -32,6 +32,12 @@ export type {
   Character,
   Note,
   Encounter,
+  // List projections
+  CampaignListItem,
+  CharacterListItem,
+  NoteListItem,
+  EncounterListItem,
+  NpcListItem,
   // NPC
   Npc,
   NpcRelation,

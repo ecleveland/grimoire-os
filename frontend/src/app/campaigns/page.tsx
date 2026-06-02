@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
-import type { Campaign, PaginatedResponse } from '@/lib/types';
+import type { CampaignListItem, PaginatedResponse } from '@/lib/types';
 
 const statusColors: Record<string, string> = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
@@ -16,7 +16,7 @@ const statusColors: Record<string, string> = {
 const LIMIT = 20;
 
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [lastPage, setLastPage] = useState(1);
@@ -24,7 +24,7 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     setLoading(true);
-    apiFetch<PaginatedResponse<Campaign>>(`/campaigns?page=${page}&limit=${LIMIT}`)
+    apiFetch<PaginatedResponse<CampaignListItem>>(`/campaigns?page=${page}&limit=${LIMIT}`)
       .then(res => {
         setCampaigns(res.data);
         setTotal(res.total);

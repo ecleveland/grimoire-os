@@ -46,6 +46,20 @@ function toJsonValue(v: unknown): NpcJsonValue {
   return v === null ? Prisma.JsonNull : (v as Prisma.InputJsonValue);
 }
 
+// Slim projection for the NPC list view (VEG-125): omits the heavy JSON columns
+// (statBlock, loot, lootOverrides, generationParams) and prose fields the list
+// never renders.
+const npcListSelect = {
+  id: true,
+  campaignId: true,
+  name: true,
+  race: true,
+  profession: true,
+  alignment: true,
+  createdAt: true,
+  updatedAt: true,
+} satisfies Prisma.NpcSelect;
+
 @Injectable()
 export class NpcsService {
   constructor(
@@ -73,6 +87,7 @@ export class NpcsService {
     const [data, total] = await Promise.all([
       this.prisma.npc.findMany({
         where,
+        select: npcListSelect,
         orderBy: { updatedAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,

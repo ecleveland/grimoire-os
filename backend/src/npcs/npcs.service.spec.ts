@@ -155,6 +155,16 @@ describe('NpcsService', () => {
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.npc.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
+        select: {
+          id: true,
+          campaignId: true,
+          name: true,
+          race: true,
+          profession: true,
+          alignment: true,
+          createdAt: true,
+          updatedAt: true,
+        },
         orderBy: { updatedAt: 'desc' },
         skip: 0,
         take: 20,
@@ -176,6 +186,16 @@ describe('NpcsService', () => {
 
       expect(prisma.npc.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID, race: 'Elf', profession: 'Merchant' },
+        select: {
+          id: true,
+          campaignId: true,
+          name: true,
+          race: true,
+          profession: true,
+          alignment: true,
+          createdAt: true,
+          updatedAt: true,
+        },
         orderBy: { updatedAt: 'desc' },
         skip: 5,
         take: 5,
