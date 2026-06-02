@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CHARACTER_ID, CAMPAIGN_ID } from '../test/fixtures';
 import { CampaignStatus } from '../common/enums';
+import { NoteVisibility } from '../prisma/enums';
 import { CampaignDto, CampaignListItemDto } from './dto/campaign-response.dto';
 
 jest.mock('crypto', () => ({
@@ -476,20 +477,59 @@ describe('CampaignsService', () => {
       );
     });
 
-    it('deletes campaignPlayer record when called by owner', async () => {
+    it('detaches the removed player characters, deletes their private notes, and deletes the join row in one transaction', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+      prisma.note.deleteMany.mockResolvedValue({ count: 2 });
       prisma.campaignPlayer.delete.mockResolvedValue({});
 
       const result = await service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID);
 
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+
+      // All cleanup happens inside a single interactive transaction.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(typeof prisma.$transaction.mock.calls[0][0]).toBe('function');
+
+      // 1. Characters are detached (campaignId -> null), not deleted.
+      expect(prisma.character.updateMany).toHaveBeenCalledWith({
+        where: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
+        data: { campaignId: null },
+      });
+      expect(prisma.character.deleteMany).not.toHaveBeenCalled();
+
+      // 2. Only the player's PRIVATE notes are deleted; party notes are untouched.
+      expect(prisma.note.deleteMany).toHaveBeenCalledWith({
+        where: {
+          campaignId: CAMPAIGN_ID,
+          authorId: USER_ID_2,
+          visibility: NoteVisibility.PRIVATE,
+        },
+      });
+
+      // 4. The join row is deleted (existing behavior, now inside the transaction).
       expect(prisma.campaignPlayer.delete).toHaveBeenCalledWith({
         where: {
           campaignId_userId: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
         },
       });
+
       expect(result).toEqual(serializedMockCampaign);
+    });
+
+    it('propagates the error and does not re-fetch the campaign when a cleanup step fails (rollback)', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+      prisma.note.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.campaignPlayer.delete.mockRejectedValue(new Error('db exploded'));
+
+      await expect(service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID)).rejects.toThrow(
+        'db exploded'
+      );
+
+      // The transaction rejected, so the final findOne never runs.
+      expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
     });
   });
 });
