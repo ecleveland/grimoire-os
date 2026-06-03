@@ -81,6 +81,7 @@ export const mockCharacter = {
   backstory: 'A veteran of many battles.',
   appearance: 'Stocky dwarf with braided beard',
   avatarUrl: null,
+  version: 0,
   createdAt: new Date('2025-01-15T00:00:00Z'),
   updatedAt: new Date('2025-01-15T00:00:00Z'),
 };

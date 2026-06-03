@@ -59,6 +59,7 @@ export class CharacterDto {
   @Expose() hitDice!: HitDice | null;
   @Expose() armorTraining!: string[];
   @Expose() weapons!: Weapon[] | null;
+  @Expose() version!: number;
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;
 }

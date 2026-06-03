@@ -81,6 +81,8 @@ export interface Character {
   hitDice?: HitDice;
   armorTraining?: string[];
   weapons?: Weapon[];
+  /** Optimistic-locking counter (VEG-137); incremented on each guarded write. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -133,6 +135,8 @@ export interface Encounter {
   currentTurn: number;
   round: number;
   isActive: boolean;
+  /** Optimistic-locking counter (VEG-137); incremented on each guarded write. */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }

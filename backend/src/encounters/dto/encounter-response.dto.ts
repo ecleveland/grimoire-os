@@ -11,6 +11,7 @@ export class EncounterDto {
   @Expose() currentTurn!: number;
   @Expose() round!: number;
   @Expose() isActive!: boolean;
+  @Expose() version!: number;
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;
 }
