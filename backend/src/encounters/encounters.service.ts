@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
@@ -87,16 +87,44 @@ export class EncountersService {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
     this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
-    const { combatants, ...rest } = dto;
-    const updated = await this.prisma.encounter.update({
-      where: { id },
-      data: {
-        ...rest,
-        ...(combatants !== undefined && {
-          combatants: combatants as unknown as Prisma.InputJsonValue,
-        }),
-      },
+    const { combatants, expectedVersion, ...rest } = dto;
+    const data = {
+      ...rest,
+      ...(combatants !== undefined && {
+        combatants: combatants as unknown as Prisma.InputJsonValue,
+      }),
+    };
+
+    // No expectedVersion → caller opts out of optimistic locking (VEG-137).
+    if (expectedVersion === undefined) {
+      const updated = await this.prisma.encounter.update({ where: { id }, data });
+      return toDto(EncounterDto, updated);
+    }
+
+    // Guarded write: only succeeds if the row is still at expectedVersion.
+    // `version` is non-unique, so updateMany with a compound where + atomic
+    // increment is the correct primitive (plain update can't match on version).
+    const { count } = await this.prisma.encounter.updateMany({
+      where: { id, version: expectedVersion },
+      data: { ...data, version: { increment: 1 } },
     });
+    if (count === 0) {
+      const current = await this.prisma.encounter.findUnique({
+        where: { id },
+        select: { version: true },
+      });
+      if (!current) {
+        throw new NotFoundException(`Encounter "${id}" not found`);
+      }
+      throw new ConflictException({
+        message: 'Encounter was modified by another request; re-fetch and retry.',
+        currentVersion: current.version,
+      });
+    }
+    const updated = await this.prisma.encounter.findUnique({ where: { id } });
+    if (!updated) {
+      throw new NotFoundException(`Encounter "${id}" not found`);
+    }
     return toDto(EncounterDto, updated);
   }
 

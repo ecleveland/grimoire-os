@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import { NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { CharactersService } from './characters.service';
@@ -162,6 +162,54 @@ describe('CharactersService', () => {
       await expect(service.update(CHARACTER_ID, USER_ID, { level: 6 })).rejects.toThrow(
         NotFoundException
       );
+    });
+  });
+
+  describe('update with optimistic locking (expectedVersion)', () => {
+    it('guards the write on expectedVersion, increments version, and returns the fresh row', async () => {
+      prisma.character.findUnique
+        .mockResolvedValueOnce(mockCharacter) // findOneForUser ownership read
+        .mockResolvedValueOnce({ ...mockCharacter, level: 6, version: 3 }); // post-write re-fetch
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.update(CHARACTER_ID, USER_ID, {
+        level: 6,
+        expectedVersion: 2,
+      });
+
+      expect(prisma.character.updateMany).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID, version: 2 },
+        data: { level: 6, version: { increment: 1 } },
+      });
+      // expectedVersion is a guard, never a persisted column.
+      expect(prisma.character.update).not.toHaveBeenCalled();
+      expect(result.level).toBe(6);
+      expect(result.version).toBe(3);
+    });
+
+    it('throws 409 ConflictException carrying currentVersion on a stale write', async () => {
+      prisma.character.findUnique
+        .mockResolvedValueOnce(mockCharacter) // ownership read
+        .mockResolvedValueOnce({ ...mockCharacter, version: 5 }); // current-version probe
+      prisma.character.updateMany.mockResolvedValue({ count: 0 });
+
+      const err = await service
+        .update(CHARACTER_ID, USER_ID, { level: 6, expectedVersion: 2 })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({ currentVersion: 5 });
+    });
+
+    it('throws NotFoundException when the row vanished mid-update', async () => {
+      prisma.character.findUnique
+        .mockResolvedValueOnce(mockCharacter) // ownership read
+        .mockResolvedValueOnce(null); // probe: gone
+      prisma.character.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.update(CHARACTER_ID, USER_ID, { level: 6, expectedVersion: 2 })
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

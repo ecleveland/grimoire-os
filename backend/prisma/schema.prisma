@@ -165,6 +165,8 @@ model Character {
   hitDice             Json?
   armorTraining       String[]
   weapons             Json?
+  // Optimistic-locking counter (VEG-137); guarded updates increment it.
+  version             Int      @default(0)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -209,6 +211,8 @@ model Encounter {
   currentTurn Int      @default(0)
   round       Int      @default(1)
   isActive    Boolean  @default(false)
+  // Optimistic-locking counter (VEG-137); guarded updates increment it.
+  version     Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

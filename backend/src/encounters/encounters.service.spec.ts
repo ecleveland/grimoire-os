@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
 import { EncountersService } from './encounters.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,6 +49,7 @@ describe('EncountersService', () => {
     currentTurn: 0,
     round: 1,
     isActive: false,
+    version: 0,
     createdAt: new Date('2025-02-01T00:00:00Z'),
     updatedAt: new Date('2025-02-01T00:00:00Z'),
   };
@@ -280,6 +281,60 @@ describe('EncountersService', () => {
       await expect(service.update(ENCOUNTER_ID, USER_ID_2, { name: 'Renamed' })).rejects.toThrow(
         ForbiddenException
       );
+    });
+  });
+
+  describe('update with optimistic locking (expectedVersion)', () => {
+    const campaignAuthShape = {
+      id: CAMPAIGN_ID,
+      ownerId: USER_ID,
+      players: [{ userId: USER_ID }, { userId: USER_ID_2 }],
+    };
+
+    it('guards the write on expectedVersion, increments version, and returns the fresh row', async () => {
+      prisma.encounter.findUnique
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ ...mockEncounter, currentTurn: 1, version: 4 }); // re-fetch
+      prisma.encounter.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.update(ENCOUNTER_ID, USER_ID, {
+        currentTurn: 1,
+        expectedVersion: 3,
+      });
+
+      expect(campaignAuth.assertOwnerOnCampaign).toHaveBeenCalledWith(campaignAuthShape, USER_ID);
+      expect(prisma.encounter.updateMany).toHaveBeenCalledWith({
+        where: { id: ENCOUNTER_ID, version: 3 },
+        data: { currentTurn: 1, version: { increment: 1 } },
+      });
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(result.currentTurn).toBe(1);
+      expect(result.version).toBe(4);
+    });
+
+    it('throws 409 ConflictException carrying currentVersion on a stale write', async () => {
+      prisma.encounter.findUnique
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ ...mockEncounter, version: 7 }); // current-version probe
+      prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
+
+      const err = await service
+        .update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({ currentVersion: 7 });
+    });
+
+    it('throws NotFoundException when the row vanished mid-update', async () => {
+      prisma.encounter.findUnique
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce(null); // probe: gone
+      prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 })
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

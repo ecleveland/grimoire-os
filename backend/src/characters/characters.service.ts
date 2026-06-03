@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  ConflictException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -75,12 +80,41 @@ export class CharactersService {
 
   async update(id: string, userId: string, dto: UpdateCharacterDto) {
     await this.findOneForUser(id, userId);
-    const character = await this.prisma.character.update({
-      where: { id },
-      // Cast needed for JSON field compatibility (see create method comment).
-      // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
-      data: dto as unknown as Prisma.CharacterUncheckedUpdateInput,
+    const { expectedVersion, ...changes } = dto;
+    // Cast needed for JSON field compatibility (see create method comment).
+    // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
+    const data = changes as unknown as Prisma.CharacterUncheckedUpdateInput;
+
+    // No expectedVersion → caller opts out of optimistic locking (VEG-137).
+    if (expectedVersion === undefined) {
+      const character = await this.prisma.character.update({ where: { id }, data });
+      return toDto(CharacterDto, character);
+    }
+
+    // Guarded write: only succeeds if the row is still at expectedVersion.
+    // `version` is non-unique, so updateMany with a compound where + atomic
+    // increment is the correct primitive (plain update can't match on version).
+    const { count } = await this.prisma.character.updateMany({
+      where: { id, version: expectedVersion },
+      data: { ...data, version: { increment: 1 } },
     });
+    if (count === 0) {
+      const current = await this.prisma.character.findUnique({
+        where: { id },
+        select: { version: true },
+      });
+      if (!current) {
+        throw new NotFoundException(`Character "${id}" not found`);
+      }
+      throw new ConflictException({
+        message: 'Character was modified by another request; re-fetch and retry.',
+        currentVersion: current.version,
+      });
+    }
+    const character = await this.prisma.character.findUnique({ where: { id } });
+    if (!character) {
+      throw new NotFoundException(`Character "${id}" not found`);
+    }
     return toDto(CharacterDto, character);
   }
 
