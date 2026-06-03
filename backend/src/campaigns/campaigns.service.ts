@@ -1,6 +1,7 @@
 import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
+import { NoteVisibility } from '../prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -179,11 +180,40 @@ export class CampaignsService {
 
   async removePlayer(campaignId: string, playerId: string, userId: string) {
     await this.campaignAuth.assertCampaignOwner(campaignId, userId);
-    await this.prisma.campaignPlayer.delete({
-      where: {
-        campaignId_userId: { campaignId, userId: playerId },
-      },
+
+    // Cascade the removed player's campaign-scoped cleanup atomically so a
+    // partial failure rolls everything back (VEG-138).
+    //
+    // Encounter combatants (ticket step 3) are intentionally NOT cleaned up
+    // here: the embedded `Combatant` shape carries no characterId/userId, so
+    // there is no reliable key to identify the removed player's entries.
+    // Deferred to a follow-up once combatants gain a linkage field.
+    await this.prisma.$transaction(async tx => {
+      // 1. Detach (do not delete) the player's characters from this campaign;
+      //    characters belong to the user, so they survive but leave the campaign.
+      await tx.character.updateMany({
+        where: { campaignId, userId: playerId },
+        data: { campaignId: null },
+      });
+
+      // 2. Delete the player's private notes in this campaign. Party-visible
+      //    notes are shared content and are left in place.
+      await tx.note.deleteMany({
+        where: {
+          campaignId,
+          authorId: playerId,
+          visibility: NoteVisibility.PRIVATE,
+        },
+      });
+
+      // 4. Delete the membership join row.
+      await tx.campaignPlayer.delete({
+        where: {
+          campaignId_userId: { campaignId, userId: playerId },
+        },
+      });
     });
+
     return this.findOne(campaignId);
   }
 }
