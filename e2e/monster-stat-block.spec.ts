@@ -32,6 +32,10 @@ test.describe('Monster stat block (VEG-257)', () => {
     // optional sections like Actions depend on the specific monster's data).
     await expect(dialog.getByText(/CR /)).toBeVisible();
     await expect(dialog.getByText('STR', { exact: true })).toBeVisible();
+    // Ability scores must resolve to real computed modifiers, not NaN (VEG-257
+    // regression guard: the API uses str/dex/... + numeric HP/CR).
+    await expect(dialog.getByText('NaN')).toHaveCount(0);
+    await expect(dialog.getByText(/\([+-]\d+\)/).first()).toBeVisible();
 
     // Escape closes it.
     await page.keyboard.press('Escape');

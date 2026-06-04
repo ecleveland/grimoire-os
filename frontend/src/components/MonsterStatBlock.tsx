@@ -1,6 +1,7 @@
 'use client';
 
 import type { SrdMonster } from '@/lib/types';
+import { formatCr } from '@/lib/srd-format';
 
 interface Action {
   name: string;
@@ -8,12 +9,12 @@ interface Action {
 }
 
 const ABILITIES: Array<{ key: keyof SrdMonster; label: string }> = [
-  { key: 'strength', label: 'STR' },
-  { key: 'dexterity', label: 'DEX' },
-  { key: 'constitution', label: 'CON' },
-  { key: 'intelligence', label: 'INT' },
-  { key: 'wisdom', label: 'WIS' },
-  { key: 'charisma', label: 'CHA' },
+  { key: 'str', label: 'STR' },
+  { key: 'dex', label: 'DEX' },
+  { key: 'con', label: 'CON' },
+  { key: 'int', label: 'INT' },
+  { key: 'wis', label: 'WIS' },
+  { key: 'cha', label: 'CHA' },
 ];
 
 function modifier(score: number): string {
@@ -55,14 +56,14 @@ export default function MonsterStatBlock({ monster: m }: { monster: SrdMonster }
           <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
         </div>
         <span className="shrink-0 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 text-xs font-medium whitespace-nowrap">
-          CR {m.challengeRating}
+          CR {formatCr(m.challengeRating)}
           {m.experiencePoints ? ` · ${m.experiencePoints} XP` : ''}
         </span>
       </header>
 
       <div className="grid grid-cols-3 gap-2 text-center">
         <StatTile label="Armor Class" value={`${m.armorClass}`} sub={m.armorType ?? undefined} />
-        <StatTile label="Hit Points" value={m.hitPoints} sub={m.hitDice ?? undefined} />
+        <StatTile label="Hit Points" value={String(m.hitPoints)} sub={m.hitDice ?? undefined} />
         <StatTile label="Speed" value={m.speed} />
       </div>
 

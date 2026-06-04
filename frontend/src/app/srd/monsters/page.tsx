@@ -7,6 +7,7 @@ import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
+import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 20;
 
@@ -192,7 +193,9 @@ export default function MonsterListPage() {
             <div className="grid grid-cols-3 gap-2 mt-3 text-center text-sm">
               <div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">CR</div>
-                <div className="font-medium text-gray-900 dark:text-white">{m.challengeRating}</div>
+                <div className="font-medium text-gray-900 dark:text-white">
+                  {formatCr(m.challengeRating)}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">HP</div>
