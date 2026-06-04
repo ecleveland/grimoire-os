@@ -63,6 +63,119 @@ interface JsonMonster {
   } | null;
 }
 
+// ── SRD monster data validation guard ──────────────────
+// Guards against the field-bleed corruption fixed in VEG-261 (a two-column PDF was
+// extracted without respecting column boundaries, so monsters absorbed fragments of
+// neighbouring stat blocks). Fails the seed loudly rather than silently persisting
+// garbage. See scripts/extract-srd-monsters.mjs for how the data is re-derived.
+
+const OFFICIAL_CONDITIONS = new Set([
+  'blinded',
+  'charmed',
+  'deafened',
+  'exhaustion',
+  'frightened',
+  'grappled',
+  'incapacitated',
+  'invisible',
+  'paralyzed',
+  'petrified',
+  'poisoned',
+  'prone',
+  'restrained',
+  'stunned',
+  'unconscious',
+]);
+
+const DAMAGE_TYPES = new Set([
+  'acid',
+  'bludgeoning',
+  'cold',
+  'fire',
+  'force',
+  'lightning',
+  'necrotic',
+  'piercing',
+  'poison',
+  'psychic',
+  'radiant',
+  'slashing',
+  'thunder',
+]);
+
+// A condition immunity may carry a trailing qualifier, e.g. "Charmed (with Mind Blank)".
+function isValidConditionImmunity(entry: string): boolean {
+  const base = entry
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .trim()
+    .toLowerCase();
+  return OFFICIAL_CONDITIONS.has(base);
+}
+
+// A damage entry is either a bare type ("Fire") or a descriptive clause that starts with
+// one ("Piercing damage from weapons …"), plus the SRD's variable-damage placeholder.
+function isValidDamageEntry(entry: string): boolean {
+  if (/^Damage type chosen for the Draconic Origin/.test(entry)) return true;
+  const firstToken = entry.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+  return DAMAGE_TYPES.has(firstToken);
+}
+
+// Legendary blocks name the acting creature ("…the aboleth can expend a use…"). Flag only
+// when a foreign creature is positively identified; stay lenient if the phrase is absent.
+function legendaryReferencesAnotherCreature(m: JsonMonster): boolean {
+  const match = m.legendary_actions?.description
+    .toLowerCase()
+    .match(/the ([a-z][a-z' ]+?) can expend a use/);
+  if (!match) return false;
+  const ref = match[1].trim();
+  const selfTokens = new Set([
+    m.name.toLowerCase(),
+    ...m.name
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter(Boolean),
+    (m.type ?? '').toLowerCase(),
+  ]);
+  return !selfTokens.has(ref) && !selfTokens.has(ref.split(/\s+/).pop() ?? ref);
+}
+
+export function validateMonsterData(monsters: JsonMonster[]): void {
+  const errors: string[] = [];
+
+  for (const m of monsters) {
+    for (const ci of m.condition_immunities ?? []) {
+      if (!isValidConditionImmunity(ci)) {
+        errors.push(`${m.name}: invalid condition immunity "${ci}"`);
+      }
+    }
+
+    for (const field of [
+      'damage_resistances',
+      'damage_immunities',
+      'damage_vulnerabilities',
+    ] as const) {
+      for (const d of m[field] ?? []) {
+        if (!isValidDamageEntry(d)) {
+          errors.push(`${m.name}.${field}: invalid damage entry "${d}"`);
+        }
+      }
+    }
+
+    if (legendaryReferencesAnotherCreature(m)) {
+      errors.push(
+        `${m.name}: legendary_actions reference another creature: "${m.legendary_actions?.description}"`
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `SRD monster data validation failed (${errors.length} ${errors.length === 1 ? 'anomaly' : 'anomalies'}):\n  ` +
+        errors.join('\n  ')
+    );
+  }
+}
+
 interface JsonMagicItem {
   name: string;
   category: string;
@@ -153,6 +266,7 @@ function formatSpeed(speed: Record<string, number | boolean | null>): string {
 
 export function loadMonstersFromJson() {
   const data = readJsonFile<{ monsters: JsonMonster[] }>('monsters.json');
+  validateMonsterData(data.monsters);
   return data.monsters.map(m => {
     // Derive saving throw proficiencies
     const savingThrows: Record<string, number> = {};

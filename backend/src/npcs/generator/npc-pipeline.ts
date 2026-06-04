@@ -523,42 +523,11 @@ export class NpcPipeline {
     const npcAlignment = decisions.alignment ?? base.alignment ?? 'Neutral';
     const profession = decisions.profession ?? constraints.profession ?? null;
 
-    const swap = this.swapProfessionWeapon(base.actions, profession);
-
-    return {
-      baseMonster: base.name,
+    return buildNpcStatBlock(base, {
       name: npcName,
-      size: base.size,
-      type: base.type,
-      subtype: base.subtype,
       alignment: npcAlignment,
-      armorClass: base.armorClass,
-      armorType: base.armorType,
-      hitPoints: base.hitPoints,
-      hitDice: base.hitDice,
-      speed: base.speed,
-      str: base.str,
-      dex: base.dex,
-      con: base.con,
-      int: base.int,
-      wis: base.wis,
-      cha: base.cha,
-      savingThrows: base.savingThrows,
-      skills: base.skills,
-      damageResistances: base.damageResistances,
-      damageImmunities: base.damageImmunities,
-      damageVulnerabilities: base.damageVulnerabilities,
-      conditionImmunities: base.conditionImmunities,
-      senses: base.senses,
-      languages: base.languages,
-      challengeRating: base.challengeRating,
-      experiencePoints: base.experiencePoints,
-      specialAbilities: base.specialAbilities,
-      actions: swap.actions,
-      reactions: base.reactions,
-      legendaryActions: base.legendaryActions,
-      professionWeaponSwap: swap.swap,
-    };
+      profession,
+    });
   }
 
   private pickBaseMonster(
@@ -611,35 +580,6 @@ export class NpcPipeline {
       default:
         return false;
     }
-  }
-
-  private swapProfessionWeapon(
-    actions: StatBlockAction[],
-    profession: string | null
-  ): { actions: StatBlockAction[]; swap: NpcStatBlock['professionWeaponSwap'] } {
-    const weapon = profession ? PROFESSION_WEAPON[profession] : undefined;
-    if (!profession || !weapon) {
-      return { actions: actions.slice(), swap: null };
-    }
-    const idx = actions.findIndex(a => isWeaponAction(a.name));
-    if (idx < 0) {
-      return { actions: actions.slice(), swap: null };
-    }
-    const original = actions[idx];
-    const replaced: StatBlockAction = {
-      name: capitalizeWords(weapon),
-      description: rewriteWeaponDescription(original.description, weapon),
-    };
-    const nextActions = actions.slice();
-    nextActions[idx] = replaced;
-    return {
-      actions: nextActions,
-      swap: {
-        profession,
-        weapon,
-        replacedAction: original.name,
-      },
-    };
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -783,6 +723,78 @@ export class NpcPipeline {
 function isWeaponAction(name: string): boolean {
   const lower = name.toLowerCase();
   return STATBLOCK_WEAPON_ACTION_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+// Swap the base monster's first weapon action for the NPC's profession weapon.
+// Pure: depends only on its arguments and module constants.
+function swapProfessionWeapon(
+  actions: StatBlockAction[],
+  profession: string | null
+): { actions: StatBlockAction[]; swap: NpcStatBlock['professionWeaponSwap'] } {
+  const weapon = profession ? PROFESSION_WEAPON[profession] : undefined;
+  if (!profession || !weapon) {
+    return { actions: actions.slice(), swap: null };
+  }
+  const idx = actions.findIndex(a => isWeaponAction(a.name));
+  if (idx < 0) {
+    return { actions: actions.slice(), swap: null };
+  }
+  const original = actions[idx];
+  const replaced: StatBlockAction = {
+    name: capitalizeWords(weapon),
+    description: rewriteWeaponDescription(original.description, weapon),
+  };
+  const nextActions = actions.slice();
+  nextActions[idx] = replaced;
+  return {
+    actions: nextActions,
+    swap: { profession, weapon, replacedAction: original.name },
+  };
+}
+
+// Build an NPC stat block from a base monster, copying the monster-sourced fields
+// and overlaying the NPC-specific name/alignment plus the profession weapon swap.
+// Shared by the generator (pickStatBlock) and the VEG-261 statBlock backfill so a
+// re-derived snapshot is identical to a freshly generated one.
+export function buildNpcStatBlock(
+  base: MonsterRef,
+  opts: { name: string; alignment: string; profession: string | null }
+): NpcStatBlock {
+  const swap = swapProfessionWeapon(base.actions, opts.profession);
+  return {
+    baseMonster: base.name,
+    name: opts.name,
+    size: base.size,
+    type: base.type,
+    subtype: base.subtype,
+    alignment: opts.alignment,
+    armorClass: base.armorClass,
+    armorType: base.armorType,
+    hitPoints: base.hitPoints,
+    hitDice: base.hitDice,
+    speed: base.speed,
+    str: base.str,
+    dex: base.dex,
+    con: base.con,
+    int: base.int,
+    wis: base.wis,
+    cha: base.cha,
+    savingThrows: base.savingThrows,
+    skills: base.skills,
+    damageResistances: base.damageResistances,
+    damageImmunities: base.damageImmunities,
+    damageVulnerabilities: base.damageVulnerabilities,
+    conditionImmunities: base.conditionImmunities,
+    senses: base.senses,
+    languages: base.languages,
+    challengeRating: base.challengeRating,
+    experiencePoints: base.experiencePoints,
+    specialAbilities: base.specialAbilities,
+    actions: swap.actions,
+    reactions: base.reactions,
+    legendaryActions: base.legendaryActions,
+    professionWeaponSwap: swap.swap,
+  };
 }
 
 function rewriteWeaponDescription(description: string, weapon: string): string {

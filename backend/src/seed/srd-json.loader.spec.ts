@@ -5,6 +5,7 @@ import {
   loadMonstersFromJson,
   loadMagicItemsFromJson,
   loadSpeciesAsRacesFromJson,
+  validateMonsterData,
 } from './srd-json.loader';
 
 jest.mock('fs');
@@ -325,6 +326,136 @@ describe('srd-json.loader', () => {
       const monsters = loadMonstersFromJson();
       expect(monsters[1].specialAbilities).toBeNull();
       expect(monsters[1].legendaryActions).toBeNull();
+    });
+  });
+
+  describe('validateMonsterData', () => {
+    // Minimal monster the guard considers valid; override the field under test.
+    function monster(over: Record<string, unknown> = {}) {
+      return {
+        name: 'Test Monster',
+        type: 'Aberration',
+        damage_resistances: null,
+        damage_immunities: null,
+        damage_vulnerabilities: null,
+        condition_immunities: null,
+        legendary_actions: null,
+        ...over,
+      } as unknown as Parameters<typeof validateMonsterData>[0][number];
+    }
+
+    it('accepts clean data', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({
+            condition_immunities: ['Poisoned', 'Exhaustion'],
+            damage_immunities: ['Poison'],
+          }),
+        ])
+      ).not.toThrow();
+    });
+
+    it('rejects a leaked (non-condition) token in condition_immunities', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({ condition_immunities: ['Exhaustion', 'Poisoned Gear Shortbow'] }),
+        ])
+      ).toThrow(/invalid condition immunity "Poisoned Gear Shortbow"/);
+    });
+
+    it('rejects "Passive Perception N" in condition_immunities', () => {
+      expect(() =>
+        validateMonsterData([monster({ condition_immunities: ['Passive Perception 24'] })])
+      ).toThrow(/invalid condition immunity/);
+    });
+
+    it('rejects condition names shifted into damage_immunities', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({ damage_immunities: ['Charmed', 'Exhaustion', 'Frightened'] }),
+        ])
+      ).toThrow(/damage_immunities: invalid damage entry "Charmed"/);
+    });
+
+    it('rejects gear/equipment leaked into a damage field', () => {
+      expect(() =>
+        validateMonsterData([monster({ damage_resistances: ['Studded Leather Armor'] })])
+      ).toThrow(/invalid damage entry "Studded Leather Armor"/);
+    });
+
+    it('rejects an empty-string damage entry', () => {
+      expect(() => validateMonsterData([monster({ damage_resistances: [''] })])).toThrow(
+        /invalid damage entry/
+      );
+    });
+
+    it('rejects legendary_actions that reference another creature', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({
+            name: 'Skeleton',
+            type: 'Undead',
+            legendary_actions: {
+              description:
+                'Legendary Action Uses: 3. Immediately after another creature’s turn, the solar can expend a use to take one of the following actions.',
+              actions: [{ name: 'Blinding Gaze', description: '…' }],
+            },
+          }),
+        ])
+      ).toThrow(/reference another creature/);
+    });
+
+    it('accepts a condition immunity with a parenthetical qualifier', () => {
+      expect(() =>
+        validateMonsterData([monster({ condition_immunities: ['Charmed (with Mind Blank)'] })])
+      ).not.toThrow();
+    });
+
+    it('accepts a descriptive damage clause that starts with a damage type', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({
+            damage_vulnerabilities: [
+              'Piercing damage from weapons wielded by creatures under the effect of a Bless spell',
+            ],
+          }),
+        ])
+      ).not.toThrow();
+    });
+
+    it("accepts the SRD's variable Draconic Origin damage placeholder", () => {
+      expect(() =>
+        validateMonsterData([
+          monster({
+            damage_resistances: ['Damage type chosen for the Draconic Origin trait below'],
+          }),
+        ])
+      ).not.toThrow();
+    });
+
+    it('accepts legendary_actions that reference the creature itself', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({
+            name: 'Aboleth',
+            type: 'Aberration',
+            legendary_actions: {
+              description:
+                'Legendary Action Uses: 3 (4 in Lair). Immediately after another creature’s turn, the aboleth can expend a use to take one of the following actions.',
+              actions: [{ name: 'Lash', description: 'The aboleth makes one Tentacle attack.' }],
+            },
+          }),
+        ])
+      ).not.toThrow();
+    });
+
+    it('reports every anomaly across all monsters in one error', () => {
+      expect(() =>
+        validateMonsterData([
+          monster({ name: 'A', condition_immunities: ['Bogus'] }),
+          monster({ name: 'B', damage_immunities: ['Charmed'] }),
+        ])
+      ).toThrow(/2 anomalies/);
     });
   });
 

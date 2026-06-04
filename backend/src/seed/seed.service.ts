@@ -74,7 +74,15 @@ export class SeedService {
       await tx.spell.createMany({ data: spells, skipDuplicates: true });
       console.log(`  Spells: ${spells.length} entries`);
 
-      await tx.monster.createMany({ data: monsters, skipDuplicates: true });
+      // Upsert (not createMany/skipDuplicates) so corrected SRD data — e.g. the VEG-261
+      // field-bleed fixes — propagates to existing rows on re-seed, preserving ids/FKs.
+      for (const monster of monsters) {
+        await tx.monster.upsert({
+          where: { name: monster.name },
+          create: monster,
+          update: monster,
+        });
+      }
       console.log(`  Monsters: ${monsters.length} entries`);
 
       await tx.item.createMany({ data: items, skipDuplicates: true });
