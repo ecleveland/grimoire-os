@@ -5,6 +5,9 @@ import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
+import Modal from '@/components/Modal';
+import MonsterStatBlock from '@/components/MonsterStatBlock';
+import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 20;
 
@@ -72,7 +75,24 @@ export default function MonsterListPage() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [crFilter, setCrFilter] = useState('');
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detail, setDetail] = useState<SrdMonster | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function openMonster(id: string) {
+    setDetail(null);
+    setDetailLoading(true);
+    setDetailOpen(true);
+    apiFetch<SrdMonster>(`/srd/monsters/${id}`)
+      .then(setDetail)
+      .catch(err => {
+        console.error('Failed to load monster:', err);
+        toast.error('Failed to load monster', { id: 'load-monster' });
+        setDetailOpen(false);
+      })
+      .finally(() => setDetailLoading(false));
+  }
 
   // Debounce search input
   useEffect(() => {
@@ -159,9 +179,12 @@ export default function MonsterListPage() {
         aria-busy={loading}
       >
         {monsters.map(m => (
-          <div
+          <button
             key={m.id}
-            className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+            type="button"
+            data-testid="monster-card"
+            onClick={() => openMonster(m.id)}
+            className="text-left p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
           >
             <h3 className="font-semibold text-gray-900 dark:text-white">{m.name}</h3>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -170,7 +193,9 @@ export default function MonsterListPage() {
             <div className="grid grid-cols-3 gap-2 mt-3 text-center text-sm">
               <div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">CR</div>
-                <div className="font-medium text-gray-900 dark:text-white">{m.challengeRating}</div>
+                <div className="font-medium text-gray-900 dark:text-white">
+                  {formatCr(m.challengeRating)}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">HP</div>
@@ -181,9 +206,23 @@ export default function MonsterListPage() {
                 <div className="font-medium text-gray-900 dark:text-white">{m.armorClass}</div>
               </div>
             </div>
-          </div>
+          </button>
         ))}
       </div>
+
+      <Modal
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        label={detail?.name ?? 'Monster'}
+      >
+        {detailLoading || !detail ? (
+          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            Loading monster…
+          </p>
+        ) : (
+          <MonsterStatBlock monster={detail} />
+        )}
+      </Modal>
 
       <Pagination
         page={page}
