@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import MonsterListPage from '../page';
 import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 
@@ -178,6 +180,66 @@ describe('MonsterListPage', () => {
         resolveRefetch();
         await vi.runAllTimersAsync();
       });
+    });
+  });
+
+  describe('monster stat block modal', () => {
+    const goblinDetail: SrdMonster = {
+      ...goblin,
+      specialAbilities: [{ name: 'Nimble Escape', description: 'Disengage as a bonus action.' }],
+      actions: [{ name: 'Scimitar', description: 'Melee: +4 to hit, 1d6+2 slashing.' }],
+    };
+
+    function routeApi(
+      detail: (path: string) => Promise<unknown> = () => Promise.resolve(goblinDetail)
+    ) {
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation((path: string) => {
+        if (path.startsWith('/srd/monsters/')) return detail(path);
+        return Promise.resolve(makeResponse([goblin, dragon]));
+      });
+    }
+
+    it('fetches and opens the stat block when a monster card is clicked', async () => {
+      routeApi();
+      const user = userEvent.setup();
+      render(<MonsterListPage />);
+
+      await user.click(await screen.findByRole('button', { name: /Goblin/i }));
+
+      await waitFor(() => {
+        expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1');
+      });
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+    });
+
+    it('closes the modal on Escape', async () => {
+      routeApi();
+      const user = userEvent.setup();
+      render(<MonsterListPage />);
+
+      await user.click(await screen.findByRole('button', { name: /Goblin/i }));
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+
+      await user.keyboard('{Escape}');
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+    });
+
+    it('shows an error toast and no modal when the detail fetch fails', async () => {
+      vi.mocked(toast.error).mockClear();
+      routeApi(() => Promise.reject(new Error('boom')));
+      const user = userEvent.setup();
+      render(<MonsterListPage />);
+
+      await user.click(await screen.findByRole('button', { name: /Goblin/i }));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalled();
+      });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
   });
 });
