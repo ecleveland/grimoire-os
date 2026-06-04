@@ -638,6 +638,15 @@ describe('generic free-text guards', () => {
       const text = 'The orb sheds Bright Light in a 20-foot radius.';
       expect(trailingForeignTitle(text, siblings)).toBeNull();
     });
+
+    it('matches across straight/curly apostrophe variants (Arcane Sword → Arcanist’s Magic Aura)', () => {
+      // The bled title carries the PDF's curly apostrophe; the spell-name set uses a straight one.
+      const names = new Set(["Arcanist's Magic Aura"]);
+      const text =
+        'repeat the attack against the same target or\na different one.\n\nArcanist’s Magic Aura';
+      // Returns the canonical title from the set (straight apostrophe), matched despite the curly variant in the text.
+      expect(trailingForeignTitle(text, names)).toBe("Arcanist's Magic Aura");
+    });
   });
 
   describe('danglingFragmentTail', () => {
@@ -685,6 +694,29 @@ describe('generic free-text guards', () => {
         'When you take damage, you can take a Reaction to roll 1d12 and add your Constitution modifier, reducing the damage by that total.';
       expect(flattenedTableSignals(text)).toEqual([]);
     });
+
+    it('does NOT flag a well-formed GFM table, even when its cells contain die ranges', () => {
+      // The corrected Divine Word / Teleport tables are valid GFM; their cells hold
+      // ranges like 0–20 and 01–05 that must not be mistaken for flattened soup.
+      const text = [
+        'You utter a word of power, as shown in the Divine Word Effects table.',
+        '',
+        '| Hit Points | Effect |',
+        '| --- | --- |',
+        '| 0–20 | The target dies. |',
+        '| 21–30 | The target has the Blinded, Deafened, and Stunned conditions for 1 hour. |',
+        '| 31–40 | The target has the Blinded and Deafened conditions for 10 minutes. |',
+        '| 41–50 | The target has the Deafened condition for 1 minute. |',
+      ].join('\n');
+      expect(flattenedTableSignals(text)).toEqual([]);
+    });
+
+    it('flags a caption followed by orphan table cells (Augury-style flattened table)', () => {
+      // The old Augury soup: a table reference, then bare cells on their own lines.
+      const text =
+        'The GM chooses the omen from the Omens table.\n\nOmens\nOmen\n\nFor Results That Will Be …\n\nWeal\n\nGood';
+      expect(flattenedTableSignals(text).join(' ')).toMatch(/orphan/);
+    });
   });
 
   describe('validateSpellData', () => {
@@ -726,6 +758,19 @@ describe('generic free-text guards', () => {
           spell({ name: 'B', description: 'soup\n01–05\n06–13\n14–24' }),
         ])
       ).toThrow(/2 anomalies/);
+    });
+
+    it('accepts a spell whose table has been reconstructed as GFM markdown', () => {
+      const description = [
+        'The GM rolls 1d100 and consults the Teleportation Outcome table.',
+        '',
+        '| Familiarity | Mishap | Similar Area | Off Target | On Target |',
+        '| --- | --- | --- | --- | --- |',
+        '| Very familiar | 01–05 | 06–13 | 14–24 | 25–00 |',
+        '| Seen casually | 01–33 | 34–43 | 44–53 | 54–00 |',
+        '| False destination | 01–50 | 51–00 | — | — |',
+      ].join('\n');
+      expect(() => validateSpellData([spell({ name: 'Teleport', description })])).not.toThrow();
     });
   });
 

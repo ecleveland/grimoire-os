@@ -23,23 +23,23 @@ const read = <T>(file: string): T =>
   JSON.parse(fs.readFileSync(path.join(JSON_DIR, file), 'utf-8')) as T;
 
 describe('SRD PDF-extracted data integrity', () => {
-  describe('spells.json (corrupt — cleaned by VEG-271)', () => {
+  describe('spells.json (cleaned by VEG-271)', () => {
     const spells = read<{ spells: Parameters<typeof validateSpellData>[0] }>('spells.json').spells;
 
-    it('reproduces the known extraction anomalies', () => {
-      // Flip to .not.toThrow() in VEG-271 once the spell tables/bleed are fixed.
-      expect(() => validateSpellData(spells)).toThrow(/spell data validation failed/);
+    it('contains the full SRD 5.2.1 spell list (339)', () => {
+      expect(spells).toHaveLength(339);
     });
 
-    it('catches both the foreign-title bleed and flattened-table classes', () => {
-      let message = '';
-      try {
-        validateSpellData(spells);
-      } catch (e) {
-        message = (e as Error).message;
-      }
-      expect(message).toMatch(/Programmed Illusion: description ends with another entry's title/);
-      expect(message).toMatch(/Teleport: flattened table/);
+    it('passes the free-text guard — bleed stripped and embedded tables reconstructed', () => {
+      expect(() => validateSpellData(spells)).not.toThrow();
+    });
+
+    it('represents reconstructed tables as GFM markdown (Teleport, Augury)', () => {
+      const byName = new Map(spells.map(s => [s.name, s]));
+      expect(byName.get('Teleport')?.description).toMatch(
+        /\| Familiarity \| Mishap \| Similar Area \| Off Target \| On Target \|/
+      );
+      expect(byName.get('Augury')?.description).toMatch(/\| Omen \| For Results That Will Be/);
     });
   });
 

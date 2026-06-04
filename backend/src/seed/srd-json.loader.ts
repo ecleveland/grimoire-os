@@ -189,16 +189,26 @@ export function validateMonsterData(monsters: JsonMonster[]): void {
 //    its own final line, or appended to the final line after sentence punctuation
 //    (the latter only for multi-word titles, to avoid matching ordinary prose
 //    that happens to end on a one-word spell name like "Light" or "Fly").
+// Curly/straight apostrophes and quotes vary between the PDF text and the
+// canonical entry names ("Arcanist's" vs "Arcanist’s"); normalize before comparing.
+const normalizeTypography = (s: string) => s.replace(/[’‘]/g, "'").replace(/[“”]/g, '"');
+
 export function trailingForeignTitle(text: string, foreignTitles: Set<string>): string | null {
   const trimmed = text.replace(/\s+$/, '');
   const lastLine = trimmed.slice(trimmed.lastIndexOf('\n') + 1).trim();
-  if (foreignTitles.has(lastLine)) return lastLine;
+  const normLast = normalizeTypography(lastLine);
+  const normTrimmed = normalizeTypography(trimmed);
 
   for (const title of foreignTitles) {
-    if (!title.includes(' ')) continue; // multi-word titles only on the same-line branch
-    if (!trimmed.endsWith(title)) continue;
-    const before = trimmed.charAt(trimmed.length - title.length - 1);
-    if (before === '' || /[.!?”’")\s]/.test(before)) return title;
+    const normTitle = normalizeTypography(title);
+    if (normLast === normTitle) return title;
+  }
+  for (const title of foreignTitles) {
+    const normTitle = normalizeTypography(title);
+    if (!normTitle.includes(' ')) continue; // multi-word titles only on the same-line branch
+    if (!normTrimmed.endsWith(normTitle)) continue;
+    const before = normTrimmed.charAt(normTrimmed.length - normTitle.length - 1);
+    if (before === '' || /[.!?"')\s]/.test(before)) return title;
   }
   return null;
 }
@@ -239,24 +249,68 @@ export function danglingFragmentTail(text: string): string | null {
   return null;
 }
 
+// A well-formed GFM table is the *fixed* representation (VEG-271), so it must not
+// be mistaken for soup. Strip any header + `| --- | --- |` delimiter + body-row
+// block before running the soup signals, so a reconstructed table's cells (which
+// legitimately contain die ranges, pipes, etc.) don't trip them.
+const GFM_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+export function stripGfmTables(text: string): string {
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const isHeader = lines[i].includes('|');
+    if (isHeader && i + 1 < lines.length && GFM_DELIMITER.test(lines[i + 1])) {
+      i++; // skip the delimiter row
+      while (i + 1 < lines.length && lines[i + 1].includes('|')) i++; // skip body rows
+      continue;
+    }
+    kept.push(lines[i]);
+  }
+  return kept.join('\n');
+}
+
 // 3. Flattened embedded table: a two-column table collapsed into the description
-//    as token soup. Any of three independent signals fires it — die-roll range
-//    runs ("01–05 06–13 …"), pipe-delimited rows ("Stage | Condition"), or
-//    wide-space column alignment ("1    Coyote    5    Black Bear"). Thresholds
-//    require repetition so a lone legitimate die range or em-dash never trips it.
+//    as token soup. After stripping any well-formed GFM tables, any of four
+//    independent signals fires it — die-roll range runs ("01–05 06–13 …"),
+//    pipe-delimited rows without a GFM delimiter ("Stage | Condition"), wide-space
+//    column alignment ("1    Coyote    5    Black Bear"), or a caption followed by
+//    a run of orphaned single-value cells (Augury's "Omens / Weal / Good").
+//    Thresholds require repetition so a lone die range or em-dash never trips it.
 export function flattenedTableSignals(text: string): string[] {
   const signals: string[] = [];
+  const stripped = stripGfmTables(text);
 
-  const ranges = text.match(/\b\d{1,3}\s*[–—-]\s*\d{2,3}\b/g) ?? [];
+  const ranges = stripped.match(/\b\d{1,3}\s*[–—-]\s*\d{2,3}\b/g) ?? [];
   if (ranges.length >= 3) signals.push(`die-range soup (${ranges.length} ranges)`);
 
-  const pipeRows = text.match(/^[^\n|]*\S \| \S[^\n]*$/gm) ?? [];
+  const pipeRows = stripped.match(/^[^\n|]*\S \| \S[^\n]*$/gm) ?? [];
   if (pipeRows.length >= 2) signals.push(`pipe-table rows (${pipeRows.length})`);
 
-  const wideRows = text.match(/^\S.*?\S {4,}\S.*$/gm) ?? [];
+  const wideRows = stripped.match(/^\S.*?\S {4,}\S.*$/gm) ?? [];
   if (wideRows.length >= 2) signals.push(`wide-column rows (${wideRows.length})`);
 
+  const orphan = orphanCellRun(stripped);
+  if (orphan >= 3) signals.push(`orphan table cells (${orphan})`);
+
   return signals;
+}
+
+// Longest trailing run of short, sentence-less, non-bullet lines — the residue of
+// a table whose rows each collapsed onto their own line (Augury's flattened Omens).
+function orphanCellRun(text: string): number {
+  const lines = text
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean);
+  let run = 0;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i];
+    // Exclude markdown furniture (bullets, pipes, **bold table titles**) — only bare cells count.
+    const cellLike = l.length <= 40 && !/[.!?:;]$/.test(l) && !/^[•\-|*]/.test(l);
+    if (cellLike) run++;
+    else break;
+  }
+  return run;
 }
 
 // Aggregate the free-text predicates over a set of labelled entries. foreignTitles
@@ -402,6 +456,7 @@ interface JsonSpecies {
 
 export function loadSpellsFromJson() {
   const data = readJsonFile<{ spells: JsonSpell[] }>('spells.json');
+  validateSpellData(data.spells);
   return data.spells.map(s => {
     const parts: string[] = [];
     if (s.components.verbal) parts.push('V');
