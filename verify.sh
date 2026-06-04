@@ -13,6 +13,9 @@ set -e
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+echo "==> Testing SRD extraction lib (node --test scripts/lib)"
+cd "$ROOT_DIR" && node --test scripts/lib/*.test.mjs
+
 echo "==> Building @grimoire-os/shared"
 cd "$ROOT_DIR/shared" && npm run build
 

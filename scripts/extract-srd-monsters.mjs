@@ -17,6 +17,7 @@
  *   1. `pdftotext -bbox-layout` emits every word with x/y coordinates.
  *   2. Words are split into left/right columns by x (gutter ~297pt) and re-ordered
  *      page → column → y → x, linearizing the snaking two-column reading order.
+ *      (Steps 1–2 live in the shared scripts/lib/srd-pdf.mjs core — VEG-270.)
  *   3. Stat blocks are located (a Size/Type/Alignment line immediately followed by an
  *      "AC <n>" line) and parsed with hard section delimiters (Skills/Resistances/
  *      Immunities/Vulnerabilities/Gear/Senses/Languages/CR, then Traits/Actions/
@@ -29,9 +30,8 @@
  */
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { fileURLToPath } from 'url';
-import { execFileSync } from 'child_process';
+import { bboxLayout, linearizeColumns, joinHyphenatedLines } from './lib/srd-pdf.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PDF = path.join(ROOT, 'resources', 'SRD_CC_v5.2.1.pdf');
@@ -42,41 +42,8 @@ const CONDSET = new Set(CONDITIONS);
 const SIZES = ['Tiny','Small','Medium','Large','Huge','Gargantuan'];
 const SECTION_HEADERS = ['Traits','Actions','Bonus Actions','Reactions','Legendary Actions','Lair Actions'];
 const LABELS = ['Skills','Resistances','Vulnerabilities','Immunities','Gear','Senses','Languages'];
-const COL_SPLIT = 297, Y_TOL = 4;
 
-// ── 1. PDF → word coordinates ──────────────────────────────────────────────
-function bboxXml() {
-  const tmp = path.join(os.tmpdir(), 'srd_bbox.xml');
-  execFileSync('pdftotext', ['-bbox-layout', PDF, tmp]);
-  return fs.readFileSync(tmp, 'utf8');
-}
-
-// ── 2. Column-aware linearization ──────────────────────────────────────────
-function linearize(xml) {
-  const decode = s => s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&apos;/g,"'").replace(/&quot;/g,'"');
-  const wordRe = /<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([\s\S]*?)<\/word>/g;
-  const lineify = words => {
-    const sorted = words.slice().sort((a,b)=>a.y-b.y||a.x-b.x);
-    const lines = []; let cur = null;
-    for (const w of sorted) {
-      if (cur && Math.abs(w.y-cur.y)<=Y_TOL) { cur.words.push(w); cur.y=(cur.y*(cur.words.length-1)+w.y)/cur.words.length; }
-      else { cur={y:w.y,words:[w]}; lines.push(cur); }
-    }
-    return lines.map(l=>l.words.sort((a,b)=>a.x-b.x).map(w=>w.text).join(' ').replace(/\s+/g,' ').trim()).filter(Boolean);
-  };
-  const out = [];
-  for (const chunk of xml.split(/<page /).slice(1)) {
-    const words = []; let m; wordRe.lastIndex = 0;
-    while ((m = wordRe.exec(chunk)) !== null) words.push({ x:+m[1], y:+m[2], text:decode(m[5]) });
-    out.push(...lineify(words.filter(w=>w.x<COL_SPLIT)), ...lineify(words.filter(w=>w.x>=COL_SPLIT)));
-  }
-  return out.filter(l =>
-    !/^\d{1,3} System Reference Document 5\.2\.1$/.test(l) &&
-    !/^System Reference Document 5\.2\.1$/.test(l) &&
-    !/^\d{1,3}$/.test(l.trim()));
-}
-
-// ── 3. Stat-block parsing ──────────────────────────────────────────────────
+// ── Stat-block parsing ─────────────────────────────────────────────────────
 const SIZE_RE = new RegExp(`^(${SIZES.join('|')}) .+, .+`);
 const isSizeLine = l => SIZE_RE.test(l) && !/[.:]/.test(l.split(',')[0]);
 const fixSpaced = s => s.replace(/\bS tr\b/g,'Str').replace(/\bD ex\b/g,'Dex').replace(/\bC on\b/g,'Con').replace(/\bI nt\b/g,'Int').replace(/\bW is\b/g,'Wis').replace(/\bC ha\b/g,'Cha');
@@ -94,23 +61,6 @@ function splitDamageCond(rest){
     }
   }
   return { dmg, cond };
-}
-
-// Join PDF lines, resolving end-of-line hyphenation:
-//   "sur-"+"rounded" -> "surrounded"; "5-foot-"+"wide" -> "5-foot-wide".
-function joinLines(pieces){
-  let out='';
-  for (let k=0;k<pieces.length;k++){
-    const piece=pieces[k].trim();
-    if (k===0){ out=piece; continue; }
-    const lastTok=(out.match(/(\S+)$/)||['',''])[1];
-    if (/-$/.test(out)){
-      if (/\d+-(foot|feet|mile)-$/i.test(lastTok)) out+=piece;        // dimension compound
-      else if (/[A-Za-z]-$/.test(out)) out=out.slice(0,-1)+piece;     // soft word-break
-      else out+=piece;
-    } else out+=' '+piece;
-  }
-  return out.replace(/\s+/g,' ').trim();
 }
 
 const CONNECTORS = new Set(['of','the','and','or','in','to','from','with','a','an','on','at','by','as']);
@@ -136,13 +86,13 @@ function splitEntries(secLines){
   const entries=[]; const lead=[]; let cur=null;
   for(const l of secLines){
     const nm=entryName(l);
-    const prevEnds = !cur || /[.!?]["”’)]?\s*$/.test(joinLines(cur.pieces));
+    const prevEnds = !cur || /[.!?]["”’)]?\s*$/.test(joinHyphenatedLines(cur.pieces));
     if(nm && prevEnds){ if(cur) entries.push(cur); cur={ name:nm.name.trim(), pieces:[nm.rest] }; }
     else if(cur) cur.pieces.push(l);
     else lead.push(l);
   }
   if(cur) entries.push(cur);
-  return { lead: joinLines(lead), entries: entries.map(e=>({ name:e.name, description:joinLines(e.pieces) })) };
+  return { lead: joinHyphenatedLines(lead), entries: entries.map(e=>({ name:e.name, description:joinHyphenatedLines(e.pieces) })) };
 }
 
 function isHeadingTrailer(l){
@@ -233,7 +183,7 @@ function main(){
   if(!fs.existsSync(PDF)) throw new Error(`SRD PDF not found at ${PDF}`);
   const doc=JSON.parse(fs.readFileSync(OUT,'utf8'));
   const knownNames=new Set(doc.monsters.map(m=>m.name));
-  const parsed=parseAll(linearize(bboxXml()), knownNames);
+  const parsed=parseAll(linearizeColumns(bboxLayout(PDF)), knownNames);
 
   const missing=[...knownNames].filter(n=>!parsed.has(n));
   if(missing.length) throw new Error(`Parser missed ${missing.length} monsters: ${missing.join(', ')}`);

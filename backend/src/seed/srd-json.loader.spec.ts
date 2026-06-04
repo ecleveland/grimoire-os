@@ -6,6 +6,12 @@ import {
   loadMagicItemsFromJson,
   loadSpeciesAsRacesFromJson,
   validateMonsterData,
+  trailingForeignTitle,
+  danglingFragmentTail,
+  flattenedTableSignals,
+  validateSpellData,
+  validateMagicItemData,
+  validateSpeciesData,
 } from './srd-json.loader';
 
 jest.mock('fs');
@@ -597,6 +603,226 @@ describe('srd-json.loader', () => {
     it('returns correct count', () => {
       const races = loadSpeciesAsRacesFromJson();
       expect(races).toHaveLength(2);
+    });
+  });
+});
+
+// ── Generic free-text guards (VEG-270) ─────────────────────────────────────
+// The strings below are real tails captured from the corrupt spells.json /
+// magic_items.json so the tests pin the exact corruption classes the guards
+// must reproduce for VEG-271 / VEG-272.
+describe('generic free-text guards', () => {
+  describe('trailingForeignTitle', () => {
+    const siblings = new Set(['Protection from Energy', 'Arcanist’s Magic Aura', 'Light']);
+
+    it('flags a description whose last line is another entry’s title', () => {
+      // Real "Programmed Illusion" tail: the next spell name bled across the column gap.
+      const text =
+        'image, and any noise it makes sounds hollow to the\ncreature.\n\nProtection from Energy';
+      expect(trailingForeignTitle(text, siblings)).toBe('Protection from Energy');
+    });
+
+    it('flags a foreign title appended after sentence punctuation on the final line', () => {
+      const text = 'You gain Resistance to Fire, Lightning, or Thunder. Protection from Energy';
+      expect(trailingForeignTitle(text, siblings)).toBe('Protection from Energy');
+    });
+
+    it('does not flag a description that ends with its own prose', () => {
+      const text =
+        'A shimmering green arrow streaks toward a target and bursts in a spray of acid.';
+      expect(trailingForeignTitle(text, siblings)).toBeNull();
+    });
+
+    it('does not flag a single short word that merely coincides with a sibling name mid-sentence', () => {
+      // "Light" is a sibling spell, but here it is ordinary prose, not a trailing title line.
+      const text = 'The orb sheds Bright Light in a 20-foot radius.';
+      expect(trailingForeignTitle(text, siblings)).toBeNull();
+    });
+  });
+
+  describe('danglingFragmentTail', () => {
+    it('flags an orphaned single-letter fragment tail', () => {
+      // Real "Headband of Intellect" tail — the ticket’s "… / on a / n" example.
+      const text = 'Your Intelligence score is 19 while you wear this headband.\non a\nn';
+      expect(danglingFragmentTail(text)).toBe('n');
+    });
+
+    it('flags an orphaned two-letter non-word fragment', () => {
+      expect(danglingFragmentTail('the spell ends and the creature is freed fr')).toBe('fr');
+    });
+
+    it('does not flag a clean sentence ending', () => {
+      expect(danglingFragmentTail('The target regains all expended Hit Dice.')).toBeNull();
+    });
+
+    it('does not flag a trailing "a" or "I"', () => {
+      expect(danglingFragmentTail('you and a creature within 5 feet form a')).toBeNull();
+      expect(danglingFragmentTail('the GM and I')).toBeNull();
+    });
+  });
+
+  describe('flattenedTableSignals', () => {
+    it('flags die-range token soup (e.g. Teleport / Ammunition of Slaying tables)', () => {
+      const text =
+        'Familiarity | Mishap | Similar Area | Off Target\nLifelong home\n01–05\n\n06–13\n\n14–24\n\n25–00\nSeen casually\n01–33\n\n34–43\n\n44–53\n\n54–00';
+      expect(flattenedTableSignals(text).join(' ')).toMatch(/die-range/);
+    });
+
+    it('flags pipe-delimited table rows (e.g. Control Weather)', () => {
+      const text =
+        'Stage | Condition\n1 | Heat wave\n2 | Hot\n3 | Warm\n4 | Cool\n5 | Cold\n6 | Freezing';
+      expect(flattenedTableSignals(text).join(' ')).toMatch(/pipe/);
+    });
+
+    it('flags wide-column alignment soup (e.g. Bag of Tricks)', () => {
+      const text =
+        'd8    Creature              d8    Creature\n1    Coyote                5    Black Bear\n2    Ape                   6    Giant Weasel';
+      expect(flattenedTableSignals(text).join(' ')).toMatch(/wide-column/);
+    });
+
+    it('returns no signals for clean prose that mentions a single die roll', () => {
+      const text =
+        'When you take damage, you can take a Reaction to roll 1d12 and add your Constitution modifier, reducing the damage by that total.';
+      expect(flattenedTableSignals(text)).toEqual([]);
+    });
+  });
+
+  describe('validateSpellData', () => {
+    const spell = (over: Record<string, unknown> = {}) =>
+      ({
+        name: 'Test Spell',
+        description: 'A clean spell description that ends properly.',
+        ...over,
+      }) as never;
+
+    it('accepts clean spells', () => {
+      expect(() => validateSpellData([spell(), spell({ name: 'Another' })])).not.toThrow();
+    });
+
+    it('reports foreign-title bleed between spells', () => {
+      expect(() =>
+        validateSpellData([
+          spell({
+            name: 'Programmed Illusion',
+            description: 'noise it makes sounds hollow.\n\nProtection from Energy',
+          }),
+          spell({ name: 'Protection from Energy' }),
+        ])
+      ).toThrow(/Programmed Illusion.*Protection from Energy/s);
+    });
+
+    it('reports a flattened embedded table', () => {
+      expect(() =>
+        validateSpellData([
+          spell({ description: 'Roll on the table.\n01–05\n06–13\n14–24\n25–00' }),
+        ])
+      ).toThrow(/flattened table/);
+    });
+
+    it('aggregates anomalies across spells into one error', () => {
+      expect(() =>
+        validateSpellData([
+          spell({ name: 'A', description: 'cut off fragment fr' }),
+          spell({ name: 'B', description: 'soup\n01–05\n06–13\n14–24' }),
+        ])
+      ).toThrow(/2 anomalies/);
+    });
+  });
+
+  describe('validateMagicItemData', () => {
+    const item = (over: Record<string, unknown> = {}) =>
+      ({ name: 'Test Item', description: 'A clean magic item description.', ...over }) as never;
+
+    it('accepts clean magic items', () => {
+      expect(() => validateMagicItemData([item()])).not.toThrow();
+    });
+
+    it('reports a wide-column flattened table (Bag of Tricks style)', () => {
+      expect(() =>
+        validateMagicItemData([
+          item({
+            description:
+              'roll a d8.\nd8    Creature              d8    Creature\n1    Coyote                5    Black Bear\n2    Ape                   6    Giant Weasel',
+          }),
+        ])
+      ).toThrow(/flattened table/);
+    });
+
+    it('reports a dangling fragment tail', () => {
+      expect(() =>
+        validateMagicItemData([item({ description: 'while you wear this headband.\non a\nn' })])
+      ).toThrow(/fragment/);
+    });
+  });
+
+  describe('validateSpeciesData', () => {
+    const trait = (over: Record<string, unknown> = {}) => ({
+      name: 'Some Trait',
+      description: 'A clean trait description.',
+      options: null,
+      table: null,
+      ...over,
+    });
+    const species = (name: string, traits: ReturnType<typeof trait>[]) =>
+      ({ name, traits }) as never;
+
+    it('accepts a species whose referenced table is present and well-formed', () => {
+      expect(() =>
+        validateSpeciesData([
+          species('Dragonborn', [
+            trait({
+              name: 'Draconic Ancestry',
+              description: 'Choose the kind of dragon from the Draconic Ancestors table.',
+              table: {
+                name: 'Draconic Ancestors',
+                columns: ['Dragon', 'Damage Type'],
+                rows: [['Black', 'Acid']],
+              },
+            }),
+          ]),
+        ])
+      ).not.toThrow();
+    });
+
+    it('accepts a species whose referenced options list is enumerated', () => {
+      expect(() =>
+        validateSpeciesData([
+          species('Goliath', [
+            trait({
+              name: 'Giant Ancestry',
+              description: 'Choose one of the following benefits:',
+              options: {
+                choices: [{ name: 'Cloud’s Jaunt', description: 'You teleport 30 feet.' }],
+              },
+            }),
+          ]),
+        ])
+      ).not.toThrow();
+    });
+
+    it('reports a trait that references a table that was dropped (table & options null)', () => {
+      expect(() =>
+        validateSpeciesData([
+          species('Elf', [
+            trait({
+              name: 'Elven Lineage',
+              description: 'Choose a lineage from the Elven Lineages table.',
+              table: null,
+              options: null,
+            }),
+          ]),
+        ])
+      ).toThrow(/Elven Lineage.*table/s);
+    });
+
+    it('reports free-text corruption inside a trait description', () => {
+      expect(() =>
+        validateSpeciesData([
+          species('Orc', [
+            trait({ name: 'Adrenaline Rush', description: 'You move fast on a\nn' }),
+          ]),
+        ])
+      ).toThrow(/fragment/);
     });
   });
 });

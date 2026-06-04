@@ -176,6 +176,201 @@ export function validateMonsterData(monsters: JsonMonster[]): void {
   }
 }
 
+// ── Generic free-text validation guards (VEG-270) ──────────────────────────
+// Reusable across the PDF-extracted SRD datasets (spells, magic items, species),
+// mirroring validateMonsterData (VEG-261). Each predicate targets one corruption
+// class produced by column-blind extraction of the SRD's two-column / embedded-
+// table layout: a stat block or table that bled across the gutter leaves a
+// foreign title, an orphaned word fragment, or a table collapsed into token soup.
+// See scripts/lib/srd-pdf.mjs for the extraction side these guards backstop.
+
+// 1. Trailing foreign-title bleed: the description ends with the title of a
+//    different entry, absorbed across the column gap. The bled title is either
+//    its own final line, or appended to the final line after sentence punctuation
+//    (the latter only for multi-word titles, to avoid matching ordinary prose
+//    that happens to end on a one-word spell name like "Light" or "Fly").
+export function trailingForeignTitle(text: string, foreignTitles: Set<string>): string | null {
+  const trimmed = text.replace(/\s+$/, '');
+  const lastLine = trimmed.slice(trimmed.lastIndexOf('\n') + 1).trim();
+  if (foreignTitles.has(lastLine)) return lastLine;
+
+  for (const title of foreignTitles) {
+    if (!title.includes(' ')) continue; // multi-word titles only on the same-line branch
+    if (!trimmed.endsWith(title)) continue;
+    const before = trimmed.charAt(trimmed.length - title.length - 1);
+    if (before === '' || /[.!?”’")\s]/.test(before)) return title;
+  }
+  return null;
+}
+
+// 2. Dangling sub-word fragment tail: a mid-word column break left an orphaned
+//    one- or two-letter lowercase fragment at the very end (the ticket's
+//    "… / on a / n" example). "a" and "i" are real words and never flagged.
+const FRAGMENT_STOPWORDS = new Set([
+  'an',
+  'as',
+  'at',
+  'be',
+  'by',
+  'do',
+  'go',
+  'he',
+  'if',
+  'in',
+  'is',
+  'it',
+  'me',
+  'my',
+  'no',
+  'of',
+  'on',
+  'or',
+  'so',
+  'to',
+  'up',
+  'us',
+  'we',
+]);
+export function danglingFragmentTail(text: string): string | null {
+  const last = text.replace(/\s+$/, '').split(/\s+/).pop() ?? '';
+  if (last === 'a' || last === 'i' || last === 'I') return null;
+  if (/^[a-z]$/.test(last)) return last;
+  if (/^[a-z]{2}$/.test(last) && !FRAGMENT_STOPWORDS.has(last)) return last;
+  return null;
+}
+
+// 3. Flattened embedded table: a two-column table collapsed into the description
+//    as token soup. Any of three independent signals fires it — die-roll range
+//    runs ("01–05 06–13 …"), pipe-delimited rows ("Stage | Condition"), or
+//    wide-space column alignment ("1    Coyote    5    Black Bear"). Thresholds
+//    require repetition so a lone legitimate die range or em-dash never trips it.
+export function flattenedTableSignals(text: string): string[] {
+  const signals: string[] = [];
+
+  const ranges = text.match(/\b\d{1,3}\s*[–—-]\s*\d{2,3}\b/g) ?? [];
+  if (ranges.length >= 3) signals.push(`die-range soup (${ranges.length} ranges)`);
+
+  const pipeRows = text.match(/^[^\n|]*\S \| \S[^\n]*$/gm) ?? [];
+  if (pipeRows.length >= 2) signals.push(`pipe-table rows (${pipeRows.length})`);
+
+  const wideRows = text.match(/^\S.*?\S {4,}\S.*$/gm) ?? [];
+  if (wideRows.length >= 2) signals.push(`wide-column rows (${wideRows.length})`);
+
+  return signals;
+}
+
+// Aggregate the free-text predicates over a set of labelled entries. foreignTitles
+// defaults to the entry labels themselves (the bleed case for flat datasets like
+// spells); callers with a richer title space (species: species + trait names) pass
+// their own set.
+export interface FreeTextEntry {
+  label: string;
+  text: string;
+}
+export function findFreeTextAnomalies(
+  entries: FreeTextEntry[],
+  foreignTitles?: Set<string>
+): string[] {
+  const titles = foreignTitles ?? new Set(entries.map(e => e.label));
+  const errors: string[] = [];
+
+  for (const { label, text } of entries) {
+    const foreign = new Set(titles);
+    foreign.delete(label);
+
+    const bled = trailingForeignTitle(text, foreign);
+    if (bled) {
+      errors.push(`${label}: description ends with another entry's title "${bled}"`);
+    }
+
+    const frag = danglingFragmentTail(text);
+    if (frag) {
+      errors.push(`${label}: dangling word fragment at end of description "…${frag}"`);
+    }
+
+    const flattened = flattenedTableSignals(text);
+    if (flattened.length > 0) {
+      errors.push(`${label}: flattened table in description — ${flattened.join('; ')}`);
+    }
+  }
+
+  return errors;
+}
+
+function raiseIfAnomalies(dataset: string, errors: string[]): void {
+  if (errors.length === 0) return;
+  throw new Error(
+    `SRD ${dataset} data validation failed (${errors.length} ${errors.length === 1 ? 'anomaly' : 'anomalies'}):\n  ` +
+      errors.join('\n  ')
+  );
+}
+
+export function validateSpellData(spells: JsonSpell[]): void {
+  raiseIfAnomalies(
+    'spell',
+    findFreeTextAnomalies(spells.map(s => ({ label: s.name, text: s.description })))
+  );
+}
+
+export function validateMagicItemData(items: JsonMagicItem[]): void {
+  raiseIfAnomalies(
+    'magic item',
+    findFreeTextAnomalies(items.map(i => ({ label: i.name, text: i.description })))
+  );
+}
+
+// Species traits reference an option table by name ("…from the Elven Lineages
+// table") or an inline list ("…the following benefits:"). A referenced table is
+// only well-formed when the matching structured `table`/`options` survived
+// extraction; a column-blind extraction drops it, leaving a dangling reference.
+const TABLE_REFERENCE = /\bthe ([A-Z][\w’'’ ]*?) tables?\b/;
+const INLINE_LIST_REFERENCE = /the following (?:options|benefits)\b/i;
+
+function tableIsWellFormed(table: JsonSpeciesTrait['table']): boolean {
+  return (
+    !!table &&
+    Array.isArray(table.columns) &&
+    table.columns.length > 0 &&
+    Array.isArray(table.rows) &&
+    table.rows.length > 0 &&
+    table.rows.every(r => Array.isArray(r) && r.length === table.columns.length)
+  );
+}
+
+function optionsArePresent(options: JsonSpeciesTrait['options']): boolean {
+  return !!options && Array.isArray(options.choices) && options.choices.length > 0;
+}
+
+export function validateSpeciesData(species: JsonSpecies[]): void {
+  const titles = new Set<string>();
+  for (const s of species) {
+    titles.add(s.name);
+    for (const t of s.traits) titles.add(t.name);
+  }
+
+  const errors = findFreeTextAnomalies(
+    species.flatMap(s =>
+      s.traits.map(t => ({ label: `${s.name} / ${t.name}`, text: t.description }))
+    ),
+    titles
+  );
+
+  for (const s of species) {
+    for (const t of s.traits) {
+      const referencesTable =
+        TABLE_REFERENCE.test(t.description) || INLINE_LIST_REFERENCE.test(t.description);
+      if (referencesTable && !tableIsWellFormed(t.table) && !optionsArePresent(t.options)) {
+        errors.push(
+          `${s.name} / ${t.name}: references an option table that is missing or malformed ` +
+            `(no well-formed table or options accompany the trait)`
+        );
+      }
+    }
+  }
+
+  raiseIfAnomalies('species', errors);
+}
+
 interface JsonMagicItem {
   name: string;
   category: string;
@@ -185,13 +380,22 @@ interface JsonMagicItem {
   description: string;
 }
 
+interface JsonSpeciesTrait {
+  name: string;
+  description: string;
+  // Lineage / ancestry traits carry a structured option table that the SRD prose
+  // points at ("…from the Elven Lineages table"). Either may be present.
+  options?: { choices: { name: string; description: string }[] } | null;
+  table?: { name: string; columns: string[]; rows: string[][] } | null;
+}
+
 interface JsonSpecies {
   name: string;
   creature_type: string;
   size: string;
   size_description: string;
   speed: number;
-  traits: { name: string; description: string }[];
+  traits: JsonSpeciesTrait[];
 }
 
 // ── Loaders ────────────────────────────────────────────
