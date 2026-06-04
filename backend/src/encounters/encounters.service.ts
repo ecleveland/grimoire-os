@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
@@ -29,8 +34,34 @@ export class EncountersService {
     private campaignAuth: CampaignAuthService
   ) {}
 
+  /**
+   * VEG-258: when combatants carry a `monsterId`, verify each one references an
+   * existing SRD monster. Combatants without a `monsterId` (manual entries) are
+   * left untouched. Throws 400 listing any unknown references.
+   */
+  private async assertMonsterReferences(
+    combatants: CreateEncounterDto['combatants']
+  ): Promise<void> {
+    if (!combatants) return;
+    const ids = [
+      ...new Set(combatants.map(c => c.monsterId).filter((id): id is string => id !== undefined)),
+    ];
+    if (ids.length === 0) return;
+
+    const found = await this.prisma.monster.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    if (found.length !== ids.length) {
+      const foundIds = new Set(found.map(m => m.id));
+      const missing = ids.filter(id => !foundIds.has(id));
+      throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
+    }
+  }
+
   async create(userId: string, dto: CreateEncounterDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
+    await this.assertMonsterReferences(dto.combatants);
     const { combatants, ...rest } = dto;
     const encounter = await this.prisma.encounter.create({
       data: {
@@ -87,6 +118,7 @@ export class EncountersService {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
     this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
+    await this.assertMonsterReferences(dto.combatants);
     const { combatants, expectedVersion, ...rest } = dto;
     const data = {
       ...rest,

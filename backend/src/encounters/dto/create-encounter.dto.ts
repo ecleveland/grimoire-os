@@ -43,6 +43,14 @@ class CombatantDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'SRD monster this combatant was created from (VEG-258); manual combatants omit it.',
+  })
+  @IsOptional()
+  @IsString()
+  monsterId?: string;
 }
 
 export class CreateEncounterDto {
