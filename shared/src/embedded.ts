@@ -54,6 +54,12 @@ export interface Combatant {
   ac: number;
   isNpc: boolean;
   notes?: string;
+  /**
+   * Optional reference to the SRD monster this combatant was created from
+   * (VEG-258). Lets the tracker re-open the source stat block. Manual
+   * combatants omit it.
+   */
+  monsterId?: string;
 }
 
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;

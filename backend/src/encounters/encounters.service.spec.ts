@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { EncountersService } from './encounters.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,6 +23,7 @@ describe('EncountersService', () => {
   };
 
   const ENCOUNTER_ID = 'enc-1111-2222-3333-444444444444';
+  const MONSTER_ID = 'mon-1111-2222-3333-444444444444';
 
   const mockCampaignOwned = {
     id: CAMPAIGN_ID,
@@ -119,6 +125,66 @@ describe('EncountersService', () => {
       });
       expect(result).toEqual(mockEncounter);
       expect(result).toBeInstanceOf(EncounterDto);
+    });
+
+    it('persists a combatant carrying monsterId after validating the reference', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      prisma.monster.findMany.mockResolvedValue([{ id: MONSTER_ID }]);
+      const dtoWithMonster = {
+        campaignId: CAMPAIGN_ID,
+        name: 'Goblin Ambush',
+        combatants: [
+          {
+            name: 'Goblin',
+            initiative: 15,
+            hp: 7,
+            maxHp: 7,
+            ac: 15,
+            isNpc: true,
+            monsterId: MONSTER_ID,
+          },
+        ],
+      };
+      const created = { ...mockEncounter, combatants: dtoWithMonster.combatants };
+      prisma.encounter.create.mockResolvedValue(created);
+
+      const result = await service.create(USER_ID, dtoWithMonster);
+
+      expect(prisma.monster.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [MONSTER_ID] } },
+        select: { id: true },
+      });
+      expect(prisma.encounter.create).toHaveBeenCalledWith({
+        data: {
+          campaignId: CAMPAIGN_ID,
+          name: 'Goblin Ambush',
+          createdById: USER_ID,
+          combatants: dtoWithMonster.combatants,
+        },
+      });
+      expect(result).toEqual(created);
+    });
+
+    it('does not query monsters when no combatant carries a monsterId', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      prisma.encounter.create.mockResolvedValue(mockEncounter);
+
+      await service.create(USER_ID, createDto);
+
+      expect(prisma.monster.findMany).not.toHaveBeenCalled();
+    });
+
+    it('rejects creation when a combatant references an unknown monsterId', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      prisma.monster.findMany.mockResolvedValue([]); // reference not found
+      const dto = {
+        campaignId: CAMPAIGN_ID,
+        name: 'Goblin Ambush',
+        combatants: [{ name: 'Goblin', monsterId: 'does-not-exist' }],
+      };
+
+      await expect(service.create(USER_ID, dto as never)).rejects.toThrow(BadRequestException);
+      expect(prisma.encounter.create).not.toHaveBeenCalled();
     });
   });
 
@@ -259,6 +325,56 @@ describe('EncountersService', () => {
         data: { combatants: newCombatants },
       });
       expect(result).toEqual(updated);
+    });
+
+    it('validates monsterId references when updating combatants', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaign: campaignAuthShape,
+      });
+      prisma.monster.findMany.mockResolvedValue([{ id: MONSTER_ID }]);
+      const newCombatants = [
+        {
+          name: 'Dragon',
+          initiative: 20,
+          hp: 200,
+          maxHp: 200,
+          ac: 19,
+          isNpc: true,
+          monsterId: MONSTER_ID,
+        },
+      ];
+      const updated = { ...mockEncounter, combatants: newCombatants };
+      prisma.encounter.update.mockResolvedValue(updated);
+
+      const result = await service.update(ENCOUNTER_ID, USER_ID, {
+        combatants: newCombatants,
+      } as never);
+
+      expect(prisma.monster.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [MONSTER_ID] } },
+        select: { id: true },
+      });
+      expect(prisma.encounter.update).toHaveBeenCalledWith({
+        where: { id: ENCOUNTER_ID },
+        data: { combatants: newCombatants },
+      });
+      expect(result).toEqual(updated);
+    });
+
+    it('rejects update when a combatant references an unknown monsterId', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaign: campaignAuthShape,
+      });
+      prisma.monster.findMany.mockResolvedValue([]); // reference not found
+
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID, {
+          combatants: [{ name: 'X', monsterId: 'nope' }],
+        } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when encounter does not exist', async () => {
