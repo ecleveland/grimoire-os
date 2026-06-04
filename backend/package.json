@@ -13,6 +13,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "seed": "ts-node -r tsconfig-paths/register src/seed/run-seed.ts",
+    "backfill:npc-statblocks": "ts-node -r tsconfig-paths/register src/npcs/run-npc-statblock-backfill.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
