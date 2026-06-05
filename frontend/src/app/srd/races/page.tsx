@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import Markdown from '@/components/Markdown';
 import type { SrdRace } from '@/lib/types';
 
 export default function RaceListPage() {
@@ -59,32 +60,34 @@ export default function RaceListPage() {
                 {race.description && (
                   <p className="text-gray-600 dark:text-gray-400 text-sm">{race.description}</p>
                 )}
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Ability Bonuses
-                  </h3>
-                  <div className="flex gap-2 mt-1">
-                    {Object.entries(race.abilityBonuses).map(([ability, bonus]) => (
-                      <span
-                        key={ability}
-                        className="text-xs px-2 py-0.5 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded"
-                      >
-                        {ability} +{bonus}
-                      </span>
-                    ))}
+                {race.abilityBonuses && Object.keys(race.abilityBonuses).length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      Ability Bonuses
+                    </h3>
+                    <div className="flex gap-2 mt-1">
+                      {Object.entries(race.abilityBonuses).map(([ability, bonus]) => (
+                        <span
+                          key={ability}
+                          className="text-xs px-2 py-0.5 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded"
+                        >
+                          {ability} +{bonus}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
                 {race.traits.length > 0 && (
                   <div>
                     <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Traits</h3>
-                    <div className="flex flex-wrap gap-1 mt-1">
+                    <div className="mt-1 space-y-2">
                       {race.traits.map(t => (
-                        <span
-                          key={t.name}
-                          className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-                        >
-                          {t.name}
-                        </span>
+                        <div key={t.name}>
+                          <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                            {t.name}.
+                          </span>{' '}
+                          {t.description && <Markdown className="mt-0.5">{t.description}</Markdown>}
+                        </div>
                       ))}
                     </div>
                   </div>
