@@ -1202,4 +1202,132 @@ describe('SrdService', () => {
       expect(cache.clear).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ── findFeaturesByIds (unified feature hydration) ────
+
+  describe('findFeaturesByIds', () => {
+    beforeEach(() => {
+      prisma.classFeature.findMany.mockResolvedValue([]);
+      prisma.subclassFeature.findMany.mockResolvedValue([]);
+      prisma.raceTrait.findMany.mockResolvedValue([]);
+      prisma.backgroundFeature.findMany.mockResolvedValue([]);
+    });
+
+    it('returns an empty array for empty input without querying', async () => {
+      const result = await service.findFeaturesByIds([]);
+
+      expect(result).toEqual([]);
+      expect(prisma.classFeature.findMany).not.toHaveBeenCalled();
+      expect(prisma.subclassFeature.findMany).not.toHaveBeenCalled();
+      expect(prisma.raceTrait.findMany).not.toHaveBeenCalled();
+      expect(prisma.backgroundFeature.findMany).not.toHaveBeenCalled();
+    });
+
+    it('resolves ids across all four feature tables into UnifiedFeatureData', async () => {
+      prisma.classFeature.findMany.mockResolvedValue([
+        {
+          id: 'cf-1',
+          name: 'Action Surge',
+          level: 2,
+          description: 'Extra action.',
+          classId: 'cls-1',
+          class: { id: 'cls-1', name: 'Fighter' },
+        },
+      ]);
+      prisma.subclassFeature.findMany.mockResolvedValue([
+        {
+          id: 'scf-1',
+          name: 'Combat Superiority',
+          level: 3,
+          description: 'Maneuvers.',
+          subclassId: 'sc-1',
+          subclass: { id: 'sc-1', name: 'Battle Master' },
+        },
+      ]);
+      prisma.raceTrait.findMany.mockResolvedValue([
+        {
+          id: 'rt-1',
+          name: 'Darkvision',
+          description: 'See in dim light.',
+          raceId: 'r-1',
+          race: { id: 'r-1', name: 'Elf' },
+        },
+      ]);
+      prisma.backgroundFeature.findMany.mockResolvedValue([
+        {
+          id: 'bf-1',
+          name: 'Shelter of the Faithful',
+          description: 'Temple aid.',
+          backgroundId: 'b-1',
+          background: { id: 'b-1', name: 'Acolyte' },
+        },
+      ]);
+
+      const ids = ['cf-1', 'scf-1', 'rt-1', 'bf-1'];
+      const result = await service.findFeaturesByIds(ids);
+
+      expect(prisma.classFeature.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ids } } })
+      );
+      expect(prisma.subclassFeature.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ids } } })
+      );
+      expect(prisma.raceTrait.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ids } } })
+      );
+      expect(prisma.backgroundFeature.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: ids } } })
+      );
+
+      expect(result).toEqual([
+        {
+          id: 'cf-1',
+          name: 'Action Surge',
+          level: 2,
+          description: 'Extra action.',
+          parent: { kind: 'class', id: 'cls-1', name: 'Fighter' },
+        },
+        {
+          id: 'scf-1',
+          name: 'Combat Superiority',
+          level: 3,
+          description: 'Maneuvers.',
+          parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master' },
+        },
+        {
+          id: 'rt-1',
+          name: 'Darkvision',
+          description: 'See in dim light.',
+          parent: { kind: 'race', id: 'r-1', name: 'Elf' },
+        },
+        {
+          id: 'bf-1',
+          name: 'Shelter of the Faithful',
+          description: 'Temple aid.',
+          parent: { kind: 'background', id: 'b-1', name: 'Acolyte' },
+        },
+      ]);
+    });
+
+    it('omits level for race traits and background features', async () => {
+      prisma.raceTrait.findMany.mockResolvedValue([
+        {
+          id: 'rt-1',
+          name: 'Darkvision',
+          description: 'd',
+          raceId: 'r-1',
+          race: { id: 'r-1', name: 'Elf' },
+        },
+      ]);
+
+      const result = await service.findFeaturesByIds(['rt-1']);
+
+      expect(result[0].level).toBeUndefined();
+    });
+
+    it('skips unknown ids without throwing', async () => {
+      const result = await service.findFeaturesByIds(['nope']);
+      expect(result).toEqual([]);
+    });
+  });
 });

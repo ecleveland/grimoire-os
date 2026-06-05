@@ -1,18 +1,23 @@
-import { Controller, Get, Param, Query, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseInterceptors } from '@nestjs/common';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
+import { PrintableCardsService } from './printable-cards.service';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto } from './dto/query-features.dto';
 import { QuerySearchDto } from './dto/query-search.dto';
+import { HydratePrintCardsDto } from './dto/hydrate-cards.dto';
 
 @ApiTags('SRD')
 @Controller('srd')
 @UseInterceptors(CacheInterceptor)
 export class SrdController {
-  constructor(private readonly srdService: SrdService) {}
+  constructor(
+    private readonly srdService: SrdService,
+    private readonly printableCardsService: PrintableCardsService
+  ) {}
 
   // ── Spells ──────────────────────────────────────────
 
@@ -214,5 +219,18 @@ export class SrdController {
   })
   search(@Query() query: QuerySearchDto) {
     return this.srdService.search(query);
+  }
+
+  // ── Printable cards batch hydrate (VEG-263) ─────────
+
+  @Post('cards')
+  @ApiOperation({
+    summary: 'Batch-hydrate a mixed print selection into printable card view-models',
+    description:
+      'Read-only despite POST (the grouped selection exceeds query-string limits). ' +
+      'Unknown ids are silently dropped; batches above 100 total ids are rejected.',
+  })
+  hydrateCards(@Body() body: HydratePrintCardsDto) {
+    return this.printableCardsService.hydrate(body.selections);
   }
 }
