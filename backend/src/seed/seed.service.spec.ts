@@ -74,6 +74,7 @@ describe('SeedService', () => {
     prisma.classFeature.createMany.mockResolvedValue({ count: 0 });
     prisma.subclassFeature.createMany.mockResolvedValue({ count: 0 });
     prisma.raceTrait.createMany.mockResolvedValue({ count: 0 });
+    prisma.raceTrait.upsert.mockResolvedValue({});
     prisma.backgroundFeature.createMany.mockResolvedValue({ count: 0 });
     prisma.npcNamePool.createMany.mockResolvedValue({ count: 0 });
     prisma.npcNamePool.deleteMany.mockResolvedValue({ count: 0 });
@@ -342,19 +343,24 @@ describe('SeedService', () => {
     }
   });
 
-  it('seeds race traits into race_traits with FK to parent race', async () => {
+  it('upserts race traits into race_traits with FK to parent race so corrected text propagates', async () => {
     await service.seed();
 
-    expect(prisma.raceTrait.createMany).toHaveBeenCalled();
-    const call = prisma.raceTrait.createMany.mock.calls[0][0];
-    expect(call).toHaveProperty('skipDuplicates', true);
-    for (const row of call.data) {
-      expect(row).toMatchObject({
+    // Upsert (not createMany/skipDuplicates), keyed on the [raceId, name] unique, so the
+    // VEG-273 lineage/ancestry option tables embedded in trait descriptions reach existing rows.
+    expect(prisma.raceTrait.upsert).toHaveBeenCalled();
+    for (const [args] of prisma.raceTrait.upsert.mock.calls) {
+      expect(args.where.raceId_name).toMatchObject({
+        raceId: expect.stringMatching(/^id-/),
+        name: expect.any(String),
+      });
+      expect(args.create).toMatchObject({
         name: expect.any(String),
         description: expect.any(String),
         raceId: expect.stringMatching(/^id-/),
       });
-      expect(row).not.toHaveProperty('level');
+      expect(args.update).toMatchObject({ description: expect.any(String) });
+      expect(args.create).not.toHaveProperty('level');
     }
   });
 

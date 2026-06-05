@@ -598,13 +598,45 @@ export function loadMagicItemsFromJson() {
   }));
 }
 
+// Surface a lineage/ancestry trait's structured options into its flattened
+// description as GFM markdown (VEG-273). RaceTrait stores only name + description,
+// so — mirroring the GFM-table representation VEG-271/272 chose for spells and
+// magic items — the referenced table (or, failing that, the enumerated option
+// list) is appended to the prose. The races page renders it with <Markdown>.
+function renderTraitTableMarkdown(table: NonNullable<JsonSpeciesTrait['table']>): string {
+  const header = `| ${table.columns.join(' | ')} |`;
+  const delimiter = `| ${table.columns.map(() => '---').join(' | ')} |`;
+  const body = table.rows.map(row => `| ${row.join(' | ')} |`).join('\n');
+  return `**${table.name}**\n\n${header}\n${delimiter}\n${body}`;
+}
+
+function renderTraitOptionsMarkdown(options: NonNullable<JsonSpeciesTrait['options']>): string {
+  return options.choices.map(c => `- **${c.name}.** ${c.description}`).join('\n');
+}
+
+// Prefer the table (the SRD's concise level-by-level reference); fall back to the
+// enumerated option list (Gnome, Goliath) when no table accompanies the trait.
+function traitDescriptionWithOptions(trait: JsonSpeciesTrait): string {
+  if (tableIsWellFormed(trait.table)) {
+    return `${trait.description}\n\n${renderTraitTableMarkdown(trait.table!)}`;
+  }
+  if (optionsArePresent(trait.options)) {
+    return `${trait.description}\n\n${renderTraitOptionsMarkdown(trait.options!)}`;
+  }
+  return trait.description;
+}
+
 export function loadSpeciesAsRacesFromJson() {
   const data = readJsonFile<{ species: JsonSpecies[] }>('species.json');
+  validateSpeciesData(data.species);
   return data.species.map(s => ({
     name: s.name,
     speed: s.speed,
     size: s.size,
-    traits: s.traits.map(({ name, description }) => ({ name, description })),
+    traits: s.traits.map(t => ({
+      name: t.name,
+      description: traitDescriptionWithOptions(t),
+    })),
     languages: ['Common'],
     sizeDescription: s.size_description,
   }));

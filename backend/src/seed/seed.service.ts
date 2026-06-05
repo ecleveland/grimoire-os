@@ -192,25 +192,23 @@ export class SeedService {
         select: { id: true, name: true },
       });
       const raceIdByName = new Map(raceRecords.map(r => [r.name, r.id]));
-      const raceTraitRows: Prisma.RaceTraitCreateManyInput[] = [];
+      // Upsert (not createMany/skipDuplicates), keyed on the [raceId, name] unique, so
+      // corrected SRD trait text — e.g. the VEG-273 lineage/ancestry option tables embedded
+      // in the description — propagates to existing rows on re-seed, preserving ids/FKs.
+      let raceTraitCount = 0;
       for (const race of races) {
         const raceId = raceIdByName.get(race.name);
         if (!raceId) continue;
         for (const t of race.traits ?? []) {
-          raceTraitRows.push({
-            raceId,
-            name: t.name,
-            description: t.description,
+          await tx.raceTrait.upsert({
+            where: { raceId_name: { raceId, name: t.name } },
+            create: { raceId, name: t.name, description: t.description },
+            update: { description: t.description },
           });
+          raceTraitCount++;
         }
       }
-      if (raceTraitRows.length) {
-        await tx.raceTrait.createMany({
-          data: raceTraitRows,
-          skipDuplicates: true,
-        });
-      }
-      console.log(`  Race Traits: ${raceTraitRows.length} entries`);
+      console.log(`  Race Traits: ${raceTraitCount} entries`);
 
       // ── Background features ──────────────────────────
       const backgroundNames = srdBackgrounds.map(b => b.name);

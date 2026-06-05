@@ -604,6 +604,134 @@ describe('srd-json.loader', () => {
       const races = loadSpeciesAsRacesFromJson();
       expect(races).toHaveLength(2);
     });
+
+    // ── Lineage / ancestry option tables (VEG-273) ──────────────────────────
+    // The loader must surface the structured `table`/`options` the SRD prose
+    // references inline ("…from the Elven Lineages table") into the flattened
+    // trait description as GFM markdown, so it reaches RaceTrait.description and
+    // renders on the races page instead of being dropped.
+    const speciesWithOptionsJson = {
+      metadata: { source: 'SRD 5.2.1', count: 3 },
+      species: [
+        {
+          name: 'Dragonborn',
+          creature_type: 'Humanoid',
+          size: 'Medium',
+          size_description: 'about 5-7 feet tall',
+          speed: 30,
+          traits: [
+            {
+              name: 'Draconic Ancestry',
+              description: 'Choose the kind of dragon from the Draconic Ancestors table.',
+              options: null,
+              table: {
+                name: 'Draconic Ancestors',
+                columns: ['Dragon', 'Damage Type'],
+                rows: [
+                  ['Black', 'Acid'],
+                  ['Blue', 'Lightning'],
+                ],
+              },
+            },
+          ],
+        },
+        {
+          name: 'Goliath',
+          creature_type: 'Humanoid',
+          size: 'Medium',
+          size_description: 'about 7-8 feet tall',
+          speed: 35,
+          traits: [
+            {
+              name: 'Giant Ancestry',
+              description: 'Choose one of the following benefits:',
+              options: {
+                choices: [
+                  {
+                    name: "Cloud's Jaunt (Cloud Giant)",
+                    description: 'As a Bonus Action, you teleport up to 30 feet.',
+                  },
+                ],
+              },
+              table: null,
+            },
+          ],
+        },
+        {
+          name: 'Elf',
+          creature_type: 'Humanoid',
+          size: 'Medium',
+          size_description: 'about 5-6 feet tall',
+          speed: 30,
+          traits: [
+            {
+              name: 'Elven Lineage',
+              description: 'Choose a lineage from the Elven Lineages table.',
+              options: { choices: [{ name: 'Drow', description: 'Your Darkvision is 120 feet.' }] },
+              table: {
+                name: 'Elven Lineages',
+                columns: ['Lineage', 'Level 1'],
+                rows: [['Drow', 'Your Darkvision is 120 feet.']],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    it('appends a referenced table to the trait description as GFM markdown', () => {
+      mockJsonFile('species.json', speciesWithOptionsJson);
+      const dragonborn = loadSpeciesAsRacesFromJson().find(r => r.name === 'Dragonborn')!;
+      const { description } = dragonborn.traits[0];
+      expect(description).toContain('Choose the kind of dragon from the Draconic Ancestors table.');
+      expect(description).toContain('**Draconic Ancestors**');
+      expect(description).toContain('| Dragon | Damage Type |');
+      expect(description).toContain('| --- | --- |');
+      expect(description).toContain('| Black | Acid |');
+      expect(description).toContain('| Blue | Lightning |');
+    });
+
+    it('appends an enumerated options list as a markdown bullet list when no table is present', () => {
+      mockJsonFile('species.json', speciesWithOptionsJson);
+      const goliath = loadSpeciesAsRacesFromJson().find(r => r.name === 'Goliath')!;
+      const { description } = goliath.traits[0];
+      expect(description).toContain('Choose one of the following benefits:');
+      expect(description).toContain(
+        "- **Cloud's Jaunt (Cloud Giant).** As a Bonus Action, you teleport up to 30 feet."
+      );
+    });
+
+    it('prefers the table over the options list when a trait carries both', () => {
+      mockJsonFile('species.json', speciesWithOptionsJson);
+      const elf = loadSpeciesAsRacesFromJson().find(r => r.name === 'Elf')!;
+      const { description } = elf.traits[0];
+      expect(description).toContain('| Lineage | Level 1 |');
+      expect(description).not.toMatch(/- \*\*Drow\.\*\*/);
+    });
+
+    it('runs the species data-integrity guard, throwing on a dangling table reference', () => {
+      mockJsonFile('species.json', {
+        metadata: { source: 'SRD 5.2.1', count: 1 },
+        species: [
+          {
+            name: 'Broken',
+            creature_type: 'Humanoid',
+            size: 'Medium',
+            size_description: 'about 5 feet tall',
+            speed: 30,
+            traits: [
+              {
+                name: 'Mystery Lineage',
+                description: 'Choose a lineage from the Mystery Lineages table.',
+                options: null,
+                table: null,
+              },
+            ],
+          },
+        ],
+      });
+      expect(() => loadSpeciesAsRacesFromJson()).toThrow(/species data validation failed/i);
+    });
   });
 });
 
