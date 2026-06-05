@@ -270,17 +270,43 @@ function buildDescription(name, descLines) {
   return segments.join('\n\n');
 }
 
+// Collapse stray blank lines left by the column-blind extraction (clean spell
+// descriptions never use `\n\n`; rendered through markdown these became spurious
+// mid-sentence paragraph gaps). A single blank line is preserved only where it
+// separates a reconstructed GFM table or **bold title** from adjacent text — the
+// markdown block boundary those need.
+function normalizeBlankLines(desc) {
+  const isStructural = l => {
+    const t = l.trim();
+    return t.startsWith('|') || t.startsWith('**');
+  };
+  const lines = desc.split('\n');
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== '') {
+      out.push(lines[i]);
+      continue;
+    }
+    let k = i + 1;
+    while (k < lines.length && lines[k].trim() === '') k++;
+    const prev = out.length ? out[out.length - 1] : '';
+    const next = k < lines.length ? lines[k] : '';
+    if (isStructural(prev) || isStructural(next)) out.push(''); // keep one block-separating blank
+    i = k - 1;
+  }
+  return out.join('\n');
+}
+
 // Strip a trailing foreign spell title (apostrophe-insensitive) from a description.
+// Idempotent: a no-op when the description has already been repaired (so the tool
+// can be re-run safely). Blank-line cleanup is handled by the global sweep.
 function stripTrailingForeignName(desc, names, self) {
   const lines = desc.replace(/\s+$/, '').split('\n');
   const last = lines[lines.length - 1].trim();
-  const isForeign =
-    last !== self && [...names].some(n => normApos(n) === normApos(last));
-  if (!isForeign) throw new Error(`${self}: expected a trailing foreign spell name, found "${last}"`);
+  const isForeign = last !== self && [...names].some(n => normApos(n) === normApos(last));
+  if (!isForeign) return desc.replace(/\s+$/, '');
   lines.pop();
-  // Collapse any internal blank lines left by the bad extraction back to the
-  // file's single-`\n`-per-line convention (clean descriptions never use `\n\n`).
-  return lines.join('\n').replace(/\n{2,}/g, '\n').replace(/\s+$/, '');
+  return lines.join('\n').replace(/\s+$/, '');
 }
 
 function main() {
@@ -314,6 +340,19 @@ function main() {
     }
     changed++;
   }
+
+  // Sweep stray blank-line artifacts from every spell description (the 11 above
+  // are already clean; this catches the ~66 others whose mid-prose gaps only
+  // became visible once descriptions render as markdown).
+  let swept = 0;
+  for (const spell of doc.spells) {
+    const normalized = normalizeBlankLines(spell.description);
+    if (normalized !== spell.description) {
+      spell.description = normalized;
+      swept++;
+    }
+  }
+  console.log(`Normalized blank lines in ${swept} spell descriptions`);
 
   let out = JSON.stringify(doc, null, 2);
   if (!out.endsWith('\n')) out += '\n';
