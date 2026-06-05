@@ -2,10 +2,12 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { CacheModule } from '@nestjs/cache-manager';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
+import { PrintableCardsService } from './printable-cards.service';
 
 describe('SrdController', () => {
   let controller: SrdController;
   let service: Record<string, jest.Mock>;
+  let printableCardsService: { hydrate: jest.Mock };
 
   beforeEach(async () => {
     service = {
@@ -39,10 +41,15 @@ describe('SrdController', () => {
       search: jest.fn(),
     };
 
+    printableCardsService = { hydrate: jest.fn() };
+
     const module: TestingModule = await Test.createTestingModule({
       imports: [CacheModule.register()],
       controllers: [SrdController],
-      providers: [{ provide: SrdService, useValue: service }],
+      providers: [
+        { provide: SrdService, useValue: service },
+        { provide: PrintableCardsService, useValue: printableCardsService },
+      ],
     }).compile();
 
     controller = module.get<SrdController>(SrdController);
@@ -401,6 +408,24 @@ describe('SrdController', () => {
 
       expect(service.search).toHaveBeenCalledWith(query);
       expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
+    });
+  });
+
+  describe('hydrateCards (POST /srd/cards)', () => {
+    it('delegates the selections to PrintableCardsService.hydrate', async () => {
+      const body = {
+        selections: [
+          { type: 'monster' as const, ids: ['mon-1'] },
+          { type: 'feature' as const, ids: ['feat-1'] },
+        ],
+      };
+      const response = { groups: [] };
+      printableCardsService.hydrate.mockResolvedValue(response);
+
+      const result = await controller.hydrateCards(body);
+
+      expect(printableCardsService.hydrate).toHaveBeenCalledWith(body.selections);
+      expect(result).toBe(response);
     });
   });
 });

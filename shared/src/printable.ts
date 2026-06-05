@@ -206,6 +206,32 @@ export type PrintableCard =
   | PrintableBackgroundCard
   | PrintableFeatureCard;
 
+// ── Batch hydrate contract (VEG-263) ───────────────────────────────────────
+
+/**
+ * Hard cap on the total number of ids accepted by the batch hydrate endpoint
+ * (`POST /srd/cards`) across all selections. Requests above this are rejected
+ * with a 400. Deliberately above the print tray's soft cap (60) so the UI
+ * warning fires well before the API refuses.
+ */
+export const PRINTABLE_CARD_BATCH_MAX = 100;
+
+/** One group of hydrated cards, keyed by the card type that produced it. */
+export interface PrintableCardGroup {
+  type: PrintableCardType;
+  cards: PrintableCard[];
+}
+
+/**
+ * Response of the batch hydrate endpoint: one group per distinct requested
+ * type, in first-appearance request order, so the print route can lay out
+ * grouped-by-type with page breaks. Unknown ids are silently dropped, so a
+ * group's `cards` may be shorter than the requested `ids`.
+ */
+export interface HydratePrintableCardsResponse {
+  groups: PrintableCardGroup[];
+}
+
 // ── Contract integrity (compile-time only) ─────────────────────────────────
 //
 // Guarantee the PRINTABLE_CARD_TYPES tuple and the PrintableCard union stay in

@@ -525,6 +525,68 @@ export class SrdService {
     };
   }
 
+  // ── Feature hydration by id (unified across the four feature tables) ──
+  //
+  // Resolves bare feature ids — no parent kind attached — by probing all four
+  // feature tables in parallel. Used by the printable-cards batch endpoint,
+  // whose clients only hold { type: 'feature', id } pairs. Unknown ids simply
+  // produce no row. Results are ordered class → subclass → race → background,
+  // matching the unified-search source order; callers needing request order
+  // re-sort by id.
+
+  async findFeaturesByIds(ids: string[]): Promise<UnifiedFeatureData[]> {
+    if (ids.length === 0) return [];
+
+    const where = { id: { in: ids } };
+    const [classFeatures, subclassFeatures, raceTraits, backgroundFeatures] = await Promise.all([
+      this.prisma.classFeature.findMany({
+        where,
+        include: { class: { select: { id: true, name: true } } },
+      }),
+      this.prisma.subclassFeature.findMany({
+        where,
+        include: { subclass: { select: { id: true, name: true } } },
+      }),
+      this.prisma.raceTrait.findMany({
+        where,
+        include: { race: { select: { id: true, name: true } } },
+      }),
+      this.prisma.backgroundFeature.findMany({
+        where,
+        include: { background: { select: { id: true, name: true } } },
+      }),
+    ]);
+
+    return [
+      ...classFeatures.map(r => ({
+        id: r.id,
+        name: r.name,
+        level: r.level,
+        description: r.description,
+        parent: { kind: 'class' as const, id: r.class.id, name: r.class.name },
+      })),
+      ...subclassFeatures.map(r => ({
+        id: r.id,
+        name: r.name,
+        level: r.level,
+        description: r.description,
+        parent: { kind: 'subclass' as const, id: r.subclass.id, name: r.subclass.name },
+      })),
+      ...raceTraits.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        parent: { kind: 'race' as const, id: r.race.id, name: r.race.name },
+      })),
+      ...backgroundFeatures.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description,
+        parent: { kind: 'background' as const, id: r.background.id, name: r.background.name },
+      })),
+    ];
+  }
+
   // ── Feats ───────────────────────────────────────────
 
   async searchFeats(query?: string) {
