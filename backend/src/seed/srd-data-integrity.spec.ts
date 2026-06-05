@@ -43,24 +43,30 @@ describe('SRD PDF-extracted data integrity', () => {
     });
   });
 
-  describe('magic_items.json (corrupt — cleaned by VEG-272)', () => {
+  describe('magic_items.json (cleaned by VEG-272)', () => {
     const items = read<{ magic_items: Parameters<typeof validateMagicItemData>[0] }>(
       'magic_items.json'
     ).magic_items;
 
-    it('reproduces the known flattened-table anomalies', () => {
-      // Flip to .not.toThrow() in VEG-272 once the embedded item tables are fixed.
-      expect(() => validateMagicItemData(items)).toThrow(/magic item data validation failed/);
+    it('contains the full SRD 5.2.1 magic-item roster (257)', () => {
+      expect(items).toHaveLength(257);
     });
 
-    it('catches a representative flattened embedded table', () => {
-      let message = '';
-      try {
-        validateMagicItemData(items);
-      } catch (e) {
-        message = (e as Error).message;
-      }
-      expect(message).toMatch(/Bag of Tricks: flattened table/);
+    it('passes the free-text guard — bleed stripped and embedded tables reconstructed', () => {
+      expect(() => validateMagicItemData(items)).not.toThrow();
+    });
+
+    it('represents reconstructed tables as GFM markdown (Bag of Tricks, Dragon Scale Mail)', () => {
+      const byName = new Map(items.map(i => [i.name, i]));
+      expect(byName.get('Bag of Tricks')?.description).toMatch(/\| 1d8 \| Creature \|/);
+      expect(byName.get('Dragon Scale Mail')?.description).toMatch(/\| Dragon \| Resistance \|/);
+    });
+
+    it('strips the Headband of Intellect interleave garble', () => {
+      const headband = items.find(i => i.name === 'Headband of Intellect');
+      expect(headband?.description).toContain('19 or higher without it.');
+      expect(headband?.description).not.toMatch(/\bon a\b\s*$/);
+      expect(headband?.description?.trimEnd()).toMatch(/without it\.$/);
     });
   });
 

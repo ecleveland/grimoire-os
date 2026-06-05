@@ -5,6 +5,7 @@ import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import type { SrdItem, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
+import Markdown from '@/components/Markdown';
 
 const LIMIT = 20;
 
@@ -126,32 +127,7 @@ export default function ItemListPage() {
         aria-busy={loading}
       >
         {items.map(item => (
-          <div
-            key={item.id}
-            className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
-          >
-            <h3 className="font-semibold text-gray-900 dark:text-white">{item.name}</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{item.category}</p>
-            <div className="flex gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
-              {item.cost && <span>Cost: {item.cost}</span>}
-              {item.weight && <span>Weight: {item.weight}</span>}
-            </div>
-            {item.damage && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Damage: {item.damage}</p>
-            )}
-            {item.properties.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {item.properties.map(p => (
-                  <span
-                    key={p}
-                    className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
-                  >
-                    {p}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+          <ItemCard key={item.id} item={item} />
         ))}
       </div>
 
@@ -162,6 +138,71 @@ export default function ItemListPage() {
         limit={LIMIT}
         onPageChange={setPage}
       />
+    </div>
+  );
+}
+
+function ItemCard({ item }: { item: SrdItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = Boolean(item.description?.trim());
+
+  return (
+    <div
+      data-testid="item-card"
+      className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+    >
+      <h3 className="font-semibold text-gray-900 dark:text-white">{item.name}</h3>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{item.category}</p>
+      {(item.rarity || item.requiresAttunement) && (
+        <div className="flex flex-wrap gap-1 mt-2 text-xs">
+          {item.rarity && (
+            <span className="px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded">
+              {item.rarity}
+            </span>
+          )}
+          {item.requiresAttunement && (
+            <span className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">
+              Requires Attunement
+            </span>
+          )}
+        </div>
+      )}
+      <div className="flex gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
+        {item.cost && <span>Cost: {item.cost}</span>}
+        {item.weight && <span>Weight: {item.weight}</span>}
+      </div>
+      {item.damage && (
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Damage: {item.damage}</p>
+      )}
+      {item.properties.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {item.properties.map(p => (
+            <span
+              key={p}
+              className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
+            >
+              {p}
+            </span>
+          ))}
+        </div>
+      )}
+      {hasDetails && (
+        <>
+          <button
+            type="button"
+            onClick={() => setExpanded(e => !e)}
+            aria-expanded={expanded}
+            className="mt-3 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+          >
+            {expanded ? 'Hide details' : 'Show details'}
+          </button>
+          {expanded && (
+            <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2">
+              <Markdown>{item.description!}</Markdown>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -58,6 +58,9 @@ describe('SeedService', () => {
       Promise.resolve({ id: `monster-${args.where.name}`, name: args.where.name })
     );
     prisma.item.createMany.mockResolvedValue({ count: 0 });
+    prisma.item.upsert.mockImplementation((args: any) =>
+      Promise.resolve({ id: `item-${args.where.name}`, name: args.where.name })
+    );
     prisma.srdClass.createMany.mockResolvedValue({ count: 0 });
     prisma.race.createMany.mockResolvedValue({ count: 0 });
     prisma.background.createMany.mockResolvedValue({ count: 0 });
@@ -214,8 +217,11 @@ describe('SeedService', () => {
     expect(prisma.monster.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { name: 'Test Monster' } })
     );
-    expect(prisma.item.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skipDuplicates: true })
+    expect(prisma.item.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { name: 'Longsword' } })
+    );
+    expect(prisma.item.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { name: 'Test Wand' } })
     );
     expect(prisma.condition.createMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
@@ -237,12 +243,12 @@ describe('SeedService', () => {
   it('merges mundane items with magic items from JSON', async () => {
     await service.seed();
 
-    const itemsCall = prisma.item.createMany.mock.calls[0][0];
-    // 5 mundane items from static data + 1 magic item from JSON mock
-    expect(itemsCall.data).toHaveLength(6);
-    expect(itemsCall.data[0].name).toBe('Longsword');
-    expect(itemsCall.data[5].name).toBe('Test Wand');
-    expect(itemsCall.data[5].isMagic).toBe(true);
+    // 5 mundane items from static data + 1 magic item from JSON mock, each upserted by name.
+    const upsertedItems = prisma.item.upsert.mock.calls.map(([args]: [any]) => args.create);
+    expect(upsertedItems).toHaveLength(6);
+    expect(upsertedItems[0].name).toBe('Longsword');
+    expect(upsertedItems[5].name).toBe('Test Wand');
+    expect(upsertedItems[5].isMagic).toBe(true);
   });
 
   it('uses species JSON data for races', async () => {

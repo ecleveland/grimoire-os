@@ -586,6 +586,7 @@ export function loadMonstersFromJson() {
 
 export function loadMagicItemsFromJson() {
   const data = readJsonFile<{ magic_items: JsonMagicItem[] }>('magic_items.json');
+  validateMagicItemData(data.magic_items);
   return data.magic_items.map(item => ({
     name: item.name,
     category: item.category,

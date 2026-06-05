@@ -91,7 +91,17 @@ export class SeedService {
       }
       console.log(`  Monsters: ${monsters.length} entries`);
 
-      await tx.item.createMany({ data: items, skipDuplicates: true });
+      // Upsert (not createMany/skipDuplicates) so corrected SRD data — e.g. the
+      // VEG-272 magic-item description/table fixes — propagates to existing rows
+      // on re-seed, preserving ids/FKs. Item names are unique across the mundane
+      // (hand-authored) and magic (JSON) rows that share this table.
+      for (const item of items) {
+        await tx.item.upsert({
+          where: { name: item.name },
+          create: item,
+          update: item,
+        });
+      }
       console.log(`  Items: ${items.length} entries`);
 
       if (backgrounds.length) {
