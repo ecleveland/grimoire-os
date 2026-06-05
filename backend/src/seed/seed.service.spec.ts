@@ -50,6 +50,9 @@ describe('SeedService', () => {
 
     // All createMany resolve successfully
     prisma.spell.createMany.mockResolvedValue({ count: 0 });
+    prisma.spell.upsert.mockImplementation((args: any) =>
+      Promise.resolve({ id: `spell-${args.where.name}`, name: args.where.name })
+    );
     prisma.monster.createMany.mockResolvedValue({ count: 0 });
     prisma.monster.upsert.mockImplementation((args: any) =>
       Promise.resolve({ id: `monster-${args.where.name}`, name: args.where.name })
@@ -205,8 +208,8 @@ describe('SeedService', () => {
     expect(mockLoadMonsters).toHaveBeenCalled();
     expect(mockLoadMagicItems).toHaveBeenCalled();
     expect(mockLoadSpecies).toHaveBeenCalled();
-    expect(prisma.spell.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skipDuplicates: true })
+    expect(prisma.spell.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { name: 'Test Spell' } })
     );
     expect(prisma.monster.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ where: { name: 'Test Monster' } })

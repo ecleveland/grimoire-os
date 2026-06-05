@@ -70,12 +70,18 @@ export class SeedService {
     console.log('Seeding SRD data...');
 
     await this.prisma.$transaction(async tx => {
-      // Independent tables (no FK dependencies)
-      await tx.spell.createMany({ data: spells, skipDuplicates: true });
+      // Upsert (not createMany/skipDuplicates) so corrected SRD data — e.g. the VEG-261
+      // field-bleed fixes and the VEG-271 spell description/table fixes — propagates to
+      // existing rows on re-seed, preserving ids/FKs.
+      for (const spell of spells) {
+        await tx.spell.upsert({
+          where: { name: spell.name },
+          create: spell,
+          update: spell,
+        });
+      }
       console.log(`  Spells: ${spells.length} entries`);
 
-      // Upsert (not createMany/skipDuplicates) so corrected SRD data — e.g. the VEG-261
-      // field-bleed fixes — propagates to existing rows on re-seed, preserving ids/FKs.
       for (const monster of monsters) {
         await tx.monster.upsert({
           where: { name: monster.name },

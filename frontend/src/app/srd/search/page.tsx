@@ -17,6 +17,7 @@ import {
 import SearchBox from '@/components/SearchBox';
 import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
+import Markdown from '@/components/Markdown';
 
 const LIMIT = 20;
 
@@ -454,9 +455,7 @@ function SpellDetail({ spell }: { spell: SrdSpell }) {
       )}
       <div>
         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
-          {spell.description}
-        </p>
+        <Markdown>{spell.description}</Markdown>
       </div>
       {spell.higherLevels && (
         <div>
