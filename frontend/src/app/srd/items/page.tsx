@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import type { SrdItem, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Markdown from '@/components/Markdown';
+import PrintToggle from '@/components/PrintToggle';
 
 const LIMIT = 20;
 
@@ -151,7 +152,10 @@ function ItemCard({ item }: { item: SrdItem }) {
       data-testid="item-card"
       className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
     >
-      <h3 className="font-semibold text-gray-900 dark:text-white">{item.name}</h3>
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-semibold text-gray-900 dark:text-white">{item.name}</h3>
+        <PrintToggle type="item" id={item.id} name={item.name} className="shrink-0 -mt-0.5" />
+      </div>
       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{item.category}</p>
       {(item.rarity || item.requiresAttunement) && (
         <div className="flex flex-wrap gap-1 mt-2 text-xs">

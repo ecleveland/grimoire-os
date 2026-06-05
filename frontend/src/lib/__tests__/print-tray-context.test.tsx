@@ -1,5 +1,6 @@
+import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   PrintTrayProvider,
@@ -193,6 +194,31 @@ describe('persistence', () => {
     renderWithProvider();
     expect(screen.getByTestId('count')).toHaveTextContent('2');
     expect(screen.getByTestId('has-goblin')).toHaveTextContent('true');
+  });
+
+  it('survives a StrictMode mount without clobbering the stored set (VEG-265 regression)', async () => {
+    // Next.js dev runs React StrictMode, which double-invokes mount effects.
+    // The persist effect must not fire during the mount commit (items still
+    // []) or the second hydrate pass reads an already-clobbered store and the
+    // set is wiped on every page load.
+    seedStorage([
+      { type: 'monster', id: 'goblin' },
+      { type: 'spell', id: 'fireball' },
+    ]);
+
+    render(
+      <StrictMode>
+        <PrintTrayProvider>
+          <TestConsumer />
+        </PrintTrayProvider>
+      </StrictMode>
+    );
+
+    await waitFor(() => expect(screen.getByTestId('count')).toHaveTextContent('2'));
+    expect(JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY)!)).toEqual([
+      { type: 'monster', id: 'goblin' },
+      { type: 'spell', id: 'fireball' },
+    ]);
   });
 
   it('persists clear so an emptied set stays empty after remount', async () => {

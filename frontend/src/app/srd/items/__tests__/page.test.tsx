@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ItemListPage from '../page';
+import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { SrdItem, PaginatedResponse } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -58,18 +59,56 @@ function makeResponse(items: SrdItem[]): PaginatedResponse<SrdItem> {
   return { data: items, total: items.length, page: 1, lastPage: 1 };
 }
 
+function renderPage() {
+  return render(
+    <PrintTrayProvider>
+      <ItemListPage />
+    </PrintTrayProvider>
+  );
+}
+
+/** The persisted tray contents, for asserting tray state after a toggle. */
+function storedTray(): unknown {
+  return JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY) ?? '[]');
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('ItemListPage', () => {
   beforeEach(() => {
+    localStorage.clear();
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(makeResponse([longsword]));
+  });
+
+  describe('print set selection', () => {
+    it('toggles an item into the tray from its card and reflects selected state', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Longsword to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'item', id: 'item-1' }]);
+      expect(
+        screen.getByRole('button', { name: 'Remove Longsword from print set' })
+      ).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('removes the item from the tray on second click', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Longsword to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Remove Longsword from print set' }));
+
+      expect(storedTray()).toEqual([]);
+    });
   });
 
   describe('item detail (collapsible description)', () => {
     it('renders rarity and attunement badges for a magic item', async () => {
       mockApiFetch.mockResolvedValue(makeResponse([wandOfTricks]));
-      render(<ItemListPage />);
+      renderPage();
 
       expect(await screen.findByText('Bag of Tricks')).toBeInTheDocument();
       expect(screen.getByText('Uncommon')).toBeInTheDocument();
@@ -79,7 +118,7 @@ describe('ItemListPage', () => {
     it('hides the description until Show details is clicked, then renders the reconstructed table', async () => {
       mockApiFetch.mockResolvedValue(makeResponse([wandOfTricks]));
       const user = userEvent.setup();
-      render(<ItemListPage />);
+      renderPage();
 
       const toggle = await screen.findByRole('button', { name: 'Show details' });
       expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -103,7 +142,7 @@ describe('ItemListPage', () => {
     it('collapses the description when Hide details is clicked', async () => {
       mockApiFetch.mockResolvedValue(makeResponse([wandOfTricks]));
       const user = userEvent.setup();
-      render(<ItemListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: 'Show details' }));
       await user.click(screen.getByRole('button', { name: 'Hide details' }));
@@ -114,7 +153,7 @@ describe('ItemListPage', () => {
 
     it('shows no details toggle for an item without a description', async () => {
       mockApiFetch.mockResolvedValue(makeResponse([longsword]));
-      render(<ItemListPage />);
+      renderPage();
 
       expect(await screen.findByText('Longsword')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /details/i })).not.toBeInTheDocument();
@@ -137,7 +176,7 @@ describe('ItemListPage', () => {
           })
       );
 
-      render(<ItemListPage />);
+      renderPage();
       const input = await screen.findByPlaceholderText('Search items...');
 
       vi.useFakeTimers();

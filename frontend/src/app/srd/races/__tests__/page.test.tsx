@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import RaceListPage from '../page';
+import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { SrdRace } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -35,11 +36,25 @@ function makeRace(over: Partial<SrdRace> = {}): SrdRace {
   };
 }
 
+function renderPage() {
+  return render(
+    <PrintTrayProvider>
+      <RaceListPage />
+    </PrintTrayProvider>
+  );
+}
+
+/** The persisted tray contents, for asserting tray state after a toggle. */
+function storedTray(): unknown {
+  return JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY) ?? '[]');
+}
+
 // An Elf whose Elven Lineage trait carries the reconstructed option table as GFM
 // markdown (VEG-273) — the races page must render it as a real <table>.
 const elfWithLineage = makeRace({
   traits: [
     {
+      id: 'trait-lineage',
       name: 'Elven Lineage',
       description: [
         'Choose a lineage from the Elven Lineages table.',
@@ -52,6 +67,7 @@ const elfWithLineage = makeRace({
       ].join('\n'),
     },
     {
+      id: 'trait-fey-ancestry',
       name: 'Fey Ancestry',
       description: 'You have Advantage on saving throws to avoid or end the Charmed condition.',
     },
@@ -62,19 +78,74 @@ const elfWithLineage = makeRace({
 
 describe('RaceListPage', () => {
   beforeEach(() => {
+    localStorage.clear();
     mockApiFetch.mockReset();
     mockToastError.mockReset();
     mockApiFetch.mockResolvedValue([makeRace()]);
   });
 
+  describe('print set selection', () => {
+    it('toggles a race into the tray from its list card', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Elf to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'race', id: 'race-1' }]);
+      expect(screen.getByRole('button', { name: 'Remove Elf from print set' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+    });
+
+    it('toggling the race affordance does not expand the card', async () => {
+      mockApiFetch.mockResolvedValue([elfWithLineage]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Elf to print set' }));
+
+      expect(screen.queryByText('Elven Lineage.')).not.toBeInTheDocument();
+    });
+
+    it('toggles an individual trait into the tray as a feature once expanded', async () => {
+      mockApiFetch.mockResolvedValue([elfWithLineage]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Elf/ }));
+      await user.click(screen.getByRole('button', { name: 'Add Fey Ancestry to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'feature', id: 'trait-fey-ancestry' }]);
+      expect(
+        screen.getByRole('button', { name: 'Remove Fey Ancestry from print set' })
+      ).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('renders no trait toggle when the trait has no id', async () => {
+      mockApiFetch.mockResolvedValue([
+        makeRace({ traits: [{ name: 'Keen Senses', description: 'Proficiency in Perception.' }] }),
+      ]);
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Elf/ }));
+
+      expect(screen.getByText('Keen Senses.')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Add Keen Senses to print set' })
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it('shows a loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
-    render(<RaceListPage />);
+    renderPage();
     expect(screen.getByText('Loading races...')).toBeInTheDocument();
   });
 
   it('renders races from the API once loaded', async () => {
-    render(<RaceListPage />);
+    renderPage();
     expect(await screen.findByText('Elf')).toBeInTheDocument();
     expect(screen.getByText(/Speed: 30 ft/)).toBeInTheDocument();
     expect(mockApiFetch).toHaveBeenCalledWith('/srd/races');
@@ -82,7 +153,7 @@ describe('RaceListPage', () => {
 
   it('keeps trait descriptions collapsed until the race is expanded', async () => {
     mockApiFetch.mockResolvedValue([elfWithLineage]);
-    render(<RaceListPage />);
+    renderPage();
 
     await screen.findByText('Elf');
     expect(screen.queryByText('Elven Lineage.')).not.toBeInTheDocument();
@@ -92,9 +163,9 @@ describe('RaceListPage', () => {
   it('renders trait descriptions and the reconstructed lineage table when expanded', async () => {
     mockApiFetch.mockResolvedValue([elfWithLineage]);
     const user = userEvent.setup();
-    render(<RaceListPage />);
+    renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /Elf/ }));
+    await user.click(await screen.findByRole('button', { name: /^Elf/ }));
 
     // Trait name + prose render.
     expect(screen.getByText('Elven Lineage.')).toBeInTheDocument();
@@ -113,9 +184,9 @@ describe('RaceListPage', () => {
   it('renders ability-bonus chips when the race grants them', async () => {
     mockApiFetch.mockResolvedValue([makeRace({ abilityBonuses: { DEX: 2, CON: 1 } })]);
     const user = userEvent.setup();
-    render(<RaceListPage />);
+    renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /Elf/ }));
+    await user.click(await screen.findByRole('button', { name: /^Elf/ }));
     expect(screen.getByText('Ability Bonuses')).toBeInTheDocument();
     expect(screen.getByText('DEX +2')).toBeInTheDocument();
     expect(screen.getByText('CON +1')).toBeInTheDocument();
@@ -128,15 +199,15 @@ describe('RaceListPage', () => {
       makeRace({ abilityBonuses: null as unknown as SrdRace['abilityBonuses'] }),
     ]);
     const user = userEvent.setup();
-    render(<RaceListPage />);
+    renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /Elf/ }));
+    await user.click(await screen.findByRole('button', { name: /^Elf/ }));
     expect(screen.queryByText('Ability Bonuses')).not.toBeInTheDocument();
   });
 
   it('shows an error toast when the fetch rejects', async () => {
     mockApiFetch.mockRejectedValue(new Error('boom'));
-    render(<RaceListPage />);
+    renderPage();
 
     await waitFor(() =>
       expect(mockToastError).toHaveBeenCalledWith('Failed to load races', { id: 'load-races' })

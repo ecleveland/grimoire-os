@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import MonsterListPage from '../page';
+import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -80,24 +81,38 @@ function makeResponse(monsters: SrdMonster[]): PaginatedResponse<SrdMonster> {
   };
 }
 
+function renderPage() {
+  return render(
+    <PrintTrayProvider>
+      <MonsterListPage />
+    </PrintTrayProvider>
+  );
+}
+
+/** The persisted tray contents, for asserting tray state after a toggle. */
+function storedTray(): unknown {
+  return JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY) ?? '[]');
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('MonsterListPage', () => {
   beforeEach(() => {
+    localStorage.clear();
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(makeResponse([goblin, dragon]));
   });
 
   describe('rendering', () => {
     it('renders the heading "Monsters"', async () => {
-      render(<MonsterListPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /^Monsters$/i })).toBeInTheDocument();
       });
     });
 
     it('renders monster names after load', async () => {
-      render(<MonsterListPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByText('Goblin')).toBeInTheDocument();
         expect(screen.getByText('Ancient Red Dragon')).toBeInTheDocument();
@@ -105,7 +120,7 @@ describe('MonsterListPage', () => {
     });
 
     it('renders the search input', async () => {
-      render(<MonsterListPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByPlaceholderText('Search monsters...')).toBeInTheDocument();
       });
@@ -128,7 +143,7 @@ describe('MonsterListPage', () => {
           })
       );
 
-      render(<MonsterListPage />);
+      renderPage();
       // Wait for the initial fetch to settle and the input to mount.
       const input = await screen.findByPlaceholderText('Search monsters...');
 
@@ -203,9 +218,9 @@ describe('MonsterListPage', () => {
     it('fetches and opens the stat block when a monster card is clicked', async () => {
       routeApi();
       const user = userEvent.setup();
-      render(<MonsterListPage />);
+      renderPage();
 
-      await user.click(await screen.findByRole('button', { name: /Goblin/i }));
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
 
       await waitFor(() => {
         expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1');
@@ -217,9 +232,9 @@ describe('MonsterListPage', () => {
     it('closes the modal on Escape', async () => {
       routeApi();
       const user = userEvent.setup();
-      render(<MonsterListPage />);
+      renderPage();
 
-      await user.click(await screen.findByRole('button', { name: /Goblin/i }));
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
       expect(await screen.findByRole('dialog')).toBeInTheDocument();
 
       await user.keyboard('{Escape}');
@@ -232,14 +247,69 @@ describe('MonsterListPage', () => {
       vi.mocked(toast.error).mockClear();
       routeApi(() => Promise.reject(new Error('boom')));
       const user = userEvent.setup();
-      render(<MonsterListPage />);
+      renderPage();
 
-      await user.click(await screen.findByRole('button', { name: /Goblin/i }));
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
 
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalled();
       });
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('print set selection', () => {
+    it('toggles a monster into the tray from its list card', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Goblin to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'monster', id: 'monster-1' }]);
+      expect(screen.getByRole('button', { name: 'Remove Goblin from print set' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+    });
+
+    it('toggling the card affordance does not open the detail modal', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Goblin to print set' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      // Only the list fetch ran — no detail fetch was triggered.
+      expect(mockApiFetch).not.toHaveBeenCalledWith('/srd/monsters/monster-1');
+    });
+
+    it('removes a selected monster from the tray on second click', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Add Goblin to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Remove Goblin from print set' }));
+
+      expect(storedTray()).toEqual([]);
+    });
+
+    it('toggles the monster from inside the detail modal', async () => {
+      mockApiFetch.mockImplementation((path: string) => {
+        if (path.startsWith('/srd/monsters/')) return Promise.resolve(goblin);
+        return Promise.resolve(makeResponse([goblin, dragon]));
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
+      const dialog = await screen.findByRole('dialog');
+
+      await user.click(within(dialog).getByRole('button', { name: 'Add Goblin to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'monster', id: 'monster-1' }]);
+      expect(
+        within(dialog).getByRole('button', { name: 'Remove Goblin from print set' })
+      ).toHaveTextContent('Remove from print set');
     });
   });
 });

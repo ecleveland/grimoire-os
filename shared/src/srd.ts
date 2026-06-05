@@ -19,6 +19,12 @@ export interface ClassSpellcasting {
 
 /** A class or subclass feature unlocked at a specific level */
 export interface ClassFeature {
+  /**
+   * Relational row id. Present on API responses (the class/subclass endpoints
+   * include the full feature rows); optional because hand-authored seed
+   * literals omit it. Used to address a feature as a printable card (VEG-265).
+   */
+  id?: string;
   name: string;
   level: number;
   description?: string;
@@ -154,7 +160,8 @@ export interface SrdRace {
   speed: number;
   size: string;
   abilityBonuses: Record<string, number>;
-  traits: { name: string; description?: string }[];
+  /** `id` is the RaceTrait row id — present on API responses, optional in seed literals (VEG-265). */
+  traits: { id?: string; name: string; description?: string }[];
   languages: string[];
   description?: string;
   age?: string;

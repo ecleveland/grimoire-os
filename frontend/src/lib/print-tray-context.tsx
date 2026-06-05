@@ -6,7 +6,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   ReactNode,
 } from 'react';
@@ -88,24 +87,29 @@ function readStoredItems(): PrintTrayItem[] {
 export function PrintTrayProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<PrintTrayItem[]>([]);
   // Skip persisting until the mount-time hydration has run, so the initial
-  // empty render can't clobber a stored set.
-  const hydratedRef = useRef(false);
+  // empty render can't clobber a stored set. This must be render state, not a
+  // ref: a ref flipped inside the hydrate effect is already true when the
+  // persist effect runs in the same mount commit (items still []), which wrote
+  // [] over the stored set — and under React StrictMode's double-invoked
+  // effects (Next.js dev) the second hydrate pass then read the clobbered
+  // store, wiping the selection on every page load (caught by VEG-265 e2e).
+  const [hydrated, setHydrated] = useState(false);
 
   // Hydrate in an effect (not a useState initializer) so server and first
   // client render agree — localStorage only exists in the browser.
   useEffect(() => {
     setItems(readStoredItems());
-    hydratedRef.current = true;
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (!hydratedRef.current) return;
+    if (!hydrated) return;
     try {
       localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify(items));
     } catch {
       // Storage full or unavailable — the in-memory set still works.
     }
-  }, [items]);
+  }, [items, hydrated]);
 
   const add = useCallback((type: PrintableCardType, id: string) => {
     setItems(prev =>

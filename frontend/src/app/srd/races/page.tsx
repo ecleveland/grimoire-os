@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import Markdown from '@/components/Markdown';
+import PrintToggle from '@/components/PrintToggle';
 import type { SrdRace } from '@/lib/types';
 
 export default function RaceListPage() {
@@ -41,20 +42,25 @@ export default function RaceListPage() {
             key={race.id}
             className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
           >
-            <button
-              onClick={() => toggle(race.id)}
-              className="w-full flex items-center justify-between p-4 text-left"
-            >
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{race.name}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Speed: {race.speed} ft &middot; Size: {race.size}
-                </p>
-              </div>
-              <span className="text-gray-400 text-lg">
-                {expanded.has(race.id) ? '\u2212' : '+'}
-              </span>
-            </button>
+            <div className="flex items-center">
+              <button
+                onClick={() => toggle(race.id)}
+                className="flex-1 flex items-center justify-between p-4 text-left"
+              >
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {race.name}
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Speed: {race.speed} ft &middot; Size: {race.size}
+                  </p>
+                </div>
+                <span className="text-gray-400 text-lg">
+                  {expanded.has(race.id) ? '\u2212' : '+'}
+                </span>
+              </button>
+              <PrintToggle type="race" id={race.id} name={race.name} className="mr-4 shrink-0" />
+            </div>
             {expanded.has(race.id) && (
               <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3 space-y-3">
                 {race.description && (
@@ -83,8 +89,11 @@ export default function RaceListPage() {
                     <div className="mt-1 space-y-2">
                       {race.traits.map(t => (
                         <div key={t.name}>
-                          <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-                            {t.name}.
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                              {t.name}.
+                            </span>
+                            {t.id && <PrintToggle type="feature" id={t.id} name={t.name} />}
                           </span>{' '}
                           {t.description && <Markdown className="mt-0.5">{t.description}</Markdown>}
                         </div>

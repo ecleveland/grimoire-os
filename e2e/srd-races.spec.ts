@@ -24,7 +24,7 @@ test.describe('SRD race lineage tables (VEG-273)', () => {
     // No trait tables render until a race is expanded.
     await expect(page.getByRole('table')).toHaveCount(0);
 
-    const toggle = page.getByRole('button', { name: /Dragonborn/ });
+    const toggle = page.getByRole('button', { name: /^Dragonborn/ });
     await expect(toggle).toBeVisible({ timeout: 10_000 });
     await toggle.click();
 
