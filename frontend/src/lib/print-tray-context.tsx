@@ -10,6 +10,7 @@ import {
   useState,
   ReactNode,
 } from 'react';
+import { toast } from 'sonner';
 import { PRINTABLE_CARD_TYPES } from '@grimoire-os/shared';
 import type { PrintableCardType } from '@grimoire-os/shared';
 
@@ -62,25 +63,41 @@ function isPrintTrayItem(value: unknown): value is PrintTrayItem {
   );
 }
 
-/** Parse a persisted print set, dropping anything corrupt or malformed. */
+/**
+ * Parse a persisted print set, dropping anything corrupt or malformed.
+ * Genuine error branches log to the console: a failed hydration is otherwise
+ * pixel-identical to an empty tray (the tray bar hides at count 0), so silent
+ * data loss would be undiagnosable.
+ */
 function readStoredItems(): PrintTrayItem[] {
   try {
     const raw = localStorage.getItem(PRINT_TRAY_STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) {
+      console.error('Print tray: stored value is not an array — starting empty.');
+      return [];
+    }
     const seen = new Set<string>();
     const items: PrintTrayItem[] = [];
+    let dropped = 0;
     for (const entry of parsed) {
-      if (!isPrintTrayItem(entry)) continue;
+      if (!isPrintTrayItem(entry)) {
+        dropped++;
+        continue;
+      }
       const key = keyOf(entry.type, entry.id);
       if (seen.has(key)) continue;
       seen.add(key);
       items.push({ type: entry.type, id: entry.id });
     }
+    if (dropped > 0) {
+      console.error(`Print tray: dropped ${dropped} malformed stored entries.`);
+    }
     return items;
-  } catch {
+  } catch (err) {
     // Corrupt JSON or storage unavailable — start with an empty set.
+    console.error('Failed to read print tray from storage:', err);
     return [];
   }
 }
@@ -88,24 +105,42 @@ function readStoredItems(): PrintTrayItem[] {
 export function PrintTrayProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<PrintTrayItem[]>([]);
   // Skip persisting until the mount-time hydration has run, so the initial
-  // empty render can't clobber a stored set.
-  const hydratedRef = useRef(false);
+  // empty render can't clobber a stored set. This must be render state, not a
+  // ref: a ref flipped inside the hydrate effect is already true when the
+  // persist effect runs in the same mount commit (items still []), which wrote
+  // [] over the stored set — and under React StrictMode's double-invoked
+  // effects (Next.js dev) the second hydrate pass then read the clobbered
+  // store, wiping the selection on every page load. Latent since the VEG-264
+  // store; caught by the VEG-265 e2e.
+  const [hydrated, setHydrated] = useState(false);
+  // Warn the user at most once per mount when persistence fails — without a
+  // signal, the selection silently becoming session-only is indistinguishable
+  // from "my clicks aren't registering" after the next reload.
+  const persistFailedRef = useRef(false);
 
   // Hydrate in an effect (not a useState initializer) so server and first
   // client render agree — localStorage only exists in the browser.
   useEffect(() => {
     setItems(readStoredItems());
-    hydratedRef.current = true;
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (!hydratedRef.current) return;
+    if (!hydrated) return;
     try {
       localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify(items));
-    } catch {
+    } catch (err) {
       // Storage full or unavailable — the in-memory set still works.
+      console.error('Failed to persist print tray:', err);
+      if (!persistFailedRef.current) {
+        persistFailedRef.current = true;
+        toast.error(
+          'Your print selection cannot be saved and will be lost when you leave or reload.',
+          { id: 'print-tray-persist' }
+        );
+      }
     }
-  }, [items]);
+  }, [items, hydrated]);
 
   const add = useCallback((type: PrintableCardType, id: string) => {
     setItems(prev =>

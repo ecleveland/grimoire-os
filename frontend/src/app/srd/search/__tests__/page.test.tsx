@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SrdSearchPage from '../page';
+import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { PaginatedResponse, SrdSpell, SrdFeat } from '@/lib/types';
 import type { UnifiedFeatureData, UnifiedSearchHit } from '@/lib/srd-search';
 
@@ -111,29 +112,87 @@ function paginated(hits: UnifiedSearchHit[]): PaginatedResponse<UnifiedSearchHit
   return { data: hits, total: hits.length, page: 1, lastPage: 1 };
 }
 
+function renderPage() {
+  return render(
+    <PrintTrayProvider>
+      <SrdSearchPage />
+    </PrintTrayProvider>
+  );
+}
+
+/** The persisted tray contents, for asserting tray state after a toggle. */
+function storedTray(): unknown {
+  return JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY) ?? '[]');
+}
+
 describe('SrdSearchPage', () => {
   beforeEach(() => {
+    localStorage.clear();
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(paginated([fireball, sharpshooter, sneakAttack]));
   });
 
+  describe('print set selection', () => {
+    it('toggles a spell hit into the tray', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Add Fireball to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'spell', id: 'sp-1' }]);
+      expect(
+        screen.getByRole('button', { name: 'Remove Fireball from print set' })
+      ).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('toggles a feature hit into the tray', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Sneak Attack')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Add Sneak Attack to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'feature', id: 'cf-1' }]);
+    });
+
+    it('renders no toggle on feat hits (feats are not printable)', async () => {
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Sharpshooter')).toBeInTheDocument());
+
+      expect(
+        screen.queryByRole('button', { name: 'Add Sharpshooter to print set' })
+      ).not.toBeInTheDocument();
+    });
+
+    it('toggling the affordance does not expand the result card', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Add Fireball to print set' }));
+
+      expect(screen.queryByText(/A bright streak flashes/)).not.toBeInTheDocument();
+    });
+  });
+
   describe('rendering', () => {
     it('renders the heading "Search SRD"', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /Search SRD/i })).toBeInTheDocument();
       });
     });
 
     it('shows a search input', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByPlaceholderText(/Search spells, feats/i)).toBeInTheDocument();
       });
     });
 
     it('shows type-filter chips for Spells, Feats, and Features', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Spells' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Feats' })).toBeInTheDocument();
@@ -144,7 +203,7 @@ describe('SrdSearchPage', () => {
 
   describe('result rendering (collapsed)', () => {
     it('renders the spell hit with level and school', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByText('Fireball')).toBeInTheDocument();
       });
@@ -153,14 +212,14 @@ describe('SrdSearchPage', () => {
     });
 
     it('renders the feat hit', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByText('Sharpshooter')).toBeInTheDocument();
       });
     });
 
     it('renders the feature hit with parent breadcrumb', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByText('Sneak Attack')).toBeInTheDocument();
       });
@@ -168,7 +227,7 @@ describe('SrdSearchPage', () => {
     });
 
     it('does not show spell description before expanding', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByText('Fireball')).toBeInTheDocument();
       });
@@ -179,7 +238,7 @@ describe('SrdSearchPage', () => {
   describe('expand on click — spell', () => {
     it('shows spell description, range, components, duration when expanded', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
 
       await user.click(screen.getByText('Fireball'));
@@ -192,7 +251,7 @@ describe('SrdSearchPage', () => {
 
     it('shows higherLevels and material when present', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
 
       await user.click(screen.getByText('Fireball'));
@@ -204,7 +263,7 @@ describe('SrdSearchPage', () => {
 
     it('shows class badges when expanded', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
 
       await user.click(screen.getByText('Fireball'));
@@ -219,7 +278,7 @@ describe('SrdSearchPage', () => {
   describe('expand on click — feat', () => {
     it('shows feat description and benefits as bullets', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Sharpshooter')).toBeInTheDocument());
 
       await user.click(screen.getByText('Sharpshooter'));
@@ -230,7 +289,7 @@ describe('SrdSearchPage', () => {
     });
 
     it('shows feat category in collapsed metadata', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Sharpshooter')).toBeInTheDocument());
       expect(screen.getByText(/General/)).toBeInTheDocument();
     });
@@ -239,7 +298,7 @@ describe('SrdSearchPage', () => {
   describe('expand on click — feature', () => {
     it('shows feature description and a parent drilldown link when expanded', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Sneak Attack')).toBeInTheDocument());
 
       await user.click(screen.getByText('Sneak Attack'));
@@ -253,21 +312,21 @@ describe('SrdSearchPage', () => {
   describe('conditional rendering — spell badges', () => {
     it('shows the Concentration badge when spell.concentration is true', async () => {
       mockApiFetch.mockResolvedValue(paginated([bless]));
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Bless')).toBeInTheDocument());
       expect(screen.getByText('Concentration')).toBeInTheDocument();
     });
 
     it('shows the Ritual badge when spell.ritual is true', async () => {
       mockApiFetch.mockResolvedValue(paginated([detectMagic]));
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Detect Magic')).toBeInTheDocument());
       expect(screen.getByText('Ritual')).toBeInTheDocument();
     });
 
     it('does not show Concentration or Ritual badges when both flags are false', async () => {
       // fireballSpell has both flags false
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
       expect(screen.queryByText('Concentration')).not.toBeInTheDocument();
       expect(screen.queryByText('Ritual')).not.toBeInTheDocument();
@@ -278,7 +337,7 @@ describe('SrdSearchPage', () => {
     it('does not render the Material section when spell.material is absent', async () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValue(paginated([detectMagic]));
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Detect Magic')).toBeInTheDocument());
 
       await user.click(screen.getByText('Detect Magic'));
@@ -289,7 +348,7 @@ describe('SrdSearchPage', () => {
     it('does not render the At Higher Levels section when spell.higherLevels is absent', async () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValue(paginated([detectMagic]));
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Detect Magic')).toBeInTheDocument());
 
       await user.click(screen.getByText('Detect Magic'));
@@ -302,7 +361,7 @@ describe('SrdSearchPage', () => {
     it('does not render the Benefits section when feat.benefits is undefined', async () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValue(paginated([tough]));
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Tough')).toBeInTheDocument());
 
       await user.click(screen.getByText('Tough'));
@@ -318,7 +377,7 @@ describe('SrdSearchPage', () => {
         data: { ...toughFeat, id: 'feat-3', name: 'Resilient', benefits: [] },
       };
       mockApiFetch.mockResolvedValue(paginated([featWithEmptyBenefits]));
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Resilient')).toBeInTheDocument());
 
       await user.click(screen.getByText('Resilient'));
@@ -330,7 +389,7 @@ describe('SrdSearchPage', () => {
   describe('expand/collapse toggle', () => {
     it('hides detail when clicking an expanded card again', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
 
       await user.click(screen.getByText('Fireball'));
@@ -342,7 +401,7 @@ describe('SrdSearchPage', () => {
 
     it('allows multiple cards across kinds to be expanded simultaneously', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
 
       await user.click(screen.getByText('Fireball'));
@@ -355,7 +414,7 @@ describe('SrdSearchPage', () => {
 
   describe('type filter', () => {
     it('hides spell sub-filters by default until Spells is the only enabled type', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Spells' })).toBeInTheDocument();
       });
@@ -364,7 +423,7 @@ describe('SrdSearchPage', () => {
 
     it('shows spell sub-filters (class, level, school) when only Spells is enabled', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Spells' })).toBeInTheDocument();
       });
@@ -379,7 +438,7 @@ describe('SrdSearchPage', () => {
 
     it('shows feat sub-filters (category, prerequisite, repeatable) when only Feats is enabled', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Feats' })).toBeInTheDocument();
       });
@@ -394,7 +453,7 @@ describe('SrdSearchPage', () => {
 
     it('shows feature sub-filters when only Features is enabled', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Features' })).toBeInTheDocument();
       });
@@ -408,7 +467,7 @@ describe('SrdSearchPage', () => {
 
   describe('api interaction', () => {
     it('calls /srd/search on mount', async () => {
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(mockApiFetch).toHaveBeenCalled();
       });
@@ -417,7 +476,7 @@ describe('SrdSearchPage', () => {
 
     it('passes selected types to the API when not all enabled', async () => {
       const user = userEvent.setup();
-      render(<SrdSearchPage />);
+      renderPage();
       await waitFor(() => {
         expect(mockApiFetch).toHaveBeenCalled();
       });

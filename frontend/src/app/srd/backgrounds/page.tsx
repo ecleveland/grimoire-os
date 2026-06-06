@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import PrintToggle from '@/components/PrintToggle';
 import type { SrdBackground } from '@/lib/types';
 
 export default function BackgroundListPage() {
@@ -41,19 +42,24 @@ export default function BackgroundListPage() {
             key={bg.id}
             className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
           >
-            <button
-              onClick={() => toggle(bg.id)}
-              className="w-full flex items-center justify-between p-4 text-left"
-            >
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{bg.name}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Skills: {bg.skillProficiencies.join(', ')}
-                  {bg.feat && <> &middot; Feat: {bg.feat}</>}
-                </p>
-              </div>
-              <span className="text-gray-400 text-lg">{expanded.has(bg.id) ? '\u2212' : '+'}</span>
-            </button>
+            <div className="flex items-center">
+              <button
+                onClick={() => toggle(bg.id)}
+                className="flex-1 flex items-center justify-between p-4 text-left"
+              >
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{bg.name}</h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Skills: {bg.skillProficiencies.join(', ')}
+                    {bg.feat && <> &middot; Feat: {bg.feat}</>}
+                  </p>
+                </div>
+                <span className="text-gray-400 text-lg">
+                  {expanded.has(bg.id) ? '\u2212' : '+'}
+                </span>
+              </button>
+              <PrintToggle type="background" id={bg.id} name={bg.name} className="mr-4 shrink-0" />
+            </div>
             {expanded.has(bg.id) && (
               <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3 space-y-3">
                 {bg.description && (

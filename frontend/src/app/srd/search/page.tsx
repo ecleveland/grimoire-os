@@ -18,6 +18,7 @@ import SearchBox from '@/components/SearchBox';
 import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
 import Markdown from '@/components/Markdown';
+import PrintToggle from '@/components/PrintToggle';
 
 const LIMIT = 20;
 
@@ -371,40 +372,56 @@ function ResultCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  // Spells and features are printable card types; feats are not.
+  const printable =
+    hit.kind === 'spell' || hit.kind === 'feature'
+      ? { type: hit.kind, id: hit.data.id, name: hit.data.name }
+      : null;
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-start justify-between gap-3 p-4 text-left"
-      >
-        <div className="flex-1">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            {hit.data.name}
-            {hit.kind === 'spell' && hit.data.concentration && (
-              <span className="ml-2 text-xs px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded">
-                Concentration
-              </span>
-            )}
-            {hit.kind === 'spell' && hit.data.ritual && (
-              <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
-                Ritual
-              </span>
-            )}
-            {hit.kind === 'feat' && hit.data.repeatable && (
-              <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">
-                Repeatable
-              </span>
-            )}
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded whitespace-nowrap">
-            {KIND_LABEL[hit.kind]}
-          </span>
-          <span className="text-gray-400 text-lg">{expanded ? '−' : '+'}</span>
-        </div>
-      </button>
+      <div className="flex items-start">
+        <button
+          onClick={onToggle}
+          className="flex-1 flex items-start justify-between gap-3 p-4 text-left"
+        >
+          <div className="flex-1">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              {hit.data.name}
+              {hit.kind === 'spell' && hit.data.concentration && (
+                <span className="ml-2 text-xs px-1.5 py-0.5 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 rounded">
+                  Concentration
+                </span>
+              )}
+              {hit.kind === 'spell' && hit.data.ritual && (
+                <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded">
+                  Ritual
+                </span>
+              )}
+              {hit.kind === 'feat' && hit.data.repeatable && (
+                <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">
+                  Repeatable
+                </span>
+              )}
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded whitespace-nowrap">
+              {KIND_LABEL[hit.kind]}
+            </span>
+            <span className="text-gray-400 text-lg">{expanded ? '−' : '+'}</span>
+          </div>
+        </button>
+        {printable && (
+          <PrintToggle
+            type={printable.type}
+            id={printable.id}
+            name={printable.name}
+            className="mt-4 mr-4 shrink-0"
+          />
+        )}
+      </div>
       {expanded && (
         <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3">
           {hit.kind === 'spell' && <SpellDetail spell={hit.data} />}

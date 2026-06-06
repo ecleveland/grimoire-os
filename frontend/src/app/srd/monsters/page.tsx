@@ -7,6 +7,7 @@ import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
+import PrintToggle from '@/components/PrintToggle';
 import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 20;
@@ -179,34 +180,43 @@ export default function MonsterListPage() {
         aria-busy={loading}
       >
         {monsters.map(m => (
-          <button
-            key={m.id}
-            type="button"
-            data-testid="monster-card"
-            onClick={() => openMonster(m.id)}
-            className="text-left p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-          >
-            <h3 className="font-semibold text-gray-900 dark:text-white">{m.name}</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {m.size} {m.type} &middot; {m.alignment}
-            </p>
-            <div className="grid grid-cols-3 gap-2 mt-3 text-center text-sm">
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">CR</div>
-                <div className="font-medium text-gray-900 dark:text-white">
-                  {formatCr(m.challengeRating)}
+          // The print toggle is an absolutely-positioned sibling (not a child)
+          // of the card button — buttons cannot nest.
+          <div key={m.id} className="relative">
+            <button
+              type="button"
+              data-testid="monster-card"
+              onClick={() => openMonster(m.id)}
+              className="w-full h-full text-left p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+            >
+              <h3 className="font-semibold text-gray-900 dark:text-white pr-8">{m.name}</h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {m.size} {m.type} &middot; {m.alignment}
+              </p>
+              <div className="grid grid-cols-3 gap-2 mt-3 text-center text-sm">
+                <div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">CR</div>
+                  <div className="font-medium text-gray-900 dark:text-white">
+                    {formatCr(m.challengeRating)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">HP</div>
+                  <div className="font-medium text-gray-900 dark:text-white">{m.hitPoints}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400">AC</div>
+                  <div className="font-medium text-gray-900 dark:text-white">{m.armorClass}</div>
                 </div>
               </div>
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">HP</div>
-                <div className="font-medium text-gray-900 dark:text-white">{m.hitPoints}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">AC</div>
-                <div className="font-medium text-gray-900 dark:text-white">{m.armorClass}</div>
-              </div>
-            </div>
-          </button>
+            </button>
+            <PrintToggle
+              type="monster"
+              id={m.id}
+              name={m.name}
+              className="absolute top-3 right-3"
+            />
+          </div>
         ))}
       </div>
 
@@ -220,7 +230,12 @@ export default function MonsterListPage() {
             Loading monster…
           </p>
         ) : (
-          <MonsterStatBlock monster={detail} />
+          <div className="space-y-3">
+            <div className="flex justify-end">
+              <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
+            </div>
+            <MonsterStatBlock monster={detail} />
+          </div>
         )}
       </Modal>
 

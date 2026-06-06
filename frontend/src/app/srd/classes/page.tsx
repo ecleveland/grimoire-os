@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import PrintToggle from '@/components/PrintToggle';
 import type { SrdClass } from '@/lib/types';
 
 export default function ClassListPage() {
@@ -97,14 +98,24 @@ export default function ClassListPage() {
                       Features
                     </h3>
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {cls.features.map(f => (
-                        <span
-                          key={f.name}
-                          className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-                        >
-                          {f.name}
-                        </span>
-                      ))}
+                      {cls.features.map(f =>
+                        f.id ? (
+                          <PrintToggle
+                            key={f.name}
+                            type="feature"
+                            id={f.id}
+                            name={f.name}
+                            variant="chip"
+                          />
+                        ) : (
+                          <span
+                            key={f.name}
+                            className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
+                          >
+                            {f.name}
+                          </span>
+                        )
+                      )}
                     </div>
                   </div>
                 )}
