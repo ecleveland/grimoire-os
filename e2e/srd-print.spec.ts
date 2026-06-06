@@ -66,8 +66,8 @@ test.describe('SRD print output (VEG-268)', () => {
     await page.emulateMedia({ media: 'print' });
     await expect(page.getByTestId('print-card').first()).toBeVisible();
     await expect(page.getByTestId('print-controls')).toBeHidden();
-    // The app nav header — each PrintCard has its own <header>, which must
-    // stay visible in print (it carries the card's name band).
+    // The app nav (`body > header`) is hidden in print. Each PrintCard's own
+    // nested <header> must remain visible — it carries the card's name band.
     await expect(page.locator('body > header')).toBeHidden();
     await expect(page.getByTestId('print-card').first().locator('header')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Print (2)' })).toBeHidden();

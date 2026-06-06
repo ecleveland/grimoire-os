@@ -30,16 +30,22 @@ const GROUP_LABELS: Record<PrintableCardType, string> = {
 };
 
 /**
- * Route-scoped print stylesheet (VEG-268). Cards are a fixed 5×3" footprint,
- * so 4-up means landscape: a 2×2 grid fits both Letter (11×8.5") and A4
+ * Route-scoped print stylesheet (VEG-268). Cards are a fixed 5" wide × 3"
+ * tall footprint (a 3×5 index card), so 4-up means landscape: a 2×2 grid
+ * needs 10.2×6.2" plus borders and fits both Letter (11×8.5") and A4
  * (11.69×8.27") in landscape, while portrait cannot fit two 5" columns.
- * The @media block strips the app chrome — only the cards print.
+ * Letter has only ~0.3" of horizontal slack at these margins — widening the
+ * card, the 0.2" gap, or the 0.25" margin breaks the 2-column fit there
+ * first. The @media block strips the app chrome — only the cards print.
  */
 function printPageCss(paper: PaperSize): string {
   const size = paper === 'a4' ? 'A4' : 'letter';
-  // The @page rule lives inside @media print (valid per CSS Paged Media):
-  // jsdom's style engine crashes applying a top-level @page rule, and inside
-  // a non-matching media block it is skipped while browsers still honor it.
+  // The @page rule lives inside @media print (valid per CSS Paged Media).
+  // With it at the top level, jsdom 28's getComputedStyle throws
+  // ("Cannot destructure property 'value' of 'Specificity.max(...)'") while
+  // applying the sheet — Testing Library role queries trigger that and the
+  // whole spec fails. Inside a non-matching media block jsdom skips the rule
+  // entirely; browsers honor it in either position.
   return `
 @media print {
   @page { size: ${size} landscape; margin: 0.25in; }
@@ -66,6 +72,14 @@ function CardForType({ card }: { card: PrintableCard }) {
     case 'species':
     case 'background':
       return <PrintTraitsCard card={card} />;
+    default: {
+      // Exhaustiveness guard: a new PrintableCardType fails the `never`
+      // assignment at compile time; at runtime a mis-typed payload logs
+      // instead of silently dropping a card from the printed deck.
+      const unhandled: never = card;
+      console.error('No print card component for type:', unhandled);
+      return null;
+    }
   }
 }
 
@@ -88,11 +102,17 @@ export default function SrdPrintPage() {
     })
       .then(response => {
         if (cancelled) return;
+        if (response.groups.length === 0) {
+          // A 200 with everything dropped is indistinguishable from stale
+          // ids — log it so a backend regression here isn't silent.
+          console.error('Print card hydrate returned no cards for selections:', grouped);
+        }
         setGroups(response.groups);
         setError(null);
       })
       .catch(err => {
         if (cancelled) return;
+        console.error('Failed to hydrate print cards:', err);
         const message = err instanceof Error ? err.message : 'Failed to load print cards';
         setError(message);
         toast.error(message);
@@ -163,6 +183,12 @@ export default function SrdPrintPage() {
     );
   }
 
+  // The batch endpoint silently drops unknown ids (see shared/printable.ts),
+  // so reconcile what came back against the tray: a DM about to cut out cards
+  // for a session must know when entries are missing before they print.
+  const returnedCount = groups.reduce((n, group) => n + group.cards.length, 0);
+  const missingCount = Math.max(0, count - returnedCount);
+
   const paperToggle = (label: string, value: PaperSize) => (
     <button
       type="button"
@@ -195,8 +221,8 @@ export default function SrdPrintPage() {
           </Link>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white mt-1">Print cards</h1>
           <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            {count} card{count === 1 ? '' : 's'} · 4-up 3×5″ index cards, grouped by type. Cut along
-            the dashed guides.
+            {returnedCount} card{returnedCount === 1 ? '' : 's'} · 4-up 3×5″ index cards, grouped by
+            type. Cut along the dashed guides.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -212,6 +238,17 @@ export default function SrdPrintPage() {
           </button>
         </div>
       </div>
+
+      {missingCount > 0 && (
+        <p
+          data-testid="missing-cards-warning"
+          className="mb-4 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 px-4 py-2 text-sm text-amber-800 dark:text-amber-200 print:hidden"
+        >
+          {missingCount} of {count} selected card{count === 1 ? '' : 's'} could not be loaded — the
+          entr{missingCount === 1 ? 'y' : 'ies'} may have been removed. Only the {returnedCount}{' '}
+          card{returnedCount === 1 ? '' : 's'} below will print.
+        </p>
+      )}
 
       {groups.map((group, index) => (
         <section

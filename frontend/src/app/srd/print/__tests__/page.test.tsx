@@ -7,8 +7,12 @@ import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-cont
 import type { PrintTrayItem } from '@/lib/print-tray-context';
 import type {
   HydratePrintableCardsResponse,
+  PrintableBackgroundCard,
+  PrintableFeatureCard,
   PrintableItemCard,
   PrintableMonsterCard,
+  PrintableRaceCard,
+  PrintableSpeciesCard,
   PrintableSpellCard,
 } from '@grimoire-os/shared';
 
@@ -23,6 +27,20 @@ vi.mock('@/lib/api', () => ({
 vi.mock('sonner', () => ({
   toast: { error: vi.fn() },
 }));
+
+// Per-test override of the tray context, for pinning states the real provider
+// races through (it hydrates from localStorage in a mount effect, so the
+// pre-hydration window can't be held open from outside). Only read at render
+// time — the factory itself never touches it.
+let trayOverride: { hydrated?: boolean } | null = null;
+
+vi.mock('@/lib/print-tray-context', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/print-tray-context')>();
+  return {
+    ...actual,
+    usePrintTray: () => ({ ...actual.usePrintTray(), ...trayOverride }),
+  };
+});
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -66,6 +84,36 @@ const bagCard: PrintableItemCard = {
   description: 'This bag has an interior space considerably larger than its outside dimensions.',
 };
 
+const dragonbornCard: PrintableRaceCard = {
+  type: 'race',
+  id: 'r1',
+  name: 'Dragonborn',
+  traits: [{ name: 'Breath Weapon', description: 'Exhale destructive energy.' }],
+};
+
+const elfCard: PrintableSpeciesCard = {
+  type: 'species',
+  id: 'sp1',
+  name: 'Elf',
+  traits: [{ name: 'Darkvision', description: 'See in dim light within 60 feet.' }],
+};
+
+const acolyteCard: PrintableBackgroundCard = {
+  type: 'background',
+  id: 'b1',
+  name: 'Acolyte',
+  traits: [{ name: 'Shelter of the Faithful', description: 'Receive aid at temples.' }],
+};
+
+const rageCard: PrintableFeatureCard = {
+  type: 'feature',
+  id: 'f1',
+  name: 'Rage',
+  parent: { kind: 'class', id: 'c1', name: 'Barbarian' },
+  level: 1,
+  description: 'Enter a battle fury granting damage bonuses and resistance.',
+};
+
 /** Tray selection matching the three fixture cards, in insertion order. */
 const seededItems: PrintTrayItem[] = [
   { type: 'monster', id: 'm1' },
@@ -102,6 +150,7 @@ beforeEach(() => {
   localStorage.clear();
   mockApiFetch.mockReset();
   vi.mocked(toast.error).mockClear();
+  trayOverride = null;
 });
 
 afterEach(() => {
@@ -144,6 +193,85 @@ describe('SrdPrintPage', () => {
 
       expect(await screen.findByText(/loading print set/i)).toBeInTheDocument();
       expect(screen.queryAllByTestId('print-card')).toHaveLength(0);
+    });
+
+    it('dispatches every card type to a card component, with its group label', async () => {
+      seedTray([
+        ...seededItems,
+        { type: 'race', id: 'r1' },
+        { type: 'species', id: 'sp1' },
+        { type: 'background', id: 'b1' },
+        { type: 'feature', id: 'f1' },
+      ]);
+      mockApiFetch.mockResolvedValue({
+        groups: [
+          ...hydrateResponse.groups,
+          { type: 'race', cards: [dragonbornCard] },
+          { type: 'species', cards: [elfCard] },
+          { type: 'background', cards: [acolyteCard] },
+          { type: 'feature', cards: [rageCard] },
+        ],
+      } satisfies HydratePrintableCardsResponse);
+
+      renderPage();
+
+      // One rendered card per type — including the race/species/background
+      // fall-through to the shared traits card and the feature card.
+      expect(await screen.findByText('Dragonborn')).toBeInTheDocument();
+      expect(screen.getByText('Elf')).toBeInTheDocument();
+      expect(screen.getByText('Acolyte')).toBeInTheDocument();
+      expect(screen.getByText('Rage')).toBeInTheDocument();
+      expect(screen.getAllByTestId('print-card')).toHaveLength(7);
+
+      for (const label of ['Races', 'Species', 'Backgrounds', 'Features']) {
+        expect(screen.getByRole('heading', { name: label })).toBeInTheDocument();
+      }
+    });
+
+    it('renders multiple cards in one group and sends all ids in one selection', async () => {
+      const goblinBoss: PrintableMonsterCard = { ...goblinCard, id: 'm2', name: 'Goblin Boss' };
+      seedTray([
+        { type: 'monster', id: 'm1' },
+        { type: 'monster', id: 'm2' },
+      ]);
+      mockApiFetch.mockResolvedValue({
+        groups: [{ type: 'monster', cards: [goblinCard, goblinBoss] }],
+      } satisfies HydratePrintableCardsResponse);
+
+      renderPage();
+
+      expect(await screen.findByText('Goblin')).toBeInTheDocument();
+      expect(screen.getByText('Goblin Boss')).toBeInTheDocument();
+      expect(screen.getAllByTestId('print-card')).toHaveLength(2);
+      expect(mockApiFetch).toHaveBeenCalledWith('/srd/cards', {
+        method: 'POST',
+        body: JSON.stringify({ selections: [{ type: 'monster', ids: ['m1', 'm2'] }] }),
+      });
+    });
+  });
+
+  describe('tray hydration gate', () => {
+    it('does not fetch before the tray has hydrated, even with a stored set', async () => {
+      seedTray(seededItems);
+      trayOverride = { hydrated: false };
+      mockApiFetch.mockResolvedValue(hydrateResponse);
+
+      renderPage();
+
+      expect(await screen.findByText(/loading print set/i)).toBeInTheDocument();
+      expect(mockApiFetch).not.toHaveBeenCalled();
+    });
+
+    it('shows loading, not the empty state, while an empty tray is still hydrating', async () => {
+      trayOverride = { hydrated: false };
+
+      renderPage();
+
+      // An un-hydrated empty tray means "don't know yet" — flashing the empty
+      // state here would mislead anyone whose set is still being read.
+      expect(await screen.findByText(/loading print set/i)).toBeInTheDocument();
+      expect(screen.queryByText(/print set is empty/i)).not.toBeInTheDocument();
+      expect(mockApiFetch).not.toHaveBeenCalled();
     });
   });
 
@@ -196,6 +324,45 @@ describe('SrdPrintPage', () => {
 
       expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument();
       expect(screen.queryAllByTestId('print-card')).toHaveLength(0);
+      // All-dropped is a distinct state from an empty tray — the user *did*
+      // select cards; telling them the set is empty would gaslight them.
+      expect(screen.queryByText(/print set is empty/i)).not.toBeInTheDocument();
+    });
+
+    it('warns when some ids were silently dropped and counts only returned cards', async () => {
+      // The batch endpoint drops unknown ids without complaint (shared
+      // contract) — the page must reconcile, or a DM prints an incomplete
+      // deck and discovers it mid-session.
+      seedTray(seededItems);
+      mockApiFetch.mockResolvedValue({
+        groups: [
+          { type: 'monster', cards: [goblinCard] },
+          { type: 'spell', cards: [fireballCard] },
+          // The item was dropped.
+        ],
+      } satisfies HydratePrintableCardsResponse);
+
+      renderPage();
+
+      expect(await screen.findByText('Goblin')).toBeInTheDocument();
+      const warning = screen.getByTestId('missing-cards-warning');
+      expect(warning).toHaveTextContent('1 of 3 selected cards could not be loaded');
+      expect(warning).toHaveTextContent('Only the 2 cards below will print');
+      // The warning is screen-only — print output stays cards-only.
+      expect(warning.className).toContain('print:hidden');
+      // The header count reflects what actually prints, not the tray.
+      expect(screen.getByText(/2 cards · 4-up/)).toBeInTheDocument();
+    });
+
+    it('shows no missing-cards warning when everything hydrates', async () => {
+      seedTray(seededItems);
+      mockApiFetch.mockResolvedValue(hydrateResponse);
+
+      renderPage();
+      await screen.findByText('Goblin');
+
+      expect(screen.queryByTestId('missing-cards-warning')).not.toBeInTheDocument();
+      expect(screen.getByText(/3 cards · 4-up/)).toBeInTheDocument();
     });
   });
 
