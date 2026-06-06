@@ -42,6 +42,12 @@ interface PrintTrayContextType {
   count: number;
   /** True when the set has grown past {@link PRINT_TRAY_SOFT_CAP}. */
   isOverSoftCap: boolean;
+  /**
+   * True once the stored set has been read from localStorage (VEG-268).
+   * Until then `items` is transiently empty — consumers that branch on
+   * emptiness (the /srd/print route's empty state) must wait for this.
+   */
+  hydrated: boolean;
   add: (type: PrintableCardType, id: string) => void;
   remove: (type: PrintableCardType, id: string) => void;
   toggle: (type: PrintableCardType, id: string) => void;
@@ -189,13 +195,14 @@ export function PrintTrayProvider({ children }: { children: ReactNode }) {
       grouped,
       count: items.length,
       isOverSoftCap: items.length > PRINT_TRAY_SOFT_CAP,
+      hydrated,
       add,
       remove,
       toggle,
       has,
       clear,
     }),
-    [items, grouped, add, remove, toggle, has, clear]
+    [items, grouped, hydrated, add, remove, toggle, has, clear]
   );
 
   return <PrintTrayContext.Provider value={contextValue}>{children}</PrintTrayContext.Provider>;
