@@ -1,7 +1,7 @@
 'use client';
 
 import type { SrdMonster } from '@/lib/types';
-import { formatCr } from '@/lib/srd-format';
+import { abilityModifier, formatCr } from '@/lib/srd-format';
 
 interface Action {
   name: string;
@@ -16,11 +16,6 @@ const ABILITIES: Array<{ key: keyof SrdMonster; label: string }> = [
   { key: 'wis', label: 'WIS' },
   { key: 'cha', label: 'CHA' },
 ];
-
-function modifier(score: number): string {
-  const mod = Math.floor((score - 10) / 2);
-  return mod >= 0 ? `+${mod}` : `${mod}`;
-}
 
 function signed(n: number): string {
   return n >= 0 ? `+${n}` : `${n}`;
@@ -79,7 +74,7 @@ export default function MonsterStatBlock({ monster: m }: { monster: SrdMonster }
                 {a.label}
               </div>
               <div className="font-mono text-xs">
-                {score} ({modifier(score)})
+                {score} ({abilityModifier(score)})
               </div>
             </div>
           );
