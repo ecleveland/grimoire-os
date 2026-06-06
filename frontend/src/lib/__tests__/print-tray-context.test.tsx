@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import {
   PrintTrayProvider,
   usePrintTray,
@@ -9,6 +10,10 @@ import {
   PRINT_TRAY_STORAGE_KEY,
 } from '../print-tray-context';
 import type { PrintTrayItem } from '../print-tray-context';
+
+vi.mock('sonner', () => ({
+  toast: { error: vi.fn() },
+}));
 
 function TestConsumer() {
   const tray = usePrintTray();
@@ -43,6 +48,7 @@ function seedStorage(items: PrintTrayItem[]) {
 
 beforeEach(() => {
   localStorage.clear();
+  vi.mocked(toast.error).mockClear();
 });
 
 describe('usePrintTray outside provider', () => {
@@ -260,6 +266,79 @@ describe('persistence', () => {
     localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify({ type: 'monster', id: 'g' }));
     renderWithProvider();
     expect(screen.getByTestId('count')).toHaveTextContent('0');
+  });
+});
+
+describe('storage failure visibility', () => {
+  // The three storage failure modes (write throws, read throws, corrupt
+  // entries dropped) must not be silent: a failed hydration is otherwise
+  // pixel-identical to an empty tray, and a failed persist silently turns the
+  // selection session-only (PR #121 review).
+
+  it('keeps the in-memory tray working and warns once when persisting throws', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const setItemSpy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    const user = userEvent.setup();
+    renderWithProvider();
+
+    await user.click(screen.getByRole('button', { name: 'Add goblin' }));
+    await user.click(screen.getByRole('button', { name: 'Add fireball' }));
+
+    // In-memory set still works.
+    expect(screen.getByTestId('count')).toHaveTextContent('2');
+    // The failure is logged and surfaced to the user once, not per change.
+    expect(consoleSpy).toHaveBeenCalledWith('Failed to persist print tray:', expect.any(Error));
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/print selection/i),
+      expect.objectContaining({ id: 'print-tray-persist' })
+    );
+
+    setItemSpy.mockRestore();
+    consoleSpy.mockRestore();
+  });
+
+  it('logs when reading the stored set throws', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const getItemSpy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    renderWithProvider();
+
+    expect(screen.getByTestId('count')).toHaveTextContent('0');
+    expect(consoleSpy).toHaveBeenCalledWith(
+      'Failed to read print tray from storage:',
+      expect.any(Error)
+    );
+
+    getItemSpy.mockRestore();
+    consoleSpy.mockRestore();
+  });
+
+  it('logs how many malformed stored entries were dropped', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.setItem(
+      PRINT_TRAY_STORAGE_KEY,
+      JSON.stringify([{ type: 'monster', id: 'goblin' }, { type: 'bogus', id: 'x' }, 'garbage'])
+    );
+    renderWithProvider();
+
+    expect(screen.getByTestId('count')).toHaveTextContent('1');
+    expect(consoleSpy).toHaveBeenCalledWith('Print tray: dropped 2 malformed stored entries.');
+
+    consoleSpy.mockRestore();
+  });
+
+  it('does not log for a legitimately empty or absent store', () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderWithProvider();
+
+    expect(screen.getByTestId('count')).toHaveTextContent('0');
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
   });
 });
 

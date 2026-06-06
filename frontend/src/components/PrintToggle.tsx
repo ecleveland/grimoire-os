@@ -20,8 +20,10 @@ export interface PrintToggleProps {
 
 /**
  * Shared print-set selection affordance (VEG-265). Toggles `{type, id}` in the
- * print tray and reflects current membership. Safe to place inside clickable
- * cards — the click never reaches the parent.
+ * print tray and reflects current membership. Safe to place alongside a
+ * clickable card — clicks never propagate to the card. Do not nest it inside a
+ * `<button>` (invalid HTML); render it as a sibling instead, as the SRD list
+ * pages do.
  */
 export default function PrintToggle({
   type,

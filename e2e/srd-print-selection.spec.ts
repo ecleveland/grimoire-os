@@ -43,7 +43,8 @@ test.describe('SRD print set selection (VEG-265)', () => {
     await page.reload();
     await expect(page.getByRole('link', { name: 'Print (2)' })).toBeVisible({ timeout: 10_000 });
 
-    // 4. The Print action routes to the print surface.
+    // 4. The Print action links to the /srd/print surface — we assert the
+    // href target only, not navigation (the route itself lands with VEG-268).
     expect(await page.getByRole('link', { name: 'Print (2)' }).getAttribute('href')).toBe(
       '/srd/print'
     );
