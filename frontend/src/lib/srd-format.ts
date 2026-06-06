@@ -5,3 +5,9 @@ export function formatCr(cr: number): string {
   if (cr === 0.5) return '1/2';
   return String(cr);
 }
+
+/** Derive the signed 5e ability modifier from a raw score, e.g. 30 → "+10", 8 → "-1". */
+export function abilityModifier(score: number): string {
+  const mod = Math.floor((score - 10) / 2);
+  return mod >= 0 ? `+${mod}` : `${mod}`;
+}
