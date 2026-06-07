@@ -260,13 +260,14 @@ export default function SrdPrintPage() {
           <h2 className="print:hidden text-lg font-semibold text-gray-900 dark:text-white mt-6 mb-3 first:mt-0">
             {GROUP_LABELS[group.type]}
           </h2>
-          {/* 2×2-up grid: the gap is the cut gutter, the dashed border the cut guide. */}
+          {/* 2×2-up grid: the gap is the cut gutter; each PrintCard brings its
+              own dashed cut guide. The `contents` wrapper exists only to key
+              the mapping — a card component may emit several physical cards
+              (overflow continuation cards, VEG-275) and each must be its own
+              grid item, not stack inside one cell. */}
           <div className="grid grid-cols-2 gap-[0.2in] justify-start">
             {group.cards.map(card => (
-              <div
-                key={`${card.type}:${card.id}`}
-                className="w-fit border border-dashed border-gray-300 break-inside-avoid"
-              >
+              <div key={`${card.type}:${card.id}`} className="contents">
                 <CardForType card={card} />
               </div>
             ))}
