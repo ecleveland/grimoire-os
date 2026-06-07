@@ -21,6 +21,20 @@ export default function ClassListPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Invariant: every feature from the API carries a row id (the classes
+  // endpoint includes feature rows), so each renders as a print toggle below.
+  // An id-less feature silently degrades to an inert chip — surface it loudly,
+  // since a backend contract regression here would otherwise drop toggles unnoticed.
+  useEffect(() => {
+    const idless = classes.flatMap(cls => cls.features).filter(f => !f.id);
+    if (idless.length > 0) {
+      console.error(
+        'srd/classes: class features rendered without an id — print toggle unavailable (backend contract regression):',
+        idless.map(f => f.name)
+      );
+    }
+  }, [classes]);
+
   const toggle = (id: string) => {
     setExpanded(prev => {
       const next = new Set(prev);

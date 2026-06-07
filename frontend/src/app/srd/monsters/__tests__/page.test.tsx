@@ -311,5 +311,26 @@ describe('MonsterListPage', () => {
         within(dialog).getByRole('button', { name: 'Remove Goblin from print set' })
       ).toHaveTextContent('Remove from print set');
     });
+
+    it('reflects the modal toggle on the same monster’s list card simultaneously', async () => {
+      mockApiFetch.mockImplementation((path: string) => {
+        if (path.startsWith('/srd/monsters/')) return Promise.resolve(goblin);
+        return Promise.resolve(makeResponse([goblin, dragon]));
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Add Goblin to print set' }));
+
+      // The card and modal toggle the same (type, id); the list card affordance
+      // outside the dialog must reflect the selection the modal just made.
+      const cardToggle = screen
+        .getAllByRole('button', { name: 'Remove Goblin from print set' })
+        .find(button => button.closest('[role="dialog"]') === null);
+      expect(cardToggle).toBeDefined();
+      expect(cardToggle).toHaveAttribute('aria-pressed', 'true');
+    });
   });
 });

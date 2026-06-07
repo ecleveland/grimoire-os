@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PrintTrayBar from '../PrintTrayBar';
+import PrintToggle from '../PrintToggle';
 import {
   PrintTrayProvider,
   usePrintTray,
@@ -107,5 +108,45 @@ describe('PrintTrayBar', () => {
       await screen.findByRole('link', { name: `Print (${PRINT_TRAY_SOFT_CAP + 1})` })
     ).toBeInTheDocument();
     expect(screen.getByText(/large print sets/i)).toBeInTheDocument();
+  });
+
+  // The seeded tests above mount already-at-count; this one drives a real
+  // PrintToggle across the boundary, so it catches a regression where an add
+  // at the cap fails to re-render the warning (e.g. a stale `count` memo).
+  it('shows and hides the soft-cap warning as a real toggle crosses the boundary', async () => {
+    const user = userEvent.setup();
+    // Seed exactly the cap; the crossing item ("goblin") is not in the set.
+    seedStorage(
+      Array.from({ length: PRINT_TRAY_SOFT_CAP }, (_, i) => ({
+        type: 'spell' as const,
+        id: `spell-${i}`,
+      }))
+    );
+    render(
+      <PrintTrayProvider>
+        <PrintTrayBar />
+        <PrintToggle type="monster" id="goblin" name="Goblin" />
+      </PrintTrayProvider>
+    );
+
+    // At the cap on mount: bar present, no warning yet.
+    expect(
+      await screen.findByRole('link', { name: `Print (${PRINT_TRAY_SOFT_CAP})` })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/large print sets/i)).not.toBeInTheDocument();
+
+    // Adding one crosses the cap → warning appears live.
+    await user.click(screen.getByRole('button', { name: 'Add Goblin to print set' }));
+    expect(
+      await screen.findByRole('link', { name: `Print (${PRINT_TRAY_SOFT_CAP + 1})` })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/large print sets/i)).toBeInTheDocument();
+
+    // Removing it drops back to the cap → warning disappears live.
+    await user.click(screen.getByRole('button', { name: 'Remove Goblin from print set' }));
+    expect(
+      await screen.findByRole('link', { name: `Print (${PRINT_TRAY_SOFT_CAP})` })
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/large print sets/i)).not.toBeInTheDocument();
   });
 });

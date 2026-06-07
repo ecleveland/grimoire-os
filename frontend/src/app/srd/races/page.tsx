@@ -22,6 +22,20 @@ export default function RaceListPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Invariant: every trait from the API carries a row id (the races endpoint
+  // includes trait rows), so each renders as a print toggle below. An id-less
+  // trait silently degrades to an inert chip — surface it loudly, since a
+  // backend contract regression here would otherwise drop toggles unnoticed.
+  useEffect(() => {
+    const idless = races.flatMap(race => race.traits).filter(t => !t.id);
+    if (idless.length > 0) {
+      console.error(
+        'srd/races: race traits rendered without an id — print toggle unavailable (backend contract regression):',
+        idless.map(t => t.name)
+      );
+    }
+  }, [races]);
+
   const toggle = (id: string) => {
     setExpanded(prev => {
       const next = new Set(prev);

@@ -138,6 +138,46 @@ describe('RaceListPage', () => {
     });
   });
 
+  // An id-less trait can't be a print toggle. On real API data this never
+  // happens (the endpoint includes trait row ids), so its appearance signals
+  // a broken backend contract that would otherwise silently drop print toggles.
+  describe('inert-chip invariant logging (VEG-274)', () => {
+    it('logs a contract-violation error when a trait is rendered without an id', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockApiFetch.mockResolvedValue([
+        makeRace({
+          traits: [
+            { id: 'trait-fey-ancestry', name: 'Fey Ancestry', description: 'Advantage vs charm.' },
+            { name: 'Keen Senses', description: 'Proficiency in Perception.' },
+          ],
+        }),
+      ]);
+      renderPage();
+
+      await screen.findByText('Elf');
+      await waitFor(() =>
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('race traits rendered without an id'),
+          ['Keen Senses']
+        )
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('does not log the invariant when every trait carries an id', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockApiFetch.mockResolvedValue([elfWithLineage]);
+      renderPage();
+
+      await screen.findByText('Elf');
+      expect(errorSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('without an id'),
+        expect.anything()
+      );
+      errorSpy.mockRestore();
+    });
+  });
+
   it('shows a loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
     renderPage();
