@@ -28,6 +28,58 @@ import { PrintCardSelectionDto } from './dto/hydrate-cards.dto';
 //   order), not DB order.
 // - Requests totalling more than PRINTABLE_CARD_BATCH_MAX ids are rejected.
 
+// ── Markdown flattening (VEG-276) ──────────────────────────────────────────
+//
+// SRD descriptions legitimately carry markdown — the seed loader appends GFM
+// tables and option-bullet lists to species traits (VEG-273), and the
+// PDF-extracted spell/magic-item descriptions embed GFM tables directly
+// (VEG-271/272). The screen UIs render them through a Markdown component, but
+// the print card components are deliberately dumb plain-text renderers, and
+// the shared contract (PrintableNamedEntry) makes pre-trimming the producer's
+// job. So: drop tables (the prose already references them by name, and the
+// full table stays available in the screen UI), strip emphasis and bullet
+// markers, and collapse whitespace into the single compact line a 3×5" card
+// shows.
+
+/** A GFM table delimiter row, e.g. `| --- | --- |`. Mirrors the seed loader's detector. */
+const GFM_DELIMITER = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+/** A line that is nothing but a bold table title, e.g. `**Draconic Ancestors**`. */
+const BOLD_TITLE_LINE = /^\s*\*\*[^*]+\*\*\s*$/;
+
+/** Drop GFM table blocks (header + delimiter + body rows) and any bold title line directly above. */
+function dropGfmTables(text: string): string {
+  const lines = text.split('\n');
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const isHeader = lines[i].includes('|');
+    if (isHeader && i + 1 < lines.length && GFM_DELIMITER.test(lines[i + 1])) {
+      while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
+      if (kept.length > 0 && BOLD_TITLE_LINE.test(kept[kept.length - 1])) kept.pop();
+      i++; // skip the delimiter row
+      while (i + 1 < lines.length && lines[i + 1].includes('|')) i++; // skip body rows
+      continue;
+    }
+    kept.push(lines[i]);
+  }
+  return kept.join('\n');
+}
+
+/** Flatten markdown a card would otherwise print verbatim into compact plain text. */
+function flattenCardText(text: string): string {
+  return dropGfmTables(text)
+    .replace(/^\s*[-*•]\s+/gm, '') // bullet markers — items read as plain sentences
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1') // **bold**
+    .replace(/\*([^*\n]+)\*/g, '$1') // *italic*
+    .replace(/\b_([^_\n]+)_\b/g, '$1') // _italic_ (stray underscores stay)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Flatten the description of a name + description entry. */
+function flattenEntry(entry: PrintableNamedEntry): PrintableNamedEntry {
+  return { name: entry.name, description: flattenCardText(entry.description) };
+}
+
 /** Parse a JSON column expected to hold [{ name, description }] entries, dropping anything malformed. */
 function toNamedEntries(value: unknown, cap: number): PrintableNamedEntry[] {
   if (!Array.isArray(value)) return [];
@@ -40,7 +92,7 @@ function toNamedEntries(value: unknown, cap: number): PrintableNamedEntry[] {
         typeof (entry as PrintableNamedEntry).description === 'string'
     )
     .slice(0, cap)
-    .map(entry => ({ name: entry.name, description: entry.description }));
+    .map(flattenEntry);
 }
 
 /** Re-order hydrated cards to match the requested id order, dropping ids that produced no card. */
@@ -178,7 +230,11 @@ export class PrintableCardsService {
         description: true,
       },
     });
-    return rows.map(row => ({ type: 'spell' as const, ...row }));
+    return rows.map(row => ({
+      type: 'spell' as const,
+      ...row,
+      description: flattenCardText(row.description),
+    }));
   }
 
   private async hydrateItems(ids: string[]): Promise<PrintableCard[]> {
@@ -202,7 +258,7 @@ export class PrintableCardsService {
       ...(row.rarity !== null ? { rarity: row.rarity } : {}),
       requiresAttunement: row.requiresAttunement,
       properties: row.properties,
-      ...(row.description !== null ? { description: row.description } : {}),
+      ...(row.description !== null ? { description: flattenCardText(row.description) } : {}),
     }));
   }
 
@@ -222,7 +278,7 @@ export class PrintableCardsService {
       type,
       id: row.id,
       name: row.name,
-      traits: row.traits.slice(0, PRINTABLE_TRAIT_SUMMARY_CAP),
+      traits: row.traits.slice(0, PRINTABLE_TRAIT_SUMMARY_CAP).map(flattenEntry),
     }));
   }
 
@@ -242,7 +298,7 @@ export class PrintableCardsService {
       type: 'background' as const,
       id: row.id,
       name: row.name,
-      traits: row.features.slice(0, PRINTABLE_TRAIT_SUMMARY_CAP),
+      traits: row.features.slice(0, PRINTABLE_TRAIT_SUMMARY_CAP).map(flattenEntry),
     }));
   }
 
@@ -254,7 +310,7 @@ export class PrintableCardsService {
       name: feature.name,
       parent: feature.parent,
       ...(feature.level !== undefined ? { level: feature.level } : {}),
-      description: feature.description,
+      description: flattenCardText(feature.description),
     }));
   }
 }
