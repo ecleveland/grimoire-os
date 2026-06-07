@@ -79,6 +79,18 @@ const FEATURE_DATA = {
   parent: { kind: 'class' as const, id: 'cls-1', name: 'Fighter' },
 };
 
+// The real-world VEG-276 case: the seeded Draconic Ancestry trait carries the
+// GFM table the loader appends for the races UI (VEG-273). Print cards render
+// plain text, so the producer must drop the table (title included) and keep
+// the prose, which already points at the table by name.
+const DRACONIC_ANCESTRY_DESCRIPTION =
+  'Your lineage stems from a dragon progenitor. Choose the kind of dragon from the Draconic Ancestors table. Your choice affects your Breath Weapon and Damage Resistance traits as well as your appearance.\n\n' +
+  '**Draconic Ancestors**\n\n' +
+  '| Dragon | Damage Type |\n| --- | --- |\n| Black | Acid |\n| Blue | Lightning |\n| Brass | Fire |';
+
+const DRACONIC_ANCESTRY_FLATTENED =
+  'Your lineage stems from a dragon progenitor. Choose the kind of dragon from the Draconic Ancestors table. Your choice affects your Breath Weapon and Damage Resistance traits as well as your appearance.';
+
 describe('PrintableCardsService', () => {
   let service: PrintableCardsService;
   let prisma: MockPrismaService;
@@ -331,6 +343,161 @@ describe('PrintableCardsService', () => {
       const result = await service.hydrate([{ type: 'feature', ids: ['feat-1'] }]);
 
       expect(result.groups[0].cards[0]).not.toHaveProperty('level');
+    });
+  });
+
+  describe('markdown flattening (VEG-276)', () => {
+    const raceWithTrait = (description: string) => ({
+      ...RACE_ROW,
+      traits: [{ name: 'Draconic Ancestry', description }],
+    });
+    const firstTraitDescription = (result: { groups: { cards: unknown[] }[] }) =>
+      (result.groups[0].cards[0] as { traits: { description: string }[] }).traits[0].description;
+
+    it('drops a GFM pipe table (and its bold title) from a race trait, keeping the prose', async () => {
+      prisma.race.findMany.mockResolvedValue([raceWithTrait(DRACONIC_ANCESTRY_DESCRIPTION)]);
+
+      const result = await service.hydrate([{ type: 'race', ids: ['race-1'] }]);
+
+      const description = firstTraitDescription(result);
+      expect(description).toBe(DRACONIC_ANCESTRY_FLATTENED);
+      expect(description).not.toContain('**');
+      expect(description).not.toContain('|');
+      expect(description).not.toContain('---');
+    });
+
+    it('strips emphasis markers from trait descriptions', async () => {
+      prisma.race.findMany.mockResolvedValue([
+        raceWithTrait('You gain **Heroic Inspiration** and *advantage* on _initiative_ rolls.'),
+      ]);
+
+      const result = await service.hydrate([{ type: 'race', ids: ['race-1'] }]);
+
+      expect(firstTraitDescription(result)).toBe(
+        'You gain Heroic Inspiration and advantage on initiative rolls.'
+      );
+    });
+
+    it('flattens option bullet lists into plain sentences', async () => {
+      prisma.race.findMany.mockResolvedValue([
+        raceWithTrait(
+          'You have the following benefits:\n\n- **Adept.** You know a cantrip.\n- **Resilient.** You have advantage.'
+        ),
+      ]);
+
+      const result = await service.hydrate([{ type: 'race', ids: ['race-1'] }]);
+
+      expect(firstTraitDescription(result)).toBe(
+        'You have the following benefits: Adept. You know a cantrip. Resilient. You have advantage.'
+      );
+    });
+
+    it('collapses whitespace runs so card text is a single compact line', async () => {
+      prisma.race.findMany.mockResolvedValue([
+        raceWithTrait('First sentence.\n\nSecond   sentence.\nThird.'),
+      ]);
+
+      const result = await service.hydrate([{ type: 'race', ids: ['race-1'] }]);
+
+      expect(firstTraitDescription(result)).toBe('First sentence. Second sentence. Third.');
+    });
+
+    it('flattens species trait descriptions (same source, species-tagged)', async () => {
+      prisma.race.findMany.mockResolvedValue([raceWithTrait(DRACONIC_ANCESTRY_DESCRIPTION)]);
+
+      const result = await service.hydrate([{ type: 'species', ids: ['race-1'] }]);
+
+      expect(firstTraitDescription(result)).toBe(DRACONIC_ANCESTRY_FLATTENED);
+    });
+
+    it('flattens markdown tables in spell descriptions', async () => {
+      prisma.spell.findMany.mockResolvedValue([
+        {
+          ...SPELL_ROW,
+          description:
+            'The GM chooses from the table below.\n\n| Omen | Result |\n| --- | --- |\n| Weal | Good |\n| Woe | Bad |',
+        },
+      ]);
+
+      const result = await service.hydrate([{ type: 'spell', ids: ['sp-1'] }]);
+
+      const card = result.groups[0].cards[0] as { description: string };
+      expect(card.description).toBe('The GM chooses from the table below.');
+    });
+
+    it('flattens markdown tables and emphasis in item descriptions', async () => {
+      prisma.item.findMany.mockResolvedValue([
+        {
+          ...ITEM_ROW,
+          description:
+            'This **magic** ammunition slays creatures.\n\n| d100 | Type |\n| --- | --- |\n| 01-10 | Beasts |',
+        },
+      ]);
+
+      const result = await service.hydrate([{ type: 'item', ids: ['it-1'] }]);
+
+      const card = result.groups[0].cards[0] as { description: string };
+      expect(card.description).toBe('This magic ammunition slays creatures.');
+    });
+
+    it('flattens markdown in feature descriptions (race traits hydrate as features)', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([
+        {
+          ...FEATURE_DATA,
+          level: undefined,
+          description: DRACONIC_ANCESTRY_DESCRIPTION,
+          parent: { kind: 'race' as const, id: 'r1', name: 'Dragonborn' },
+        },
+      ]);
+
+      const result = await service.hydrate([{ type: 'feature', ids: ['feat-1'] }]);
+
+      const card = result.groups[0].cards[0] as { description: string };
+      expect(card.description).toBe(DRACONIC_ANCESTRY_FLATTENED);
+    });
+
+    it('flattens markdown in background feature descriptions', async () => {
+      prisma.background.findMany.mockResolvedValue([
+        {
+          ...BACKGROUND_ROW,
+          features: [{ name: 'Patron', description: 'A **wealthy** patron sponsors you.' }],
+        },
+      ]);
+
+      const result = await service.hydrate([{ type: 'background', ids: ['bg-1'] }]);
+
+      expect(firstTraitDescription(result)).toBe('A wealthy patron sponsors you.');
+    });
+
+    it('flattens markdown in monster action and trait descriptions', async () => {
+      prisma.monster.findMany.mockResolvedValue([
+        {
+          ...MONSTER_ROW,
+          actions: [{ name: 'Bite', description: 'Deals **2d6** piercing damage.' }],
+          specialAbilities: [{ name: 'Pack Tactics', description: 'Has *advantage* near allies.' }],
+        },
+      ]);
+
+      const result = await service.hydrate([{ type: 'monster', ids: ['mon-1'] }]);
+
+      const card = result.groups[0].cards[0] as {
+        actions: { description: string }[];
+        traits: { description: string }[];
+      };
+      expect(card.actions[0].description).toBe('Deals 2d6 piercing damage.');
+      expect(card.traits[0].description).toBe('Has advantage near allies.');
+    });
+
+    it('leaves a stray non-emphasis asterisk or underscore untouched', async () => {
+      prisma.race.findMany.mockResolvedValue([
+        raceWithTrait('Rations last 7 days* under_score normal conditions.'),
+      ]);
+
+      const result = await service.hydrate([{ type: 'race', ids: ['race-1'] }]);
+
+      expect(firstTraitDescription(result)).toBe(
+        'Rations last 7 days* under_score normal conditions.'
+      );
     });
   });
 
