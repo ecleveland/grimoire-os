@@ -129,4 +129,43 @@ describe('ClassListPage', () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  // An id-less feature can't be a print toggle. On real API data this never
+  // happens (the endpoint includes feature row ids), so its appearance signals
+  // a broken backend contract that would otherwise silently drop print toggles.
+  describe('inert-chip invariant logging (VEG-274)', () => {
+    it('logs a contract-violation error when a feature is rendered without an id', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockApiFetch.mockResolvedValue([
+        makeClass({
+          features: [
+            { id: 'cf-second-wind', name: 'Second Wind', level: 1 },
+            { name: 'Legacy Feature', level: 1 },
+          ],
+        }),
+      ]);
+      renderPage();
+
+      await screen.findByText('Fighter');
+      await waitFor(() =>
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('class features rendered without an id'),
+          ['Legacy Feature']
+        )
+      );
+      errorSpy.mockRestore();
+    });
+
+    it('does not log the invariant when every feature carries an id', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      renderPage();
+
+      await screen.findByText('Fighter');
+      expect(errorSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('without an id'),
+        expect.anything()
+      );
+      errorSpy.mockRestore();
+    });
+  });
 });
