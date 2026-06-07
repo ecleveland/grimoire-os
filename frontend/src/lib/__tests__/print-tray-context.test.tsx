@@ -24,6 +24,7 @@ function TestConsumer() {
       <span data-testid="has-goblin">{String(tray.has('monster', 'goblin'))}</span>
       <span data-testid="grouped">{JSON.stringify(tray.grouped)}</span>
       <span data-testid="items">{JSON.stringify(tray.items)}</span>
+      <span data-testid="hydrated">{String(tray.hydrated)}</span>
       <button onClick={() => tray.add('monster', 'goblin')}>Add goblin</button>
       <button onClick={() => tray.add('spell', 'fireball')}>Add fireball</button>
       <button onClick={() => tray.add('feature', 'action-surge')}>Add feature</button>
@@ -225,6 +226,17 @@ describe('persistence', () => {
       { type: 'monster', id: 'goblin' },
       { type: 'spell', id: 'fireball' },
     ]);
+  });
+
+  it('flips hydrated to true once the stored set has been read (VEG-268)', async () => {
+    // The /srd/print route gates on this: until hydration has run, an empty
+    // items array means "don't know yet", not "the set is empty".
+    seedStorage([{ type: 'monster', id: 'goblin' }]);
+
+    renderWithProvider();
+
+    await waitFor(() => expect(screen.getByTestId('hydrated')).toHaveTextContent('true'));
+    expect(screen.getByTestId('count')).toHaveTextContent('1');
   });
 
   it('persists clear so an emptied set stays empty after remount', async () => {

@@ -68,6 +68,17 @@ describe('PrintTrayBar', () => {
     expect(screen.queryByRole('link', { name: /print/i })).not.toBeInTheDocument();
   });
 
+  it('is excluded from print output (VEG-268)', async () => {
+    const user = userEvent.setup();
+    renderBar();
+
+    await user.click(screen.getByRole('button', { name: 'Add goblin' }));
+
+    const link = screen.getByRole('link', { name: 'Print (1)' });
+    // The floating overlay must never appear on a printed sheet.
+    expect(link.closest('[class*="fixed"]')).toHaveClass('print:hidden');
+  });
+
   it('hides the soft-cap warning at or below the cap', async () => {
     seedStorage(
       Array.from({ length: PRINT_TRAY_SOFT_CAP }, (_, i) => ({

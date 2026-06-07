@@ -14,7 +14,7 @@ export default function PrintTrayBar() {
   if (tray.count === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-1.5">
+    <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-1.5 print:hidden">
       {tray.isOverSoftCap && (
         <p className="max-w-xs rounded-lg bg-amber-50 dark:bg-amber-900/80 border border-amber-200 dark:border-amber-700 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-200 shadow">
           Large print sets may be slow — consider keeping it under {PRINT_TRAY_SOFT_CAP} cards.
