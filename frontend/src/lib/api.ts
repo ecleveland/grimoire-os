@@ -45,20 +45,28 @@ async function refreshAccessToken(): Promise<boolean> {
   return inflightRefresh;
 }
 
+// The CsrfGuard's rejection message (backend/src/auth/guards/csrf.guard.ts).
+// It is a global guard, so an idle-expired session's unsafe request dies on
+// this 403 *before* JWT auth can 401 — it must trigger the same refresh.
+const CSRF_REJECTION_MESSAGE = 'Invalid CSRF token';
+
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const method = (options.method ?? 'GET').toUpperCase();
-  // Double-submit cookie: on state-changing requests, read the csrf_token
-  // cookie set by the backend on auth and echo it back as a header. The
-  // header is omitted when the cookie isn't present so callers explicitly
-  // overriding the header (e.g. in tests) still win.
-  const csrfHeaders: Record<string, string> = {};
-  if (UNSAFE_METHODS.has(method)) {
-    const token = readCookie(CSRF_COOKIE_NAME);
-    if (token) csrfHeaders[CSRF_HEADER_NAME] = token;
-  }
+  const isUnsafe = UNSAFE_METHODS.has(method);
 
-  const doFetch = () =>
-    fetch(`${API_URL}${path}`, {
+  const doFetch = () => {
+    // Double-submit cookie: on state-changing requests, read the csrf_token
+    // cookie set by the backend on auth and echo it back as a header. Read
+    // per attempt — a refresh between attempts rotates the cookie, and the
+    // retry must echo the re-minted value, not a stale capture (VEG-277).
+    // The header is omitted when the cookie isn't present so callers
+    // explicitly overriding the header (e.g. in tests) still win.
+    const csrfHeaders: Record<string, string> = {};
+    if (isUnsafe) {
+      const token = readCookie(CSRF_COOKIE_NAME);
+      if (token) csrfHeaders[CSRF_HEADER_NAME] = token;
+    }
+    return fetch(`${API_URL}${path}`, {
       ...options,
       credentials: 'include',
       headers: {
@@ -67,14 +75,31 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
         ...options.headers,
       },
     });
+  };
 
   let res = await doFetch();
 
   // Never refresh on the refresh endpoint itself — that's how recursion happens.
-  if (res.status === 401 && path !== REFRESH_PATH) {
+  if (path !== REFRESH_PATH && (res.status === 401 || (res.status === 403 && isUnsafe))) {
+    // A 403 warrants a refresh only when it is the CSRF guard's rejection
+    // (idle expiry deleted the csrf cookie) — a genuine authorization denial
+    // must surface untouched, without a refresh round-trip.
+    let body: { message?: string } | null = null;
+    if (res.status === 403) {
+      body = await res.json().catch(() => ({}));
+      if (body?.message !== CSRF_REJECTION_MESSAGE) {
+        throw new Error(body?.message || `API error: ${res.status}`);
+      }
+    }
+
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       res = await doFetch();
+    } else if (res.status === 403) {
+      // CSRF rejection and the session can't be refreshed: same terminal
+      // state as a failed 401 refresh — the user has to log in again.
+      redirectToLogin();
+      throw new Error('Unauthorized');
     }
   }
 
