@@ -265,6 +265,112 @@ describe('apiFetch', () => {
     });
   });
 
+  describe('CSRF recovery (VEG-277)', () => {
+    // The csrf_token cookie shares the access cookie's 15-minute maxAge and
+    // is rotated by /auth/refresh. After idle expiry the browser has deleted
+    // both, so a stale tab's first unsafe request is rejected 403 "Invalid
+    // CSRF token" by the global CsrfGuard *before* JWT auth can 401 — the
+    // refresh that would re-mint both cookies must be triggered from the
+    // CSRF rejection too.
+
+    it('refreshes and retries once when a POST is rejected with the CSRF 403', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(
+          mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
+        )
+        .mockImplementationOnce(async () => {
+          // /auth/refresh re-mints the rotated csrf cookie alongside the
+          // access cookie.
+          setCookie('csrf_token=re-minted');
+          return mockResponse(200) as unknown as Response;
+        })
+        .mockResolvedValueOnce(mockResponse(200, { ok: true }) as unknown as Response);
+
+      const result = await apiFetch('/srd/cards', { method: 'POST', body: '{}' });
+
+      expect(result).toEqual({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(fetchMock.mock.calls[1][0]).toBe(`${API_URL}/auth/refresh`);
+      const retryHeaders = fetchMock.mock.calls[2][1]?.headers as Record<string, string>;
+      expect(retryHeaders['x-csrf-token']).toBe('re-minted');
+    });
+
+    it('sends the rotated csrf token on the retry after a 401-triggered refresh', async () => {
+      // Latent variant of the same bug: the header used to be captured once
+      // before the first attempt, so the post-refresh retry echoed the stale
+      // token and died on the CSRF guard despite a successful refresh.
+      setCookie('csrf_token=stale');
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockImplementationOnce(async () => {
+          setCookie('csrf_token=rotated');
+          return mockResponse(200) as unknown as Response;
+        })
+        .mockResolvedValueOnce(mockResponse(200, { ok: true }) as unknown as Response);
+
+      await apiFetch('/things', { method: 'POST', body: '{}' });
+
+      const retryHeaders = fetchMock.mock.calls[2][1]?.headers as Record<string, string>;
+      expect(retryHeaders['x-csrf-token']).toBe('rotated');
+    });
+
+    it('surfaces a genuine authorization 403 unchanged without attempting a refresh', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValue(
+        mockResponse(403, { message: 'Forbidden resource' }) as unknown as Response
+      );
+
+      await expect(apiFetch('/admin/users', { method: 'POST', body: '{}' })).rejects.toThrow(
+        'Forbidden resource'
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not treat a CSRF-worded 403 on a GET as refreshable (safe methods skip the guard)', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValue(
+        mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
+      );
+
+      await expect(apiFetch('/things')).rejects.toThrow('Invalid CSRF token');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('redirects to /login when the refresh after a CSRF 403 fails (session is gone)', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(
+          mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
+        )
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response); // refresh fails
+
+      await expect(apiFetch('/srd/cards', { method: 'POST', body: '{}' })).rejects.toThrow(
+        'Unauthorized'
+      );
+      expect(window.location.href).toBe('/login');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('throws the CSRF error without looping when the retry is rejected again', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(
+          mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
+        )
+        .mockResolvedValueOnce(mockResponse(200) as unknown as Response) // refresh ok
+        .mockResolvedValueOnce(
+          mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
+        ); // retry still rejected
+
+      await expect(apiFetch('/srd/cards', { method: 'POST', body: '{}' })).rejects.toThrow(
+        'Invalid CSRF token'
+      );
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe('non-401 error responses', () => {
     it('throws Error with message from response body when available', async () => {
       vi.mocked(fetch).mockResolvedValue(
