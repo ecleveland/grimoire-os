@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, afterEach } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
 import PrintMonsterCard from '../PrintMonsterCard';
 import { PRINTABLE_MONSTER_ACTION_CAP, PRINTABLE_MONSTER_TRAIT_CAP } from '@grimoire-os/shared';
 import type { PrintableMonsterCard } from '@grimoire-os/shared';
@@ -115,5 +115,103 @@ describe('PrintMonsterCard', () => {
     const card = screen.getByTestId('print-card');
     expect(card.className).toContain('w-[5in]');
     expect(card.className).toContain('h-[3in]');
+  });
+
+  // ── Overflow pagination (VEG-275) ─────────────────────────────────────────
+  //
+  // jsdom has no layout, so geometry is stubbed at the prototype level: the
+  // card body reports a fixed capacity and each measured node a fixed height,
+  // mimicking a verbose monster (the Aboleth) whose 4th action falls below
+  // the card's overflow-hidden fold.
+  describe('overflow pagination', () => {
+    const GEOMETRY = {
+      body: 150, // PrintCard body clientHeight
+      chrome: 50, // subtitle + AC/HP/Speed + ability grid block
+      heading: 10, // section h4
+      entry: 40, // each trait/action <li>
+    };
+
+    function stubGeometry() {
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+        configurable: true,
+        get(this: HTMLElement) {
+          if (this.dataset.measure === 'chrome') return GEOMETRY.chrome;
+          if (this.dataset.measure === 'heading') return GEOMETRY.heading;
+          if (this.dataset.measure === 'entry') return GEOMETRY.entry;
+          return 0;
+        },
+      });
+      Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+        configurable: true,
+        get(this: HTMLElement) {
+          return this.hasAttribute('data-print-card-body') ? GEOMETRY.body : 0;
+        },
+      });
+    }
+
+    afterEach(() => {
+      // The original jsdom getters live on Element.prototype; deleting the
+      // HTMLElement.prototype overrides restores them.
+      delete (HTMLElement.prototype as { offsetHeight?: unknown }).offsetHeight;
+      delete (HTMLElement.prototype as { clientHeight?: unknown }).clientHeight;
+    });
+
+    // With the geometry above the usable body is 150 − 4 (pt-1) = 146, so the
+    // first card fits the chrome (50) + Actions heading (4 gap + 10) + two
+    // 40px entries with their 2px gap — exactly 146 — and the 3rd and 4th
+    // actions flow to a continuation card. The exact packing arithmetic is
+    // the pure function's concern (see print-card-pagination tests); here we
+    // assert that a 4-action monster paginates and the pieces land on the
+    // right cards.
+    const fourActions = [
+      { name: 'Multiattack', description: 'The aboleth makes two Tentacle attacks.' },
+      { name: 'Tentacle', description: 'Melee Attack Roll: +9, reach 15 ft.' },
+      { name: 'Consume Memories', description: 'Targets one creature charmed or grappled.' },
+      { name: 'Dominate Mind', description: 'The aboleth casts Dominate Monster.' },
+    ];
+
+    it('renders a single card with no part label when content fits (default jsdom geometry)', () => {
+      render(<PrintMonsterCard card={makeCard({ actions: fourActions })} />);
+
+      expect(screen.getAllByTestId('print-card')).toHaveLength(1);
+      expect(screen.getByText('Ancient Red Dragon')).toBeInTheDocument();
+      expect(screen.queryByText(/1 of/)).not.toBeInTheDocument();
+    });
+
+    it('flows overflowing actions onto continuation cards labelled (n of m)', () => {
+      stubGeometry();
+      render(<PrintMonsterCard card={makeCard({ actions: fourActions })} />);
+
+      const cards = screen.getAllByTestId('print-card');
+      expect(cards.length).toBeGreaterThan(1);
+
+      expect(screen.getByText(`Ancient Red Dragon (1 of ${cards.length})`)).toBeInTheDocument();
+      expect(screen.getByText(`Ancient Red Dragon (2 of ${cards.length})`)).toBeInTheDocument();
+
+      // Every action is visible somewhere across the card set — nothing is
+      // silently clipped (the VEG-275 regression).
+      for (const action of fourActions) {
+        expect(screen.getByText(`${action.name}.`)).toBeInTheDocument();
+      }
+
+      // The stat block renders only on the first card.
+      expect(within(cards[0]).getByText('AC')).toBeInTheDocument();
+      expect(within(cards[1]).queryByText('AC')).not.toBeInTheDocument();
+
+      // The split section's heading repeats with a continuation marker.
+      expect(within(cards[1]).getByText('Actions (cont.)')).toBeInTheDocument();
+
+      // The CR tag repeats on every card so a cut card stays identifiable.
+      for (const card of cards) {
+        expect(within(card).getByText('CR 24 · 62000 XP')).toBeInTheDocument();
+      }
+    });
+
+    it('keeps the 4th action visible across the card set instead of clipping it', () => {
+      stubGeometry();
+      render(<PrintMonsterCard card={makeCard({ actions: fourActions })} />);
+
+      expect(screen.getByText('Dominate Mind.')).toBeInTheDocument();
+    });
   });
 });
