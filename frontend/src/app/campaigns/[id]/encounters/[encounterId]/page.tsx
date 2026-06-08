@@ -2,18 +2,25 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Encounter } from '@/lib/types';
+import type { Encounter, SrdMonster } from '@/lib/types';
 import Badge from '@/components/Badge';
+import Modal from '@/components/Modal';
+import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
+import { buildMonsterCombatants } from '@/lib/encounter-combatants';
+import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 
 export default function InitiativeTrackerPage() {
   const { encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);
+  const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewLoading, setViewLoading] = useState(false);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -63,6 +70,56 @@ export default function InitiativeTrackerPage() {
   const toggleActive = () => {
     if (!encounter) return;
     patchEncounter({ isActive: !encounter.isActive });
+  };
+
+  // Append monster combatant(s) from the lookup panel. Unlike the unguarded
+  // HP/turn writes above, the add path sends `expectedVersion` so a concurrent
+  // edit surfaces a 409 rather than clobbering the other change (VEG-260/137).
+  const addMonsterToEncounter = async (
+    monster: SrdMonster,
+    { quantity, initiatives }: AddToEncounterResult
+  ) => {
+    if (!encounter) return;
+    const additions = buildMonsterCombatants(
+      monster,
+      { quantity, initiatives },
+      encounter.combatants.map(c => c.name)
+    );
+    try {
+      const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          combatants: [...encounter.combatants, ...additions],
+          expectedVersion: encounter.version,
+        }),
+      });
+      setEncounter(updated);
+      toast.success(
+        quantity > 1
+          ? `Added ${quantity} ${monster.name}s to the encounter`
+          : `Added ${monster.name} to the encounter`
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error('This encounter changed since you opened it — refreshed, please try again.');
+        fetchEncounter();
+        return;
+      }
+      toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
+    }
+  };
+
+  const viewCombatantMonster = (monsterId: string) => {
+    setViewMonster(null);
+    setViewLoading(true);
+    setViewOpen(true);
+    apiFetch<SrdMonster>(`/srd/monsters/${monsterId}`)
+      .then(setViewMonster)
+      .catch(() => {
+        toast.error('Failed to load monster');
+        setViewOpen(false);
+      })
+      .finally(() => setViewLoading(false));
   };
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
@@ -126,7 +183,17 @@ export default function InitiativeTrackerPage() {
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-gray-900 dark:text-white">{c.name}</span>
+                  {c.monsterId ? (
+                    <button
+                      type="button"
+                      onClick={() => viewCombatantMonster(c.monsterId!)}
+                      className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
+                    >
+                      {c.name}
+                    </button>
+                  ) : (
+                    <span className="font-medium text-gray-900 dark:text-white">{c.name}</span>
+                  )}
                   {c.isNpc && (
                     <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded">
                       NPC
@@ -167,7 +234,21 @@ export default function InitiativeTrackerPage() {
         })}
       </div>
 
-      <MonsterLookupPanel />
+      <MonsterLookupPanel canAdd={!!isController} onAdd={addMonsterToEncounter} />
+
+      <Modal
+        open={viewOpen}
+        onClose={() => setViewOpen(false)}
+        label={viewMonster?.name ?? 'Monster'}
+      >
+        {viewLoading || !viewMonster ? (
+          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            Loading monster…
+          </p>
+        ) : (
+          <MonsterStatBlock monster={viewMonster} />
+        )}
+      </Modal>
     </div>
   );
 }

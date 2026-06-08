@@ -9,13 +9,20 @@ import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockApiFetch = vi.fn();
+const mockUseAuth = vi.fn();
 
-vi.mock('@/lib/api', () => ({
-  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
+// Preserve the real module (notably `ApiError`); only stub `apiFetch`.
+vi.mock('@/lib/api', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/api')>();
+  return { ...actual, apiFetch: (...args: unknown[]) => mockApiFetch(...args) };
+});
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+vi.mock('@/lib/auth-context', () => ({
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock('@/components/Pagination', () => ({
@@ -101,6 +108,9 @@ describe('MonsterListPage', () => {
     localStorage.clear();
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(makeResponse([goblin, dragon]));
+    mockUseAuth.mockReturnValue({ isDm: false });
+    vi.mocked(toast.error).mockClear();
+    vi.mocked(toast.success).mockClear();
   });
 
   describe('rendering', () => {
@@ -331,6 +341,123 @@ describe('MonsterListPage', () => {
         .find(button => button.closest('[role="dialog"]') === null);
       expect(cardToggle).toBeDefined();
       expect(cardToggle).toHaveAttribute('aria-pressed', 'true');
+    });
+  });
+
+  // ── Add to encounter via campaign/encounter picker (VEG-260) ─────────────────
+
+  describe('add to encounter (DM only)', () => {
+    const goblinDetail: SrdMonster = {
+      ...goblin,
+      specialAbilities: [{ name: 'Nimble Escape', description: 'Disengage as a bonus action.' }],
+    };
+
+    function pageOf<T>(data: T[]) {
+      return { data, total: data.length, page: 1, lastPage: 1 };
+    }
+
+    function routeAddFlow(opts: {
+      encounter: { id: string; combatants: unknown[]; version: number };
+      onPatch?: (body: unknown) => Promise<unknown>;
+    }) {
+      const { encounter, onPatch } = opts;
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === `/encounters/${encounter.id}` && init?.method === 'PATCH') {
+          const body = JSON.parse(init.body ?? '{}');
+          return onPatch ? onPatch(body) : Promise.resolve({ ...encounter, ...body });
+        }
+        if (path === `/encounters/${encounter.id}`) return Promise.resolve(encounter);
+        if (path.startsWith('/encounters?')) {
+          return Promise.resolve(pageOf([{ id: encounter.id, name: 'Death House' }]));
+        }
+        if (path.startsWith('/campaigns')) {
+          return Promise.resolve(pageOf([{ id: 'camp-1', name: 'Curse of Strahd' }]));
+        }
+        if (path.startsWith('/srd/monsters/')) return Promise.resolve(goblinDetail);
+        return Promise.resolve(makeResponse([goblin, dragon]));
+      });
+    }
+
+    async function openGoblinModal(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
+      await screen.findByText('Nimble Escape.');
+    }
+
+    it('hides the "Add to encounter" CTA from non-DMs', async () => {
+      mockUseAuth.mockReturnValue({ isDm: false });
+      routeAddFlow({ encounter: { id: 'enc-1', combatants: [], version: 2 } });
+      const user = userEvent.setup();
+      renderPage();
+      await openGoblinModal(user);
+      expect(screen.queryByRole('button', { name: /add to encounter/i })).not.toBeInTheDocument();
+    });
+
+    it('shows the CTA to a DM and walks campaign → encounter → add, PATCHing with the version', async () => {
+      mockUseAuth.mockReturnValue({ isDm: true });
+      routeAddFlow({
+        encounter: {
+          id: 'enc-1',
+          combatants: [{ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, ac: 16, isNpc: false }],
+          version: 2,
+        },
+      });
+      const user = userEvent.setup();
+      renderPage();
+      await openGoblinModal(user);
+
+      await user.click(screen.getByRole('button', { name: /add to encounter/i })); // CTA -> picker
+      await user.selectOptions(await screen.findByLabelText(/campaign/i), 'camp-1');
+      await user.selectOptions(await screen.findByLabelText(/encounter/i), 'enc-1');
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+
+      // Dialog -> confirm (default quantity 1, initiative 10).
+      await user.click(await screen.findByRole('button', { name: /add to encounter/i }));
+
+      let patchBody:
+        | { combatants: Array<Record<string, unknown>>; expectedVersion: number }
+        | undefined;
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(call).toBeDefined();
+        patchBody = JSON.parse((call![1] as { body: string }).body);
+      });
+      expect(patchBody!.expectedVersion).toBe(2);
+      expect(patchBody!.combatants[0].name).toBe('Hero');
+      expect(patchBody!.combatants[patchBody!.combatants.length - 1]).toMatchObject({
+        name: 'Goblin',
+        ac: 15,
+        hp: 7,
+        maxHp: 7,
+        isNpc: true,
+        monsterId: 'monster-1',
+      });
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    });
+
+    it('surfaces a 409 conflict from the picker flow without reporting success', async () => {
+      const { ApiError } = await import('@/lib/api');
+      mockUseAuth.mockReturnValue({ isDm: true });
+      routeAddFlow({
+        encounter: { id: 'enc-1', combatants: [], version: 2 },
+        onPatch: () =>
+          Promise.reject(new ApiError(409, 'Encounter was modified by another request.', {})),
+      });
+      const user = userEvent.setup();
+      renderPage();
+      await openGoblinModal(user);
+
+      await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+      await user.selectOptions(await screen.findByLabelText(/campaign/i), 'camp-1');
+      await user.selectOptions(await screen.findByLabelText(/encounter/i), 'enc-1');
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+      await user.click(await screen.findByRole('button', { name: /add to encounter/i }));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(toast.success).not.toHaveBeenCalled();
     });
   });
 });

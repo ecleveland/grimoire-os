@@ -185,4 +185,66 @@ describe('MonsterLookupPanel', () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
   });
+
+  // ── Add to encounter (VEG-260) ───────────────────────────────────────────────
+
+  async function openGoblin(user: ReturnType<typeof userEvent.setup>) {
+    await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
+    await user.click(await screen.findByRole('button', { name: /goblin/i }));
+    await screen.findByText('Nimble Escape.'); // detail loaded
+  }
+
+  it('shows no "Add to encounter" CTA when canAdd is false', async () => {
+    routeApi();
+    const user = userEvent.setup();
+    render(<MonsterLookupPanel />);
+    await openGoblin(user);
+    expect(screen.queryByRole('button', { name: /add to encounter/i })).not.toBeInTheDocument();
+  });
+
+  it('exposes an "Add to encounter" CTA on the stat block when canAdd is true', async () => {
+    routeApi();
+    const user = userEvent.setup();
+    render(<MonsterLookupPanel canAdd onAdd={vi.fn()} />);
+    await openGoblin(user);
+    expect(screen.getByRole('button', { name: /add to encounter/i })).toBeInTheDocument();
+  });
+
+  it('opens the add dialog and forwards the monster + choices to onAdd, then closes', async () => {
+    routeApi();
+    const onAdd = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<MonsterLookupPanel canAdd onAdd={onAdd} />);
+    await openGoblin(user);
+
+    // CTA swaps the modal to the dialog (so only one "Add to encounter" button exists).
+    await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+    expect(screen.getByLabelText(/quantity/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+    await waitFor(() =>
+      expect(onAdd).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'monster-1', name: 'Goblin' }),
+        { quantity: 1, initiatives: [10] }
+      )
+    );
+    // Modal closes on success.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('returns to the stat block when the add dialog is cancelled', async () => {
+    routeApi();
+    const onAdd = vi.fn();
+    const user = userEvent.setup();
+    render(<MonsterLookupPanel canAdd onAdd={onAdd} />);
+    await openGoblin(user);
+
+    await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+
+    // Back on the stat block: CTA visible again, no quantity field, onAdd untouched.
+    expect(screen.getByRole('button', { name: /add to encounter/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/quantity/i)).not.toBeInTheDocument();
+    expect(onAdd).not.toHaveBeenCalled();
+  });
 });

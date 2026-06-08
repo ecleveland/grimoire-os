@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiFetch } from '../api';
+import { apiFetch, ApiError } from '../api';
 
 const API_URL = 'http://localhost:3001/api';
 
@@ -394,6 +394,21 @@ describe('apiFetch', () => {
       } as unknown as Response);
 
       await expect(apiFetch('/test')).rejects.toThrow('API error: 502');
+    });
+
+    it('throws an ApiError carrying the HTTP status and response body', async () => {
+      vi.mocked(fetch).mockResolvedValue(
+        mockResponse(409, {
+          message: 'Encounter was modified by another request; re-fetch and retry.',
+          currentVersion: 7,
+        }) as unknown as Response
+      );
+
+      const err = await apiFetch('/encounters/enc-1', { method: 'PATCH' }).catch(e => e);
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(409);
+      expect(err.message).toMatch(/modified by another request/i);
+      expect((err.body as { currentVersion: number }).currentVersion).toBe(7);
     });
   });
 });

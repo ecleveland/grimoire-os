@@ -1,4 +1,20 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+
+/**
+ * Error thrown for non-OK API responses, carrying the HTTP `status` and parsed
+ * `body` so callers can branch on specific failures (e.g. a 409 optimistic-lock
+ * conflict) instead of string-matching the message.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+  constructor(status: number, message: string, body?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
 const REFRESH_PATH = '/auth/refresh';
 const CSRF_COOKIE_NAME = 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -88,7 +104,7 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     if (res.status === 403) {
       body = await res.json().catch(() => ({}));
       if (body?.message !== CSRF_REJECTION_MESSAGE) {
-        throw new Error(body?.message || `API error: ${res.status}`);
+        throw new ApiError(res.status, body?.message || `API error: ${res.status}`, body);
       }
     }
 
@@ -110,7 +126,7 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || `API error: ${res.status}`);
+    throw new ApiError(res.status, body.message || `API error: ${res.status}`, body);
   }
 
   if (res.status === 204) {
