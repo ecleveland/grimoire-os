@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { apiFetch } from '@/lib/api';
+import { apiFetch, ApiError } from '@/lib/api';
 import { toast } from 'sonner';
-import type { SrdMonster, PaginatedResponse } from '@/lib/types';
+import { useAuth } from '@/lib/auth-context';
+import type { SrdMonster, PaginatedResponse, Encounter } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import PrintToggle from '@/components/PrintToggle';
+import EncounterPicker from '@/components/EncounterPicker';
+import AddToEncounterDialog, { type AddToEncounterResult } from '@/components/AddToEncounterDialog';
+import { buildMonsterCombatants } from '@/lib/encounter-combatants';
 import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 20;
@@ -67,6 +71,7 @@ const CHALLENGE_RATINGS = [
 ];
 
 export default function MonsterListPage() {
+  const { isDm } = useAuth();
   const [monsters, setMonsters] = useState<SrdMonster[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -79,12 +84,17 @@ export default function MonsterListPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<SrdMonster | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [addMode, setAddMode] = useState<'none' | 'picker' | 'dialog'>('none');
+  const [addEncounterId, setAddEncounterId] = useState('');
+  const [addSubmitting, setAddSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function openMonster(id: string) {
     setDetail(null);
     setDetailLoading(true);
     setDetailOpen(true);
+    setAddMode('none');
+    setAddEncounterId('');
     apiFetch<SrdMonster>(`/srd/monsters/${id}`)
       .then(setDetail)
       .catch(err => {
@@ -93,6 +103,47 @@ export default function MonsterListPage() {
         setDetailOpen(false);
       })
       .finally(() => setDetailLoading(false));
+  }
+
+  // Add the monster to a chosen encounter (VEG-260). No ambient encounter here,
+  // so the target is picked first; the write fetches the encounter fresh for its
+  // version + combatants, then PATCHes with `expectedVersion` so a concurrent
+  // edit yields a 409 instead of a silent overwrite.
+  async function handleConfirmAdd(
+    monster: SrdMonster,
+    { quantity, initiatives }: AddToEncounterResult
+  ) {
+    setAddSubmitting(true);
+    try {
+      const encounter = await apiFetch<Encounter>(`/encounters/${addEncounterId}`);
+      const additions = buildMonsterCombatants(
+        monster,
+        { quantity, initiatives },
+        encounter.combatants.map(c => c.name)
+      );
+      await apiFetch<Encounter>(`/encounters/${addEncounterId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          combatants: [...encounter.combatants, ...additions],
+          expectedVersion: encounter.version,
+        }),
+      });
+      toast.success(
+        quantity > 1
+          ? `Added ${quantity} ${monster.name}s to the encounter`
+          : `Added ${monster.name} to the encounter`
+      );
+      setDetailOpen(false);
+      setAddMode('none');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error('That encounter changed since you loaded it — please try again.');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
+      }
+    } finally {
+      setAddSubmitting(false);
+    }
   }
 
   // Debounce search input
@@ -229,9 +280,33 @@ export default function MonsterListPage() {
           <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
             Loading monster…
           </p>
+        ) : addMode === 'picker' ? (
+          <EncounterPicker
+            onSelect={id => {
+              setAddEncounterId(id);
+              setAddMode('dialog');
+            }}
+            onCancel={() => setAddMode('none')}
+          />
+        ) : addMode === 'dialog' ? (
+          <AddToEncounterDialog
+            monster={detail}
+            submitting={addSubmitting}
+            onConfirm={result => handleConfirmAdd(detail, result)}
+            onCancel={() => setAddMode('picker')}
+          />
         ) : (
           <div className="space-y-3">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {isDm && (
+                <button
+                  type="button"
+                  onClick={() => setAddMode('picker')}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                  Add to encounter
+                </button>
+              )}
               <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
             </div>
             <MonsterStatBlock monster={detail} />

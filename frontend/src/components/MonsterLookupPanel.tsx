@@ -6,17 +6,26 @@ import { toast } from 'sonner';
 import type { SrdMonster, PaginatedResponse } from '@/lib/types';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
+import AddToEncounterDialog, { type AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 8;
 
+interface Props {
+  /** When true, the stat-block overlay exposes an "Add to encounter" CTA (DM only). */
+  canAdd?: boolean;
+  /** Appends the monster to the current encounter; the panel awaits it before closing. */
+  onAdd?: (monster: SrdMonster, result: AddToEncounterResult) => Promise<void> | void;
+}
+
 /**
  * Read-only monster reference for the encounter tracker (VEG-259): debounced
  * search against `/srd/monsters`, compact results, and the shared stat-block
- * overlay (VEG-257) on selection. Mutating actions ("add to encounter") arrive
- * in VEG-260. Collapsible so it stays unobtrusive below the tracker on mobile.
+ * overlay (VEG-257) on selection. With `canAdd` (VEG-260) the overlay also lets
+ * a DM add the monster to the current encounter. Collapsible so it stays
+ * unobtrusive below the tracker on mobile.
  */
-export default function MonsterLookupPanel() {
+export default function MonsterLookupPanel({ canAdd = false, onAdd }: Props) {
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SrdMonster[]>([]);
@@ -25,6 +34,8 @@ export default function MonsterLookupPanel() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<SrdMonster | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce the raw input into the query that drives the fetch.
@@ -62,6 +73,7 @@ export default function MonsterLookupPanel() {
     setDetail(null);
     setDetailLoading(true);
     setDetailOpen(true);
+    setAdding(false);
     apiFetch<SrdMonster>(`/srd/monsters/${id}`)
       .then(setDetail)
       .catch(err => {
@@ -70,6 +82,18 @@ export default function MonsterLookupPanel() {
         setDetailOpen(false);
       })
       .finally(() => setDetailLoading(false));
+  }
+
+  async function handleAdd(monster: SrdMonster, result: AddToEncounterResult) {
+    if (!onAdd) return;
+    setSubmitting(true);
+    try {
+      await onAdd(monster, result);
+      setDetailOpen(false);
+      setAdding(false);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -145,8 +169,28 @@ export default function MonsterLookupPanel() {
           <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
             Loading monster…
           </p>
+        ) : adding ? (
+          <AddToEncounterDialog
+            monster={detail}
+            submitting={submitting}
+            onConfirm={result => handleAdd(detail, result)}
+            onCancel={() => setAdding(false)}
+          />
         ) : (
-          <MonsterStatBlock monster={detail} />
+          <div className="space-y-3">
+            {canAdd && onAdd && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setAdding(true)}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                  Add to encounter
+                </button>
+              </div>
+            )}
+            <MonsterStatBlock monster={detail} />
+          </div>
         )}
       </Modal>
     </details>

@@ -60,6 +60,14 @@ describe('EncountersService', () => {
     updatedAt: new Date('2025-02-01T00:00:00Z'),
   };
 
+  // The detail DTO surfaces the Prisma `createdById` column as `createdBy`
+  // (shared Encounter contract). Mirror that rename when asserting a DTO result
+  // against a raw Prisma-entity mock.
+  const asEncounterDto = <T extends { createdById?: string }>({ createdById, ...rest }: T) => ({
+    ...rest,
+    createdBy: createdById,
+  });
+
   beforeEach(async () => {
     campaignAuth = {
       assertCampaignOwner: jest.fn(),
@@ -123,7 +131,7 @@ describe('EncountersService', () => {
           combatants: createDto.combatants,
         },
       });
-      expect(result).toEqual(mockEncounter);
+      expect(result).toEqual(asEncounterDto(mockEncounter));
       expect(result).toBeInstanceOf(EncounterDto);
     });
 
@@ -162,7 +170,7 @@ describe('EncountersService', () => {
           combatants: dtoWithMonster.combatants,
         },
       });
-      expect(result).toEqual(created);
+      expect(result).toEqual(asEncounterDto(created));
     });
 
     it('does not query monsters when no combatant carries a monsterId', async () => {
@@ -261,7 +269,12 @@ describe('EncountersService', () => {
       });
       expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
       expect(campaignAuth.assertMemberOnCampaign).toHaveBeenCalledWith(campaignAuthShape, USER_ID);
-      expect(result).toEqual(mockEncounter);
+      // The DTO surfaces the owner as `createdBy` (the shared Encounter contract),
+      // mapping the Prisma `createdById` column — the frontend's controller check
+      // (`encounter.createdBy === user.userId`) depends on this name.
+      const { createdById, ...rest } = mockEncounter;
+      expect(result).toEqual({ ...rest, createdBy: createdById });
+      expect((result as unknown as Record<string, unknown>).createdById).toBeUndefined();
       expect((result as { campaign?: unknown }).campaign).toBeUndefined();
     });
 
@@ -302,7 +315,7 @@ describe('EncountersService', () => {
         where: { id: ENCOUNTER_ID },
         data: { name: 'Dragon Fight' },
       });
-      expect(result).toEqual(updated);
+      expect(result).toEqual(asEncounterDto(updated));
     });
 
     it('DM can update combatants as InputJsonValue', async () => {
@@ -324,7 +337,7 @@ describe('EncountersService', () => {
         where: { id: ENCOUNTER_ID },
         data: { combatants: newCombatants },
       });
-      expect(result).toEqual(updated);
+      expect(result).toEqual(asEncounterDto(updated));
     });
 
     it('validates monsterId references when updating combatants', async () => {
@@ -359,7 +372,7 @@ describe('EncountersService', () => {
         where: { id: ENCOUNTER_ID },
         data: { combatants: newCombatants },
       });
-      expect(result).toEqual(updated);
+      expect(result).toEqual(asEncounterDto(updated));
     });
 
     it('rejects update when a combatant references an unknown monsterId', async () => {

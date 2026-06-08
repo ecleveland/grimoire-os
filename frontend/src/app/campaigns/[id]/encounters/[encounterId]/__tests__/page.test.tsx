@@ -2,21 +2,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
-import type { Encounter, Combatant } from '@/lib/types';
+import { ApiError } from '@/lib/api';
+import type { Encounter, Combatant, SrdMonster } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
+const mockToastSuccess = vi.fn();
 const mockUseAuth = vi.fn();
 
-vi.mock('@/lib/api', () => ({
-  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
+// Preserve the real module (notably `ApiError`) and only stub `apiFetch`, so
+// the page's `err instanceof ApiError` 409 branch resolves against the real class.
+vi.mock('@/lib/api', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/api')>();
+  return { ...actual, apiFetch: (...args: unknown[]) => mockApiFetch(...args) };
+});
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'camp-1', encounterId: 'enc-1' }),
 }));
 vi.mock('sonner', () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
   },
 }));
 vi.mock('@/lib/auth-context', () => ({
@@ -34,6 +40,31 @@ function makeCombatant(over: Partial<Combatant> = {}): Combatant {
     ...over,
   };
 }
+
+const goblinMonster: SrdMonster = {
+  id: 'monster-1',
+  name: 'Goblin',
+  size: 'Small',
+  type: 'Humanoid',
+  alignment: 'Neutral Evil',
+  armorClass: 15,
+  hitPoints: 7,
+  speed: '30 ft.',
+  str: 8,
+  dex: 14,
+  con: 10,
+  int: 10,
+  wis: 8,
+  cha: 8,
+  damageResistances: [],
+  damageImmunities: [],
+  damageVulnerabilities: [],
+  conditionImmunities: [],
+  challengeRating: 0.25,
+  actions: [{ name: 'Scimitar', description: 'Melee: +4 to hit, 1d6+2 slashing.' }],
+  specialAbilities: [{ name: 'Nimble Escape', description: 'Disengage as a bonus action.' }],
+  source: 'SRD 5.2.1',
+};
 
 function makeEncounter(over: Partial<Encounter> = {}): Encounter {
   return {
@@ -58,11 +89,45 @@ function makeEncounter(over: Partial<Encounter> = {}): Encounter {
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockToastError.mockReset();
+  mockToastSuccess.mockReset();
   mockUseAuth.mockReturnValue({
     user: { userId: 'user-1', username: 'dm', role: 'dungeon_master' },
     isDm: true,
   });
 });
+
+/**
+ * Routes the encounter GET/PATCH and the SRD monster search/detail endpoints
+ * for the "add monster from lookup" integration flow. `onPatch` lets a test
+ * decide how the PATCH resolves (e.g. reject with a 409).
+ */
+function routeAddFlow(opts: {
+  encounter: Encounter;
+  onPatch?: (body: unknown) => Promise<unknown>;
+}) {
+  const { encounter, onPatch } = opts;
+  mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+    if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+      const body = JSON.parse(init.body ?? '{}');
+      return onPatch ? onPatch(body) : Promise.resolve({ ...encounter, ...body, version: 99 });
+    }
+    if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+    if (path.startsWith('/srd/monsters/')) return Promise.resolve(goblinMonster);
+    if (path.startsWith('/srd/monsters?')) {
+      return Promise.resolve({ data: [goblinMonster], total: 1, page: 1, lastPage: 1 });
+    }
+    return Promise.reject(new Error(`unexpected path ${path}`));
+  });
+}
+
+async function addGoblinFromLookup(user: ReturnType<typeof userEvent.setup>) {
+  await screen.findByRole('heading', { name: /goblin ambush/i });
+  await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
+  await user.click(await screen.findByTestId('lookup-result'));
+  await screen.findByText('Nimble Escape.'); // stat block loaded
+  await user.click(screen.getByRole('button', { name: /add to encounter/i })); // CTA
+  await user.click(screen.getByRole('button', { name: /add to encounter/i })); // dialog confirm
+}
 
 describe('InitiativeTrackerPage', () => {
   it('shows the loading state before the fetch resolves', () => {
@@ -272,5 +337,117 @@ describe('InitiativeTrackerPage', () => {
     );
     expect(screen.getByRole('button', { name: /next turn/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start combat/i })).toBeInTheDocument();
+  });
+
+  // ── Add monster from the lookup panel (VEG-260) ──────────────────────────────
+
+  it('appends a monster combatant via a version-guarded PATCH and toasts success', async () => {
+    routeAddFlow({
+      encounter: makeEncounter({
+        version: 3,
+        combatants: [makeCombatant({ name: 'Hero', isNpc: false, monsterId: undefined })],
+      }),
+    });
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await addGoblinFromLookup(user);
+
+    let patchBody: { combatants: Combatant[]; expectedVersion: number } | undefined;
+    await waitFor(() => {
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      expect(call).toBeDefined();
+      patchBody = JSON.parse((call![1] as { body: string }).body);
+    });
+
+    // Optimistic-lock guard carries the version we read.
+    expect(patchBody!.expectedVersion).toBe(3);
+    // Existing combatants preserved; the goblin is appended, pre-filled from the stat block.
+    const added = patchBody!.combatants[patchBody!.combatants.length - 1];
+    expect(added).toMatchObject({
+      name: 'Goblin',
+      ac: 15,
+      hp: 7,
+      maxHp: 7,
+      isNpc: true,
+      monsterId: 'monster-1',
+      initiative: 10,
+    });
+    expect(patchBody!.combatants[0].name).toBe('Hero');
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+  });
+
+  it('surfaces the 409 conflict path on add: re-fetches and warns instead of overwriting', async () => {
+    routeAddFlow({
+      encounter: makeEncounter({ version: 3 }),
+      onPatch: () =>
+        Promise.reject(
+          new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+            currentVersion: 9,
+          })
+        ),
+    });
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await addGoblinFromLookup(user);
+
+    // Conflict → guidance toast, no success.
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+    const warning = String(mockToastError.mock.calls.at(-1)?.[0] ?? '');
+    expect(warning).toMatch(/chang|refresh|again/i);
+
+    // Re-fetched the encounter (GET after the failed PATCH) rather than trusting local state.
+    const getCalls = mockApiFetch.mock.calls.filter(
+      ([p, o]) => p === '/encounters/enc-1' && !(o as { method?: string } | undefined)?.method
+    );
+    expect(getCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not offer the add CTA to non-controllers in the lookup panel', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { userId: 'someone-else', username: 'p', role: 'player' },
+      isDm: false,
+    });
+    routeAddFlow({ encounter: makeEncounter({ version: 3, createdBy: 'user-1' }) });
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+    await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
+    await user.click(await screen.findByTestId('lookup-result'));
+    await screen.findByText('Nimble Escape.');
+    expect(screen.queryByRole('button', { name: /add to encounter/i })).not.toBeInTheDocument();
+  });
+
+  // ── Click combatant to view stat block (VEG-260) ─────────────────────────────
+
+  it('opens the source stat block when an NPC combatant with a monsterId is clicked', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/encounters/enc-1') {
+        return Promise.resolve(
+          makeEncounter({
+            combatants: [
+              makeCombatant({ name: 'Hero', isNpc: false }),
+              makeCombatant({ name: 'Goblin A', monsterId: 'monster-1' }),
+            ],
+          })
+        );
+      }
+      if (path === '/srd/monsters/monster-1') return Promise.resolve(goblinMonster);
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+
+    // Linked combatant exposes a clickable affordance; the plain one does not.
+    expect(screen.queryByRole('button', { name: /^hero$/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /goblin a/i }));
+
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1'));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
   });
 });

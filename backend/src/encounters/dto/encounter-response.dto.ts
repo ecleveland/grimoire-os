@@ -5,7 +5,9 @@ import type { Combatant } from '@grimoire-os/shared';
 export class EncounterDto {
   @Expose() id!: string;
   @Expose() campaignId!: string;
-  @Expose() createdById!: string;
+  // Surface the Prisma `createdById` column as `createdBy` to match the shared
+  // Encounter contract the frontend consumes (controller detection reads it).
+  @Expose({ name: 'createdById' }) createdBy!: string;
   @Expose() name!: string;
   @Expose() combatants!: Combatant[] | null;
   @Expose() currentTurn!: number;

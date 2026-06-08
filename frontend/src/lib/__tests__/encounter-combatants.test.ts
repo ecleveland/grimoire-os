@@ -1,0 +1,140 @@
+import { describe, it, expect } from 'vitest';
+import type { SrdMonster } from '@/lib/types';
+import {
+  dexModifier,
+  rollInitiative,
+  nextCombatantNames,
+  buildMonsterCombatants,
+} from '@/lib/encounter-combatants';
+
+function makeMonster(over: Partial<SrdMonster> = {}): SrdMonster {
+  return {
+    id: 'mon-goblin',
+    name: 'Goblin',
+    size: 'Small',
+    type: 'Humanoid',
+    alignment: 'neutral evil',
+    armorClass: 15,
+    hitPoints: 7,
+    speed: '30 ft.',
+    str: 8,
+    dex: 14,
+    con: 10,
+    int: 10,
+    wis: 8,
+    cha: 8,
+    damageResistances: [],
+    damageImmunities: [],
+    damageVulnerabilities: [],
+    conditionImmunities: [],
+    challengeRating: 0.25,
+    actions: [],
+    source: 'SRD',
+    ...over,
+  } as SrdMonster;
+}
+
+describe('dexModifier', () => {
+  it('derives the 5e DEX modifier via floor((dex - 10) / 2)', () => {
+    expect(dexModifier(makeMonster({ dex: 14 }))).toBe(2);
+    expect(dexModifier(makeMonster({ dex: 10 }))).toBe(0);
+    expect(dexModifier(makeMonster({ dex: 8 }))).toBe(-1);
+    expect(dexModifier(makeMonster({ dex: 7 }))).toBe(-2);
+    expect(dexModifier(makeMonster({ dex: 30 }))).toBe(10);
+  });
+});
+
+describe('rollInitiative', () => {
+  it('adds a d20 roll to the DEX modifier (rng injected for determinism)', () => {
+    const m = makeMonster({ dex: 14 }); // +2
+    // rng returns [0,1); 0 -> d20 face 1, 0.999 -> face 20.
+    expect(rollInitiative(m, () => 0)).toBe(1 + 2);
+    expect(rollInitiative(m, () => 0.999)).toBe(20 + 2);
+    expect(rollInitiative(m, () => 0.5)).toBe(11 + 2); // floor(0.5*20)+1 = 11
+  });
+
+  it('can roll below zero with a strong negative modifier', () => {
+    const m = makeMonster({ dex: 7 }); // -2
+    expect(rollInitiative(m, () => 0)).toBe(1 - 2);
+  });
+
+  it('produces independent values across successive calls with a real-ish rng', () => {
+    const m = makeMonster({ dex: 10 });
+    const seq = [0.1, 0.7, 0.95];
+    let i = 0;
+    const rng = () => seq[i++];
+    expect([rollInitiative(m, rng), rollInitiative(m, rng), rollInitiative(m, rng)]).toEqual([
+      3, 15, 20,
+    ]);
+  });
+});
+
+describe('nextCombatantNames', () => {
+  it('uses the bare base name when none exists yet', () => {
+    expect(nextCombatantNames([], 'Goblin', 1)).toEqual(['Goblin']);
+  });
+
+  it('numbers sequentially from 2 when the bare name is taken', () => {
+    expect(nextCombatantNames(['Goblin'], 'Goblin', 1)).toEqual(['Goblin 2']);
+  });
+
+  it('returns N sequential names, skipping ones already present', () => {
+    expect(nextCombatantNames([], 'Goblin', 3)).toEqual(['Goblin', 'Goblin 2', 'Goblin 3']);
+    expect(nextCombatantNames(['Goblin', 'Goblin 2'], 'Goblin', 2)).toEqual([
+      'Goblin 3',
+      'Goblin 4',
+    ]);
+  });
+
+  it('does not collide with an existing numbered entry mid-sequence', () => {
+    // "Goblin 3" already taken -> first free bare is "Goblin", then skip 3.
+    expect(nextCombatantNames(['Goblin 3'], 'Goblin', 3)).toEqual([
+      'Goblin',
+      'Goblin 2',
+      'Goblin 4',
+    ]);
+  });
+
+  it('is unaffected by unrelated names', () => {
+    expect(nextCombatantNames(['Hero', 'Orc'], 'Goblin', 2)).toEqual(['Goblin', 'Goblin 2']);
+  });
+});
+
+describe('buildMonsterCombatants', () => {
+  it('pre-fills each combatant from the monster with the given initiatives', () => {
+    const m = makeMonster({ armorClass: 15, hitPoints: 7, id: 'mon-goblin' });
+    const result = buildMonsterCombatants(m, { quantity: 2, initiatives: [12, 9] }, []);
+    expect(result).toEqual([
+      {
+        name: 'Goblin',
+        initiative: 12,
+        hp: 7,
+        maxHp: 7,
+        ac: 15,
+        isNpc: true,
+        monsterId: 'mon-goblin',
+      },
+      {
+        name: 'Goblin 2',
+        initiative: 9,
+        hp: 7,
+        maxHp: 7,
+        ac: 15,
+        isNpc: true,
+        monsterId: 'mon-goblin',
+      },
+    ]);
+  });
+
+  it('auto-numbers around combatants already in the encounter', () => {
+    const m = makeMonster();
+    const existing = ['Goblin', 'Hero'];
+    const result = buildMonsterCombatants(m, { quantity: 2, initiatives: [10, 10] }, existing);
+    expect(result.map(c => c.name)).toEqual(['Goblin 2', 'Goblin 3']);
+  });
+
+  it('throws when the initiatives length does not match the quantity', () => {
+    const m = makeMonster();
+    expect(() => buildMonsterCombatants(m, { quantity: 3, initiatives: [1, 2] }, [])).toThrow();
+  });
+});
