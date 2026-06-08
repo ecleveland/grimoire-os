@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import type { Encounter } from '@/lib/types';
 import Badge from '@/components/Badge';
+import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 
 export default function InitiativeTrackerPage() {
   const { encounterId } = useParams<{ id: string; encounterId: string }>();
@@ -165,6 +166,8 @@ export default function InitiativeTrackerPage() {
           );
         })}
       </div>
+
+      <MonsterLookupPanel />
     </div>
   );
 }

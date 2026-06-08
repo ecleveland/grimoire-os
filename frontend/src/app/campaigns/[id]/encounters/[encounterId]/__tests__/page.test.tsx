@@ -244,6 +244,22 @@ describe('InitiativeTrackerPage', () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to update encounter'));
   });
 
+  it('renders the monster-lookup panel for anyone viewing the encounter', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { userId: 'someone-else', username: 'p', role: 'player' },
+      isDm: false,
+    });
+    mockApiFetch.mockResolvedValue(makeEncounter());
+    render(<InitiativeTrackerPage />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument()
+    );
+    expect(screen.getByText(/monster lookup/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search monsters/i)).toBeInTheDocument();
+    // The panel is idle on mount: only the encounter GET ran, no monster search.
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('shows controller buttons for a non-DM creator', async () => {
     mockUseAuth.mockReturnValue({
       user: { userId: 'user-1', username: 'creator', role: 'player' },
