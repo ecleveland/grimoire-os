@@ -169,10 +169,20 @@ export class CampaignsService {
     if (!character) {
       throw new NotFoundException(`Character "${characterId}" not found`);
     }
-    // Members may only attach their own characters; the campaign owner (DM)
-    // may attach any member's character.
-    if (character.userId !== userId && campaign.ownerId !== userId) {
+    // A plain member may only attach their own character. The campaign owner
+    // (DM) may attach any member's character — but not an outsider's: the
+    // character's owner must belong to the campaign, otherwise a DM could
+    // conscript a stranger's character by ID and yank it out of its real
+    // campaign (VEG-317).
+    const isOwner = campaign.ownerId === userId;
+    if (!isOwner && character.userId !== userId) {
       throw new ForbiddenException('You can only add your own characters to a campaign');
+    }
+    const characterOwnerIsMember =
+      character.userId === campaign.ownerId ||
+      campaign.players.some(p => p.userId === character.userId);
+    if (!characterOwnerIsMember) {
+      throw new ForbiddenException("You can only add a campaign member's character");
     }
     await this.prisma.character.update({
       where: { id: characterId },

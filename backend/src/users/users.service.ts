@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { RefreshTokenService } from '../auth/refresh-token.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { Role } from '../common/enums';
 import { PaginationDto } from '../common/dto/pagination.dto';
@@ -20,7 +21,10 @@ const BCRYPT_ROUNDS = 12;
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private refreshTokens: RefreshTokenService
+  ) {}
 
   async create(createUserDto: CreateUserDto) {
     const passwordHash = await bcrypt.hash(createUserDto.password, BCRYPT_ROUNDS);
@@ -103,10 +107,7 @@ export class UsersService {
           omit: { passwordHash: true },
         });
         if (roleChanged) {
-          await tx.refreshToken.updateMany({
-            where: { userId: id, revokedAt: null },
-            data: { revokedAt: new Date() },
-          });
+          await this.refreshTokens.revokeAllForUser(id, tx);
         }
         return updated;
       });
@@ -133,10 +134,7 @@ export class UsersService {
         where: { id },
         data: { passwordHash },
       });
-      await tx.refreshToken.updateMany({
-        where: { userId: id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
+      await this.refreshTokens.revokeAllForUser(id, tx);
     });
   }
 

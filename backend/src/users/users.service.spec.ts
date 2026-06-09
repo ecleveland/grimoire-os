@@ -3,6 +3,7 @@ import { ConflictException, NotFoundException, UnauthorizedException } from '@ne
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RefreshTokenService } from '../auth/refresh-token.service';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { USER_ID, mockUser, mockUserPublic, createUserDto } from '../test/fixtures';
 import { Role } from '../common/enums';
@@ -18,12 +19,18 @@ import * as bcrypt from 'bcryptjs';
 describe('UsersService', () => {
   let service: UsersService;
   let prisma: MockPrismaService;
+  let refreshTokens: { revokeAllForUser: jest.Mock };
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
+    refreshTokens = { revokeAllForUser: jest.fn().mockResolvedValue(0) };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UsersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        UsersService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: RefreshTokenService, useValue: refreshTokens },
+      ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);
@@ -211,14 +218,10 @@ describe('UsersService', () => {
     it('revokes live refresh tokens when the update changes the role', async () => {
       const updated = { ...mockUserPublic, role: Role.DUNGEON_MASTER };
       prisma.user.update.mockResolvedValue(updated);
-      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       await service.update(USER_ID, { role: Role.DUNGEON_MASTER });
 
-      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
-        where: { userId: USER_ID, revokedAt: null },
-        data: { revokedAt: expect.any(Date) },
-      });
+      expect(refreshTokens.revokeAllForUser).toHaveBeenCalledWith(USER_ID, expect.anything());
     });
 
     it('does not revoke refresh tokens for updates that do not touch the role', async () => {
@@ -226,7 +229,7 @@ describe('UsersService', () => {
 
       await service.update(USER_ID, { displayName: 'Updated' });
 
-      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
     });
   });
 
@@ -261,15 +264,11 @@ describe('UsersService', () => {
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       (bcrypt.hash as jest.Mock).mockResolvedValue('new_hashed_pw');
       prisma.user.update.mockResolvedValue({ ...mockUser, passwordHash: 'new_hashed_pw' });
-      prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
 
       await service.changePassword(USER_ID, 'correctpassword', 'newpassword');
 
       expect(prisma.$transaction).toHaveBeenCalled();
-      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
-        where: { userId: USER_ID, revokedAt: null },
-        data: { revokedAt: expect.any(Date) },
-      });
+      expect(refreshTokens.revokeAllForUser).toHaveBeenCalledWith(USER_ID, expect.anything());
     });
 
     it('does not revoke refresh tokens when the current password is wrong', async () => {
@@ -279,7 +278,7 @@ describe('UsersService', () => {
       await expect(service.changePassword(USER_ID, 'wrongpassword', 'newpassword')).rejects.toThrow(
         UnauthorizedException
       );
-      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
     });
   });
 

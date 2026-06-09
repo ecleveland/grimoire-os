@@ -461,7 +461,15 @@ describe('CampaignsService', () => {
     });
 
     it("allows the campaign owner to add a member's character", async () => {
-      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      // USER_ID_2 is a member here (in players), so the owner may attach their character.
+      const campaignWithMember = {
+        ...mockCampaign,
+        players: [
+          ...mockCampaign.players,
+          { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+        ],
+      };
+      campaignAuth.assertCampaignMember.mockResolvedValue(campaignWithMember);
       prisma.character.findUnique.mockResolvedValue({ id: CHARACTER_ID, userId: USER_ID_2 });
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: CAMPAIGN_ID });
@@ -473,6 +481,18 @@ describe('CampaignsService', () => {
         data: { campaignId: CAMPAIGN_ID },
       });
       expect(result).toEqual(serializedMockCampaign);
+    });
+
+    it("rejects the owner attaching an outsider's character (not a campaign member)", async () => {
+      // USER_ID_2 owns the character but is NOT in mockCampaign.players, so the
+      // DM may not conscript it (would yank it out of its real campaign).
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findUnique.mockResolvedValue({ id: CHARACTER_ID, userId: USER_ID_2 });
+
+      await expect(service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.character.update).not.toHaveBeenCalled();
     });
   });
 

@@ -1,5 +1,6 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -8,14 +9,36 @@ export interface RotatedRefreshToken {
   userId: string;
 }
 
+/** Accepts either the root client or a `$transaction` client. */
+type RefreshTokenClient = Pick<PrismaService, 'refreshToken'> | Prisma.TransactionClient;
+
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class RefreshTokenService {
+  private readonly logger = new Logger(RefreshTokenService.name);
+
   constructor(
     private prisma: PrismaService,
     private configService: ConfigService
   ) {}
+
+  /**
+   * Revoke every live (non-revoked) refresh token for a user. The single
+   * conditional `updateMany` is the canonical session-invalidation primitive —
+   * used on password change, role change, and reuse detection. Pass a
+   * transaction client to enlist it in a caller's transaction.
+   */
+  async revokeAllForUser(
+    userId: string,
+    client: RefreshTokenClient = this.prisma
+  ): Promise<number> {
+    const { count } = await client.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    return count;
+  }
 
   async issue(userId: string): Promise<{ token: string; id: string }> {
     const token = this.generateOpaqueToken();
@@ -31,50 +54,55 @@ export class RefreshTokenService {
 
   async rotate(presentedToken: string): Promise<RotatedRefreshToken> {
     const tokenHash = this.hash(presentedToken);
-    return this.prisma.$transaction(async tx => {
-      const existing = await tx.refreshToken.findUnique({ where: { tokenHash } });
+    const existing = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
 
-      if (!existing) {
-        throw new UnauthorizedException('Invalid refresh token');
-      }
+    if (!existing) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
-      if (existing.expiresAt.getTime() <= Date.now()) {
-        throw new UnauthorizedException('Refresh token expired');
-      }
-
-      // Atomically claim the token: only one rotation can flip revokedAt from
-      // null. count === 0 means the row was already revoked — either a replay
-      // of a stolen token or a lost race between concurrent refreshes. Both
-      // get the defense-in-depth response of revoking every live token for
-      // the user.
-      const claimed = await tx.refreshToken.updateMany({
-        where: { tokenHash, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      if (claimed.count === 0) {
-        await tx.refreshToken.updateMany({
-          where: { userId: existing.userId, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-        throw new UnauthorizedException('Refresh token reuse detected');
-      }
-
-      const newToken = this.generateOpaqueToken();
-      const newRow = await tx.refreshToken.create({
-        data: {
-          userId: existing.userId,
-          tokenHash: this.hash(newToken),
-          expiresAt: new Date(Date.now() + this.ttlMs()),
-        },
-      });
-
-      await tx.refreshToken.update({
-        where: { id: existing.id },
-        data: { replacedById: newRow.id },
-      });
-
-      return { token: newToken, userId: existing.userId };
+    // Atomically claim the token: the conditional `updateMany` flips revokedAt
+    // null→set in a single locked statement, so concurrent rotations serialize
+    // and exactly one wins. count === 0 means the row was already revoked — a
+    // replay of a stolen token or the loser of a race. Either way it is the
+    // reuse signal, and it must be checked BEFORE expiry so a late replay of a
+    // revoked token still trips the defense.
+    //
+    // The reuse revoke-all runs on the root client (NOT inside a transaction
+    // that then throws) so it actually commits — a throw inside an interactive
+    // transaction would roll the revocation back, defeating the response.
+    const claimed = await this.prisma.refreshToken.updateMany({
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
+    if (claimed.count === 0) {
+      const revoked = await this.revokeAllForUser(existing.userId);
+      this.logger.warn(
+        `Refresh token reuse detected for user ${existing.userId}; revoked ${revoked} live token(s)`
+      );
+      throw new UnauthorizedException('Refresh token reuse detected');
+    }
+
+    // The presented token is now revoked (claimed above). Reject if it had
+    // already expired — harmless that the claim revoked it in passing.
+    if (existing.expiresAt.getTime() <= Date.now()) {
+      throw new UnauthorizedException('Refresh token expired');
+    }
+
+    const newToken = this.generateOpaqueToken();
+    const newRow = await this.prisma.refreshToken.create({
+      data: {
+        userId: existing.userId,
+        tokenHash: this.hash(newToken),
+        expiresAt: new Date(Date.now() + this.ttlMs()),
+      },
+    });
+
+    await this.prisma.refreshToken.update({
+      where: { id: existing.id },
+      data: { replacedById: newRow.id },
+    });
+
+    return { token: newToken, userId: existing.userId };
   }
 
   /**

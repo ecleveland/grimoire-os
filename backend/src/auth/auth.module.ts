@@ -5,7 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { RefreshTokenService } from './refresh-token.service';
+import { RefreshTokenModule } from './refresh-token.module';
 import { UsersModule } from '../users/users.module';
 import { PrismaModule } from '../prisma/prisma.module';
 
@@ -13,6 +13,7 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [
     UsersModule,
     PrismaModule,
+    RefreshTokenModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       useFactory: (configService: ConfigService): JwtModuleOptions => ({
@@ -25,7 +26,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, RefreshTokenService, JwtStrategy],
-  exports: [AuthService, RefreshTokenService, JwtModule],
+  providers: [AuthService, JwtStrategy],
+  exports: [AuthService, RefreshTokenModule, JwtModule],
 })
 export class AuthModule {}
