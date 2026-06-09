@@ -108,11 +108,7 @@ export function createMockPrismaService(): MockPrismaService {
     $queryRaw: jest.fn(),
   } as unknown as MockPrismaService;
   mock.$transaction = jest.fn(
-    (
-      fnOrArray:
-        | ((tx: MockPrismaService) => Promise<unknown> | unknown)
-        | Array<Promise<unknown> | unknown>
-    ): Promise<unknown> => {
+    (fnOrArray: ((tx: MockPrismaService) => unknown) | Array<unknown>): Promise<unknown> => {
       if (typeof fnOrArray === 'function') return Promise.resolve(fnOrArray(mock));
       if (Array.isArray(fnOrArray)) return Promise.all(fnOrArray);
       return Promise.resolve();

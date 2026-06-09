@@ -47,9 +47,14 @@ export class AuditLogInterceptor implements NestInterceptor {
         const user = request.user;
         if (!user) return;
 
+        const createdId = responseBody?.id;
         const resolvedEntityId =
           entityId ??
-          (action === AuditAction.create && responseBody?.id ? String(responseBody.id) : undefined);
+          (action === AuditAction.create &&
+          (typeof createdId === 'string' || typeof createdId === 'number') &&
+          createdId
+            ? String(createdId)
+            : undefined);
 
         const metadata = sanitize(body);
 

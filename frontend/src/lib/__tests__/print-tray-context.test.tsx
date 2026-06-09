@@ -47,6 +47,19 @@ function seedStorage(items: PrintTrayItem[]) {
   localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify(items));
 }
 
+// Where localStorage's methods live varies by runtime: jsdom's Storage keeps
+// them on Storage.prototype (and its instance proxy ignores own-property
+// writes of method names, so instance spies silently fail to intercept),
+// while Node >=25's native webstorage puts them on the instance itself. Spy
+// on whichever object in the chain actually owns the method.
+function storageMethodOwner(method: 'getItem' | 'setItem'): Storage {
+  let owner: object | null = localStorage;
+  while (owner && !Object.getOwnPropertyDescriptor(owner, method)) {
+    owner = Object.getPrototypeOf(owner) as object | null;
+  }
+  return (owner ?? localStorage) as Storage;
+}
+
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(toast.error).mockClear();
@@ -289,7 +302,7 @@ describe('storage failure visibility', () => {
 
   it('keeps the in-memory tray working and warns once when persisting throws', async () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const setItemSpy = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+    const setItemSpy = vi.spyOn(storageMethodOwner('setItem'), 'setItem').mockImplementation(() => {
       throw new Error('QuotaExceededError');
     });
     const user = userEvent.setup();
@@ -314,7 +327,7 @@ describe('storage failure visibility', () => {
 
   it('logs when reading the stored set throws', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const getItemSpy = vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+    const getItemSpy = vi.spyOn(storageMethodOwner('getItem'), 'getItem').mockImplementation(() => {
       throw new Error('SecurityError');
     });
     renderWithProvider();

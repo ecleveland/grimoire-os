@@ -44,12 +44,12 @@ export class RateLimitGuard extends ThrottlerGuard {
     this.authedLimit = readEnvInt(process.env.THROTTLE_AUTHED_LIMIT, DEFAULT_AUTHED_LIMIT);
   }
 
-  protected async getTracker(req: Record<string, unknown>): Promise<string> {
+  protected getTracker(req: Record<string, unknown>): Promise<string> {
     const typedReq = req as unknown as RateLimitedRequest;
     const userId = this.userIdFromRequest(typedReq);
-    if (userId) return `user:${userId}`;
+    if (userId) return Promise.resolve(`user:${userId}`);
     const ip = typedReq.ip;
-    return `ip:${ip && ip.length > 0 ? ip : 'unknown'}`;
+    return Promise.resolve(`ip:${ip && ip.length > 0 ? ip : 'unknown'}`);
   }
 
   // The base guard treats `limit` as the value resolved before handleRequest

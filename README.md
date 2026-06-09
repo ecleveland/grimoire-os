@@ -1,5 +1,7 @@
 # GrimoireOS
 
+[![CI](https://github.com/ecleveland/grimoire-os/actions/workflows/ci.yml/badge.svg)](https://github.com/ecleveland/grimoire-os/actions/workflows/ci.yml)
+
 Free, open-source D&D 5e campaign management. Self-hostable alternative to D&D Beyond.
 
 ## Features

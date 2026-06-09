@@ -9,6 +9,8 @@ async function main() {
   const app = await NestFactory.createApplicationContext(PrismaModule);
   // Prisma's generated delegate types are structurally wider than the slice the backfill
   // needs; cast at this boundary so the helper can keep a small, mockable interface.
+  // The cast looks redundant under the lint tsconfig but is required by tsconfig.build.json.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion
   const prisma = app.get(PrismaService) as unknown as BackfillPrisma;
   const { scanned, updated, skipped } = await backfillNpcStatBlocks(prisma);
   console.log(

@@ -136,7 +136,7 @@ describe('NpcGeneratorService', () => {
 
     it('persists the rerolled NPC and returns the updated row', async () => {
       prisma.npc.findUnique.mockResolvedValue(baseNpc);
-      prisma.npc.update.mockImplementation(async ({ data }) => ({ ...baseNpc, ...data }));
+      prisma.npc.update.mockImplementation(({ data }) => Promise.resolve({ ...baseNpc, ...data }));
 
       const result = await service.reroll(NPC_ID, USER_ID, 'name');
 
@@ -155,7 +155,7 @@ describe('NpcGeneratorService', () => {
         ...baseNpc,
         lockedFields: ['race', 'name'],
       });
-      prisma.npc.update.mockImplementation(async ({ data }) => ({ ...baseNpc, ...data }));
+      prisma.npc.update.mockImplementation(({ data }) => Promise.resolve({ ...baseNpc, ...data }));
 
       await service.reroll(NPC_ID, USER_ID, 'all');
       const callArgs = prisma.npc.update.mock.calls[0][0];

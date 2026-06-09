@@ -46,9 +46,11 @@ Backend thresholds match the targets agreed in VEG-204; current actual coverage 
 
 **Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
 
-## Pre-merge production build check
+## CI & pre-merge verification
 
-Until VEG-120 (GitHub Actions CI) lands, run `./verify.sh` from the repo root before merging any PR that touches `backend/` or `frontend/` source. It runs the same production builds (`shared` → `nest build` → `next build`) that `docker compose build` runs inside each image, and catches type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, and the Playwright E2E suite against a compose-provisioned Postgres. Docker images are built on pushes to `main`.
+
+Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E. The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
 
 ## Environment Variables
 
