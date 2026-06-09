@@ -800,11 +800,9 @@ describe('NpcsService', () => {
 
     it('rolls back: when relation insert fails, no orphan NPC remains', async () => {
       arrangeSuccess();
-      // Use a fresh $transaction mock that throws if the callback throws
-      prisma.$transaction.mockImplementationOnce(async (fn: any) => {
-        // run the callback against the real mock prisma
-        return fn(prisma);
-      });
+      // Use a fresh $transaction mock that rejects if the callback rejects,
+      // running the callback against the real mock prisma
+      prisma.$transaction.mockImplementationOnce((fn: any) => Promise.resolve(fn(prisma)));
       prisma.npcRelation.create.mockReset().mockRejectedValueOnce(new Error('boom'));
 
       await expect(

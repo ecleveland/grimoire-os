@@ -190,7 +190,7 @@ function toMonsterRef(m: PrismaMonster): MonsterRef {
     challengeRating: m.challengeRating,
     experiencePoints: m.experiencePoints,
     specialAbilities: (m.specialAbilities as StatBlockAction[] | null) ?? null,
-    actions: ((m.actions as StatBlockAction[] | null) ?? []) as StatBlockAction[],
+    actions: (m.actions as StatBlockAction[] | null) ?? [],
     reactions: (m.reactions as StatBlockAction[] | null) ?? null,
     legendaryActions: (m.legendaryActions as StatBlockAction[] | null) ?? null,
   };

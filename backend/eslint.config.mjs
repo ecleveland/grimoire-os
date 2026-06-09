@@ -39,4 +39,12 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // unbound-method false-positives on `expect(mock.method)` assertions where
+    // the "method" is a jest.fn() that is never actually invoked unbound.
+    files: ['**/*.spec.ts', 'src/test/**'],
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
 );

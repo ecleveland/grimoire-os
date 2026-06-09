@@ -14,6 +14,10 @@ const config = [
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      // Pre-existing fetch-in-effect and hydration patterns trip this rule.
+      // They are scheduled to be restructured by VEG-319 (TanStack Query) and
+      // VEG-320 (auth/SRD refactor); ratchet back to 'error' once those land.
+      'react-hooks/set-state-in-effect': 'warn',
     },
   },
 ];

@@ -42,8 +42,12 @@ export default defineConfig({
         command: './dev-e2e.sh',
         cwd: '..',
         url: FRONTEND_URL,
-        reuseExistingServer: true,
-        timeout: 120_000,
+        // Locally, reuse an already-running dev-e2e.sh stack; in CI a stale
+        // server can't exist, so treat one as an error per Playwright docs.
+        reuseExistingServer: !process.env.CI,
+        // CI cold-starts the whole stack (postgres, migrate, seed, two dev
+        // servers); allow more headroom than the warm local path needs.
+        timeout: process.env.CI ? 300_000 : 120_000,
         stdout: 'pipe',
         stderr: 'pipe',
       },

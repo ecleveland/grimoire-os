@@ -330,8 +330,7 @@ export class NpcPipeline {
   ): GeneratedName {
     const race = decisions.race;
     if (!race) throw new Error('pickName requires race decision');
-    const gender =
-      constraints.gender ?? (rng.pickOne(NAME_GENDERS) as (typeof NAME_GENDERS)[number]);
+    const gender = constraints.gender ?? rng.pickOne(NAME_GENDERS);
     if (constraints.name) {
       // Constraint name supplied: keep as-is, infer first/family from whitespace split.
       const parts = constraints.name.split(/\s+/);

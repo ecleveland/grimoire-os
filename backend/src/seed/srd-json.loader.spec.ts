@@ -25,7 +25,7 @@ function mockJsonFile(filename: string, data: unknown) {
     if (String(filePath).endsWith(filename)) {
       return JSON.stringify(data);
     }
-    throw new Error(`Unexpected file read: ${filePath}`);
+    throw new Error(`Unexpected file read: ${String(filePath)}`);
   });
 }
 

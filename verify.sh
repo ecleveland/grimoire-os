@@ -1,13 +1,12 @@
 #!/bin/bash
 
-# Production-build smoke gate.
+# Local verification gate — mirrors what CI (.github/workflows/ci.yml) runs
+# on every PR: lint, unit tests with coverage thresholds, and the same
+# production builds that `docker compose build` runs inside each image.
 #
-# Runs the same `npm run build` that `docker compose build` runs inside each
-# image, so type errors that only surface in production builds (and not in
-# the more-lenient `next dev` / `nest start --watch`) are caught locally.
-#
-# Until VEG-120 (GitHub Actions CI) lands, run this before merging any PR
-# that touches backend/ or frontend/ source.
+# Run this before pushing to catch failures without waiting on CI. The
+# Playwright E2E suite is not included here (CI runs it); run it separately
+# with `npm run e2e` from e2e/ when your change touches user-visible behavior.
 
 set -e
 
@@ -19,11 +18,23 @@ cd "$ROOT_DIR" && node --test scripts/lib/*.test.mjs
 echo "==> Building @grimoire-os/shared"
 cd "$ROOT_DIR/shared" && npm run build
 
+echo "==> Linting backend"
+cd "$ROOT_DIR/backend" && npm run lint:check
+
+echo "==> Backend unit tests + coverage thresholds"
+cd "$ROOT_DIR/backend" && npm run test:cov
+
 echo "==> Building backend (nest build)"
 cd "$ROOT_DIR/backend" && npm run build
+
+echo "==> Linting frontend"
+cd "$ROOT_DIR/frontend" && npm run lint
+
+echo "==> Frontend unit tests + coverage thresholds"
+cd "$ROOT_DIR/frontend" && npm run test:cov
 
 echo "==> Building frontend (next build)"
 cd "$ROOT_DIR/frontend" && npm run build
 
 echo
-echo "All production builds passed."
+echo "All verification steps passed."
