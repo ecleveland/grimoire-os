@@ -12,14 +12,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Request } from 'express';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
+import type { AuthenticatedRequest } from '../../auth/interfaces/jwt-payload.interface';
 import { UserRole } from '../../prisma/enums';
 import { AdminNpcDataService } from './admin-npc-data.service';
-
-type AuthedRequest = Request & { user: { id: string } };
+import { SetActiveDto } from './dto/set-active.dto';
 
 @ApiTags('Admin / NPC Data')
 @ApiBearerAuth()
@@ -40,18 +39,14 @@ export class AdminNpcDataController {
   create(
     @Param('table') table: string,
     @Body() body: Record<string, unknown>,
-    @Req() req: AuthedRequest
+    @Req() req: AuthenticatedRequest
   ) {
-    return this.service.create(table, req.user.id, body);
+    return this.service.create(table, req.user.userId, body);
   }
 
   @Patch(':table/:id')
   @ApiOperation({ summary: 'Toggle isActive on a row (admin only)' })
-  setActive(
-    @Param('table') table: string,
-    @Param('id') id: string,
-    @Body() body: { isActive: boolean }
-  ) {
+  setActive(@Param('table') table: string, @Param('id') id: string, @Body() body: SetActiveDto) {
     return this.service.setActive(table, id, body.isActive);
   }
 

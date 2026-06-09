@@ -29,14 +29,29 @@ describe('AdminNpcDataController', () => {
     expect(service.list).toHaveBeenCalledWith('names');
   });
 
-  it('create passes userId from req.user', async () => {
+  it('create passes the JWT userId from req.user', async () => {
     service.create.mockResolvedValue({ id: 'n1' });
-    const req = { user: { id: USER_ID } } as never;
+    const req = { user: { userId: USER_ID, username: 'admin', role: 'admin' } } as never;
     await controller.create('names', { race: 'Elf', kind: 'first', value: 'Arannis' }, req);
     expect(service.create).toHaveBeenCalledWith(
       'names',
       USER_ID,
       expect.objectContaining({ value: 'Arannis' })
+    );
+  });
+
+  it('create forwards the authenticated admin id for personality rows', async () => {
+    service.create.mockResolvedValue({ id: 'p1', addedById: USER_ID });
+    const req = { user: { userId: USER_ID, username: 'admin', role: 'admin' } } as never;
+    await controller.create(
+      'personality',
+      { background: 'Acolyte', kind: 'ideals', value: 'Faith above all.' },
+      req
+    );
+    expect(service.create).toHaveBeenCalledWith(
+      'personality',
+      USER_ID,
+      expect.objectContaining({ background: 'Acolyte' })
     );
   });
 
