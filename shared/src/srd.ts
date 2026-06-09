@@ -60,9 +60,34 @@ export interface BackgroundFeature {
   description: string;
 }
 
+// ── Content source / ownership (VEG-292) ───────────────────────────────
+
+/**
+ * Origin of a piece of reference content. SRD content is loaded by the seed;
+ * homebrew content is authored by a user. The shared content tables hold both,
+ * so `/srd/*` is the initial data load rather than a hard boundary.
+ */
+export type ContentSource = 'srd' | 'homebrew';
+
+/**
+ * Authorship/scope fields carried by every content type that can originate from
+ * either the SRD seed or a user (monsters, spells, feats, magic items).
+ *
+ * - SRD rows have `contentSource: 'srd'` and a null `createdById`.
+ * - Homebrew rows are owned by their creator (`createdById`) and form a per-user
+ *   library visible to that user across all their campaigns.
+ * - `campaignId` is reserved for future per-campaign scoping; it is always null
+ *   for now (the column exists so adding that feature needs no second migration).
+ */
+export interface ContentOwnership {
+  contentSource: ContentSource;
+  createdById?: string | null;
+  campaignId?: string | null;
+}
+
 // ── SRD Entity Interfaces ──────────────────────────────────────────────
 
-export interface SrdSpell {
+export interface SrdSpell extends ContentOwnership {
   id: string;
   name: string;
   level: number;
@@ -80,7 +105,7 @@ export interface SrdSpell {
   source: string;
 }
 
-export interface SrdMonster {
+export interface SrdMonster extends ContentOwnership {
   id: string;
   name: string;
   size: string;
@@ -116,7 +141,7 @@ export interface SrdMonster {
   source: string;
 }
 
-export interface SrdItem {
+export interface SrdItem extends ContentOwnership {
   id: string;
   name: string;
   category: string;
@@ -213,7 +238,7 @@ export interface SrdBackground {
   source: string;
 }
 
-export interface SrdFeat {
+export interface SrdFeat extends ContentOwnership {
   id: string;
   name: string;
   description?: string;

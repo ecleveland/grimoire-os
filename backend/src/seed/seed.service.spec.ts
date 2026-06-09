@@ -48,26 +48,21 @@ describe('SeedService', () => {
     jest.spyOn(console, 'log').mockImplementation();
     jest.spyOn(console, 'warn').mockImplementation();
 
-    // All createMany resolve successfully
-    prisma.spell.createMany.mockResolvedValue({ count: 0 });
-    prisma.spell.upsert.mockImplementation((args: any) =>
-      Promise.resolve({ id: `spell-${args.where.name}`, name: args.where.name })
-    );
-    prisma.monster.createMany.mockResolvedValue({ count: 0 });
-    prisma.monster.upsert.mockImplementation((args: any) =>
-      Promise.resolve({ id: `monster-${args.where.name}`, name: args.where.name })
-    );
-    prisma.item.createMany.mockResolvedValue({ count: 0 });
-    prisma.item.upsert.mockImplementation((args: any) =>
-      Promise.resolve({ id: `item-${args.where.name}`, name: args.where.name })
-    );
+    // SRD reference tables (spell/monster/item/feat) are now seeded via
+    // findFirst→create/update scoped to contentSource='srd' (VEG-292). Default
+    // findFirst to null so the create branch runs; individual tests override it.
+    for (const model of [prisma.spell, prisma.monster, prisma.item, prisma.feat]) {
+      model.createMany.mockResolvedValue({ count: 0 });
+      model.findFirst.mockResolvedValue(null);
+      model.create.mockResolvedValue({});
+      model.update.mockResolvedValue({});
+    }
     prisma.srdClass.createMany.mockResolvedValue({ count: 0 });
     prisma.race.createMany.mockResolvedValue({ count: 0 });
     prisma.background.createMany.mockResolvedValue({ count: 0 });
     prisma.background.upsert.mockImplementation((args: any) =>
       Promise.resolve({ id: `bg-${args.where.name}`, name: args.where.name })
     );
-    prisma.feat.createMany.mockResolvedValue({ count: 0 });
     prisma.condition.createMany.mockResolvedValue({ count: 0 });
     prisma.skill.createMany.mockResolvedValue({ count: 0 });
     prisma.language.createMany.mockResolvedValue({ count: 0 });
@@ -212,17 +207,17 @@ describe('SeedService', () => {
     expect(mockLoadMonsters).toHaveBeenCalled();
     expect(mockLoadMagicItems).toHaveBeenCalled();
     expect(mockLoadSpecies).toHaveBeenCalled();
-    expect(prisma.spell.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: 'Test Spell' } })
+    expect(prisma.spell.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Test Spell' }) })
     );
-    expect(prisma.monster.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: 'Test Monster' } })
+    expect(prisma.monster.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Test Monster' }) })
     );
-    expect(prisma.item.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: 'Longsword' } })
+    expect(prisma.item.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Longsword' }) })
     );
-    expect(prisma.item.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { name: 'Test Wand' } })
+    expect(prisma.item.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ name: 'Test Wand' }) })
     );
     expect(prisma.condition.createMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
@@ -244,12 +239,60 @@ describe('SeedService', () => {
   it('merges mundane items with magic items from JSON', async () => {
     await service.seed();
 
-    // 5 mundane items from static data + 1 magic item from JSON mock, each upserted by name.
-    const upsertedItems = prisma.item.upsert.mock.calls.map(([args]: [any]) => args.create);
-    expect(upsertedItems).toHaveLength(6);
-    expect(upsertedItems[0].name).toBe('Longsword');
-    expect(upsertedItems[5].name).toBe('Test Wand');
-    expect(upsertedItems[5].isMagic).toBe(true);
+    // 5 mundane items from static data + 1 magic item from JSON mock, each created by name.
+    const createdItems = prisma.item.create.mock.calls.map(([args]: [any]) => args.data);
+    expect(createdItems).toHaveLength(6);
+    expect(createdItems[0].name).toBe('Longsword');
+    expect(createdItems[5].name).toBe('Test Wand');
+    expect(createdItems[5].isMagic).toBe(true);
+  });
+
+  // ── Content source (VEG-292) ───────────────────────────
+
+  it('tags every seeded SRD row with contentSource "srd"', async () => {
+    await service.seed();
+
+    for (const model of [prisma.spell, prisma.monster, prisma.item, prisma.feat]) {
+      expect(model.create).toHaveBeenCalled();
+      for (const [args] of model.create.mock.calls) {
+        expect(args.data.contentSource).toBe('srd');
+      }
+    }
+  });
+
+  it('scopes SRD seed lookups to the srd partition so homebrew rows never match', async () => {
+    await service.seed();
+
+    for (const model of [prisma.spell, prisma.monster, prisma.item, prisma.feat]) {
+      expect(model.findFirst).toHaveBeenCalled();
+      for (const [args] of model.findFirst.mock.calls) {
+        expect(args.where).toMatchObject({ name: expect.any(String), contentSource: 'srd' });
+      }
+    }
+  });
+
+  it('updates an existing SRD row in place rather than creating a duplicate (idempotent reseed)', async () => {
+    // Simulate the row already existing in the srd partition.
+    prisma.spell.findFirst.mockResolvedValue({ id: 'existing-spell-id' });
+
+    await service.seed();
+
+    expect(prisma.spell.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'existing-spell-id' },
+        data: expect.objectContaining({ name: 'Test Spell', contentSource: 'srd' }),
+      })
+    );
+    expect(prisma.spell.create).not.toHaveBeenCalled();
+  });
+
+  it('never deletes spells/monsters/items/feats on reseed (user homebrew survives)', async () => {
+    await service.seed();
+
+    for (const model of [prisma.spell, prisma.monster, prisma.item, prisma.feat]) {
+      expect(model.deleteMany).not.toHaveBeenCalled();
+      expect(model.delete).not.toHaveBeenCalled();
+    }
   });
 
   it('uses species JSON data for races', async () => {

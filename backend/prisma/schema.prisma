@@ -36,6 +36,14 @@ enum AuditAction {
   delete
 }
 
+// Origin of a piece of reference content (monsters/spells/feats/magic items).
+// SRD rows are loaded by the seed; homebrew rows are authored by a user. Both
+// live in the same tables — SRD is the initial data load, not a hard boundary.
+enum ContentSource {
+  srd
+  homebrew
+}
+
 // ── Users ──────────────────────────────────────────────
 
 model User {
@@ -59,6 +67,10 @@ model User {
   npcs                      Npc[]
   addedNpcCustomPersonality NpcCustomPersonality[]
   refreshTokens             RefreshToken[]
+  homebrewMonsters          Monster[]
+  homebrewSpells            Spell[]
+  homebrewItems             Item[]
+  homebrewFeats             Feat[]
 
   @@map("users")
 }
@@ -86,17 +98,17 @@ model RefreshToken {
 // ── Campaigns ──────────────────────────────────────────
 
 model Campaign {
-  id             String         @id @default(uuid())
-  name           String
-  description    String?
-  ownerId        String
-  status         CampaignStatus @default(active)
-  setting        String?
-  currentSession Int            @default(0)
-  inviteCode     String?        @unique
+  id                  String         @id @default(uuid())
+  name                String
+  description         String?
+  ownerId             String
+  status              CampaignStatus @default(active)
+  setting             String?
+  currentSession      Int            @default(0)
+  inviteCode          String?        @unique
   inviteCodeExpiresAt DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   owner      User             @relation("CampaignOwner", fields: [ownerId], references: [id])
   players    CampaignPlayer[]
@@ -226,8 +238,8 @@ model Encounter {
 // ── SRD Data ───────────────────────────────────────────
 
 model Spell {
-  id            String   @id @default(uuid())
-  name          String   @unique
+  id            String        @id @default(uuid())
+  name          String
   level         Int
   school        String
   castingTime   String
@@ -236,22 +248,32 @@ model Spell {
   duration      String
   description   String
   classes       String[]
-  ritual        Boolean  @default(false)
-  concentration Boolean  @default(false)
+  ritual        Boolean       @default(false)
+  concentration Boolean       @default(false)
   material      String?
   higherLevels  String?
-  source        String   @default("SRD 5.2.1")
+  source        String        @default("SRD 5.2.1")
+  contentSource ContentSource @default(srd)
+  createdById   String?
+  campaignId    String?
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  // SRD-name uniqueness and per-user homebrew-name uniqueness are enforced by
+  // partial unique indexes added by hand in the migration (Prisma cannot model
+  // partial indexes). See the add_homebrew_content_source migration.
   @@index([level])
   @@index([school])
+  @@index([contentSource])
+  @@index([createdById])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "spells_name_trgm_idx")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "spells_description_trgm_idx")
   @@map("spells")
 }
 
 model Monster {
-  id                    String   @id @default(uuid())
-  name                  String   @unique
+  id                    String        @id @default(uuid())
+  name                  String
   size                  String
   type                  String
   subtype               String?
@@ -282,18 +304,27 @@ model Monster {
   reactions             Json?
   legendaryActions      Json?
   description           String?
-  source                String   @default("SRD 5.2.1")
+  source                String        @default("SRD 5.2.1")
+  contentSource         ContentSource @default(srd)
+  createdById           String?
+  campaignId            String?
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  // Name uniqueness is enforced by partial unique indexes (per-source) added by
+  // hand in the add_homebrew_content_source migration; Prisma cannot model them.
   @@index([type])
   @@index([challengeRating])
+  @@index([contentSource])
+  @@index([createdById])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "monsters_name_trgm_idx")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "monsters_description_trgm_idx")
   @@map("monsters")
 }
 
 model Item {
-  id                  String   @id @default(uuid())
-  name                String   @unique
+  id                  String        @id @default(uuid())
+  name                String
   category            String
   cost                String?
   weight              Float?
@@ -301,15 +332,24 @@ model Item {
   damage              String?
   damageType          String?
   armorClass          Int?
-  stealthDisadvantage Boolean  @default(false)
+  stealthDisadvantage Boolean       @default(false)
   strengthRequirement Int?
   properties          String[]
   rarity              String?
-  requiresAttunement  Boolean  @default(false)
-  isMagic             Boolean  @default(false)
-  source              String   @default("SRD 5.2.1")
+  requiresAttunement  Boolean       @default(false)
+  isMagic             Boolean       @default(false)
+  source              String        @default("SRD 5.2.1")
+  contentSource       ContentSource @default(srd)
+  createdById         String?
+  campaignId          String?
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  // Name uniqueness is enforced by partial unique indexes (per-source) added by
+  // hand in the add_homebrew_content_source migration; Prisma cannot model them.
   @@index([category])
+  @@index([contentSource])
+  @@index([createdById])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_name_trgm_idx")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "items_description_trgm_idx")
   @@map("items")
@@ -465,15 +505,24 @@ model BackgroundFeature {
 }
 
 model Feat {
-  id           String  @id @default(uuid())
-  name         String  @unique
-  description  String?
-  prerequisite String?
-  benefits     Json?
-  category     String?
-  repeatable   Boolean @default(false)
-  source       String  @default("SRD 5.2.1")
+  id            String        @id @default(uuid())
+  name          String
+  description   String?
+  prerequisite  String?
+  benefits      Json?
+  category      String?
+  repeatable    Boolean       @default(false)
+  source        String        @default("SRD 5.2.1")
+  contentSource ContentSource @default(srd)
+  createdById   String?
+  campaignId    String?
 
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  // Name uniqueness is enforced by partial unique indexes (per-source) added by
+  // hand in the add_homebrew_content_source migration; Prisma cannot model them.
+  @@index([contentSource])
+  @@index([createdById])
   @@map("feats")
 }
 
