@@ -9,6 +9,16 @@ import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
+import { ContentAccessService, GLOBAL_CONTENT_SOURCES } from './content-access.service';
+
+// Raw-SQL counterpart of ContentAccessService.globalWhere(), for the pg_trgm and
+// unified-search queries that build SQL by hand. Pins a content table to the
+// global catalog (SRD + admin-published shared), keeping owner-scoped homebrew
+// out of the public `/srd/*` responses (VEG-311). The `::text` cast lets the
+// enum column compare against the bound string parameters.
+const GLOBAL_SOURCE_SQL = Prisma.sql`"contentSource"::text IN (${Prisma.join([
+  ...GLOBAL_CONTENT_SOURCES,
+])})`;
 
 // Minimum query length that triggers pg_trgm similarity matching. Below this we
 // fall back to plain ILIKE substring matching — single-char fuzzy queries return
@@ -126,6 +136,7 @@ function buildFuzzyScoreSql(query: string): Prisma.Sql {
 export class SrdService {
   constructor(
     private prisma: PrismaService,
+    private contentAccess: ContentAccessService,
     @Inject(CACHE_MANAGER) private cache: Cache
   ) {}
 
@@ -143,7 +154,7 @@ export class SrdService {
       return this.fuzzySearchSpells(dto, dto.q, page, limit);
     }
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
     if (dto.q) {
       where.OR = [
         { name: { contains: dto.q, mode: 'insensitive' } },
@@ -168,7 +179,7 @@ export class SrdService {
   }
 
   private async fuzzySearchSpells(dto: QuerySpellsDto, q: string, page: number, limit: number) {
-    const conds: Prisma.Sql[] = [buildFuzzyMatchSql(q, SPELL_FUZZY_THRESHOLD)];
+    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL, buildFuzzyMatchSql(q, SPELL_FUZZY_THRESHOLD)];
     if (dto.class) conds.push(Prisma.sql`${dto.class} = ANY("classes")`);
     if (dto.level !== undefined) conds.push(Prisma.sql`"level" = ${dto.level}`);
     if (dto.school) conds.push(Prisma.sql`"school" = ${dto.school}`);
@@ -190,7 +201,7 @@ export class SrdService {
   }
 
   async findSpell(id: string) {
-    return this.prisma.spell.findUnique({ where: { id } });
+    return this.prisma.spell.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
   }
 
   // ── Monsters ────────────────────────────────────────
@@ -203,7 +214,7 @@ export class SrdService {
       return this.fuzzySearchMonsters(dto, dto.q, page, limit);
     }
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
     if (dto.q) {
       where.OR = [
         { name: { contains: dto.q, mode: 'insensitive' } },
@@ -234,7 +245,7 @@ export class SrdService {
   }
 
   private async fuzzySearchMonsters(dto: QueryMonstersDto, q: string, page: number, limit: number) {
-    const conds: Prisma.Sql[] = [buildFuzzyMatchSql(q, MONSTER_FUZZY_THRESHOLD)];
+    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL, buildFuzzyMatchSql(q, MONSTER_FUZZY_THRESHOLD)];
     if (dto.type) conds.push(Prisma.sql`"type" = ${dto.type}`);
     if (dto.size) conds.push(Prisma.sql`"size" = ${dto.size}`);
     if (dto.cr) conds.push(Prisma.sql`"challengeRating" = ${parseFloat(dto.cr)}`);
@@ -258,7 +269,7 @@ export class SrdService {
   }
 
   async findMonster(id: string) {
-    return this.prisma.monster.findUnique({ where: { id } });
+    return this.prisma.monster.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
   }
 
   // ── Items ───────────────────────────────────────────
@@ -271,7 +282,7 @@ export class SrdService {
       return this.fuzzySearchItems(dto, dto.q, page, limit);
     }
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
     if (dto.q) {
       where.OR = [
         { name: { contains: dto.q, mode: 'insensitive' } },
@@ -296,7 +307,7 @@ export class SrdService {
   }
 
   private async fuzzySearchItems(dto: QueryItemsDto, q: string, page: number, limit: number) {
-    const conds: Prisma.Sql[] = [buildFuzzyMatchSql(q, ITEM_FUZZY_THRESHOLD)];
+    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL, buildFuzzyMatchSql(q, ITEM_FUZZY_THRESHOLD)];
     if (dto.category) conds.push(Prisma.sql`"category" = ${dto.category}`);
     if (dto.rarity) conds.push(Prisma.sql`"rarity" = ${dto.rarity}`);
     if (dto.isMagic !== undefined) conds.push(Prisma.sql`"isMagic" = ${dto.isMagic === 'true'}`);
@@ -318,7 +329,7 @@ export class SrdService {
   }
 
   async findItem(id: string) {
-    return this.prisma.item.findUnique({ where: { id } });
+    return this.prisma.item.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
   }
 
   // ── Classes ─────────────────────────────────────────
@@ -590,7 +601,7 @@ export class SrdService {
   // ── Feats ───────────────────────────────────────────
 
   async searchFeats(query?: string) {
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
     if (query) {
       where.OR = [
         { name: { contains: query, mode: 'insensitive' } },
@@ -601,7 +612,7 @@ export class SrdService {
   }
 
   async findFeat(id: string) {
-    return this.prisma.feat.findUnique({ where: { id } });
+    return this.prisma.feat.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
   }
 
   // ── Conditions ──────────────────────────────────────
@@ -736,7 +747,7 @@ export class SrdService {
   }
 
   private buildSpellWhereSql(dto: QuerySearchDto): Prisma.Sql {
-    const conds: Prisma.Sql[] = [];
+    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL];
     if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
     if (dto.class) conds.push(Prisma.sql`${dto.class} = ANY("classes")`);
     if (dto.level !== undefined) conds.push(Prisma.sql`"level" = ${dto.level}`);
@@ -745,7 +756,7 @@ export class SrdService {
   }
 
   private buildFeatWhereSql(dto: QuerySearchDto): Prisma.Sql {
-    const conds: Prisma.Sql[] = [];
+    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL];
     if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
     if (dto.hasPrerequisite === 'true') conds.push(Prisma.sql`"prerequisite" IS NOT NULL`);
     else if (dto.hasPrerequisite === 'false') conds.push(Prisma.sql`"prerequisite" IS NULL`);

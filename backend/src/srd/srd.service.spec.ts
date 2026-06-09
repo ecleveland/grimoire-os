@@ -1,8 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { SrdService } from './srd.service';
+import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
+
+// Every public /srd read is pinned to the global catalog — SRD + admin-published
+// shared content — so owner-scoped homebrew never leaks (VEG-311).
+const GLOBAL_WHERE = { contentSource: { in: ['srd', 'shared'] } };
 
 describe('SrdService', () => {
   let service: SrdService;
@@ -13,7 +18,12 @@ describe('SrdService', () => {
     cache = { clear: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [SrdService, prismaMockProvider(), { provide: CACHE_MANAGER, useValue: cache }],
+      providers: [
+        SrdService,
+        ContentAccessService,
+        prismaMockProvider(),
+        { provide: CACHE_MANAGER, useValue: cache },
+      ],
     }).compile();
 
     service = module.get<SrdService>(SrdService);
@@ -44,7 +54,7 @@ describe('SrdService', () => {
       const result = await service.searchSpells({});
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
-        where: {},
+        where: { ...GLOBAL_WHERE },
         orderBy: { name: 'asc' },
         skip: 0,
         take: 20,
@@ -60,6 +70,10 @@ describe('SrdService', () => {
       expect(prisma.spell.findMany).not.toHaveBeenCalled();
       const { dataQuery, countQuery } = captureSql();
       expect(dataQuery?.sql).toContain('"spells"');
+      expect(dataQuery?.sql).toContain('"contentSource"');
+      expect(countQuery?.sql).toContain('"contentSource"');
+      expect(dataQuery?.values).toContain('srd');
+      expect(dataQuery?.values).toContain('shared');
       expect(dataQuery?.sql).toContain('similarity');
       expect(dataQuery?.sql).toContain('ILIKE');
       expect(dataQuery?.sql).toContain('ORDER BY');
@@ -94,6 +108,7 @@ describe('SrdService', () => {
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           OR: [
             { name: { contains: 'a', mode: 'insensitive' } },
             { description: { contains: 'a', mode: 'insensitive' } },
@@ -140,6 +155,7 @@ describe('SrdService', () => {
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           classes: { has: 'Wizard' },
         },
         orderBy: { name: 'asc' },
@@ -156,6 +172,7 @@ describe('SrdService', () => {
 
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           school: 'Evocation',
         },
         orderBy: { name: 'asc' },
@@ -186,6 +203,9 @@ describe('SrdService', () => {
       expect(prisma.monster.findMany).not.toHaveBeenCalled();
       const { dataQuery, countQuery } = captureSql();
       expect(dataQuery?.sql).toContain('"monsters"');
+      expect(dataQuery?.sql).toContain('"contentSource"');
+      expect(dataQuery?.values).toContain('srd');
+      expect(dataQuery?.values).toContain('shared');
       expect(dataQuery?.sql).toContain('similarity');
       expect(dataQuery?.values).toContain('drg');
       expect(dataQuery?.values).toContain('%drg%');
@@ -201,6 +221,7 @@ describe('SrdService', () => {
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           OR: [
             { name: { contains: 'a', mode: 'insensitive' } },
             { description: { contains: 'a', mode: 'insensitive' } },
@@ -246,6 +267,7 @@ describe('SrdService', () => {
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           challengeRating: 0.25,
         },
         orderBy: { name: 'asc' },
@@ -262,6 +284,7 @@ describe('SrdService', () => {
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           size: 'Large',
         },
         orderBy: { name: 'asc' },
@@ -278,6 +301,7 @@ describe('SrdService', () => {
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           challengeRating: { gte: 5, lte: 10 },
         },
         orderBy: { name: 'asc' },
@@ -308,6 +332,9 @@ describe('SrdService', () => {
       expect(prisma.item.findMany).not.toHaveBeenCalled();
       const { dataQuery, countQuery } = captureSql();
       expect(dataQuery?.sql).toContain('"items"');
+      expect(dataQuery?.sql).toContain('"contentSource"');
+      expect(dataQuery?.values).toContain('srd');
+      expect(dataQuery?.values).toContain('shared');
       expect(dataQuery?.sql).toContain('similarity');
       expect(dataQuery?.values).toContain('ptn');
       expect(dataQuery?.values).toContain('%ptn%');
@@ -323,6 +350,7 @@ describe('SrdService', () => {
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           OR: [
             { name: { contains: 'a', mode: 'insensitive' } },
             { description: { contains: 'a', mode: 'insensitive' } },
@@ -356,6 +384,7 @@ describe('SrdService', () => {
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           category: 'Potion',
         },
         orderBy: { name: 'asc' },
@@ -372,6 +401,7 @@ describe('SrdService', () => {
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           rarity: 'Rare',
         },
         orderBy: { name: 'asc' },
@@ -388,6 +418,7 @@ describe('SrdService', () => {
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
+          ...GLOBAL_WHERE,
           isMagic: true,
         },
         orderBy: { name: 'asc' },
@@ -542,7 +573,7 @@ describe('SrdService', () => {
       await service.searchFeats();
 
       expect(prisma.feat.findMany).toHaveBeenCalledWith({
-        where: {},
+        where: { ...GLOBAL_WHERE },
         orderBy: { name: 'asc' },
       });
     });
@@ -632,37 +663,39 @@ describe('SrdService', () => {
   // ── Find-by-ID methods ─────────────────────────────
 
   describe('findSpell', () => {
-    it('returns spell by id', async () => {
+    it('returns spell by id, scoped to the global catalog', async () => {
       const spell = { id: '1', name: 'Fireball' };
-      prisma.spell.findUnique.mockResolvedValue(spell);
+      prisma.spell.findFirst.mockResolvedValue(spell);
 
       const result = await service.findSpell('1');
 
-      expect(prisma.spell.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(prisma.spell.findFirst).toHaveBeenCalledWith({ where: { id: '1', ...GLOBAL_WHERE } });
       expect(result).toEqual(spell);
     });
   });
 
   describe('findMonster', () => {
-    it('returns monster by id', async () => {
+    it('returns monster by id, scoped to the global catalog', async () => {
       const monster = { id: '1', name: 'Dragon' };
-      prisma.monster.findUnique.mockResolvedValue(monster);
+      prisma.monster.findFirst.mockResolvedValue(monster);
 
       const result = await service.findMonster('1');
 
-      expect(prisma.monster.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(prisma.monster.findFirst).toHaveBeenCalledWith({
+        where: { id: '1', ...GLOBAL_WHERE },
+      });
       expect(result).toEqual(monster);
     });
   });
 
   describe('findItem', () => {
-    it('returns item by id', async () => {
+    it('returns item by id, scoped to the global catalog', async () => {
       const item = { id: '1', name: 'Healing Potion' };
-      prisma.item.findUnique.mockResolvedValue(item);
+      prisma.item.findFirst.mockResolvedValue(item);
 
       const result = await service.findItem('1');
 
-      expect(prisma.item.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(prisma.item.findFirst).toHaveBeenCalledWith({ where: { id: '1', ...GLOBAL_WHERE } });
       expect(result).toEqual(item);
     });
   });
@@ -710,13 +743,13 @@ describe('SrdService', () => {
   });
 
   describe('findFeat', () => {
-    it('returns feat by id', async () => {
+    it('returns feat by id, scoped to the global catalog', async () => {
       const feat = { id: '1', name: 'Tough' };
-      prisma.feat.findUnique.mockResolvedValue(feat);
+      prisma.feat.findFirst.mockResolvedValue(feat);
 
       const result = await service.findFeat('1');
 
-      expect(prisma.feat.findUnique).toHaveBeenCalledWith({ where: { id: '1' } });
+      expect(prisma.feat.findFirst).toHaveBeenCalledWith({ where: { id: '1', ...GLOBAL_WHERE } });
       expect(result).toEqual(feat);
     });
   });
@@ -965,6 +998,16 @@ describe('SrdService', () => {
       const wildcardMatches = idQuery?.values.filter(v => v === '%fire%') ?? [];
       // 6 sources × 2 columns (name + description) per source.
       expect(wildcardMatches.length).toBe(12);
+    });
+
+    it('restricts the spell and feat sources to the global catalog (srd + shared)', async () => {
+      await service.search({ types: ['spell', 'feat'] });
+      const { idQuery, countQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"contentSource"');
+      expect(countQuery?.sql).toContain('"contentSource"');
+      // Both content sources (spell + feat) contribute the srd/shared params.
+      expect(idQuery?.values.filter(v => v === 'srd').length).toBe(2);
+      expect(idQuery?.values.filter(v => v === 'shared').length).toBe(2);
     });
 
     it('applies spell sub-filters (class via ANY, level, school)', async () => {

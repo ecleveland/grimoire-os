@@ -8,6 +8,14 @@ import path from 'node:path';
 //
 // When adding a new top-level entity model in prisma/schema.prisma whose
 // rows are created at runtime by users (not the seed), add the table here.
+//
+// `users` is deliberately NOT in this list: the VEG-292 content tables
+// (monsters/spells/items/feats) now carry a createdById FK to users with
+// ON DELETE CASCADE, and `TRUNCATE users CASCADE` truncates *every* table that
+// references it — which would structurally wipe the seeded SRD catalog. It is
+// cleared with DELETE below instead (see the sql), which honors the per-row
+// cascade: only homebrew owned by the deleted users is removed, leaving SRD
+// rows (createdById IS NULL) intact.
 const APP_DATA_TABLES = [
   'audit_logs',
   'npc_relations',
@@ -18,7 +26,6 @@ const APP_DATA_TABLES = [
   'characters',
   'campaign_players',
   'campaigns',
-  'users',
 ];
 
 const E2E_DB_NAME = process.env.E2E_DB_NAME ?? 'grimoire_os_e2e';
@@ -26,13 +33,16 @@ const E2E_DB_NAME = process.env.E2E_DB_NAME ?? 'grimoire_os_e2e';
 export default async function globalSetup(): Promise<void> {
   const repoRoot = path.resolve(__dirname, '..');
   const tables = APP_DATA_TABLES.join(', ');
-  const sql = `TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE;`;
+  // Truncate the app tables that reference users first (clears the children),
+  // then DELETE users so its per-row ON DELETE CASCADE spares the SRD catalog.
+  const sql = `TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE; DELETE FROM users;`;
 
   // Run inside the postgres container — same path the dev scripts use, so we
   // do not need a host-side psql client or a new node dependency.
   const cmd = [
     'docker compose',
-    '-f', `"${path.join(repoRoot, 'docker-compose.yml')}"`,
+    '-f',
+    `"${path.join(repoRoot, 'docker-compose.yml')}"`,
     'exec -T postgres',
     'psql',
     '-U grimoire',

@@ -13,7 +13,13 @@ import type {
 } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SrdService } from './srd.service';
+import { GLOBAL_CONTENT_SOURCES } from './content-access.service';
 import { PrintCardSelectionDto } from './dto/hydrate-cards.dto';
+
+// The public print endpoint hydrates by client-supplied id, so it must scope to
+// the global catalog (SRD + admin-published shared) rather than trusting the id
+// alone — otherwise an enumerated homebrew id could be printed (VEG-311).
+const GLOBAL_SOURCES = [...GLOBAL_CONTENT_SOURCES];
 
 // Batch hydration for the printable SRD cards feature (VEG-263). Takes the
 // grouped print selection the frontend tray holds and returns the curated
@@ -163,7 +169,7 @@ export class PrintableCardsService {
 
   private async hydrateMonsters(ids: string[]): Promise<PrintableCard[]> {
     const rows = await this.prisma.monster.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, contentSource: { in: GLOBAL_SOURCES } },
       select: {
         id: true,
         name: true,
@@ -215,7 +221,7 @@ export class PrintableCardsService {
 
   private async hydrateSpells(ids: string[]): Promise<PrintableCard[]> {
     const rows = await this.prisma.spell.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, contentSource: { in: GLOBAL_SOURCES } },
       select: {
         id: true,
         name: true,
@@ -239,7 +245,7 @@ export class PrintableCardsService {
 
   private async hydrateItems(ids: string[]): Promise<PrintableCard[]> {
     const rows = await this.prisma.item.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, contentSource: { in: GLOBAL_SOURCES } },
       select: {
         id: true,
         name: true,
