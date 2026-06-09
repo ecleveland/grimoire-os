@@ -501,6 +501,24 @@ describe('PrintableCardsService', () => {
     });
   });
 
+  describe('global-catalog scoping (VEG-311)', () => {
+    it('scopes monster/spell/item hydration to the global catalog (excludes homebrew)', async () => {
+      await service.hydrate([
+        { type: 'monster', ids: ['mon-1'] },
+        { type: 'spell', ids: ['sp-1'] },
+        { type: 'item', ids: ['it-1'] },
+      ]);
+
+      for (const model of [prisma.monster, prisma.spell, prisma.item]) {
+        expect(model.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ contentSource: { in: ['srd', 'shared'] } }),
+          })
+        );
+      }
+    });
+  });
+
   describe('robustness', () => {
     it('silently drops unknown ids without failing the batch', async () => {
       prisma.spell.findMany.mockResolvedValue([SPELL_ROW]);
@@ -530,7 +548,9 @@ describe('PrintableCardsService', () => {
 
       expect(prisma.spell.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.spell.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ['sp-1'] } } })
+        expect.objectContaining({
+          where: { id: { in: ['sp-1'] }, contentSource: { in: ['srd', 'shared'] } },
+        })
       );
       expect(result.groups).toHaveLength(1);
       expect(result.groups[0].cards).toHaveLength(1);
