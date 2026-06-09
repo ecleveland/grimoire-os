@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCharacterDto } from './dto/create-character.dto';
@@ -28,9 +29,18 @@ const characterListSelect = {
 
 @Injectable()
 export class CharactersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private campaignAuth: CampaignAuthService
+  ) {}
 
   async create(userId: string, dto: CreateCharacterDto) {
+    // campaignId is attacker-controlled input: without this check any
+    // authenticated user could inject a character into an arbitrary campaign,
+    // bypassing the POST /campaigns/:id/characters/:characterId guard (VEG-317).
+    if (dto.campaignId) {
+      await this.campaignAuth.assertCampaignMember(dto.campaignId, userId);
+    }
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
       // Prisma's InputJsonValue for JSON fields (abilityScores, hitPoints, etc.).

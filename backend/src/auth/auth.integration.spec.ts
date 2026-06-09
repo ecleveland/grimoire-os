@@ -272,6 +272,7 @@ describe('Auth Integration', () => {
         revokedAt: null,
         replacedById: null,
       });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
       prisma.refreshToken.create.mockResolvedValue({ id: 'r-new' });
       prisma.refreshToken.update.mockResolvedValue({});
       prisma.user.findUnique.mockResolvedValue(mockUser);
@@ -283,13 +284,15 @@ describe('Auth Integration', () => {
       );
 
       expect(result.user.id).toBe(USER_ID);
-      // Old token marked revoked + chained to new token id.
+      // Old token atomically claimed (revoked) by hash...
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { tokenHash: expect.any(String), revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      // ...and chained to the new token id.
       expect(prisma.refreshToken.update).toHaveBeenCalledWith({
         where: { id: 'r-old' },
-        data: expect.objectContaining({
-          revokedAt: expect.any(Date),
-          replacedById: 'r-new',
-        }),
+        data: { replacedById: 'r-new' },
       });
       const calls = (res.cookie as jest.Mock).mock.calls;
       const access = calls.find(c => c[0] === AUTH_COOKIE_NAME);
@@ -311,7 +314,9 @@ describe('Auth Integration', () => {
         revokedAt: new Date(Date.now() - 1000),
         replacedById: 'r-newer',
       });
-      prisma.refreshToken.updateMany.mockResolvedValue({ count: 3 });
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 }) // claim fails: row already revoked
+        .mockResolvedValueOnce({ count: 3 }); // revoke-all of the user's live tokens
 
       const res = createMockResponse();
       await expect(

@@ -261,7 +261,11 @@ model Spell {
   createdById   String?
   campaignId    String?
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  // SetNull (not Cascade): admin-published `shared` rows are global catalog
+  // content and must survive their author's deletion. Homebrew rows are
+  // deleted at the service layer (UsersService.remove) and backstopped by a
+  // hand-authored DB CHECK: homebrew must always have a creator (VEG-317).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   // SRD-name uniqueness and per-user homebrew-name uniqueness are enforced by
   // partial unique indexes added by hand in the migration (Prisma cannot model
@@ -313,7 +317,11 @@ model Monster {
   createdById           String?
   campaignId            String?
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  // SetNull (not Cascade): admin-published `shared` rows are global catalog
+  // content and must survive their author's deletion. Homebrew rows are
+  // deleted at the service layer (UsersService.remove) and backstopped by a
+  // hand-authored DB CHECK: homebrew must always have a creator (VEG-317).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   // Name uniqueness is enforced by partial unique indexes (per-source) added by
   // hand in the add_homebrew_content_source migration; Prisma cannot model them.
@@ -347,7 +355,11 @@ model Item {
   createdById         String?
   campaignId          String?
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  // SetNull (not Cascade): admin-published `shared` rows are global catalog
+  // content and must survive their author's deletion. Homebrew rows are
+  // deleted at the service layer (UsersService.remove) and backstopped by a
+  // hand-authored DB CHECK: homebrew must always have a creator (VEG-317).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   // Name uniqueness is enforced by partial unique indexes (per-source) added by
   // hand in the add_homebrew_content_source migration; Prisma cannot model them.
@@ -521,7 +533,11 @@ model Feat {
   createdById   String?
   campaignId    String?
 
-  createdBy User? @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  // SetNull (not Cascade): admin-published `shared` rows are global catalog
+  // content and must survive their author's deletion. Homebrew rows are
+  // deleted at the service layer (UsersService.remove) and backstopped by a
+  // hand-authored DB CHECK: homebrew must always have a creator (VEG-317).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   // Name uniqueness is enforced by partial unique indexes (per-source) added by
   // hand in the add_homebrew_content_source migration; Prisma cannot model them.

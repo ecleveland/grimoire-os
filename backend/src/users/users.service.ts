@@ -92,11 +92,23 @@ export class UsersService {
   }
 
   async update(id: string, updateDto: UpdateUserDto | AdminUpdateUserDto) {
+    // A role change alters what the user's JWTs are allowed to do, so any
+    // outstanding refresh tokens must die with the old role (VEG-317).
+    const roleChanged = 'role' in updateDto && updateDto.role !== undefined;
     try {
-      const user = await this.prisma.user.update({
-        where: { id },
-        data: updateDto,
-        omit: { passwordHash: true },
+      const user = await this.prisma.$transaction(async tx => {
+        const updated = await tx.user.update({
+          where: { id },
+          data: updateDto,
+          omit: { passwordHash: true },
+        });
+        if (roleChanged) {
+          await tx.refreshToken.updateMany({
+            where: { userId: id, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        return updated;
       });
       return toDto(UserDto, user);
     } catch (error: unknown) {
@@ -114,9 +126,17 @@ export class UsersService {
       throw new UnauthorizedException('Current password is incorrect');
     }
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
-    await this.prisma.user.update({
-      where: { id },
-      data: { passwordHash },
+    // Revoke every live refresh token alongside the hash rewrite: a stolen
+    // refresh cookie must not survive the victim changing their password.
+    await this.prisma.$transaction(async tx => {
+      await tx.user.update({
+        where: { id },
+        data: { passwordHash },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
   }
 
@@ -140,7 +160,20 @@ export class UsersService {
 
   async remove(id: string): Promise<void> {
     try {
-      await this.prisma.user.delete({ where: { id } });
+      // Homebrew content dies with its author; admin-published `shared`
+      // content survives via the SET NULL FK. The explicit deletes are
+      // required because a homebrew row with a nulled creator would violate
+      // the DB CHECK constraint and abort the user delete (VEG-317).
+      await this.prisma.$transaction(async tx => {
+        const homebrewByUser = {
+          where: { createdById: id, contentSource: 'homebrew' as const },
+        };
+        await tx.spell.deleteMany(homebrewByUser);
+        await tx.monster.deleteMany(homebrewByUser);
+        await tx.item.deleteMany(homebrewByUser);
+        await tx.feat.deleteMany(homebrewByUser);
+        await tx.user.delete({ where: { id } });
+      });
     } catch (error: unknown) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);

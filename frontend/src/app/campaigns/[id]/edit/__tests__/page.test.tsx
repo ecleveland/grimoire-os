@@ -84,6 +84,30 @@ describe('EditCampaignPage', () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load campaign'));
   });
 
+  it('renders an error state instead of an editable form when the initial load fails', async () => {
+    mockApiFetch.mockRejectedValue(new Error('nope'));
+    render(<EditCampaignPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+    // No form: a Save here would PATCH empty defaults over the real record.
+    expect(screen.queryByRole('button', { name: /save changes/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
+  });
+
+  it('Retry re-fetches and renders the form once the load succeeds', async () => {
+    mockApiFetch.mockRejectedValueOnce(new Error('nope'));
+    mockApiFetch.mockResolvedValueOnce(makeCampaign());
+    const user = userEvent.setup();
+    render(<EditCampaignPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
+    );
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+  });
+
   it('PATCHes /campaigns/:id with edited values and redirects on save', async () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockResolvedValueOnce(undefined);

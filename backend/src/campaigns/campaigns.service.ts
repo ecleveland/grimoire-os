@@ -1,4 +1,4 @@
-import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
@@ -161,7 +161,19 @@ export class CampaignsService {
   }
 
   async addCharacter(campaignId: string, characterId: string, userId: string) {
-    await this.findOneForUser(campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
+    const character = await this.prisma.character.findUnique({
+      where: { id: characterId },
+      select: { id: true, userId: true },
+    });
+    if (!character) {
+      throw new NotFoundException(`Character "${characterId}" not found`);
+    }
+    // Members may only attach their own characters; the campaign owner (DM)
+    // may attach any member's character.
+    if (character.userId !== userId && campaign.ownerId !== userId) {
+      throw new ForbiddenException('You can only add your own characters to a campaign');
+    }
     await this.prisma.character.update({
       where: { id: characterId },
       data: { campaignId },

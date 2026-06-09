@@ -4,6 +4,8 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { CharactersService } from './characters.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import {
@@ -18,12 +20,18 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 describe('CharactersService', () => {
   let service: CharactersService;
   let prisma: MockPrismaService;
+  let campaignAuth: { assertCampaignMember: jest.Mock };
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
+    campaignAuth = { assertCampaignMember: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [CharactersService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        CharactersService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: CampaignAuthService, useValue: campaignAuth },
+      ],
     }).compile();
 
     service = module.get<CharactersService>(CharactersService);
@@ -43,6 +51,61 @@ describe('CharactersService', () => {
       });
       expect(result).toEqual(mockCharacter);
       expect(result).toBeInstanceOf(CharacterDto);
+    });
+
+    it('does not check campaign membership when no campaignId is given', async () => {
+      prisma.character.create.mockResolvedValue(mockCharacter);
+
+      await service.create(USER_ID, createCharacterDto);
+
+      expect(campaignAuth.assertCampaignMember).not.toHaveBeenCalled();
+    });
+
+    it('asserts campaign membership when campaignId is provided', async () => {
+      const campaignId = '123e4567-e89b-42d3-a456-426614174000';
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: campaignId });
+      prisma.character.create.mockResolvedValue({ ...mockCharacter, campaignId });
+
+      await service.create(USER_ID, { ...createCharacterDto, campaignId });
+
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(campaignId, USER_ID);
+      expect(prisma.character.create).toHaveBeenCalled();
+    });
+
+    it('rejects and does not create when the user is not a member of the target campaign', async () => {
+      const campaignId = '123e4567-e89b-42d3-a456-426614174000';
+      campaignAuth.assertCampaignMember.mockRejectedValue(
+        new ForbiddenException('You are not a member of this campaign')
+      );
+
+      await expect(
+        service.create(USER_ID_2, { ...createCharacterDto, campaignId })
+      ).rejects.toThrow(ForbiddenException);
+      expect(prisma.character.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('CreateCharacterDto validation', () => {
+    it('rejects a non-UUID campaignId', async () => {
+      const dto = plainToInstance(CreateCharacterDto, {
+        ...createCharacterDto,
+        campaignId: 'not-a-uuid',
+      });
+
+      const errors = await validate(dto);
+
+      expect(errors.some(e => e.property === 'campaignId')).toBe(true);
+    });
+
+    it('accepts a UUID campaignId', async () => {
+      const dto = plainToInstance(CreateCharacterDto, {
+        ...createCharacterDto,
+        campaignId: '123e4567-e89b-42d3-a456-426614174000',
+      });
+
+      const errors = await validate(dto);
+
+      expect(errors.filter(e => e.property === 'campaignId')).toEqual([]);
     });
   });
 
