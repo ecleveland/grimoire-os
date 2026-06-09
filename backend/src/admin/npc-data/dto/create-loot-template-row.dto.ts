@@ -1,15 +1,14 @@
-import { IsArray, IsObject, IsString, Matches } from 'class-validator';
+import { IsArray, IsObject } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { IsNonBlankString } from '../../../common/validators/non-blank-string.decorator';
 
 export class CreateLootTemplateRowDto {
   @ApiProperty({ example: 'merchant' })
-  @IsString()
-  @Matches(/\S/, { message: 'profession is required' })
+  @IsNonBlankString()
   profession!: string;
 
   @ApiProperty({ example: '0-4' })
-  @IsString()
-  @Matches(/\S/, { message: 'crBucket is required' })
+  @IsNonBlankString()
   crBucket!: string;
 
   @ApiProperty({ example: { gp: '2d6' }, description: 'Coinage dice by denomination' })

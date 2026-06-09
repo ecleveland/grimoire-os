@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isNpcDataTable, NpcDataTable } from './admin-npc-data.types';
 import { CreateNameRowDto } from './dto/create-name-row.dto';
@@ -175,11 +176,11 @@ export class AdminNpcDataService {
   }
 }
 
-// Mirrors the global ValidationPipe (whitelist + forbidNonWhitelisted), which cannot
-// validate this endpoint itself because the create body's class depends on the :table param.
+// Mirrors the global ValidationPipe's strictness, which cannot validate this
+// endpoint itself because the create body's class depends on the :table param.
 function validateRow<T extends object>(cls: new () => T, input: CreateRowInput): T {
   const instance = plainToInstance(cls, input);
-  const errors = validateSync(instance, { whitelist: true, forbidNonWhitelisted: true });
+  const errors = validateSync(instance, VALIDATOR_STRICTNESS);
   if (errors.length > 0) {
     throw new BadRequestException(errors.flatMap(e => Object.values(e.constraints ?? {})));
   }

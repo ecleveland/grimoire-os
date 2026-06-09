@@ -1,5 +1,7 @@
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../../../bootstrap-config';
 import { CreateNameRowDto } from './create-name-row.dto';
 import { CreateAppearanceRowDto } from './create-appearance-row.dto';
 import { CreateLootTemplateRowDto } from './create-loot-template-row.dto';
@@ -150,5 +152,31 @@ describe('SetActiveDto', () => {
   it('rejects a missing isActive', () => {
     const errors = validate(SetActiveDto, {});
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  // The unit checks above bypass the transform step; this block runs the DTO
+  // through the production pipe config, where enableImplicitConversion would
+  // otherwise coerce any non-empty string (including 'false') to true.
+  describe('through the production ValidationPipe', () => {
+    const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
+    const meta = { type: 'body' as const, metatype: SetActiveDto };
+
+    it('accepts a real boolean', async () => {
+      await expect(pipe.transform({ isActive: false }, meta)).resolves.toEqual(
+        expect.objectContaining({ isActive: false })
+      );
+    });
+
+    it("rejects the string 'false' instead of coercing it to true", async () => {
+      await expect(pipe.transform({ isActive: 'false' }, meta)).rejects.toBeInstanceOf(
+        BadRequestException
+      );
+    });
+
+    it("rejects the string 'true'", async () => {
+      await expect(pipe.transform({ isActive: 'true' }, meta)).rejects.toBeInstanceOf(
+        BadRequestException
+      );
+    });
   });
 });

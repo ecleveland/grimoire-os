@@ -1,10 +1,10 @@
-import { IsOptional, IsString, Matches } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNonBlankString } from '../../../common/validators/non-blank-string.decorator';
 
 export class CreateNameRowDto {
   @ApiProperty({ example: 'Elf' })
-  @IsString()
-  @Matches(/\S/, { message: 'race is required' })
+  @IsNonBlankString()
   race!: string;
 
   @ApiPropertyOptional({ example: 'female' })
@@ -13,12 +13,10 @@ export class CreateNameRowDto {
   gender?: string;
 
   @ApiProperty({ example: 'first' })
-  @IsString()
-  @Matches(/\S/, { message: 'kind is required' })
+  @IsNonBlankString()
   kind!: string;
 
   @ApiProperty({ example: 'Arannis' })
-  @IsString()
-  @Matches(/\S/, { message: 'value is required' })
+  @IsNonBlankString()
   value!: string;
 }

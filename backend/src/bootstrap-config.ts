@@ -1,5 +1,21 @@
-import { INestApplication } from '@nestjs/common';
+import { INestApplication, ValidationPipeOptions } from '@nestjs/common';
+import { ValidatorOptions } from 'class-validator';
 import { json, urlencoded } from 'express';
+
+// Strictness shared by the global ValidationPipe and manual validateSync call
+// sites (e.g. AdminNpcDataService, whose body class depends on a route param).
+export const VALIDATOR_STRICTNESS: ValidatorOptions = {
+  whitelist: true,
+  forbidNonWhitelisted: true,
+};
+
+export const GLOBAL_VALIDATION_PIPE_OPTIONS: ValidationPipeOptions = {
+  ...VALIDATOR_STRICTNESS,
+  transform: true,
+  transformOptions: {
+    enableImplicitConversion: true,
+  },
+};
 
 export const DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024; // 1MB
 export const AUTH_BODY_LIMIT_BYTES = 100 * 1024; // 100KB

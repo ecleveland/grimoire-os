@@ -5,7 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
-import { configureBodyParsers } from './bootstrap-config';
+import { configureBodyParsers, GLOBAL_VALIDATION_PIPE_OPTIONS } from './bootstrap-config';
 
 async function bootstrap() {
   // Nest's default body parser is disabled so configureBodyParsers can install
@@ -18,16 +18,7 @@ async function bootstrap() {
   app.use(cookieParser());
   configureBodyParsers(app);
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
-    })
-  );
+  app.useGlobalPipes(new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS));
 
   app.use(
     helmet({

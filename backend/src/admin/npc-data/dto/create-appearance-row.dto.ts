@@ -1,19 +1,16 @@
-import { IsString, Matches } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { IsNonBlankString } from '../../../common/validators/non-blank-string.decorator';
 
 export class CreateAppearanceRowDto {
   @ApiProperty({ example: 'Dwarf' })
-  @IsString()
-  @Matches(/\S/, { message: 'race is required' })
+  @IsNonBlankString()
   race!: string;
 
   @ApiProperty({ example: 'hair' })
-  @IsString()
-  @Matches(/\S/, { message: 'category is required' })
+  @IsNonBlankString()
   category!: string;
 
   @ApiProperty({ example: 'A braided copper beard.' })
-  @IsString()
-  @Matches(/\S/, { message: 'trait is required' })
+  @IsNonBlankString()
   trait!: string;
 }
