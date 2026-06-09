@@ -47,10 +47,14 @@ export default function EditCharacterPage() {
   const [armorClass, setArmorClass] = useState(10);
   const [speed, setSpeed] = useState(30);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
+    setLoading(true);
+    setLoadError(false);
     apiFetch<Character>(`/characters/${id}`)
       .then(c => {
         setName(c.name);
@@ -65,9 +69,14 @@ export default function EditCharacterPage() {
         setArmorClass(c.armorClass);
         setSpeed(c.speed);
       })
-      .catch(() => toast.error('Failed to load character'))
+      .catch(() => {
+        // Without this flag the form would render its defaults (level 1, all
+        // 10s) and one Save would PATCH them over the real record (VEG-317).
+        setLoadError(true);
+        toast.error('Failed to load character');
+      })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, reloadKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,6 +116,19 @@ export default function EditCharacterPage() {
   };
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  if (loadError)
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load character.</p>
+        <button
+          type="button"
+          onClick={() => setReloadKey(k => k + 1)}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
 
   return (
     <div className="max-w-2xl mx-auto">

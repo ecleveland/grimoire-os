@@ -6,6 +6,7 @@ import {
   ValidateNested,
   IsBoolean,
   IsIn,
+  IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -393,6 +394,6 @@ export class CreateCharacterDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsString()
+  @IsUUID()
   campaignId?: string;
 }

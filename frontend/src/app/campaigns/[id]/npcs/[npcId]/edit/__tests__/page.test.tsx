@@ -93,6 +93,29 @@ describe('EditNpcPage', () => {
     expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs/npc-1');
   });
 
+  it('renders an error state with Retry instead of hanging on Loading when the load fails', async () => {
+    mockApiFetch.mockRejectedValue(new Error('nope'));
+    render(<EditNpcPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+  });
+
+  it('Retry re-fetches and renders the form once the load succeeds', async () => {
+    mockApiFetch.mockRejectedValueOnce(new Error('nope'));
+    mockApiFetch.mockResolvedValueOnce(makeNpc());
+    const user = userEvent.setup();
+    render(<EditNpcPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    await waitFor(() => {
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Old Maelin');
+    });
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+  });
+
   it('reads and persists existing lootOverrides', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lootOverrides: { trinketChance: 25 } }));

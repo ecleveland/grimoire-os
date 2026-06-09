@@ -50,13 +50,21 @@ export default function EditNpcPage() {
   const { id: campaignId, npcId } = useParams<{ id: string; npcId: string }>();
   const router = useRouter();
   const [form, setForm] = useState<FormState | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    setLoadError(false);
     apiFetch<Npc>(`/npcs/${npcId}`)
       .then(npc => setForm(fromNpc(npc)))
-      .catch(() => toast.error('Failed to load NPC'));
-  }, [npcId]);
+      .catch(() => {
+        // Without this flag a failed load left the page stuck on
+        // "Loading..." forever (VEG-317).
+        setLoadError(true);
+        toast.error('Failed to load NPC');
+      });
+  }, [npcId, reloadKey]);
 
   const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm(prev => (prev ? { ...prev, [key]: value } : prev));
@@ -100,6 +108,19 @@ export default function EditNpcPage() {
     }
   };
 
+  if (loadError)
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load NPC.</p>
+        <button
+          type="button"
+          onClick={() => setReloadKey(k => k + 1)}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
   if (!form) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
   return (

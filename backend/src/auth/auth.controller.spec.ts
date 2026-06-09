@@ -35,6 +35,7 @@ describe('AuthController', () => {
     issue: jest.Mock;
     rotate: jest.Mock;
     revoke: jest.Mock;
+    purgeExpired: jest.Mock;
   };
   const originalNodeEnv = process.env.NODE_ENV;
 
@@ -45,6 +46,7 @@ describe('AuthController', () => {
       issue: jest.fn(),
       rotate: jest.fn(),
       revoke: jest.fn(),
+      purgeExpired: jest.fn().mockResolvedValue(0),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -98,6 +100,29 @@ describe('AuthController', () => {
       expect(result).toEqual({ user: mockUserPublic });
       expect(result).not.toHaveProperty('access_token');
       expect(result).not.toHaveProperty('refresh_token');
+    });
+
+    it('opportunistically purges expired refresh tokens on login', async () => {
+      authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
+      refreshTokenService.issue.mockResolvedValue({ token: 'r', id: 'r1' });
+      refreshTokenService.purgeExpired.mockResolvedValue(2);
+
+      await controller.login({ username: 'testuser', password: 'pw' }, createMockResponse());
+
+      expect(refreshTokenService.purgeExpired).toHaveBeenCalled();
+    });
+
+    it('login still succeeds when the opportunistic purge fails', async () => {
+      authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
+      refreshTokenService.issue.mockResolvedValue({ token: 'r', id: 'r1' });
+      refreshTokenService.purgeExpired.mockRejectedValue(new Error('db hiccup'));
+
+      const result = await controller.login(
+        { username: 'testuser', password: 'pw' },
+        createMockResponse()
+      );
+
+      expect(result).toEqual({ user: mockUserPublic });
     });
 
     it('also issues a JS-readable csrf_token cookie alongside the auth cookies', async () => {

@@ -4,6 +4,7 @@ import {
   Body,
   HttpCode,
   HttpStatus,
+  Logger,
   Req,
   Res,
   UnauthorizedException,
@@ -45,6 +46,8 @@ const REFRESH_LIMIT = authOverride ?? 30;
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private authService: AuthService,
     private usersService: UsersService,
@@ -67,6 +70,18 @@ export class AuthController {
       loginDto.password
     );
     const { token: refresh_token } = await this.refreshTokenService.issue(user.id);
+    // Opportunistic cleanup of expired refresh-token rows (VEG-317).
+    // Fire-and-forget: this is pure housekeeping, so the login response must not
+    // wait on an unbounded DELETE, and lost cleanup is fine — the next login
+    // retries. Failures only log.
+    void this.refreshTokenService
+      .purgeExpired()
+      .catch((err: unknown) =>
+        this.logger.warn(
+          `Expired refresh-token purge failed: ${err instanceof Error ? err.message : String(err)}`,
+          err instanceof Error ? err.stack : undefined
+        )
+      );
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, refresh_token, refreshCookieOptions());
     res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());

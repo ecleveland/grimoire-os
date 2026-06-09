@@ -1,4 +1,4 @@
-import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
@@ -161,7 +161,29 @@ export class CampaignsService {
   }
 
   async addCharacter(campaignId: string, characterId: string, userId: string) {
-    await this.findOneForUser(campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
+    const character = await this.prisma.character.findUnique({
+      where: { id: characterId },
+      select: { id: true, userId: true },
+    });
+    if (!character) {
+      throw new NotFoundException(`Character "${characterId}" not found`);
+    }
+    // A plain member may only attach their own character. The campaign owner
+    // (DM) may attach any member's character — but not an outsider's: the
+    // character's owner must belong to the campaign, otherwise a DM could
+    // conscript a stranger's character by ID and yank it out of its real
+    // campaign (VEG-317).
+    const isOwner = campaign.ownerId === userId;
+    if (!isOwner && character.userId !== userId) {
+      throw new ForbiddenException('You can only add your own characters to a campaign');
+    }
+    const characterOwnerIsMember =
+      character.userId === campaign.ownerId ||
+      campaign.players.some(p => p.userId === character.userId);
+    if (!characterOwnerIsMember) {
+      throw new ForbiddenException("You can only add a campaign member's character");
+    }
     await this.prisma.character.update({
       where: { id: characterId },
       data: { campaignId },

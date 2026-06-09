@@ -89,21 +89,23 @@ describe('RefreshTokenService', () => {
   });
 
   describe('rotate', () => {
+    const oldToken = 'valid-refresh-token-abc';
+    const liveRow = () => ({
+      id: 'old-row',
+      userId: USER_ID,
+      tokenHash: hash(oldToken),
+      expiresAt: new Date(Date.now() + 60_000),
+      revokedAt: null,
+      replacedById: null,
+    });
+
     it('returns a new token + revokes the presented one when valid', async () => {
-      const oldToken = 'valid-refresh-token-abc';
-      const oldRow = {
-        id: 'old-row',
-        userId: USER_ID,
-        tokenHash: hash(oldToken),
-        expiresAt: new Date(Date.now() + 60_000),
-        revokedAt: null,
-        replacedById: null,
-      };
-      prisma.refreshToken.findUnique.mockResolvedValue(oldRow);
+      prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
       prisma.refreshToken.create.mockImplementation(({ data }) =>
         Promise.resolve({ id: 'new-row', ...data })
       );
-      prisma.refreshToken.update.mockResolvedValue({ ...oldRow, revokedAt: new Date() });
+      prisma.refreshToken.update.mockResolvedValue({});
 
       const result = await service.rotate(oldToken);
 
@@ -112,11 +114,39 @@ describe('RefreshTokenService', () => {
       expect(result.token).not.toBe(oldToken);
       expect(prisma.refreshToken.update).toHaveBeenCalledWith({
         where: { id: 'old-row' },
-        data: expect.objectContaining({
-          revokedAt: expect.any(Date),
-          replacedById: 'new-row',
-        }),
+        data: { replacedById: 'new-row' },
       });
+    });
+
+    it('claims the presented token with a conditional updateMany on the root client', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+      prisma.refreshToken.create.mockResolvedValue({ id: 'new-row' });
+      prisma.refreshToken.update.mockResolvedValue({});
+
+      await service.rotate(oldToken);
+
+      // No interactive transaction wraps rotation — a throw inside one would
+      // roll back the reuse revoke-all, defeating it.
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { tokenHash: hash(oldToken), revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('treats a lost claim race (count 0 on a live row) as reuse and revokes all user tokens', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 }) // claim lost: concurrent rotation won
+        .mockResolvedValueOnce({ count: 2 }); // revoke-all response
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(UnauthorizedException);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(prisma.refreshToken.create).not.toHaveBeenCalled();
     });
 
     it('throws Unauthorized when the token is not found', async () => {
@@ -125,7 +155,7 @@ describe('RefreshTokenService', () => {
       await expect(service.rotate('does-not-exist')).rejects.toThrow(UnauthorizedException);
     });
 
-    it('throws Unauthorized when the token is expired', async () => {
+    it('throws Unauthorized when the token is expired (after claiming it)', async () => {
       const expiredToken = 'expired-token';
       prisma.refreshToken.findUnique.mockResolvedValue({
         id: 'r',
@@ -135,22 +165,29 @@ describe('RefreshTokenService', () => {
         revokedAt: null,
         replacedById: null,
       });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(service.rotate(expiredToken)).rejects.toThrow(UnauthorizedException);
+      expect(prisma.refreshToken.create).not.toHaveBeenCalled();
     });
 
-    it('detects reuse: when presented token is already revoked, revokes all user tokens', async () => {
+    it('detects reuse before expiry: an expired-and-revoked token still revokes all user tokens', async () => {
       const reusedToken = 'reused-token';
+      // Expired AND revoked: the claim must run (and report 0) before the
+      // expiry check, so the breach response still fires.
       prisma.refreshToken.findUnique.mockResolvedValue({
         id: 'r',
         userId: USER_ID,
         tokenHash: hash(reusedToken),
-        expiresAt: new Date(Date.now() + 60_000),
+        expiresAt: new Date(Date.now() - 5000),
         revokedAt: new Date(Date.now() - 5000),
         replacedById: 'r2',
       });
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 }) // claim fails: row already revoked
+        .mockResolvedValueOnce({ count: 3 });
 
-      await expect(service.rotate(reusedToken)).rejects.toThrow(UnauthorizedException);
+      await expect(service.rotate(reusedToken)).rejects.toThrow('Refresh token reuse detected');
       expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
         where: { userId: USER_ID, revokedAt: null },
         data: { revokedAt: expect.any(Date) },
@@ -164,6 +201,49 @@ describe('RefreshTokenService', () => {
 
       expect(prisma.refreshToken.findUnique).toHaveBeenCalledWith({
         where: { tokenHash: hash('some-token') },
+      });
+    });
+  });
+
+  describe('revokeAllForUser', () => {
+    it('revokes every live token for the user and returns the count', async () => {
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 4 });
+
+      const count = await service.revokeAllForUser(USER_ID);
+
+      expect(count).toBe(4);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('uses the supplied transaction client when given one', async () => {
+      const txUpdateMany = jest.fn().mockResolvedValue({ count: 1 });
+      const tx = { refreshToken: { updateMany: txUpdateMany } };
+
+      await service.revokeAllForUser(
+        USER_ID,
+        tx as unknown as Parameters<typeof service.revokeAllForUser>[1]
+      );
+
+      expect(txUpdateMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID, revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('purgeExpired', () => {
+    it('deletes only rows that are past their expiry and returns the count', async () => {
+      prisma.refreshToken.deleteMany.mockResolvedValue({ count: 4 });
+
+      const purged = await service.purgeExpired();
+
+      expect(purged).toBe(4);
+      expect(prisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { expiresAt: { lt: expect.any(Date) } },
       });
     });
   });

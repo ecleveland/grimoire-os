@@ -16,10 +16,14 @@ export default function EditCampaignPage() {
   const [setting, setSetting] = useState('');
   const [status, setStatus] = useState<Campaign['status']>('active');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
+    setLoading(true);
+    setLoadError(false);
     apiFetch<Campaign>(`/campaigns/${id}`)
       .then(c => {
         setName(c.name);
@@ -27,9 +31,14 @@ export default function EditCampaignPage() {
         setSetting(c.setting || '');
         setStatus(c.status);
       })
-      .catch(() => toast.error('Failed to load campaign'))
+      .catch(() => {
+        // Without this flag the form would render empty defaults and one Save
+        // would PATCH them over the real record (VEG-317).
+        setLoadError(true);
+        toast.error('Failed to load campaign');
+      })
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, reloadKey]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +67,19 @@ export default function EditCampaignPage() {
   };
 
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  if (loadError)
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load campaign.</p>
+        <button
+          type="button"
+          onClick={() => setReloadKey(k => k + 1)}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          Retry
+        </button>
+      </div>
+    );
 
   return (
     <div className="max-w-2xl mx-auto">
