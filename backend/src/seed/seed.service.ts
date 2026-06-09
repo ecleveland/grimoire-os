@@ -27,12 +27,47 @@ import { npcLootTemplates } from './data/npc-loot-templates';
 import { npcAlignmentPriors } from './data/npc-alignment-priors';
 import { trinkets } from './data/trinkets';
 
+// Minimal structural view of a Prisma delegate for SRD reference tables that
+// carry a `contentSource` discriminator (spells/monsters/items/feats). The seed
+// only needs these three operations; the real delegates are cast to this shape.
+interface SrdSeedDelegate {
+  findFirst(args: {
+    where: { name: string; contentSource: 'srd' };
+    select: { id: true };
+  }): Promise<{ id: string } | null>;
+  update(args: { where: { id: string }; data: Record<string, unknown> }): Promise<unknown>;
+  create(args: { data: Record<string, unknown> }): Promise<unknown>;
+}
+
 @Injectable()
 export class SeedService {
   constructor(
     private prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cache: Cache
   ) {}
+
+  // Idempotently (re-)seed SRD reference rows keyed on (name, contentSource='srd').
+  //
+  // Uses findFirst→update/create rather than upsert-by-name because `name` is no
+  // longer globally unique (homebrew rows may reuse SRD names — VEG-292); the
+  // remaining name uniqueness is the partial index scoped to contentSource='srd'.
+  // Scoping every read and write to contentSource='srd' guarantees a re-seed can
+  // never read, update, or delete a user's homebrew row. Corrected SRD data still
+  // propagates to existing rows on re-seed, preserving ids/FKs.
+  private async seedSrdByName(delegate: SrdSeedDelegate, rows: { name: string }[]): Promise<void> {
+    for (const row of rows) {
+      const data = { ...row, contentSource: 'srd' as const };
+      const existing = await delegate.findFirst({
+        where: { name: row.name, contentSource: 'srd' },
+        select: { id: true },
+      });
+      if (existing) {
+        await delegate.update({ where: { id: existing.id }, data });
+      } else {
+        await delegate.create({ data });
+      }
+    }
+  }
 
   async seed(): Promise<void> {
     // ── Load data from JSON files ──────────────────────
@@ -70,38 +105,21 @@ export class SeedService {
     console.log('Seeding SRD data...');
 
     await this.prisma.$transaction(async tx => {
-      // Upsert (not createMany/skipDuplicates) so corrected SRD data — e.g. the VEG-261
-      // field-bleed fixes and the VEG-271 spell description/table fixes — propagates to
-      // existing rows on re-seed, preserving ids/FKs.
-      for (const spell of spells) {
-        await tx.spell.upsert({
-          where: { name: spell.name },
-          create: spell,
-          update: spell,
-        });
-      }
+      // SRD content (spells/monsters/items/feats) is seeded by name within the
+      // contentSource='srd' partition so corrected SRD data — e.g. the VEG-261
+      // field-bleed fixes and the VEG-271 spell description/table fixes —
+      // propagates to existing rows on re-seed (preserving ids/FKs) while leaving
+      // any user homebrew rows in the same tables untouched (VEG-292).
+      await this.seedSrdByName(tx.spell as unknown as SrdSeedDelegate, spells);
       console.log(`  Spells: ${spells.length} entries`);
 
-      for (const monster of monsters) {
-        await tx.monster.upsert({
-          where: { name: monster.name },
-          create: monster,
-          update: monster,
-        });
-      }
+      await this.seedSrdByName(tx.monster as unknown as SrdSeedDelegate, monsters);
       console.log(`  Monsters: ${monsters.length} entries`);
 
-      // Upsert (not createMany/skipDuplicates) so corrected SRD data — e.g. the
-      // VEG-272 magic-item description/table fixes — propagates to existing rows
-      // on re-seed, preserving ids/FKs. Item names are unique across the mundane
-      // (hand-authored) and magic (JSON) rows that share this table.
-      for (const item of items) {
-        await tx.item.upsert({
-          where: { name: item.name },
-          create: item,
-          update: item,
-        });
-      }
+      // Item names are unique across the mundane (hand-authored) and magic (JSON)
+      // SRD rows that share this table; the contentSource='srd' partial unique
+      // index enforces it.
+      await this.seedSrdByName(tx.item as unknown as SrdSeedDelegate, items);
       console.log(`  Items: ${items.length} entries`);
 
       if (backgrounds.length) {
@@ -116,13 +134,7 @@ export class SeedService {
       }
 
       if (feats.length) {
-        for (const feat of feats) {
-          await tx.feat.upsert({
-            where: { name: feat.name },
-            create: feat,
-            update: feat,
-          });
-        }
+        await this.seedSrdByName(tx.feat as unknown as SrdSeedDelegate, feats);
         console.log(`  Feats: ${feats.length} entries`);
       }
 
