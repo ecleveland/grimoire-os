@@ -63,17 +63,24 @@ export interface BackgroundFeature {
 // ── Content source / ownership (VEG-292) ───────────────────────────────
 
 /**
- * Origin of a piece of reference content. SRD content is loaded by the seed;
- * homebrew content is authored by a user. The shared content tables hold both,
- * so `/srd/*` is the initial data load rather than a hard boundary.
+ * Origin of a piece of reference content, which also determines its visibility:
+ * - `srd`: loaded by the seed; globally visible; immutable.
+ * - `shared`: published by an admin; globally visible like SRD, but user-authored
+ *   and editable by any admin (VEG-310).
+ * - `homebrew`: authored by a user; visible only to its creator (per-user library).
+ *
+ * The shared content tables hold all three, so `/srd/*` is the initial data load
+ * rather than a hard boundary. The "global catalog" everyone sees is `srd + shared`.
  */
-export type ContentSource = 'srd' | 'homebrew';
+export type ContentSource = 'srd' | 'shared' | 'homebrew';
 
 /**
  * Authorship/scope fields carried by every content type that can originate from
- * either the SRD seed or a user (monsters, spells, feats, magic items).
+ * the SRD seed, an admin, or a user (monsters, spells, feats, magic items).
  *
  * - SRD rows have `contentSource: 'srd'` and a null `createdById`.
+ * - Shared rows have `contentSource: 'shared'` and `createdById` set to the
+ *   publishing admin; they are globally visible.
  * - Homebrew rows are owned by their creator (`createdById`) and form a per-user
  *   library visible to that user across all their campaigns.
  * - `campaignId` is reserved for future per-campaign scoping; it is always null

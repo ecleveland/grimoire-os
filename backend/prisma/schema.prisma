@@ -36,11 +36,15 @@ enum AuditAction {
   delete
 }
 
-// Origin of a piece of reference content (monsters/spells/feats/magic items).
-// SRD rows are loaded by the seed; homebrew rows are authored by a user. Both
-// live in the same tables — SRD is the initial data load, not a hard boundary.
+// Origin (and visibility tier) of a piece of reference content
+// (monsters/spells/feats/magic items), all living in the same tables:
+//   srd      — loaded by the seed; globally visible; immutable.
+//   shared   — admin-published; globally visible like SRD; editable by any admin.
+//   homebrew — user-authored; visible only to its creator.
+// The "global catalog" everyone sees is srd + shared (VEG-292, VEG-310).
 enum ContentSource {
   srd
+  shared
   homebrew
 }
 
