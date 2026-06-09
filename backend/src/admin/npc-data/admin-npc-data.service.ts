@@ -5,8 +5,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { PrismaService } from '../../prisma/prisma.service';
-import { isNpcDataTable, isPersonalityKind, NpcDataTable } from './admin-npc-data.types';
+import { isNpcDataTable, NpcDataTable } from './admin-npc-data.types';
+import { CreateNameRowDto } from './dto/create-name-row.dto';
+import { CreateAppearanceRowDto } from './dto/create-appearance-row.dto';
+import { CreateLootTemplateRowDto } from './dto/create-loot-template-row.dto';
+import { CreateTrinketRowDto } from './dto/create-trinket-row.dto';
+import { CreatePersonalityRowDto } from './dto/create-personality-row.dto';
 
 type CreateRowInput = Record<string, unknown>;
 
@@ -41,52 +48,57 @@ export class AdminNpcDataService {
   async create(table: string, userId: string, input: CreateRowInput) {
     this.assertTable(table);
     switch (table) {
-      case 'names':
+      case 'names': {
+        const dto = validateRow(CreateNameRowDto, input);
         return this.prisma.npcNamePool.create({
           data: {
-            race: requireString(input.race, 'race'),
-            gender: optionalString(input.gender),
-            kind: requireString(input.kind, 'kind'),
-            value: requireString(input.value, 'value'),
+            race: dto.race,
+            gender: dto.gender,
+            kind: dto.kind,
+            value: dto.value,
             source: 'user',
           },
         });
-      case 'appearance':
+      }
+      case 'appearance': {
+        const dto = validateRow(CreateAppearanceRowDto, input);
         return this.prisma.npcAppearanceTrait.create({
           data: {
-            race: requireString(input.race, 'race'),
-            category: requireString(input.category, 'category'),
-            trait: requireString(input.trait, 'trait'),
+            race: dto.race,
+            category: dto.category,
+            trait: dto.trait,
             source: 'user',
           },
         });
-      case 'loot-templates':
+      }
+      case 'loot-templates': {
+        const dto = validateRow(CreateLootTemplateRowDto, input);
         return this.prisma.npcLootTemplate.create({
           data: {
-            profession: requireString(input.profession, 'profession'),
-            crBucket: requireString(input.crBucket, 'crBucket'),
-            coinage: requireObject(input.coinage, 'coinage'),
-            items: requireArrayObject(input.items, 'items'),
+            profession: dto.profession,
+            crBucket: dto.crBucket,
+            coinage: dto.coinage as Prisma.InputJsonValue,
+            items: dto.items as Prisma.InputJsonValue,
             source: 'user',
           },
         });
-      case 'trinkets':
+      }
+      case 'trinkets': {
+        const dto = validateRow(CreateTrinketRowDto, input);
         return this.prisma.trinket.create({
           data: {
-            description: requireString(input.description, 'description'),
+            description: dto.description,
             source: 'user',
           },
         });
+      }
       case 'personality': {
-        const kind = input.kind;
-        if (!isPersonalityKind(kind)) {
-          throw new BadRequestException('kind must be one of personalityTraits|ideals|bonds|flaws');
-        }
+        const dto = validateRow(CreatePersonalityRowDto, input);
         return this.prisma.npcCustomPersonality.create({
           data: {
-            background: requireString(input.background, 'background'),
-            kind,
-            value: requireString(input.value, 'value'),
+            background: dto.background,
+            kind: dto.kind,
+            value: dto.value,
             addedById: userId,
           },
         });
@@ -163,31 +175,13 @@ export class AdminNpcDataService {
   }
 }
 
-function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new BadRequestException(`${field} is required`);
+// Mirrors the global ValidationPipe (whitelist + forbidNonWhitelisted), which cannot
+// validate this endpoint itself because the create body's class depends on the :table param.
+function validateRow<T extends object>(cls: new () => T, input: CreateRowInput): T {
+  const instance = plainToInstance(cls, input);
+  const errors = validateSync(instance, { whitelist: true, forbidNonWhitelisted: true });
+  if (errors.length > 0) {
+    throw new BadRequestException(errors.flatMap(e => Object.values(e.constraints ?? {})));
   }
-  return value;
-}
-
-function optionalString(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string') {
-    throw new BadRequestException('Field must be a string when provided');
-  }
-  return value;
-}
-
-function requireObject(value: unknown, field: string): Prisma.InputJsonValue {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new BadRequestException(`${field} must be an object`);
-  }
-  return value as Prisma.InputJsonValue;
-}
-
-function requireArrayObject(value: unknown, field: string): Prisma.InputJsonValue {
-  if (!Array.isArray(value)) {
-    throw new BadRequestException(`${field} must be an array`);
-  }
-  return value as Prisma.InputJsonValue;
+  return instance;
 }

@@ -139,6 +139,30 @@ describe('AdminNpcDataService', () => {
         service.create('names', USER_ID, { race: 'Elf' } as never)
       ).rejects.toBeInstanceOf(BadRequestException);
     });
+
+    it('rejects unknown extra fields', async () => {
+      await expect(
+        service.create('names', USER_ID, {
+          race: 'Elf',
+          kind: 'first',
+          value: 'Arannis',
+          source: 'curated',
+        })
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.npcNamePool.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a client-supplied addedById on personality rows', async () => {
+      await expect(
+        service.create('personality', USER_ID, {
+          background: 'Acolyte',
+          kind: 'ideals',
+          value: 'Faith above all.',
+          addedById: 'someone-else',
+        })
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(prisma.npcCustomPersonality.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('setActive', () => {
