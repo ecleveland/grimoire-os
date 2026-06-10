@@ -16,7 +16,7 @@ describe('AllExceptionsFilter', () => {
     mockJson = jest.fn();
     mockStatus = jest.fn().mockReturnValue({ json: mockJson });
     mockGetResponse = jest.fn().mockReturnValue({ status: mockStatus });
-    mockGetRequest = jest.fn().mockReturnValue({ url: '/api/test' });
+    mockGetRequest = jest.fn().mockReturnValue({ url: '/api/test', method: 'POST' });
   });
 
   function createHost(): ArgumentsHost {
@@ -91,7 +91,7 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
-  it('returns 400 for Prisma P2003 foreign key constraint', () => {
+  it('returns 400 for Prisma P2003 foreign key constraint on writes', () => {
     const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
       code: 'P2003',
       clientVersion: '1.0.0',
@@ -106,6 +106,44 @@ describe('AllExceptionsFilter', () => {
       timestamp: expect.any(String),
       path: '/api/test',
     });
+  });
+
+  // VEG-312: every relation now carries an explicit onDelete policy, so a
+  // P2003 on a DELETE means a future relation was added without one. Surface
+  // a clean 409 to the client and log the schema diagnostic server-side.
+  it('returns a sanitized 409 for Prisma P2003 on DELETE requests', () => {
+    mockGetRequest.mockReturnValue({ url: '/api/admin/users/u1', method: 'DELETE' });
+    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+      code: 'P2003',
+      clientVersion: '1.0.0',
+      meta: { field_name: 'widgets_userId_fkey' },
+    });
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(409);
+    expect(mockJson).toHaveBeenCalledWith({
+      statusCode: 409,
+      message: 'Cannot delete this record because other records still depend on it',
+      error: 'Conflict',
+      timestamp: expect.any(String),
+      path: '/api/admin/users/u1',
+    });
+  });
+
+  it('logs the offending relation server-side when P2003 blocks a DELETE', () => {
+    const logSpy = jest
+      .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
+      .mockImplementation(() => undefined);
+    mockGetRequest.mockReturnValue({ url: '/api/admin/users/u1', method: 'DELETE' });
+    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+      code: 'P2003',
+      clientVersion: '1.0.0',
+      meta: { field_name: 'widgets_userId_fkey' },
+    });
+    filter.catch(error, createHost());
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('widgets_userId_fkey'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('onDelete'));
   });
 
   it('does not leak internal details for unrecognized Prisma errors', () => {

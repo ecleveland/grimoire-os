@@ -347,18 +347,14 @@ describe('UsersService', () => {
       await expect(service.remove(USER_ID)).rejects.toThrow(NotFoundException);
     });
 
-    it('should throw ConflictException when a RESTRICT FK still blocks deletion (P2003)', async () => {
-      prisma.user.delete.mockRejectedValue(
-        new PrismaClientKnownRequestError('Foreign key constraint failed', {
-          code: 'P2003',
-          clientVersion: '6.0.0',
-        })
-      );
+    it('propagates P2003 untouched so AllExceptionsFilter can map it to 409 (VEG-312)', async () => {
+      const fkError = new PrismaClientKnownRequestError('Foreign key constraint failed', {
+        code: 'P2003',
+        clientVersion: '6.0.0',
+      });
+      prisma.user.delete.mockRejectedValue(fkError);
 
-      await expect(service.remove(USER_ID)).rejects.toThrow(ConflictException);
-      await expect(service.remove(USER_ID)).rejects.toThrow(
-        `User "${USER_ID}" still owns content that blocks deletion`
-      );
+      await expect(service.remove(USER_ID)).rejects.toBe(fkError);
     });
 
     it("deletes the user's homebrew content with the user in one transaction", async () => {

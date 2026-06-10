@@ -236,6 +236,7 @@ model Encounter {
   createdBy User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
 
   @@index([campaignId])
+  @@index([createdById])
   @@map("encounters")
 }
 
@@ -640,6 +641,7 @@ model Npc {
   updatedAt DateTime @updatedAt
 
   @@index([campaignId])
+  @@index([createdById])
   @@map("npcs")
 }
 
@@ -730,6 +732,7 @@ model NpcCustomPersonality {
   addedBy User? @relation(fields: [addedById], references: [id], onDelete: SetNull)
 
   @@index([background, kind])
+  @@index([addedById])
   @@map("npc_custom_personality")
 }
 

@@ -176,14 +176,8 @@ export class UsersService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);
       }
-      // Safety net: user-owned content cascades (VEG-312), so a P2003 here
-      // means a future relation was added without an onDelete policy.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
-        throw new ConflictException(
-          `User "${id}" still owns content that blocks deletion. ` +
-            'A relation is missing an onDelete policy — see VEG-312.'
-        );
-      }
+      // P2003 (a relation missing an onDelete policy, VEG-312) propagates to
+      // AllExceptionsFilter, which maps DELETE-blocking FK violations to 409.
       throw error;
     }
   }
