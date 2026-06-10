@@ -80,6 +80,7 @@ function makeEncounter(over: Partial<Encounter> = {}): Encounter {
     currentTurn: 0,
     round: 1,
     isActive: false,
+    version: 1,
     createdAt: '',
     updatedAt: '',
     ...over,
@@ -193,7 +194,7 @@ describe('InitiativeTrackerPage', () => {
       '/encounters/enc-1',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ isActive: true }),
+        body: JSON.stringify({ isActive: true, expectedVersion: 1 }),
       })
     );
     expect(screen.getByText('Active')).toBeInTheDocument();
@@ -213,7 +214,7 @@ describe('InitiativeTrackerPage', () => {
       expect(mockApiFetch).toHaveBeenLastCalledWith(
         '/encounters/enc-1',
         expect.objectContaining({
-          body: JSON.stringify({ currentTurn: 1, round: 1 }),
+          body: JSON.stringify({ currentTurn: 1, round: 1, expectedVersion: 1 }),
         })
       )
     );
@@ -223,7 +224,7 @@ describe('InitiativeTrackerPage', () => {
       expect(mockApiFetch).toHaveBeenLastCalledWith(
         '/encounters/enc-1',
         expect.objectContaining({
-          body: JSON.stringify({ currentTurn: 2, round: 1 }),
+          body: JSON.stringify({ currentTurn: 2, round: 1, expectedVersion: 1 }),
         })
       )
     );
@@ -233,7 +234,7 @@ describe('InitiativeTrackerPage', () => {
       expect(mockApiFetch).toHaveBeenLastCalledWith(
         '/encounters/enc-1',
         expect.objectContaining({
-          body: JSON.stringify({ currentTurn: 0, round: 2 }),
+          body: JSON.stringify({ currentTurn: 0, round: 2, expectedVersion: 1 }),
         })
       )
     );
@@ -256,37 +257,187 @@ describe('InitiativeTrackerPage', () => {
     expect(mockApiFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('lets the controller edit a combatant HP and clamps to [0, maxHp]', async () => {
-    mockApiFetch.mockResolvedValueOnce(makeEncounter());
-    mockApiFetch.mockResolvedValueOnce(makeEncounter());
+  // ── HP edits commit once, on blur/Enter, version-guarded (VEG-315) ──────────
+
+  it('does not PATCH while typing — only one guarded PATCH on blur, clamped to maxHp', async () => {
+    // Goblin A is wounded (5/7) so the clamp to maxHp is a real change.
+    const wounded = makeEncounter({
+      version: 4,
+      combatants: [
+        makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+        makeCombatant({ name: 'Goblin A', initiative: 12, hp: 5, maxHp: 7 }),
+        makeCombatant({ name: 'Goblin B', initiative: 8, hp: 7, maxHp: 7 }),
+      ],
+    });
+    mockApiFetch.mockResolvedValueOnce(wounded);
+    mockApiFetch.mockResolvedValueOnce(makeEncounter({ version: 5 }));
     render(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
     // Sorted order: Hero (idx 0), Goblin A (1), Goblin B (2).
+    // Two change events simulate typing "9" then "99" — neither may fire a PATCH.
+    fireEvent.change(hpInputs[1], { target: { value: '9' } });
     fireEvent.change(hpInputs[1], { target: { value: '99' } });
+    expect(mockApiFetch).toHaveBeenCalledTimes(1); // initial GET only
+    expect(hpInputs[1].value).toBe('99'); // draft shown while editing
 
+    fireEvent.blur(hpInputs[1]);
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
     const [, init] = mockApiFetch.mock.calls[1];
     const body = JSON.parse((init as { body: string }).body);
     expect(body.combatants[1].name).toBe('Goblin A');
-    expect(body.combatants[1].hp).toBe(7);
+    expect(body.combatants[1].hp).toBe(7); // clamped to maxHp
+    expect(body.expectedVersion).toBe(4); // optimistic-lock guard
   });
 
-  it('clamps negative HP entries to 0', async () => {
+  it('commits the HP edit on Enter, clamping negative entries to 0', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     render(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    // Focus first so the Enter handler's blur() actually dispatches the blur
+    // event in jsdom (blur on an unfocused element is a no-op).
+    hpInputs[2].focus();
     fireEvent.change(hpInputs[2], { target: { value: '-5' } });
+    fireEvent.keyDown(hpInputs[2], { key: 'Enter' });
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
     const [, init] = mockApiFetch.mock.calls[1];
     const body = JSON.parse((init as { body: string }).body);
     expect(body.combatants[2].name).toBe('Goblin B');
     expect(body.combatants[2].hp).toBe(0);
+    expect(body.expectedVersion).toBe(1);
+  });
+
+  it('skips the PATCH when the committed HP is unchanged', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeEncounter());
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    fireEvent.change(hpInputs[1], { target: { value: '7' } }); // same as current hp
+    fireEvent.blur(hpInputs[1]);
+    expect(mockApiFetch).toHaveBeenCalledTimes(1); // GET only
+  });
+
+  it('reverts to the server value when an empty HP edit is committed', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeEncounter());
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    fireEvent.change(hpInputs[1], { target: { value: '' } });
+    fireEvent.blur(hpInputs[1]);
+    expect(mockApiFetch).toHaveBeenCalledTimes(1); // no PATCH
+    expect((screen.getAllByRole('spinbutton')[1] as HTMLInputElement).value).toBe('7');
+  });
+
+  it('commits the draft to the same combatant even when the list reorders mid-edit', async () => {
+    const initial = makeEncounter();
+    // An Ogre (init 15) lands above Goblin A while the draft is open —
+    // Goblin A shifts from sorted index 1 to index 2.
+    const reordered = makeEncounter({
+      version: 2,
+      isActive: true,
+      combatants: [
+        makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+        makeCombatant({ name: 'Ogre', initiative: 15, hp: 30, maxHp: 30 }),
+        makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7, maxHp: 7 }),
+        makeCombatant({ name: 'Goblin B', initiative: 8, hp: 7, maxHp: 7 }),
+      ],
+    });
+    mockApiFetch.mockResolvedValueOnce(initial); // GET
+    mockApiFetch.mockResolvedValueOnce(reordered); // PATCH (toggleActive) → reordered list
+    mockApiFetch.mockResolvedValueOnce(reordered); // PATCH (hp commit)
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    // Open a draft on Goblin A (index 1 pre-reorder)...
+    fireEvent.change((screen.getAllByRole('spinbutton') as HTMLInputElement[])[1], {
+      target: { value: '3' },
+    });
+    // ...then the encounter updates underneath it (here via Start Combat).
+    await user.click(screen.getByRole('button', { name: /start combat/i }));
+    await screen.findByText('Active');
+
+    // The draft followed Goblin A to its new row (index 2), not index 1 (Ogre).
+    const inputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    expect(inputs[2].value).toBe('3');
+    expect(inputs[1].value).toBe('30');
+
+    fireEvent.blur(inputs[2]);
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(3));
+    const [, init] = mockApiFetch.mock.calls[2];
+    const body = JSON.parse((init as { body: string }).body);
+    const byName = Object.fromEntries((body.combatants as Combatant[]).map(c => [c.name, c.hp]));
+    expect(byName['Goblin A']).toBe(3); // the edit landed on the right combatant
+    expect(byName['Ogre']).toBe(30); // the interloper is untouched
+    expect(body.expectedVersion).toBe(2);
+  });
+
+  it('targets the edited row, not the first name match, when combatant names collide', async () => {
+    // Duplicate names are legal — nothing unique-ifies hand-entered combatants.
+    const twins = makeEncounter({
+      combatants: [
+        makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+        makeCombatant({ name: 'Goblin', initiative: 12, hp: 5, maxHp: 7 }),
+        makeCombatant({ name: 'Goblin', initiative: 8, hp: 7, maxHp: 7 }),
+      ],
+    });
+    mockApiFetch.mockResolvedValueOnce(twins);
+    mockApiFetch.mockResolvedValueOnce(twins);
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    // Edit the SECOND Goblin (sorted index 2).
+    fireEvent.change(hpInputs[2], { target: { value: '2' } });
+    // The draft renders only on the edited row, not on its twin.
+    expect(hpInputs[2].value).toBe('2');
+    expect(hpInputs[1].value).toBe('5');
+
+    fireEvent.blur(hpInputs[2]);
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+    const [, init] = mockApiFetch.mock.calls[1];
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.combatants[2].hp).toBe(2); // the edited twin
+    expect(body.combatants[1].hp).toBe(5); // the first name match is untouched
+  });
+
+  it('refetches and warns on a 409 conflict instead of clobbering', async () => {
+    const initial = makeEncounter({ version: 4 });
+    let patched = false;
+    mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') {
+        patched = true;
+        return Promise.reject(
+          new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+            currentVersion: 9,
+          })
+        );
+      }
+      return Promise.resolve(initial);
+    });
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    fireEvent.change(hpInputs[1], { target: { value: '3' } });
+    fireEvent.blur(hpInputs[1]);
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(patched).toBe(true);
+    const warning = String(mockToastError.mock.calls.at(-1)?.[0] ?? '');
+    expect(warning).toMatch(/chang|refresh|again/i);
+    // Re-fetched rather than trusting local state: GET on mount + GET after 409.
+    const getCalls = mockApiFetch.mock.calls.filter(
+      ([p, o]) => p === '/encounters/enc-1' && !(o as { method?: string } | undefined)?.method
+    );
+    expect(getCalls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('toasts when a PATCH fails', async () => {

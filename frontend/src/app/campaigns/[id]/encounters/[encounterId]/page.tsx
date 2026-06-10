@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Encounter, SrdMonster } from '@/lib/types';
+import type { Combatant, Encounter, SrdMonster } from '@/lib/types';
 import Badge from '@/components/Badge';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
@@ -13,11 +13,23 @@ import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import { buildMonsterCombatants } from '@/lib/encounter-combatants';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 
+// The single ordering rule for the tracker — render, turn order, and HP
+// commits must all agree on it.
+const sortByInitiative = (combatants: Combatant[]) =>
+  [...combatants].sort((a, b) => b.initiative - a.initiative);
+
 export default function InitiativeTrackerPage() {
   const { encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);
+  // In-progress HP edit, committed on blur/Enter. Keyed by combatant name AND
+  // the sorted-row index at draft time: the name lets the draft follow its
+  // combatant if the list reorders, while the index disambiguates hand-entered
+  // duplicate names (nothing enforces name uniqueness).
+  const [hpDraft, setHpDraft] = useState<{ name: string; index: number; value: string } | null>(
+    null
+  );
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -33,21 +45,36 @@ export default function InitiativeTrackerPage() {
     fetchEncounter();
   }, [fetchEncounter]);
 
+  // Shared 409 recovery: another writer won the version race — refetch and let
+  // the user retry against fresh state. Returns true if the error was handled.
+  const handleEncounterConflict = (err: unknown): boolean => {
+    if (err instanceof ApiError && err.status === 409) {
+      toast.error('This encounter changed since you opened it — refreshed, please try again.');
+      fetchEncounter();
+      return true;
+    }
+    return false;
+  };
+
+  // All writes carry `expectedVersion` so concurrent edits surface as a 409
+  // instead of silently clobbering each other (VEG-315, same guard as VEG-260/137).
   const patchEncounter = async (updates: Partial<Encounter>) => {
+    if (!encounter) return;
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ ...updates, expectedVersion: encounter.version }),
       });
       setEncounter(updated);
     } catch (err) {
+      if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to update encounter');
     }
   };
 
   const nextTurn = () => {
     if (!encounter) return;
-    const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
+    const sorted = sortByInitiative(encounter.combatants);
     const activeCombatants = sorted.filter(c => c.hp > 0);
     if (activeCombatants.length === 0) return;
 
@@ -60,10 +87,26 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ currentTurn: nextIndex, round: newRound });
   };
 
-  const updateCombatantHp = (index: number, newHp: number) => {
-    if (!encounter) return;
-    const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
-    sorted[index] = { ...sorted[index], hp: Math.max(0, Math.min(newHp, sorted[index].maxHp)) };
+  // Commit the drafted HP: one clamped, version-guarded PATCH. Empty/invalid
+  // or unchanged drafts revert silently. Target resolution: a unique name is
+  // looked up fresh (correct even if the list reordered mid-edit); a duplicated
+  // name falls back to the draft's row index, bailing out unless that row still
+  // holds the name. A combatant removed mid-edit bails out too.
+  const commitCombatantHp = (name: string) => {
+    if (!encounter || !hpDraft || hpDraft.name !== name) return;
+    const { index: draftIndex, value } = hpDraft;
+    setHpDraft(null);
+    const raw = value.trim();
+    const parsed = Number(raw);
+    if (raw === '' || Number.isNaN(parsed)) return;
+    const sorted = sortByInitiative(encounter.combatants);
+    const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
+    const index =
+      matches.length === 1 ? matches[0] : sorted[draftIndex]?.name === name ? draftIndex : -1;
+    if (index === -1) return;
+    const clamped = Math.max(0, Math.min(parsed, sorted[index].maxHp));
+    if (clamped === sorted[index].hp) return;
+    sorted[index] = { ...sorted[index], hp: clamped };
     patchEncounter({ combatants: sorted });
   };
 
@@ -72,9 +115,8 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ isActive: !encounter.isActive });
   };
 
-  // Append monster combatant(s) from the lookup panel. Unlike the unguarded
-  // HP/turn writes above, the add path sends `expectedVersion` so a concurrent
-  // edit surfaces a 409 rather than clobbering the other change (VEG-260/137).
+  // Append monster combatant(s) from the lookup panel. Kept separate from
+  // patchEncounter for its add-specific success/error toasts.
   const addMonsterToEncounter = async (
     monster: SrdMonster,
     { quantity, initiatives }: AddToEncounterResult
@@ -100,11 +142,7 @@ export default function InitiativeTrackerPage() {
           : `Added ${monster.name} to the encounter`
       );
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        toast.error('This encounter changed since you opened it — refreshed, please try again.');
-        fetchEncounter();
-        return;
-      }
+      if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
     }
   };
@@ -126,8 +164,14 @@ export default function InitiativeTrackerPage() {
   if (!encounter)
     return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
 
-  const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
+  const sorted = sortByInitiative(encounter.combatants);
   const isController = isDm || (user && encounter.createdBy === user.userId);
+  // Mirror of the commit-target rule: a unique draft name binds to its (possibly
+  // re-sorted) row; a duplicated one binds only to the exact row it was typed in.
+  const draftNameIsUnique =
+    hpDraft !== null && sorted.filter(c => c.name === hpDraft.name).length === 1;
+  const rowHoldsDraft = (c: Combatant, i: number) =>
+    hpDraft?.name === c.name && (draftNameIsUnique || hpDraft.index === i);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -217,8 +261,14 @@ export default function InitiativeTrackerPage() {
                   {isController ? (
                     <input
                       type="number"
-                      value={c.hp}
-                      onChange={e => updateCombatantHp(i, Number(e.target.value))}
+                      value={rowHoldsDraft(c, i) ? hpDraft!.value : c.hp}
+                      onChange={e => setHpDraft({ name: c.name, index: i, value: e.target.value })}
+                      onBlur={() => commitCombatantHp(c.name)}
+                      onKeyDown={e => {
+                        // Enter commits via the blur handler — a single commit
+                        // path, so it can't double-PATCH with a stale draft.
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                      }}
                       className="w-16 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
                   ) : (
