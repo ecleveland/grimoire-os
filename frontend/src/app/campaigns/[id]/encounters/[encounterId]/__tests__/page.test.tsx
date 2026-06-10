@@ -379,6 +379,35 @@ describe('InitiativeTrackerPage', () => {
     expect(body.expectedVersion).toBe(2);
   });
 
+  it('targets the edited row, not the first name match, when combatant names collide', async () => {
+    // Duplicate names are legal — nothing unique-ifies hand-entered combatants.
+    const twins = makeEncounter({
+      combatants: [
+        makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+        makeCombatant({ name: 'Goblin', initiative: 12, hp: 5, maxHp: 7 }),
+        makeCombatant({ name: 'Goblin', initiative: 8, hp: 7, maxHp: 7 }),
+      ],
+    });
+    mockApiFetch.mockResolvedValueOnce(twins);
+    mockApiFetch.mockResolvedValueOnce(twins);
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    // Edit the SECOND Goblin (sorted index 2).
+    fireEvent.change(hpInputs[2], { target: { value: '2' } });
+    // The draft renders only on the edited row, not on its twin.
+    expect(hpInputs[2].value).toBe('2');
+    expect(hpInputs[1].value).toBe('5');
+
+    fireEvent.blur(hpInputs[2]);
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+    const [, init] = mockApiFetch.mock.calls[1];
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.combatants[2].hp).toBe(2); // the edited twin
+    expect(body.combatants[1].hp).toBe(5); // the first name match is untouched
+  });
+
   it('refetches and warns on a 409 conflict instead of clobbering', async () => {
     const initial = makeEncounter({ version: 4 });
     let patched = false;

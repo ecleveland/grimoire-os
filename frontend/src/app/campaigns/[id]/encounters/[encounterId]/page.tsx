@@ -23,9 +23,13 @@ export default function InitiativeTrackerPage() {
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);
-  // In-progress HP edit, keyed by combatant name (unique per encounter) so the
-  // draft follows its combatant if the list reorders; committed on blur/Enter.
-  const [hpDraft, setHpDraft] = useState<{ name: string; value: string } | null>(null);
+  // In-progress HP edit, committed on blur/Enter. Keyed by combatant name AND
+  // the sorted-row index at draft time: the name lets the draft follow its
+  // combatant if the list reorders, while the index disambiguates hand-entered
+  // duplicate names (nothing enforces name uniqueness).
+  const [hpDraft, setHpDraft] = useState<{ name: string; index: number; value: string } | null>(
+    null
+  );
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -83,19 +87,23 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ currentTurn: nextIndex, round: newRound });
   };
 
-  // Commit the drafted HP for the named combatant: one clamped, version-guarded
-  // PATCH. Empty/invalid or unchanged drafts revert silently. Looking the
-  // target up by name (not row index) keeps the commit correct if the list
-  // reordered or shrank while the draft was open.
+  // Commit the drafted HP: one clamped, version-guarded PATCH. Empty/invalid
+  // or unchanged drafts revert silently. Target resolution: a unique name is
+  // looked up fresh (correct even if the list reordered mid-edit); a duplicated
+  // name falls back to the draft's row index, bailing out unless that row still
+  // holds the name. A combatant removed mid-edit bails out too.
   const commitCombatantHp = (name: string) => {
     if (!encounter || !hpDraft || hpDraft.name !== name) return;
-    const raw = hpDraft.value.trim();
+    const { index: draftIndex, value } = hpDraft;
     setHpDraft(null);
+    const raw = value.trim();
     const parsed = Number(raw);
     if (raw === '' || Number.isNaN(parsed)) return;
     const sorted = sortByInitiative(encounter.combatants);
-    const index = sorted.findIndex(c => c.name === name);
-    if (index === -1) return; // combatant removed mid-edit
+    const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
+    const index =
+      matches.length === 1 ? matches[0] : sorted[draftIndex]?.name === name ? draftIndex : -1;
+    if (index === -1) return;
     const clamped = Math.max(0, Math.min(parsed, sorted[index].maxHp));
     if (clamped === sorted[index].hp) return;
     sorted[index] = { ...sorted[index], hp: clamped };
@@ -158,6 +166,12 @@ export default function InitiativeTrackerPage() {
 
   const sorted = sortByInitiative(encounter.combatants);
   const isController = isDm || (user && encounter.createdBy === user.userId);
+  // Mirror of the commit-target rule: a unique draft name binds to its (possibly
+  // re-sorted) row; a duplicated one binds only to the exact row it was typed in.
+  const draftNameIsUnique =
+    hpDraft !== null && sorted.filter(c => c.name === hpDraft.name).length === 1;
+  const rowHoldsDraft = (c: Combatant, i: number) =>
+    hpDraft?.name === c.name && (draftNameIsUnique || hpDraft.index === i);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -247,8 +261,8 @@ export default function InitiativeTrackerPage() {
                   {isController ? (
                     <input
                       type="number"
-                      value={hpDraft?.name === c.name ? hpDraft.value : c.hp}
-                      onChange={e => setHpDraft({ name: c.name, value: e.target.value })}
+                      value={rowHoldsDraft(c, i) ? hpDraft!.value : c.hp}
+                      onChange={e => setHpDraft({ name: c.name, index: i, value: e.target.value })}
                       onBlur={() => commitCombatantHp(c.name)}
                       onKeyDown={e => {
                         // Enter commits via the blur handler — a single commit
