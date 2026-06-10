@@ -2,17 +2,16 @@
 // the controller and reroll endpoint consume; persisted on Npc.generationParams.
 
 import { NPC_APPEARANCE_CATEGORIES } from '../../seed/data/npc-appearance-traits';
+import { GeneratedLoot, GeneratedLootItem, LootOverrides } from '../../loot/loot.types';
+
+// Loot shapes are owned by the shared loot module (VEG-297); re-exported here
+// under their historical names so existing NPC-side imports keep working.
+export type NpcLootOverrides = LootOverrides;
+export type { GeneratedLoot, GeneratedLootItem };
 
 export type NpcHostility = 'friendly' | 'neutral' | 'hostile';
 
 export type NpcGender = 'male' | 'female';
-
-export type NpcLootOverrides = {
-  trinketChance?: number;
-  magicItemChance?: number;
-  itemCountDie?: string;
-  coinageMultiplier?: number;
-};
 
 export type NpcGenerationConstraints = {
   campaignId: string;
@@ -48,26 +47,6 @@ export type GeneratedPersonality = {
   ideals: string[];
   bonds: string[];
   flaws: string[];
-};
-
-export type GeneratedLootItem = {
-  itemId: string | null;
-  name: string;
-  quantity: number;
-  source: 'profession' | 'trinket' | 'magic-item';
-  notes?: string;
-};
-
-export type GeneratedLoot = {
-  template: { profession: string; crBucket: string } | null;
-  coinage: { gp: number; sp: number; cp: number };
-  items: GeneratedLootItem[];
-  effective: {
-    itemCountDie: string;
-    coinageMultiplier: number;
-    trinketChance: number;
-    magicItemChance: number;
-  };
 };
 
 export type StatBlockAction = {

@@ -5,7 +5,6 @@
 import {
   GeneratedAppearance,
   GeneratedLoot,
-  GeneratedLootItem,
   GeneratedName,
   GeneratedNpc,
   GeneratedPersonality,
@@ -18,7 +17,10 @@ import {
   RerollField,
   StatBlockAction,
 } from './npc-generator.types';
-import { SeededRng } from './seeded-rng';
+import { SeededRng } from '../../common/helpers/seeded-rng';
+import { LootRoller } from '../../loot/loot-roller';
+import { createFallbackTemplateSelector } from '../../loot/loot-template-selector';
+import { LootItemRef, LootTemplateItem, LootTrinket } from '../../loot/loot.types';
 import {
   AGE_RANGE_BY_RACE,
   DEFAULT_AGE_RANGE,
@@ -65,8 +67,10 @@ export type AppearanceTraitRef = {
   trait: string;
 };
 
-export type LootTemplateItemRef = { itemName: string; weight: number; qty: [number, number] };
+export type LootTemplateItemRef = LootTemplateItem;
 
+// Same shape as the shared LootTemplate, but keyed by profession — the NPC
+// generator's selection key. Mapped to LootTemplate when building the roller.
 export type LootTemplateRef = {
   profession: string;
   crBucket: string;
@@ -74,9 +78,9 @@ export type LootTemplateRef = {
   items: LootTemplateItemRef[];
 };
 
-export type TrinketRef = { description: string };
+export type TrinketRef = LootTrinket;
 
-export type ItemRef = { id: string; name: string; isMagic: boolean };
+export type ItemRef = LootItemRef;
 
 export type MonsterRef = {
   name: string;
@@ -150,7 +154,25 @@ const SAMPLE_COUNTS: Record<keyof GeneratedPersonality, number> = {
 };
 
 export class NpcPipeline {
-  constructor(private readonly data: NpcRefData) {}
+  private readonly lootRoller: LootRoller;
+
+  constructor(private readonly data: NpcRefData) {
+    this.lootRoller = new LootRoller({
+      selectTemplate: createFallbackTemplateSelector(
+        data.lootTemplates.map(t => ({
+          key: t.profession,
+          crBucket: t.crBucket,
+          coinage: t.coinage,
+          items: t.items,
+        })),
+        NPC_LOOT_GENERIC_PROFESSION
+      ),
+      trinkets: data.trinkets,
+      itemsByName: data.itemsByName,
+      magicItems: data.magicItems,
+      gameRules: data.gameRules,
+    });
+  }
 
   /** Run every step in order; returns a GeneratedNpc payload. */
   generate(constraints: NpcGenerationConstraints, seed: string): GeneratedNpc {
@@ -417,93 +439,21 @@ export class NpcPipeline {
     constraints: NpcGenerationConstraints,
     decisions: NpcGenerationDecisions
   ): GeneratedLoot {
-    const profession = decisions.profession ?? null;
-    const overrides = constraints.lootOverrides ?? {};
+    // The CR bucket roll stays here, before the delegation: it is the first
+    // draw on the loot sub-RNG, and persisted seeds depend on that order.
     const crBucket = this.pickCrBucket(rng);
-    const template = this.findLootTemplate(profession, crBucket);
-    const effectiveDie = overrides.itemCountDie ?? this.data.gameRules.itemCountDie;
-    const coinageMultiplier = overrides.coinageMultiplier ?? this.data.gameRules.coinageMultiplier;
-    const trinketChance = overrides.trinketChance ?? this.data.gameRules.trinketChance;
-    const magicItemChance =
-      overrides.magicItemChance ?? this.data.gameRules.magicItemChanceByCr[crBucket] ?? 0;
-
-    const coinage = template
-      ? {
-          gp: Math.round(
-            rng.intInRange(template.coinage.gp[0], template.coinage.gp[1]) * coinageMultiplier
-          ),
-          sp: Math.round(
-            rng.intInRange(template.coinage.sp[0], template.coinage.sp[1]) * coinageMultiplier
-          ),
-          cp: Math.round(
-            rng.intInRange(template.coinage.cp[0], template.coinage.cp[1]) * coinageMultiplier
-          ),
-        }
-      : { gp: 0, sp: 0, cp: 0 };
-
-    const items: GeneratedLootItem[] = [];
-    if (template && template.items.length > 0) {
-      const itemCount = Math.max(0, rng.rollDie(effectiveDie));
-      for (let i = 0; i < itemCount; i++) {
-        const pick = rng.weightedPick(template.items.map(it => ({ value: it, weight: it.weight })));
-        const qty = rng.intInRange(pick.qty[0], pick.qty[1]);
-        const ref = this.data.itemsByName.get(pick.itemName);
-        items.push({
-          itemId: ref?.id ?? null,
-          name: pick.itemName,
-          quantity: qty,
-          source: 'profession',
-        });
-      }
-    }
-
-    if (rng.chance(trinketChance) && this.data.trinkets.length > 0) {
-      const trinket = rng.pickOne(this.data.trinkets);
-      items.push({
-        itemId: null,
-        name: trinket.description,
-        quantity: 1,
-        source: 'trinket',
-      });
-    }
-
-    if (rng.chance(magicItemChance) && this.data.magicItems.length > 0) {
-      const mag = rng.pickOne(this.data.magicItems);
-      items.push({ itemId: mag.id, name: mag.name, quantity: 1, source: 'magic-item' });
-    }
-
-    return {
-      template: template ? { profession: template.profession, crBucket: template.crBucket } : null,
-      coinage,
-      items,
-      effective: {
-        itemCountDie: effectiveDie,
-        coinageMultiplier,
-        trinketChance,
-        magicItemChance,
-      },
-    };
+    return this.lootRoller.rollLoot({
+      selectionKey: decisions.profession ?? null,
+      crBucket,
+      overrides: constraints.lootOverrides,
+      rng,
+    });
   }
 
   private pickCrBucket(rng: SeededRng): string {
     return rng.weightedPick(
       DEFAULT_CR_BUCKET_WEIGHTS.map(b => ({ value: b.bucket, weight: b.weight }))
     );
-  }
-
-  private findLootTemplate(profession: string | null, crBucket: string): LootTemplateRef | null {
-    const find = (prof: string, bucket: string) =>
-      this.data.lootTemplates.find(t => t.profession === prof && t.crBucket === bucket);
-    if (profession) {
-      const exact = find(profession, crBucket);
-      if (exact) return exact;
-      // Fall back to any CR bucket for this profession.
-      const anyBucket = this.data.lootTemplates.find(t => t.profession === profession);
-      if (anyBucket) return anyBucket;
-    }
-    const generic = find(NPC_LOOT_GENERIC_PROFESSION, crBucket);
-    if (generic) return generic;
-    return this.data.lootTemplates.find(t => t.profession === NPC_LOOT_GENERIC_PROFESSION) ?? null;
   }
 
   // ── Step 9 ────────────────────────────────────────────────────────────────

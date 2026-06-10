@@ -1,6 +1,6 @@
 import { NpcPipeline } from './npc-pipeline';
 import { buildSeedRefData } from './npc-pipeline.fixture';
-import { SeededRng } from './seeded-rng';
+import { SeededRng } from '../../common/helpers/seeded-rng';
 import { NPC_ALIGNMENT_ORDER } from '../../seed/data/npc-alignment-priors';
 import { NPC_APPEARANCE_CATEGORIES } from '../../seed/data/npc-appearance-traits';
 import { NpcGenerationConstraints } from './npc-generator.types';

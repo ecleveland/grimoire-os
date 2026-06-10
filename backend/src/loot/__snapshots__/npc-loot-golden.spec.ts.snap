@@ -1,0 +1,639 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) honors loot overrides (forced trinket + magic item, scaled coinage, bigger die) 1`] = `
+{
+  "coinage": {
+    "cp": 6,
+    "gp": 12,
+    "sp": 36,
+  },
+  "effective": {
+    "coinageMultiplier": 3,
+    "itemCountDie": "2d4",
+    "magicItemChance": 1,
+    "trinketChance": 1,
+  },
+  "items": [
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": null,
+      "name": "A glass vial filled with nail clippings",
+      "quantity": 1,
+      "source": "trinket",
+    },
+    {
+      "itemId": "magic-2",
+      "name": "Wand of Magic Missiles",
+      "quantity": 1,
+      "source": "magic-item",
+    },
+  ],
+  "template": {
+    "crBucket": "0–1",
+    "profession": "merchant",
+  },
+}
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) missing profession uses the generic template 1`] = `
+{
+  "coinage": {
+    "cp": 9,
+    "gp": 1,
+    "sp": 3,
+  },
+  "effective": {
+    "coinageMultiplier": 1,
+    "itemCountDie": "1d3",
+    "magicItemChance": 0.001,
+    "trinketChance": 0.05,
+  },
+  "items": [
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+  ],
+  "template": {
+    "crBucket": "0",
+    "profession": "__generic__",
+  },
+}
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) profession=blacksmith, default overrides 1`] = `
+[
+  {
+    "coinage": {
+      "cp": 10,
+      "gp": 0,
+      "sp": 4,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-4",
+        "name": "Hammer",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "blacksmith",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 20,
+      "gp": 0,
+      "sp": 6,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.005,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-4",
+        "name": "Hammer",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "blacksmith",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 7,
+      "gp": 1,
+      "sp": 5,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-0",
+        "name": "Dagger",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-4",
+        "name": "Hammer",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-4",
+        "name": "Hammer",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "blacksmith",
+    },
+  },
+]
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) profession=mercenary, default overrides 1`] = `
+[
+  {
+    "coinage": {
+      "cp": 7,
+      "gp": 5,
+      "sp": 4,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-7",
+        "name": "Shortsword",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "mercenary",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 5,
+      "gp": 6,
+      "sp": 12,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.005,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-7",
+        "name": "Shortsword",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-7",
+        "name": "Shortsword",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-9",
+        "name": "Crossbow, Light",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "mercenary",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 10,
+      "gp": 3,
+      "sp": 12,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-8",
+        "name": "Longsword",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "mercenary",
+    },
+  },
+]
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) profession=noble, default overrides 1`] = `
+[
+  {
+    "coinage": {
+      "cp": 0,
+      "gp": 25,
+      "sp": 6,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-14",
+        "name": "Rapier",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-14",
+        "name": "Rapier",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-14",
+        "name": "Rapier",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "noble",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 0,
+      "gp": 31,
+      "sp": 13,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-0",
+        "name": "Dagger",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "noble",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 0,
+      "gp": 19,
+      "sp": 8,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.005,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-0",
+        "name": "Dagger",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-0",
+        "name": "Dagger",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "noble",
+    },
+  },
+]
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) profession=peasant, default overrides 1`] = `
+[
+  {
+    "coinage": {
+      "cp": 9,
+      "gp": 0,
+      "sp": 0,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "peasant",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 5,
+      "gp": 0,
+      "sp": 1,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-2",
+        "name": "Sling",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": null,
+        "name": "A scrap of cloth from an old banner",
+        "quantity": 1,
+        "source": "trinket",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "peasant",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 11,
+      "gp": 0,
+      "sp": 1,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "peasant",
+    },
+  },
+]
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) profession=priest, default overrides 1`] = `
+[
+  {
+    "coinage": {
+      "cp": 6,
+      "gp": 1,
+      "sp": 4,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "priest",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 11,
+      "gp": 0,
+      "sp": 4,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.001,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0",
+      "profession": "priest",
+    },
+  },
+  {
+    "coinage": {
+      "cp": 12,
+      "gp": 4,
+      "sp": 11,
+    },
+    "effective": {
+      "coinageMultiplier": 1,
+      "itemCountDie": "1d3",
+      "magicItemChance": 0.005,
+      "trinketChance": 0.05,
+    },
+    "items": [
+      {
+        "itemId": "item-1",
+        "name": "Quarterstaff",
+        "quantity": 1,
+        "source": "profession",
+      },
+    ],
+    "template": {
+      "crBucket": "0–1",
+      "profession": "priest",
+    },
+  },
+]
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) unknown profession falls back to the generic template 1`] = `
+{
+  "coinage": {
+    "cp": 4,
+    "gp": 0,
+    "sp": 3,
+  },
+  "effective": {
+    "coinageMultiplier": 1,
+    "itemCountDie": "1d3",
+    "magicItemChance": 0.001,
+    "trinketChance": 0.05,
+  },
+  "items": [
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+  ],
+  "template": {
+    "crBucket": "0",
+    "profession": "__generic__",
+  },
+}
+`;
+
+exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) zeroed chances produce no trinket or magic item 1`] = `
+{
+  "coinage": {
+    "cp": 5,
+    "gp": 0,
+    "sp": 4,
+  },
+  "effective": {
+    "coinageMultiplier": 1,
+    "itemCountDie": "1d3",
+    "magicItemChance": 0,
+    "trinketChance": 0,
+  },
+  "items": [
+    {
+      "itemId": "item-0",
+      "name": "Dagger",
+      "quantity": 1,
+      "source": "profession",
+    },
+  ],
+  "template": {
+    "crBucket": "0",
+    "profession": "__generic__",
+  },
+}
+`;

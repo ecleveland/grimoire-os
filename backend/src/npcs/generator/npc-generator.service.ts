@@ -7,7 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignAuthService } from '../../auth/campaign-auth.service';
 import { NpcPipeline } from './npc-pipeline';
 import { NpcRefDataLoader } from './npc-ref-data.loader';
-import { SeededRng } from './seeded-rng';
+import { SeededRng } from '../../common/helpers/seeded-rng';
 import {
   GeneratedNpc,
   NpcGenerationConstraints,
