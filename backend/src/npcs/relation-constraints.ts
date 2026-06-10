@@ -2,7 +2,7 @@
 // via POST /npcs/:id/relations/generate. All inputs/outputs are plain
 // values so the rules are unit-testable without a Prisma client.
 
-import { SeededRng } from './generator/seeded-rng';
+import { SeededRng } from '../common/helpers/seeded-rng';
 
 export function extractFamilyName(fullName: string): string | null {
   const tokens = fullName.trim().split(/\s+/).filter(Boolean);
