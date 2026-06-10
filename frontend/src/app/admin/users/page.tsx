@@ -140,7 +140,7 @@ export default function AdminUsersPage() {
         title="Delete user?"
         description={
           pendingDelete
-            ? `Are you sure you want to delete user "${pendingDelete.username}"? This cannot be undone.`
+            ? `Deleting "${pendingDelete.username}" permanently deletes everything they created: their campaigns (with all notes, encounters, and NPCs), their characters, their homebrew content, and anything they authored in other campaigns. This cannot be undone.`
             : ''
         }
         variant="danger"
