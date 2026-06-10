@@ -1,10 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import SearchBox from '@/components/SearchBox';
 import type { Npc, NpcRelation, PaginatedResponse } from '@/lib/types';
 
 const RELATION_TYPES = [
@@ -107,12 +109,12 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
                 <span className="font-medium">{rel.relation}</span>
                 {' of '}
                 {rel.toNpc ? (
-                  <a
+                  <Link
                     href={`/campaigns/${npc.campaignId}/npcs/${rel.toNpc.id}`}
                     className="text-indigo-600 hover:text-indigo-700"
                   >
                     {rel.toNpc.name}
-                  </a>
+                  </Link>
                 ) : (
                   <span className="text-gray-500">{rel.toNpcId}</span>
                 )}
@@ -171,29 +173,39 @@ function AddRelationForm({
   setBusy: (b: boolean) => void;
 }) {
   const [relation, setRelation] = useState<string>('parent');
-  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState<Npc[]>([]);
+  const [total, setTotal] = useState(0);
   const fetchSeq = useRef(0);
 
+  // Stable callback so SearchBox's debounce effect doesn't re-arm per render.
+  const handleDebouncedSearch = useCallback((value: string) => setQuery(value.trim()), []);
+
+  // Search server-side so matches beyond the first page are reachable
+  // (VEG-313); only the exclude-self filter stays on the client.
   useEffect(() => {
-    const trimmed = search.trim();
-    if (!trimmed) {
+    if (!query) {
       setCandidates([]);
+      setTotal(0);
       return;
     }
     const seq = ++fetchSeq.current;
     apiFetch<PaginatedResponse<Npc>>(
-      `/npcs?campaignId=${encodeURIComponent(npc.campaignId)}&limit=10`
+      `/npcs?campaignId=${encodeURIComponent(npc.campaignId)}&search=${encodeURIComponent(query)}&limit=10`
     )
       .then(res => {
         if (seq !== fetchSeq.current) return;
-        const filtered = res.data
-          .filter(n => n.id !== npc.id)
-          .filter(n => n.name.toLowerCase().includes(trimmed.toLowerCase()));
-        setCandidates(filtered);
+        const linkable = res.data.filter(n => n.id !== npc.id);
+        setCandidates(linkable);
+        // Don't count rows excluded client-side (the NPC being edited) toward
+        // the "more matches exist" hint.
+        setTotal(res.total - (res.data.length - linkable.length));
       })
-      .catch(() => setCandidates([]));
-  }, [search, npc.id, npc.campaignId]);
+      .catch(() => {
+        setCandidates([]);
+        setTotal(0);
+      });
+  }, [query, npc.id, npc.campaignId]);
 
   const handlePick = useCallback(
     async (target: Npc) => {
@@ -240,11 +252,9 @@ function AddRelationForm({
           Cancel
         </button>
       </div>
-      <input
-        type="text"
+      <SearchBox
         placeholder="Search NPCs by name…"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
+        onDebouncedChange={handleDebouncedSearch}
         className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
       />
       {candidates.length > 0 && (
@@ -266,6 +276,11 @@ function AddRelationForm({
             </li>
           ))}
         </ul>
+      )}
+      {total > candidates.length && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Showing {candidates.length} of {total}. Refine your search to narrow results.
+        </p>
       )}
     </div>
   );

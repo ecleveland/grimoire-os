@@ -224,6 +224,33 @@ describe('NpcsService', () => {
       });
     });
 
+    it('applies a case-insensitive name filter when search is given (VEG-313)', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.npc.findMany.mockResolvedValue([]);
+      prisma.npc.count.mockResolvedValue(0);
+
+      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID, {
+        page: 1,
+        limit: 10,
+        search: 'maelin',
+      });
+
+      expect(prisma.npc.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            campaignId: CAMPAIGN_ID,
+            name: { contains: 'maelin', mode: 'insensitive' },
+          },
+        })
+      );
+      expect(prisma.npc.count).toHaveBeenCalledWith({
+        where: {
+          campaignId: CAMPAIGN_ID,
+          name: { contains: 'maelin', mode: 'insensitive' },
+        },
+      });
+    });
+
     it('throws ForbiddenException when non-DM lists', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')

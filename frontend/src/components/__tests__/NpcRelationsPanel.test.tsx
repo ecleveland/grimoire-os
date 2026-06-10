@@ -168,10 +168,112 @@ describe('NpcRelationsPanel', () => {
     expect(onRefetch).toHaveBeenCalled();
   });
 
+  it('Add Existing search sends the term to the API instead of filtering client-side (VEG-313)', async () => {
+    const user = userEvent.setup();
+    // The server matches on more than a client substring could (e.g. paginated
+    // rows beyond page 1) — render whatever it returns, even names that don't
+    // contain the typed term.
+    const candidateList: PaginatedResponse<Npc> = {
+      data: [makeNpc({ id: 'npc-42', name: 'Karis the Grey' })],
+      total: 1,
+      page: 1,
+      lastPage: 1,
+    };
+    mockApiFetch.mockImplementation((path: string) => {
+      if (typeof path === 'string' && path.startsWith('/npcs?')) {
+        return Promise.resolve(candidateList);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'shadow cloak');
+
+    // The query string carries the (encoded) search term.
+    await waitFor(() =>
+      expect(mockApiFetch).toHaveBeenCalledWith(expect.stringContaining('search=shadow%20cloak'))
+    );
+    expect(mockApiFetch).toHaveBeenCalledWith(expect.stringContaining('campaignId=campaign-1'));
+    // Server-side matches render even without a client-side substring hit.
+    expect(await screen.findByRole('button', { name: /karis the grey/i })).toBeInTheDocument();
+  });
+
+  it('hints to refine the search when more matches exist than the page shows', async () => {
+    const user = userEvent.setup();
+    const page1: PaginatedResponse<Npc> = {
+      data: Array.from({ length: 10 }, (_, i) =>
+        makeNpc({ id: `npc-t${i}`, name: `Townsfolk ${i}` })
+      ),
+      total: 23,
+      page: 1,
+      lastPage: 3,
+    };
+    mockApiFetch.mockResolvedValue(page1);
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'townsfolk');
+
+    await screen.findByRole('button', { name: /townsfolk 0/i });
+    expect(screen.getByText(/showing 10 of 23/i)).toBeInTheDocument();
+  });
+
+  it('shows no refine hint when every match fits on the page', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue({
+      data: [makeNpc({ id: 'npc-2', name: 'Bren Stormwind' })],
+      total: 1,
+      page: 1,
+      lastPage: 1,
+    });
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'bren');
+
+    await screen.findByRole('button', { name: /bren stormwind/i });
+    expect(screen.queryByText(/showing \d+ of \d+/i)).not.toBeInTheDocument();
+  });
+
+  it('does not count the excluded self toward the refine hint', async () => {
+    const user = userEvent.setup();
+    // Self is in the results: 2 fetched / total 2, but only 1 is linkable —
+    // everything linkable is shown, so no hint.
+    mockApiFetch.mockResolvedValue({
+      data: [makeNpc({ id: 'npc-1', name: 'Old Maelin' }), makeNpc({ id: 'npc-2', name: 'Mae' })],
+      total: 2,
+      page: 1,
+      lastPage: 1,
+    });
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'mae');
+
+    await screen.findByRole('button', { name: /^mae/i });
+    expect(screen.queryByText(/showing \d+ of \d+/i)).not.toBeInTheDocument();
+  });
+
+  it('Add Existing search debounces keystrokes into a single request', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'Bren');
+
+    // Four keystrokes → one trailing-edge request carrying the final term.
+    await waitFor(() =>
+      expect(mockApiFetch).toHaveBeenCalledWith(expect.stringContaining('search=Bren'))
+    );
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('Add Existing autocomplete excludes the current NPC from results', async () => {
     const user = userEvent.setup();
-    // Both candidates contain "m" so the substring filter alone would match
-    // both; only the current-NPC exclusion can hide "Old Maelin".
+    // The server can return the NPC being edited; only the client-side
+    // exclusion hides "Old Maelin".
     const candidateList: PaginatedResponse<Npc> = {
       data: [
         makeNpc({ id: 'npc-1', name: 'Old Maelin' }), // current — must be filtered
