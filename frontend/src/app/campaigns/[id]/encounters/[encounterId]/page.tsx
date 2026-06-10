@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Encounter, SrdMonster } from '@/lib/types';
+import type { Combatant, Encounter, SrdMonster } from '@/lib/types';
 import Badge from '@/components/Badge';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
@@ -13,13 +13,19 @@ import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import { buildMonsterCombatants } from '@/lib/encounter-combatants';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 
+// The single ordering rule for the tracker — render, turn order, and HP
+// commits must all agree on it.
+const sortByInitiative = (combatants: Combatant[]) =>
+  [...combatants].sort((a, b) => b.initiative - a.initiative);
+
 export default function InitiativeTrackerPage() {
   const { encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);
-  // In-progress HP edit (keyed by sorted-row index); committed on blur/Enter.
-  const [hpDraft, setHpDraft] = useState<{ index: number; value: string } | null>(null);
+  // In-progress HP edit, keyed by combatant name (unique per encounter) so the
+  // draft follows its combatant if the list reorders; committed on blur/Enter.
+  const [hpDraft, setHpDraft] = useState<{ name: string; value: string } | null>(null);
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -35,6 +41,17 @@ export default function InitiativeTrackerPage() {
     fetchEncounter();
   }, [fetchEncounter]);
 
+  // Shared 409 recovery: another writer won the version race — refetch and let
+  // the user retry against fresh state. Returns true if the error was handled.
+  const handleEncounterConflict = (err: unknown): boolean => {
+    if (err instanceof ApiError && err.status === 409) {
+      toast.error('This encounter changed since you opened it — refreshed, please try again.');
+      fetchEncounter();
+      return true;
+    }
+    return false;
+  };
+
   // All writes carry `expectedVersion` so concurrent edits surface as a 409
   // instead of silently clobbering each other (VEG-315, same guard as VEG-260/137).
   const patchEncounter = async (updates: Partial<Encounter>) => {
@@ -46,18 +63,14 @@ export default function InitiativeTrackerPage() {
       });
       setEncounter(updated);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        toast.error('This encounter changed since you opened it — refreshed, please try again.');
-        fetchEncounter();
-        return;
-      }
+      if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to update encounter');
     }
   };
 
   const nextTurn = () => {
     if (!encounter) return;
-    const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
+    const sorted = sortByInitiative(encounter.combatants);
     const activeCombatants = sorted.filter(c => c.hp > 0);
     if (activeCombatants.length === 0) return;
 
@@ -70,15 +83,19 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ currentTurn: nextIndex, round: newRound });
   };
 
-  // Commit the drafted HP for the given sorted-row index: one clamped,
-  // version-guarded PATCH. Empty/invalid or unchanged drafts revert silently.
-  const commitCombatantHp = (index: number) => {
-    if (!encounter || !hpDraft || hpDraft.index !== index) return;
+  // Commit the drafted HP for the named combatant: one clamped, version-guarded
+  // PATCH. Empty/invalid or unchanged drafts revert silently. Looking the
+  // target up by name (not row index) keeps the commit correct if the list
+  // reordered or shrank while the draft was open.
+  const commitCombatantHp = (name: string) => {
+    if (!encounter || !hpDraft || hpDraft.name !== name) return;
     const raw = hpDraft.value.trim();
     setHpDraft(null);
     const parsed = Number(raw);
     if (raw === '' || Number.isNaN(parsed)) return;
-    const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
+    const sorted = sortByInitiative(encounter.combatants);
+    const index = sorted.findIndex(c => c.name === name);
+    if (index === -1) return; // combatant removed mid-edit
     const clamped = Math.max(0, Math.min(parsed, sorted[index].maxHp));
     if (clamped === sorted[index].hp) return;
     sorted[index] = { ...sorted[index], hp: clamped };
@@ -117,11 +134,7 @@ export default function InitiativeTrackerPage() {
           : `Added ${monster.name} to the encounter`
       );
     } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        toast.error('This encounter changed since you opened it — refreshed, please try again.');
-        fetchEncounter();
-        return;
-      }
+      if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
     }
   };
@@ -143,7 +156,7 @@ export default function InitiativeTrackerPage() {
   if (!encounter)
     return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
 
-  const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
+  const sorted = sortByInitiative(encounter.combatants);
   const isController = isDm || (user && encounter.createdBy === user.userId);
 
   return (
@@ -234,9 +247,9 @@ export default function InitiativeTrackerPage() {
                   {isController ? (
                     <input
                       type="number"
-                      value={hpDraft?.index === i ? hpDraft.value : c.hp}
-                      onChange={e => setHpDraft({ index: i, value: e.target.value })}
-                      onBlur={() => commitCombatantHp(i)}
+                      value={hpDraft?.name === c.name ? hpDraft.value : c.hp}
+                      onChange={e => setHpDraft({ name: c.name, value: e.target.value })}
+                      onBlur={() => commitCombatantHp(c.name)}
                       onKeyDown={e => {
                         // Enter commits via the blur handler — a single commit
                         // path, so it can't double-PATCH with a stale draft.

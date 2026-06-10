@@ -335,6 +335,50 @@ describe('InitiativeTrackerPage', () => {
     expect((screen.getAllByRole('spinbutton')[1] as HTMLInputElement).value).toBe('7');
   });
 
+  it('commits the draft to the same combatant even when the list reorders mid-edit', async () => {
+    const initial = makeEncounter();
+    // An Ogre (init 15) lands above Goblin A while the draft is open —
+    // Goblin A shifts from sorted index 1 to index 2.
+    const reordered = makeEncounter({
+      version: 2,
+      isActive: true,
+      combatants: [
+        makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+        makeCombatant({ name: 'Ogre', initiative: 15, hp: 30, maxHp: 30 }),
+        makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7, maxHp: 7 }),
+        makeCombatant({ name: 'Goblin B', initiative: 8, hp: 7, maxHp: 7 }),
+      ],
+    });
+    mockApiFetch.mockResolvedValueOnce(initial); // GET
+    mockApiFetch.mockResolvedValueOnce(reordered); // PATCH (toggleActive) → reordered list
+    mockApiFetch.mockResolvedValueOnce(reordered); // PATCH (hp commit)
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    // Open a draft on Goblin A (index 1 pre-reorder)...
+    fireEvent.change((screen.getAllByRole('spinbutton') as HTMLInputElement[])[1], {
+      target: { value: '3' },
+    });
+    // ...then the encounter updates underneath it (here via Start Combat).
+    await user.click(screen.getByRole('button', { name: /start combat/i }));
+    await screen.findByText('Active');
+
+    // The draft followed Goblin A to its new row (index 2), not index 1 (Ogre).
+    const inputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    expect(inputs[2].value).toBe('3');
+    expect(inputs[1].value).toBe('30');
+
+    fireEvent.blur(inputs[2]);
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(3));
+    const [, init] = mockApiFetch.mock.calls[2];
+    const body = JSON.parse((init as { body: string }).body);
+    const byName = Object.fromEntries((body.combatants as Combatant[]).map(c => [c.name, c.hp]));
+    expect(byName['Goblin A']).toBe(3); // the edit landed on the right combatant
+    expect(byName['Ogre']).toBe(30); // the interloper is untouched
+    expect(body.expectedVersion).toBe(2);
+  });
+
   it('refetches and warns on a 409 conflict instead of clobbering', async () => {
     const initial = makeEncounter({ version: 4 });
     let patched = false;
