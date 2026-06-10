@@ -236,6 +236,25 @@ describe('NpcRelationsPanel', () => {
     expect(screen.queryByText(/showing \d+ of \d+/i)).not.toBeInTheDocument();
   });
 
+  it('does not count the excluded self toward the refine hint', async () => {
+    const user = userEvent.setup();
+    // Self is in the results: 2 fetched / total 2, but only 1 is linkable —
+    // everything linkable is shown, so no hint.
+    mockApiFetch.mockResolvedValue({
+      data: [makeNpc({ id: 'npc-1', name: 'Old Maelin' }), makeNpc({ id: 'npc-2', name: 'Mae' })],
+      total: 2,
+      page: 1,
+      lastPage: 1,
+    });
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'mae');
+
+    await screen.findByRole('button', { name: /^mae/i });
+    expect(screen.queryByText(/showing \d+ of \d+/i)).not.toBeInTheDocument();
+  });
+
   it('Add Existing search debounces keystrokes into a single request', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });

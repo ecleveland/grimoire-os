@@ -195,8 +195,11 @@ function AddRelationForm({
     )
       .then(res => {
         if (seq !== fetchSeq.current) return;
-        setCandidates(res.data.filter(n => n.id !== npc.id));
-        setTotal(res.total);
+        const linkable = res.data.filter(n => n.id !== npc.id);
+        setCandidates(linkable);
+        // Don't count rows excluded client-side (the NPC being edited) toward
+        // the "more matches exist" hint.
+        setTotal(res.total - (res.data.length - linkable.length));
       })
       .catch(() => {
         setCandidates([]);
