@@ -73,7 +73,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         // FK violation on a DELETE means a relation was added without one.
         // Give the client a clean 409 and keep the schema diagnostic in the
         // server log, where the missing-policy bug actually gets fixed.
-        if (method === 'DELETE') {
+        if (exception.code === 'P2003' && method === 'DELETE') {
           const fieldName = (exception.meta?.field_name as string) ?? 'unknown relation';
           this.logger.error(
             `P2003 blocked a DELETE via "${fieldName}" — a relation is missing an onDelete policy (see VEG-312)`
