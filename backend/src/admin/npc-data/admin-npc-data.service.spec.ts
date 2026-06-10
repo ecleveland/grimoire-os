@@ -61,6 +61,16 @@ describe('AdminNpcDataService', () => {
       expect(result).toBe(rows);
     });
 
+    it('lists only npc-category loot templates (monster rows belong to the VEG-304 editor)', async () => {
+      prisma.npcLootTemplate.findMany.mockResolvedValue([]);
+
+      await service.list('loot-templates');
+
+      expect(prisma.npcLootTemplate.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { category: 'npc' } })
+      );
+    });
+
     it('lists personality rows', async () => {
       prisma.npcCustomPersonality.findMany.mockResolvedValue([]);
       await service.list('personality');

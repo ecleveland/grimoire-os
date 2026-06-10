@@ -34,7 +34,10 @@ export class AdminNpcDataService {
           orderBy: [{ race: 'asc' }, { category: 'asc' }, { trait: 'asc' }],
         });
       case 'loot-templates':
+        // The admin NPC-data editor manages the 'npc' family only; monster
+        // templates get their own editor in VEG-304.
         return this.prisma.npcLootTemplate.findMany({
+          where: { category: 'npc' },
           orderBy: [{ profession: 'asc' }, { crBucket: 'asc' }],
         });
       case 'trinkets':

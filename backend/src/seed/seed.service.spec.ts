@@ -487,6 +487,24 @@ describe('SeedService', () => {
     expect(call.data.length).toBeGreaterThan(0);
   });
 
+  it('seeds monster loot templates with category=monster alongside NPC ones', async () => {
+    await service.seed();
+
+    const calls = prisma.npcLootTemplate.createMany.mock.calls;
+    expect(calls.length).toBe(2);
+    const npcRows = calls[0][0].data;
+    const monsterRows = calls[1][0].data;
+    expect(npcRows.length).toBeGreaterThan(0);
+    expect(monsterRows.length).toBeGreaterThan(0);
+    for (const row of npcRows) {
+      expect(row.category ?? 'npc').toBe('npc');
+    }
+    for (const row of monsterRows) {
+      expect(row.category).toBe('monster');
+      expect(typeof row.profession).toBe('string');
+    }
+  });
+
   it('seeds NPC alignment priors after clearing curated rows (compound unique with nullable background prevents upsert)', async () => {
     await service.seed();
 

@@ -24,6 +24,7 @@ import { srdGameRules } from './data/game-rules';
 import { npcNamePools } from './data/npc-name-pools';
 import { npcAppearanceTraits } from './data/npc-appearance-traits';
 import { npcLootTemplates } from './data/npc-loot-templates';
+import { monsterLootTemplates } from './data/monster-loot-templates';
 import { npcAlignmentPriors } from './data/npc-alignment-priors';
 import { trinkets } from './data/trinkets';
 
@@ -329,6 +330,20 @@ export class SeedService {
         skipDuplicates: true,
       });
       console.log(`  NPC Loot Templates: ${npcLootTemplates.length} entries`);
+
+      // Monster loot templates share the table; the curated deleteMany above
+      // already cleared both categories.
+      await tx.npcLootTemplate.createMany({
+        data: monsterLootTemplates.map(t => ({
+          category: 'monster',
+          profession: t.type,
+          crBucket: t.crBucket,
+          coinage: t.coinage as unknown as Prisma.InputJsonValue,
+          items: t.items as unknown as Prisma.InputJsonValue,
+        })),
+        skipDuplicates: true,
+      });
+      console.log(`  Monster Loot Templates: ${monsterLootTemplates.length} entries`);
 
       // Alignment priors carry nullable `background` (default rows), and
       // Prisma compound uniques don't accept null. Drop curated rows and
