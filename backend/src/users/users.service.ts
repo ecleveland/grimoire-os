@@ -176,6 +176,8 @@ export class UsersService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);
       }
+      // P2003 (a relation missing an onDelete policy, VEG-312) propagates to
+      // AllExceptionsFilter, which maps DELETE-blocking FK violations to 409.
       throw error;
     }
   }

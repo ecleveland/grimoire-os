@@ -179,6 +179,10 @@ describe('EditCampaignPage', () => {
     // Confirmation dialog is now open
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText(/delete campaign\?/i)).toBeInTheDocument();
+    // Cascade warning (VEG-312): campaign content dies with the campaign
+    expect(
+      screen.getByText(/permanently deletes all of its notes, encounters, and NPCs/i)
+    ).toBeInTheDocument();
     // Click the confirm "Delete" button inside the dialog (the second one)
     const dialog = screen.getByRole('dialog');
     const confirmBtn = within(dialog).getByRole('button', { name: /delete/i });

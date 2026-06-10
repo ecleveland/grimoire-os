@@ -148,7 +148,7 @@ export default function EditCampaignPage() {
         open={confirmDeleteOpen}
         onOpenChange={setConfirmDeleteOpen}
         title="Delete campaign?"
-        description="Are you sure you want to delete this campaign? This cannot be undone."
+        description="Deleting this campaign permanently deletes all of its notes, encounters, and NPCs. Characters survive but are unlinked from the campaign. This cannot be undone."
         variant="danger"
         onConfirm={handleDelete}
       />

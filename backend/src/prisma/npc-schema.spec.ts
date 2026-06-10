@@ -68,12 +68,12 @@ describe('NPC Generator schema (VEG-243)', () => {
       expect(body).toMatch(/isManual\s+Boolean\s+@default\(false\)/);
     });
 
-    it('relates to Campaign and User', () => {
+    it('relates to Campaign and User, dying with either (VEG-312)', () => {
       expect(body).toMatch(
-        /campaign\s+Campaign\s+@relation\(fields: \[campaignId\], references: \[id\]\)/
+        /campaign\s+Campaign\s+@relation\(fields: \[campaignId\], references: \[id\], onDelete: Cascade\)/
       );
       expect(body).toMatch(
-        /createdBy\s+User\s+@relation\(fields: \[createdById\], references: \[id\]\)/
+        /createdBy\s+User\s+@relation\(fields: \[createdById\], references: \[id\], onDelete: Cascade\)/
       );
     });
 

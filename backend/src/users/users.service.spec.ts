@@ -347,6 +347,16 @@ describe('UsersService', () => {
       await expect(service.remove(USER_ID)).rejects.toThrow(NotFoundException);
     });
 
+    it('propagates P2003 untouched so AllExceptionsFilter can map it to 409 (VEG-312)', async () => {
+      const fkError = new PrismaClientKnownRequestError('Foreign key constraint failed', {
+        code: 'P2003',
+        clientVersion: '6.0.0',
+      });
+      prisma.user.delete.mockRejectedValue(fkError);
+
+      await expect(service.remove(USER_ID)).rejects.toBe(fkError);
+    });
+
     it("deletes the user's homebrew content with the user in one transaction", async () => {
       prisma.spell.deleteMany.mockResolvedValue({ count: 1 });
       prisma.monster.deleteMany.mockResolvedValue({ count: 0 });

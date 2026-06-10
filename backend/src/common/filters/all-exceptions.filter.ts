@@ -1,8 +1,17 @@
-import { ExceptionFilter, Catch, ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 @Catch()
 export class AllExceptionsFilter implements ExceptionFilter {
+  private readonly logger = new Logger(AllExceptionsFilter.name);
+
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse();
@@ -13,7 +22,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     let error = 'Internal Server Error';
 
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
-      ({ statusCode, message, error } = this.handlePrismaError(exception));
+      ({ statusCode, message, error } = this.handlePrismaError(exception, request.method));
     } else if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
       const res = exception.getResponse();
@@ -35,7 +44,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
     });
   }
 
-  private handlePrismaError(exception: Prisma.PrismaClientKnownRequestError): {
+  private handlePrismaError(
+    exception: Prisma.PrismaClientKnownRequestError,
+    method?: string
+  ): {
     statusCode: number;
     message: string;
     error: string;
@@ -57,6 +69,21 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
       case 'P2003':
       case 'P2006':
+        // Every relation carries an explicit onDelete policy (VEG-312), so an
+        // FK violation on a DELETE means a relation was added without one.
+        // Give the client a clean 409 and keep the schema diagnostic in the
+        // server log, where the missing-policy bug actually gets fixed.
+        if (exception.code === 'P2003' && method === 'DELETE') {
+          const fieldName = (exception.meta?.field_name as string) ?? 'unknown relation';
+          this.logger.error(
+            `P2003 blocked a DELETE via "${fieldName}" — a relation is missing an onDelete policy (see VEG-312)`
+          );
+          return {
+            statusCode: HttpStatus.CONFLICT,
+            message: 'Cannot delete this record because other records still depend on it',
+            error: 'Conflict',
+          };
+        }
         return {
           statusCode: HttpStatus.BAD_REQUEST,
           message: exception.message.replace(/\n/g, ' ').trim(),
