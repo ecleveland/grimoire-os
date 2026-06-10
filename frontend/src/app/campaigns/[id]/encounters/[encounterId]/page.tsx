@@ -18,6 +18,8 @@ export default function InitiativeTrackerPage() {
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);
+  // In-progress HP edit (keyed by sorted-row index); committed on blur/Enter.
+  const [hpDraft, setHpDraft] = useState<{ index: number; value: string } | null>(null);
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -33,14 +35,22 @@ export default function InitiativeTrackerPage() {
     fetchEncounter();
   }, [fetchEncounter]);
 
+  // All writes carry `expectedVersion` so concurrent edits surface as a 409
+  // instead of silently clobbering each other (VEG-315, same guard as VEG-260/137).
   const patchEncounter = async (updates: Partial<Encounter>) => {
+    if (!encounter) return;
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
-        body: JSON.stringify(updates),
+        body: JSON.stringify({ ...updates, expectedVersion: encounter.version }),
       });
       setEncounter(updated);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        toast.error('This encounter changed since you opened it — refreshed, please try again.');
+        fetchEncounter();
+        return;
+      }
       toast.error(err instanceof Error ? err.message : 'Failed to update encounter');
     }
   };
@@ -60,10 +70,18 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ currentTurn: nextIndex, round: newRound });
   };
 
-  const updateCombatantHp = (index: number, newHp: number) => {
-    if (!encounter) return;
+  // Commit the drafted HP for the given sorted-row index: one clamped,
+  // version-guarded PATCH. Empty/invalid or unchanged drafts revert silently.
+  const commitCombatantHp = (index: number) => {
+    if (!encounter || !hpDraft || hpDraft.index !== index) return;
+    const raw = hpDraft.value.trim();
+    setHpDraft(null);
+    const parsed = Number(raw);
+    if (raw === '' || Number.isNaN(parsed)) return;
     const sorted = [...encounter.combatants].sort((a, b) => b.initiative - a.initiative);
-    sorted[index] = { ...sorted[index], hp: Math.max(0, Math.min(newHp, sorted[index].maxHp)) };
+    const clamped = Math.max(0, Math.min(parsed, sorted[index].maxHp));
+    if (clamped === sorted[index].hp) return;
+    sorted[index] = { ...sorted[index], hp: clamped };
     patchEncounter({ combatants: sorted });
   };
 
@@ -72,9 +90,8 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ isActive: !encounter.isActive });
   };
 
-  // Append monster combatant(s) from the lookup panel. Unlike the unguarded
-  // HP/turn writes above, the add path sends `expectedVersion` so a concurrent
-  // edit surfaces a 409 rather than clobbering the other change (VEG-260/137).
+  // Append monster combatant(s) from the lookup panel. Kept separate from
+  // patchEncounter for its add-specific success/error toasts.
   const addMonsterToEncounter = async (
     monster: SrdMonster,
     { quantity, initiatives }: AddToEncounterResult
@@ -217,8 +234,14 @@ export default function InitiativeTrackerPage() {
                   {isController ? (
                     <input
                       type="number"
-                      value={c.hp}
-                      onChange={e => updateCombatantHp(i, Number(e.target.value))}
+                      value={hpDraft?.index === i ? hpDraft.value : c.hp}
+                      onChange={e => setHpDraft({ index: i, value: e.target.value })}
+                      onBlur={() => commitCombatantHp(i)}
+                      onKeyDown={e => {
+                        // Enter commits via the blur handler — a single commit
+                        // path, so it can't double-PATCH with a stale draft.
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                      }}
                       className="w-16 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
                   ) : (
