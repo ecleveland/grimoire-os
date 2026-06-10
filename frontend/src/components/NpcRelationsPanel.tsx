@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
@@ -107,12 +108,12 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
                 <span className="font-medium">{rel.relation}</span>
                 {' of '}
                 {rel.toNpc ? (
-                  <a
+                  <Link
                     href={`/campaigns/${npc.campaignId}/npcs/${rel.toNpc.id}`}
                     className="text-indigo-600 hover:text-indigo-700"
                   >
                     {rel.toNpc.name}
-                  </a>
+                  </Link>
                 ) : (
                   <span className="text-gray-500">{rel.toNpcId}</span>
                 )}
@@ -171,29 +172,38 @@ function AddRelationForm({
   setBusy: (b: boolean) => void;
 }) {
   const [relation, setRelation] = useState<string>('parent');
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState<Npc[]>([]);
   const fetchSeq = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Debounce keystrokes into a trailing-edge query (mirrors MonsterLookupPanel).
   useEffect(() => {
-    const trimmed = search.trim();
-    if (!trimmed) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setQuery(searchInput.trim()), 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [searchInput]);
+
+  // Search server-side so matches beyond the first page are reachable
+  // (VEG-313); only the exclude-self filter stays on the client.
+  useEffect(() => {
+    if (!query) {
       setCandidates([]);
       return;
     }
     const seq = ++fetchSeq.current;
     apiFetch<PaginatedResponse<Npc>>(
-      `/npcs?campaignId=${encodeURIComponent(npc.campaignId)}&limit=10`
+      `/npcs?campaignId=${encodeURIComponent(npc.campaignId)}&search=${encodeURIComponent(query)}&limit=10`
     )
       .then(res => {
         if (seq !== fetchSeq.current) return;
-        const filtered = res.data
-          .filter(n => n.id !== npc.id)
-          .filter(n => n.name.toLowerCase().includes(trimmed.toLowerCase()));
-        setCandidates(filtered);
+        setCandidates(res.data.filter(n => n.id !== npc.id));
       })
       .catch(() => setCandidates([]));
-  }, [search, npc.id, npc.campaignId]);
+  }, [query, npc.id, npc.campaignId]);
 
   const handlePick = useCallback(
     async (target: Npc) => {
@@ -243,8 +253,8 @@ function AddRelationForm({
       <input
         type="text"
         placeholder="Search NPCs by name…"
-        value={search}
-        onChange={e => setSearch(e.target.value)}
+        value={searchInput}
+        onChange={e => setSearchInput(e.target.value)}
         className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800"
       />
       {candidates.length > 0 && (

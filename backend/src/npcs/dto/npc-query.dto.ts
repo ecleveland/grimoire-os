@@ -12,6 +12,11 @@ export class NpcFilterDto extends PaginationDto {
   @IsOptional()
   @IsString()
   profession?: string;
+
+  @ApiPropertyOptional({ description: 'Case-insensitive name substring match' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class NpcQueryDto extends NpcFilterDto {
