@@ -1,6 +1,5 @@
 import {
   MONSTER_LOOT_GENERIC_TYPE,
-  MONSTER_LOOT_TYPES,
   createMonsterLootTemplateSelector,
   crToBucket,
   monsterToLootSelection,
@@ -72,6 +71,11 @@ describe('crToBucket', () => {
 
   it('clamps negative CRs to the 0 bucket', () => {
     expect(crToBucket(-1)).toBe('0');
+  });
+
+  it('throws on non-finite CRs instead of silently picking a bucket', () => {
+    expect(() => crToBucket(NaN)).toThrow(/invalid challenge rating/i);
+    expect(() => crToBucket(Infinity)).toThrow(/invalid challenge rating/i);
   });
 });
 
@@ -145,26 +149,5 @@ describe('integration with the shared LootRoller', () => {
     expect(a.template).toEqual({ profession: 'dragon', crBucket: '11+' });
     expect(a.coinage.gp).toBeGreaterThanOrEqual(100);
     expect(a.coinage.gp).toBeLessThanOrEqual(200);
-  });
-});
-
-describe('MONSTER_LOOT_TYPES', () => {
-  it('covers the canonical 5e type list', () => {
-    expect(MONSTER_LOOT_TYPES).toEqual([
-      'aberration',
-      'beast',
-      'celestial',
-      'construct',
-      'dragon',
-      'elemental',
-      'fey',
-      'fiend',
-      'giant',
-      'humanoid',
-      'monstrosity',
-      'ooze',
-      'plant',
-      'undead',
-    ]);
   });
 });

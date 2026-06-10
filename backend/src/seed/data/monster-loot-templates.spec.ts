@@ -107,17 +107,36 @@ describe('Monster loot seed integrity against real SRD monsters', () => {
     '../../../../docs/extracted-srd-json/monsters.json'
   );
 
-  it('every SRD monster type resolves to a canonical type or falls back cleanly', () => {
+  let srdMonsters: { name: string; type: string; challenge_rating: string }[];
+
+  beforeAll(() => {
     const raw = JSON.parse(fs.readFileSync(monstersJsonPath, 'utf-8')) as {
       monsters: { name: string; type: string; challenge_rating: string }[];
     };
-    const select = createMonsterLootTemplateSelector(asLootTemplates());
+    srdMonsters = raw.monsters;
+  });
+
+  // Strict on purpose: an unrecognized CR string must fail the test, not get
+  // parseFloat'd into the wrong bucket ('3/4' → 3) or NaN.
+  const parseCr = (cr: string): number => {
     const fractions: Record<string, number> = { '1/8': 0.125, '1/4': 0.25, '1/2': 0.5 };
-    for (const m of raw.monsters) {
-      const cr = fractions[m.challenge_rating] ?? parseFloat(m.challenge_rating);
+    if (cr in fractions) return fractions[cr];
+    if (!/^\d+$/.test(cr)) throw new Error(`Unrecognized SRD challenge rating: "${cr}"`);
+    return parseInt(cr, 10);
+  };
+
+  it('the SRD extraction is present and non-trivial', () => {
+    // Guards against an empty/truncated monsters.json making the integrity
+    // tests below pass vacuously.
+    expect(srdMonsters.length).toBeGreaterThanOrEqual(300);
+  });
+
+  it('every SRD monster type resolves to a canonical type or falls back cleanly', () => {
+    const select = createMonsterLootTemplateSelector(asLootTemplates());
+    for (const m of srdMonsters) {
       const { selectionKey, crBucket } = monsterToLootSelection({
         type: m.type,
-        challengeRating: cr,
+        challengeRating: parseCr(m.challenge_rating),
       });
       const tpl = select(selectionKey, crBucket);
       expect(tpl).not.toBeNull();
@@ -125,10 +144,7 @@ describe('Monster loot seed integrity against real SRD monsters', () => {
   });
 
   it('every SRD monster type normalizes to a canonical type (no silent generic-only fallbacks)', () => {
-    const raw = JSON.parse(fs.readFileSync(monstersJsonPath, 'utf-8')) as {
-      monsters: { type: string }[];
-    };
-    const types = new Set(raw.monsters.map(m => normalizeMonsterType(m.type)));
+    const types = new Set(srdMonsters.map(m => normalizeMonsterType(m.type)));
     for (const t of types) {
       expect(MONSTER_LOOT_TYPES).toContain(t);
     }

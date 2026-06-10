@@ -476,32 +476,39 @@ describe('SeedService', () => {
     expect(call.data.length).toBeGreaterThan(0);
   });
 
-  it('seeds NPC loot templates after clearing curated rows', async () => {
+  it('seeds both loot-template families with explicit categories and scoped curated deletes', async () => {
     await service.seed();
 
+    // Each family clears exactly its own curated rows — neither delete may
+    // silently load-bear for the other.
     expect(prisma.npcLootTemplate.deleteMany).toHaveBeenCalledWith({
-      where: { source: 'curated' },
+      where: { source: 'curated', category: 'npc' },
     });
-    expect(prisma.npcLootTemplate.createMany).toHaveBeenCalled();
-    const call = prisma.npcLootTemplate.createMany.mock.calls[0][0];
-    expect(call.data.length).toBeGreaterThan(0);
-  });
+    expect(prisma.npcLootTemplate.deleteMany).toHaveBeenCalledWith({
+      where: { source: 'curated', category: 'monster' },
+    });
 
-  it('seeds monster loot templates with category=monster alongside NPC ones', async () => {
-    await service.seed();
-
-    const calls = prisma.npcLootTemplate.createMany.mock.calls;
-    expect(calls.length).toBe(2);
-    const npcRows = calls[0][0].data;
-    const monsterRows = calls[1][0].data;
+    // Discriminate the createMany batches by row content, not call order.
+    const batches = prisma.npcLootTemplate.createMany.mock.calls.map(c => c[0]);
+    const npcRows = batches.flatMap(b =>
+      b.data.filter((r: { category?: string }) => r.category === 'npc')
+    );
+    const monsterRows = batches.flatMap(b =>
+      b.data.filter((r: { category?: string }) => r.category === 'monster')
+    );
     expect(npcRows.length).toBeGreaterThan(0);
     expect(monsterRows.length).toBeGreaterThan(0);
-    for (const row of npcRows) {
-      expect(row.category ?? 'npc').toBe('npc');
-    }
+    expect(npcRows.length + monsterRows.length).toBe(
+      batches.reduce((n, b) => n + b.data.length, 0)
+    );
     for (const row of monsterRows) {
-      expect(row.category).toBe('monster');
       expect(typeof row.profession).toBe('string');
+    }
+
+    // skipDuplicates is inert on this table (no unique constraint) — it must
+    // not reappear and imply protection that does not exist.
+    for (const b of batches) {
+      expect(b.skipDuplicates).toBeUndefined();
     }
   });
 

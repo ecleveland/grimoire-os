@@ -3,7 +3,7 @@
 // contract: a normalized type key plus a CR bucket. Pure — no Prisma, no I/O.
 
 import { createFallbackTemplateSelector, LootTemplateSelector } from './loot-template-selector';
-import { LootTemplate } from './loot.types';
+import { LootCrBucket, LootTemplate } from './loot.types';
 
 /** Canonical 5e creature types monster loot templates are keyed by. */
 export const MONSTER_LOOT_TYPES = [
@@ -26,9 +26,10 @@ export const MONSTER_LOOT_TYPES = [
 export type MonsterLootType = (typeof MONSTER_LOOT_TYPES)[number];
 
 /**
- * Fallback key for monster templates without a type match. Same sentinel
- * string the NPC templates use, but in the 'monster' category namespace —
- * the two families never share a template pool.
+ * Fallback key for monster templates without a type match. The sentinel
+ * string collides with the NPC one by design, so callers MUST pass only
+ * category='monster' templates to the selector — an unfiltered template
+ * query would silently mix the two families' generic fallbacks.
  */
 export const MONSTER_LOOT_GENERIC_TYPE = '__generic__';
 
@@ -49,10 +50,14 @@ export function normalizeMonsterType(raw: string): string {
 
 /**
  * Buckets a real challenge rating into the loot CR buckets. Total over all
- * non-negative CRs — unlike the NPC generator's weighted bucket roll, a
- * monster's bucket is derived, never random.
+ * finite CRs (negatives clamp to '0'); throws on NaN/Infinity rather than
+ * silently picking a bucket. Unlike the NPC generator's weighted bucket
+ * roll, a monster's bucket is derived, never random.
  */
-export function crToBucket(cr: number): string {
+export function crToBucket(cr: number): LootCrBucket {
+  if (!Number.isFinite(cr)) {
+    throw new Error(`crToBucket: invalid challenge rating ${cr}`);
+  }
   if (cr <= 0) return '0';
   if (cr <= 1) return '0–1';
   if (cr < 5) return '2–4';
@@ -60,7 +65,7 @@ export function crToBucket(cr: number): string {
   return '11+';
 }
 
-export type MonsterLootSelection = { selectionKey: string; crBucket: string };
+export type MonsterLootSelection = { selectionKey: string; crBucket: LootCrBucket };
 
 /** The selection inputs the shared LootRoller needs for a given monster. */
 export function monsterToLootSelection(monster: {

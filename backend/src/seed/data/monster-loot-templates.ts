@@ -10,19 +10,23 @@
 // dragons/fiends/giants get richer hoards at high CR; humanoids borrow from
 // the NPC arsenal. Within a type, list the most representative bucket FIRST —
 // the shared fallback chain picks the first entry for the type when the
-// exact bucket is missing.
+// exact bucket is missing. That convention only holds for this in-memory
+// array: any loader that round-trips these rows through the database MUST
+// impose a deterministic order (Postgres row order without ORDER BY is
+// unspecified) — e.g. orderBy crBucket ascending, which keeps the poorest
+// bucket as the fallback.
 
-import { MONSTER_LOOT_GENERIC_TYPE } from '../../loot/monster-loot';
-import { NpcLootCoinage, NpcLootCrBucket, NpcLootItemEntry } from './npc-loot-templates';
+import { MONSTER_LOOT_GENERIC_TYPE, MonsterLootType } from '../../loot/monster-loot';
+import { LootCoinage, LootCrBucket, LootTemplateItem } from '../../loot/loot.types';
 
 export type MonsterLootTemplate = {
-  type: string;
-  crBucket: NpcLootCrBucket;
-  coinage: NpcLootCoinage;
-  items: NpcLootItemEntry[];
+  type: MonsterLootType | typeof MONSTER_LOOT_GENERIC_TYPE;
+  crBucket: LootCrBucket;
+  coinage: LootCoinage;
+  items: LootTemplateItem[];
 };
 
-const NO_COIN: NpcLootCoinage = { gp: [0, 0], sp: [0, 0], cp: [0, 0] };
+const NO_COIN: LootCoinage = { gp: [0, 0], sp: [0, 0], cp: [0, 0] };
 
 export const monsterLootTemplates: MonsterLootTemplate[] = [
   // ── Generic monster fallback (one per bucket) ───────────────────────────
@@ -86,7 +90,7 @@ export const monsterLootTemplates: MonsterLootTemplate[] = [
     ],
   },
 
-  // ── Beast: hide, fang, feather — never coin ──────────────────────────────
+  // ── Beast: hide, fang, feather — no gold, a few silver at most ───────────
   {
     type: 'beast',
     crBucket: '0',

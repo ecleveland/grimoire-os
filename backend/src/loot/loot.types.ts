@@ -27,6 +27,20 @@ export type GeneratedLoot = {
   };
 };
 
+/**
+ * The CR buckets every loot template family is keyed by. Note the en-dash
+ * (U+2013) in the range labels — an ASCII hyphen never matches a template.
+ */
+export const LOOT_CR_BUCKETS = ['0', '0–1', '2–4', '5–10', '11+'] as const;
+
+export type LootCrBucket = (typeof LOOT_CR_BUCKETS)[number];
+
+export type LootCoinage = {
+  gp: [number, number];
+  sp: [number, number];
+  cp: [number, number];
+};
+
 export type LootTemplateItem = { itemName: string; weight: number; qty: [number, number] };
 
 export type LootTemplate = {

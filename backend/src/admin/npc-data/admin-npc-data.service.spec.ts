@@ -7,6 +7,7 @@ import { USER_ID } from '../../test/fixtures';
 type MockModel = {
   findMany: jest.Mock;
   findUnique: jest.Mock;
+  findFirst: jest.Mock;
   create: jest.Mock;
   update: jest.Mock;
   delete: jest.Mock;
@@ -16,6 +17,7 @@ function makeMockModel(): MockModel {
   return {
     findMany: jest.fn(),
     findUnique: jest.fn(),
+    findFirst: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
     delete: jest.fn(),
@@ -194,6 +196,28 @@ describe('AdminNpcDataService', () => {
       await expect(service.setActive('names', 'missing', false)).rejects.toBeInstanceOf(
         NotFoundException
       );
+    });
+
+    it('resolves loot templates scoped to category=npc', async () => {
+      prisma.npcLootTemplate.findFirst.mockResolvedValue({ id: 'lt1', source: 'user' });
+      prisma.npcLootTemplate.update.mockResolvedValue({ id: 'lt1', isActive: false });
+
+      await service.setActive('loot-templates', 'lt1', false);
+
+      expect(prisma.npcLootTemplate.findFirst).toHaveBeenCalledWith({
+        where: { id: 'lt1', category: 'npc' },
+      });
+      expect(prisma.npcLootTemplate.update).toHaveBeenCalled();
+    });
+
+    it('404s when the id belongs to a monster-category template', async () => {
+      // findFirst with the category filter returns null for monster rows.
+      prisma.npcLootTemplate.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.setActive('loot-templates', 'monster-row', false)
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(prisma.npcLootTemplate.update).not.toHaveBeenCalled();
     });
   });
 

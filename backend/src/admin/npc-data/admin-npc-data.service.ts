@@ -79,6 +79,7 @@ export class AdminNpcDataService {
         const dto = validateRow(CreateLootTemplateRowDto, input);
         return this.prisma.npcLootTemplate.create({
           data: {
+            category: 'npc',
             profession: dto.profession,
             crBucket: dto.crBucket,
             coinage: dto.coinage as Prisma.InputJsonValue,
@@ -170,7 +171,9 @@ export class AdminNpcDataService {
       case 'appearance':
         return this.prisma.npcAppearanceTrait.findUnique({ where: { id } });
       case 'loot-templates':
-        return this.prisma.npcLootTemplate.findUnique({ where: { id } });
+        // Scoped to the NPC family: monster-category ids must 404 here, not
+        // get mutated through the NPC editor (their editor is VEG-304).
+        return this.prisma.npcLootTemplate.findFirst({ where: { id, category: 'npc' } });
       case 'trinkets':
         return this.prisma.trinket.findUnique({ where: { id } });
       case 'personality':
