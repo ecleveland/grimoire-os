@@ -199,6 +199,43 @@ describe('NpcRelationsPanel', () => {
     expect(await screen.findByRole('button', { name: /karis the grey/i })).toBeInTheDocument();
   });
 
+  it('hints to refine the search when more matches exist than the page shows', async () => {
+    const user = userEvent.setup();
+    const page1: PaginatedResponse<Npc> = {
+      data: Array.from({ length: 10 }, (_, i) =>
+        makeNpc({ id: `npc-t${i}`, name: `Townsfolk ${i}` })
+      ),
+      total: 23,
+      page: 1,
+      lastPage: 3,
+    };
+    mockApiFetch.mockResolvedValue(page1);
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'townsfolk');
+
+    await screen.findByRole('button', { name: /townsfolk 0/i });
+    expect(screen.getByText(/showing 10 of 23/i)).toBeInTheDocument();
+  });
+
+  it('shows no refine hint when every match fits on the page', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue({
+      data: [makeNpc({ id: 'npc-2', name: 'Bren Stormwind' })],
+      total: 1,
+      page: 1,
+      lastPage: 1,
+    });
+
+    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'bren');
+
+    await screen.findByRole('button', { name: /bren stormwind/i });
+    expect(screen.queryByText(/showing \d+ of \d+/i)).not.toBeInTheDocument();
+  });
+
   it('Add Existing search debounces keystrokes into a single request', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
