@@ -5,12 +5,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { aggregateCombatantLoot, Combatant, EncounterLootTotal } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
+import { SeededRng } from '../common/helpers/seeded-rng';
+import { MonsterLootService } from '../loot/monster-loot.service';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
+import { RollEncounterLootDto } from './dto/roll-encounter-loot.dto';
 import { EncounterDto, EncounterListItemDto } from './dto/encounter-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
@@ -31,7 +35,8 @@ const encounterListSelect = {
 export class EncountersService {
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService
+    private campaignAuth: CampaignAuthService,
+    private monsterLoot: MonsterLootService
   ) {}
 
   /**
@@ -127,10 +132,24 @@ export class EncountersService {
       }),
     };
 
-    // No expectedVersion → caller opts out of optimistic locking (VEG-137).
+    const updated = await this.writeWithVersionGuard(id, data, expectedVersion);
+    return toDto(EncounterDto, updated);
+  }
+
+  /**
+   * Applies `data` to an encounter, honoring the optimistic-locking contract
+   * (VEG-137): no `expectedVersion` → plain write; otherwise the write only
+   * succeeds while the row is still at that version, incrementing it. Shared
+   * by field updates and loot rolls so every encounter write conflicts the
+   * same way.
+   */
+  private async writeWithVersionGuard(
+    id: string,
+    data: Prisma.EncounterUpdateInput,
+    expectedVersion: number | undefined
+  ) {
     if (expectedVersion === undefined) {
-      const updated = await this.prisma.encounter.update({ where: { id }, data });
-      return toDto(EncounterDto, updated);
+      return this.prisma.encounter.update({ where: { id }, data });
     }
 
     // Guarded write: only succeeds if the row is still at expectedVersion.
@@ -157,7 +176,99 @@ export class EncountersService {
     if (!updated) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
-    return toDto(EncounterDto, updated);
+    return updated;
+  }
+
+  /**
+   * Rolls loot for the encounter's monster combatants (VEG-300): every
+   * combatant with a `monsterId`, or just `dto.combatantIndex` when given.
+   * Each target's loot is rolled off its source monster's type × CR via the
+   * shared loot engine and replaces any previous roll. Per-combatant RNG is
+   * derived as `seed:index`, so a seed reproduces the whole roll and skipped
+   * combatants don't shift their neighbours' results.
+   */
+  async rollLoot(
+    id: string,
+    userId: string,
+    dto: RollEncounterLootDto
+  ): Promise<{ encounter: EncounterDto; lootTotal: EncounterLootTotal }> {
+    const result = await this.prisma.encounter.findUnique({
+      where: { id },
+      include: { campaign: { select: campaignAuthSelect } },
+    });
+    if (!result) {
+      throw new NotFoundException(`Encounter "${id}" not found`);
+    }
+    this.campaignAuth.assertOwnerOnCampaign(result.campaign, userId);
+
+    const combatants = (result.combatants as unknown as Combatant[] | null) ?? [];
+    const targetIndexes = this.resolveLootTargets(combatants, dto.combatantIndex);
+
+    const monsterIds = [...new Set(targetIndexes.map(i => combatants[i].monsterId as string))];
+    const monsters = await this.prisma.monster.findMany({
+      where: { id: { in: monsterIds } },
+      select: { id: true, type: true, challengeRating: true },
+    });
+    if (monsters.length !== monsterIds.length) {
+      const found = new Set(monsters.map(m => m.id));
+      const missing = monsterIds.filter(mid => !found.has(mid));
+      throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
+    }
+    const monstersById = new Map(monsters.map(m => [m.id, m]));
+
+    const roller = await this.monsterLoot.loadRoller();
+    const seed = dto.seed ?? SeededRng.generateSeed();
+    const rolledAt = new Date().toISOString();
+    const targets = new Set(targetIndexes);
+    const updatedCombatants = combatants.map((combatant, index) => {
+      if (!targets.has(index)) return combatant;
+      const monster = monstersById.get(combatant.monsterId as string)!;
+      const rolled = roller.rollForMonster(
+        { type: monster.type, challengeRating: monster.challengeRating },
+        new SeededRng(`${seed}:${index}`)
+      );
+      return {
+        ...combatant,
+        loot: { coinage: rolled.coinage, items: rolled.items, rolledAt },
+      };
+    });
+
+    const updated = await this.writeWithVersionGuard(
+      id,
+      { combatants: updatedCombatants as unknown as Prisma.InputJsonValue },
+      dto.expectedVersion
+    );
+    return {
+      encounter: toDto(EncounterDto, updated),
+      lootTotal: aggregateCombatantLoot(updatedCombatants),
+    };
+  }
+
+  /** Which combatant indexes a loot roll applies to; throws 400 when none. */
+  private resolveLootTargets(
+    combatants: Combatant[],
+    combatantIndex: number | undefined
+  ): number[] {
+    if (combatantIndex !== undefined) {
+      const combatant = combatants[combatantIndex];
+      if (!combatant) {
+        throw new BadRequestException(
+          `combatantIndex ${combatantIndex} is out of range (encounter has ${combatants.length} combatants)`
+        );
+      }
+      if (!combatant.monsterId) {
+        throw new BadRequestException(
+          `Combatant "${combatant.name}" has no linked monster to roll loot from`
+        );
+      }
+      return [combatantIndex];
+    }
+
+    const indexes = combatants.flatMap((c, i) => (c.monsterId ? [i] : []));
+    if (indexes.length === 0) {
+      throw new BadRequestException('No combatant references a monster to roll loot from');
+    }
+    return indexes;
   }
 
   async remove(id: string, userId: string): Promise<void> {

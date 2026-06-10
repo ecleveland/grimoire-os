@@ -46,6 +46,38 @@ export interface Feature {
   description?: string;
 }
 
+/**
+ * Where a rolled loot item came from. `profession`/`monster` tag items rolled
+ * off an NPC- or monster-category template respectively; `trinket` and
+ * `magic-item` come from the engine's bonus rolls (VEG-297/VEG-300).
+ */
+export type LootItemSource = 'profession' | 'trinket' | 'magic-item' | 'monster';
+
+export interface CombatantLootItem {
+  /** Resolved SRD item id, or null for flavor entries with no catalog match. */
+  itemId: string | null;
+  name: string;
+  quantity: number;
+  source: LootItemSource;
+  notes?: string;
+}
+
+export interface CombatantLootCoinage {
+  gp: number;
+  sp: number;
+  cp: number;
+}
+
+/**
+ * Loot rolled for a combatant from its source monster (VEG-300). Re-rolling
+ * replaces the whole object.
+ */
+export interface CombatantLoot {
+  coinage: CombatantLootCoinage;
+  items: CombatantLootItem[];
+  rolledAt?: string;
+}
+
 export interface Combatant {
   name: string;
   initiative: number;
@@ -60,6 +92,8 @@ export interface Combatant {
    * combatants omit it.
    */
   monsterId?: string;
+  /** Loot rolled from the source monster (VEG-300); absent until rolled. */
+  loot?: CombatantLoot;
 }
 
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;

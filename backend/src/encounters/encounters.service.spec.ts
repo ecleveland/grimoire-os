@@ -11,6 +11,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
 import { EncounterDto, EncounterListItemDto } from './dto/encounter-response.dto';
+import { MonsterLootService } from '../loot/monster-loot.service';
+import { SeededRng } from '../common/helpers/seeded-rng';
+import type { GeneratedLoot } from '../loot/loot.types';
 
 describe('EncountersService', () => {
   let service: EncountersService;
@@ -21,6 +24,8 @@ describe('EncountersService', () => {
     assertOwnerOnCampaign: jest.Mock;
     assertMemberOnCampaign: jest.Mock;
   };
+  let rollForMonster: jest.Mock;
+  let monsterLoot: { loadRoller: jest.Mock };
 
   const ENCOUNTER_ID = 'enc-1111-2222-3333-444444444444';
   const MONSTER_ID = 'mon-1111-2222-3333-444444444444';
@@ -76,11 +81,15 @@ describe('EncountersService', () => {
       assertMemberOnCampaign: jest.fn(),
     };
 
+    rollForMonster = jest.fn();
+    monsterLoot = { loadRoller: jest.fn().mockResolvedValue({ rollForMonster }) };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EncountersService,
         prismaMockProvider(),
         { provide: CampaignAuthService, useValue: campaignAuth },
+        { provide: MonsterLootService, useValue: monsterLoot },
       ],
     }).compile();
 
@@ -464,6 +473,259 @@ describe('EncountersService', () => {
       await expect(
         service.update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 })
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('rollLoot (VEG-300)', () => {
+    const campaignAuthShape = {
+      id: CAMPAIGN_ID,
+      ownerId: USER_ID,
+      players: [{ userId: USER_ID }, { userId: USER_ID_2 }],
+    };
+    const MONSTER_ID_2 = 'mon-5555-6666-7777-888888888888';
+
+    const wolfRow = { id: MONSTER_ID, type: 'Beast', challengeRating: 0.25 };
+    const dragonRow = { id: MONSTER_ID_2, type: 'Dragon (Chromatic)', challengeRating: 17 };
+
+    const wolf = {
+      name: 'Wolf',
+      initiative: 12,
+      hp: 11,
+      maxHp: 11,
+      ac: 13,
+      isNpc: true,
+      monsterId: MONSTER_ID,
+    };
+    const pc = { name: 'Aria (PC)', initiative: 18, hp: 30, maxHp: 30, ac: 16, isNpc: false };
+    const dragon = {
+      name: 'Red Dragon',
+      initiative: 10,
+      hp: 256,
+      maxHp: 256,
+      ac: 19,
+      isNpc: true,
+      monsterId: MONSTER_ID_2,
+    };
+
+    const generated = (over: Partial<GeneratedLoot> = {}): GeneratedLoot => ({
+      template: { profession: 'beast', crBucket: '0–1' },
+      coinage: { gp: 0, sp: 1, cp: 5 },
+      items: [{ itemId: null, name: 'Wolf pelt', quantity: 1, source: 'monster' }],
+      effective: {
+        itemCountDie: '1d3',
+        coinageMultiplier: 1,
+        trinketChance: 0.05,
+        magicItemChance: 0.005,
+      },
+      ...over,
+    });
+
+    const dragonLoot = generated({
+      template: { profession: 'dragon', crBucket: '11+' },
+      coinage: { gp: 500, sp: 0, cp: 0 },
+      items: [{ itemId: 'item-gem', name: 'Ruby', quantity: 2, source: 'monster' }],
+    });
+
+    const mockEncounterRow = (combatants: unknown) => ({
+      ...mockEncounter,
+      combatants,
+      campaign: campaignAuthShape,
+    });
+
+    beforeEach(() => {
+      // Honor the `where.id.in` filter like real Prisma — rollLoot compares
+      // the result count against the requested ids to detect stale references.
+      prisma.monster.findMany.mockImplementation(({ where }: { where: { id: { in: string[] } } }) =>
+        Promise.resolve([wolfRow, dragonRow].filter(m => where.id.in.includes(m.id)))
+      );
+      rollForMonster.mockImplementation((monster: { type: string }) =>
+        monster.type.startsWith('Dragon') ? dragonLoot : generated()
+      );
+      // Unguarded write echoes back the data it was given, like Prisma does.
+      prisma.encounter.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+        Promise.resolve({ ...mockEncounter, ...data })
+      );
+    });
+
+    it('rolls loot for every monster combatant, skips manual ones, and returns the aggregate', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf, pc, dragon]));
+
+      const result = await service.rollLoot(ENCOUNTER_ID, USER_ID, {});
+
+      expect(campaignAuth.assertOwnerOnCampaign).toHaveBeenCalledWith(campaignAuthShape, USER_ID);
+      expect(prisma.monster.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [MONSTER_ID, MONSTER_ID_2] } },
+        select: { id: true, type: true, challengeRating: true },
+      });
+      expect(rollForMonster).toHaveBeenCalledTimes(2);
+      expect(rollForMonster).toHaveBeenCalledWith(
+        { type: 'Beast', challengeRating: 0.25 },
+        expect.any(SeededRng)
+      );
+      expect(rollForMonster).toHaveBeenCalledWith(
+        { type: 'Dragon (Chromatic)', challengeRating: 17 },
+        expect.any(SeededRng)
+      );
+
+      const written = prisma.encounter.update.mock.calls[0][0].data.combatants;
+      expect(written[0].loot).toEqual({
+        coinage: { gp: 0, sp: 1, cp: 5 },
+        items: [{ itemId: null, name: 'Wolf pelt', quantity: 1, source: 'monster' }],
+        rolledAt: expect.any(String),
+      });
+      expect(written[1]).toEqual(pc); // manual combatant untouched
+      expect(written[2].loot.coinage).toEqual({ gp: 500, sp: 0, cp: 0 });
+
+      expect(result.encounter).toBeInstanceOf(EncounterDto);
+      expect(result.lootTotal).toEqual({
+        coinage: { gp: 500, sp: 1, cp: 5 },
+        items: [
+          { itemId: null, name: 'Wolf pelt', quantity: 1, source: 'monster' },
+          { itemId: 'item-gem', name: 'Ruby', quantity: 2, source: 'monster' },
+        ],
+      });
+    });
+
+    it('derives a deterministic per-combatant rng from the seed and combatant index', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf, pc, dragon]));
+
+      await service.rollLoot(ENCOUNTER_ID, USER_ID, { seed: 'veg-300' });
+
+      const [, wolfRng] = rollForMonster.mock.calls[0];
+      const [, dragonRng] = rollForMonster.mock.calls[1];
+      // Same seed derivation → same float sequence. The dragon sits at
+      // combatant index 2 (the manual PC at 1 is skipped but keeps its slot).
+      expect((wolfRng as SeededRng).nextFloat()).toBe(new SeededRng('veg-300:0').nextFloat());
+      expect((dragonRng as SeededRng).nextFloat()).toBe(new SeededRng('veg-300:2').nextFloat());
+    });
+
+    it('rolls only the selected combatant when combatantIndex is given', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf, pc, dragon]));
+
+      await service.rollLoot(ENCOUNTER_ID, USER_ID, { combatantIndex: 2 });
+
+      expect(rollForMonster).toHaveBeenCalledTimes(1);
+      expect(rollForMonster).toHaveBeenCalledWith(
+        { type: 'Dragon (Chromatic)', challengeRating: 17 },
+        expect.any(SeededRng)
+      );
+      const written = prisma.encounter.update.mock.calls[0][0].data.combatants;
+      expect(written[0].loot).toBeUndefined();
+      expect(written[2].loot).toBeDefined();
+    });
+
+    it('replaces existing loot on re-roll', async () => {
+      const previouslyRolled = {
+        ...wolf,
+        loot: {
+          coinage: { gp: 99, sp: 99, cp: 99 },
+          items: [{ itemId: null, name: 'Old pelt', quantity: 9, source: 'monster' }],
+          rolledAt: '2026-01-01T00:00:00.000Z',
+        },
+      };
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([previouslyRolled]));
+
+      const result = await service.rollLoot(ENCOUNTER_ID, USER_ID, {});
+
+      const written = prisma.encounter.update.mock.calls[0][0].data.combatants;
+      expect(written[0].loot.coinage).toEqual({ gp: 0, sp: 1, cp: 5 });
+      expect(written[0].loot.items).toEqual([
+        { itemId: null, name: 'Wolf pelt', quantity: 1, source: 'monster' },
+      ]);
+      expect(result.lootTotal.coinage).toEqual({ gp: 0, sp: 1, cp: 5 });
+    });
+
+    it('throws 400 when combatantIndex is out of range', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf]));
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, { combatantIndex: 5 })).rejects.toThrow(
+        BadRequestException
+      );
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+    });
+
+    it('throws 400 when combatantIndex targets a combatant without a monsterId', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf, pc]));
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, { combatantIndex: 1 })).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it('throws 400 when no combatant references a monster (roll-all)', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([pc]));
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, {})).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it('throws 400 when combatants is null (roll-all)', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow(null));
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, {})).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it('throws 400 when a referenced monster no longer exists', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf]));
+      prisma.monster.findMany.mockResolvedValue([]);
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, {})).rejects.toThrow(
+        BadRequestException
+      );
+    });
+
+    it('throws NotFoundException when the encounter does not exist', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(null);
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, {})).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws ForbiddenException when a non-owner rolls', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf]));
+      campaignAuth.assertOwnerOnCampaign.mockImplementation(() => {
+        throw new ForbiddenException('Only the campaign owner can perform this action');
+      });
+
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID_2, {})).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+    });
+
+    it('guards the write on expectedVersion and increments version', async () => {
+      prisma.encounter.findUnique
+        .mockResolvedValueOnce(mockEncounterRow([wolf])) // auth read
+        .mockResolvedValueOnce({ ...mockEncounter, version: 4 }); // re-fetch
+      prisma.encounter.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.rollLoot(ENCOUNTER_ID, USER_ID, { expectedVersion: 3 });
+
+      expect(prisma.encounter.updateMany).toHaveBeenCalledWith({
+        where: { id: ENCOUNTER_ID, version: 3 },
+        data: {
+          combatants: expect.any(Array),
+          version: { increment: 1 },
+        },
+      });
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(result.encounter.version).toBe(4);
+    });
+
+    it('throws 409 ConflictException carrying currentVersion on a stale roll', async () => {
+      prisma.encounter.findUnique
+        .mockResolvedValueOnce(mockEncounterRow([wolf])) // auth read
+        .mockResolvedValueOnce({ ...mockEncounter, version: 7 }); // current-version probe
+      prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
+
+      const err = await service
+        .rollLoot(ENCOUNTER_ID, USER_ID, { expectedVersion: 3 })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({ currentVersion: 7 });
     });
   });
 

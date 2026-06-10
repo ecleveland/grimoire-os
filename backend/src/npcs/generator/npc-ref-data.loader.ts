@@ -7,21 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NpcRefData, MonsterRef } from './npc-pipeline';
 import { StatBlockAction } from './npc-generator.types';
 import { npcSettingBiases } from '../../seed/data/npc-setting-biases';
-
-const NPC_GAME_RULE_CATEGORY = 'npc-generation';
-
-const DEFAULT_GAME_RULES = {
-  trinketChance: 0.05,
-  magicItemChanceByCr: {
-    '0': 0.001,
-    '0–1': 0.005,
-    '2–4': 0.02,
-    '5–10': 0.05,
-    '11+': 0.15,
-  } as Record<string, number>,
-  itemCountDie: '1d3',
-  coinageMultiplier: 1,
-};
+import { LOOT_GAME_RULE_CATEGORY, resolveLootGameRules } from '../../loot/loot-game-rules';
 
 @Injectable()
 export class NpcRefDataLoader {
@@ -62,7 +48,7 @@ export class NpcRefDataLoader {
       }),
       this.prisma.item.findMany({ select: { id: true, name: true, isMagic: true } }),
       this.prisma.monster.findMany(),
-      this.prisma.gameRule.findMany({ where: { category: NPC_GAME_RULE_CATEGORY } }),
+      this.prisma.gameRule.findMany({ where: { category: LOOT_GAME_RULE_CATEGORY } }),
     ]);
 
     const itemsByName = new Map<string, { id: string; name: string; isMagic: boolean }>();
@@ -71,9 +57,6 @@ export class NpcRefDataLoader {
       itemsByName.set(it.name, it);
       if (it.isMagic) magicItems.push(it);
     }
-
-    const gameRulesMap = new Map<string, unknown>();
-    for (const r of gameRules) gameRulesMap.set(r.key, r.value);
 
     return {
       species: species.map(s => ({ name: s.name, size: s.size })),
@@ -110,20 +93,7 @@ export class NpcRefDataLoader {
       magicItems,
       monsters: monsters.map(toMonsterRef),
       settingBiases: npcSettingBiases,
-      gameRules: {
-        trinketChance:
-          (gameRulesMap.get('trinket-chance') as number | undefined) ??
-          DEFAULT_GAME_RULES.trinketChance,
-        magicItemChanceByCr:
-          (gameRulesMap.get('magic-item-chance-by-cr') as Record<string, number> | undefined) ??
-          DEFAULT_GAME_RULES.magicItemChanceByCr,
-        itemCountDie:
-          (gameRulesMap.get('item-count-die') as string | undefined) ??
-          DEFAULT_GAME_RULES.itemCountDie,
-        coinageMultiplier:
-          (gameRulesMap.get('coinage-multiplier') as number | undefined) ??
-          DEFAULT_GAME_RULES.coinageMultiplier,
-      },
+      gameRules: resolveLootGameRules(gameRules),
     };
   }
 }
