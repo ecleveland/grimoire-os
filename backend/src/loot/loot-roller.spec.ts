@@ -1,14 +1,20 @@
-import { LootRoller } from './loot-roller';
+import { LootRoller, LootRollerData } from './loot-roller';
 import { createFallbackTemplateSelector, LootTemplateSelector } from './loot-template-selector';
 import { GeneratedLoot, LootTemplate } from './loot.types';
 import { NpcPipeline } from '../npcs/generator/npc-pipeline';
 import { buildSeedRefData } from '../npcs/generator/npc-pipeline.fixture';
 import { SeededRng } from '../common/helpers/seeded-rng';
 import { NPC_LOOT_GENERIC_PROFESSION } from '../seed/data/npc-loot-templates';
+import { DEFAULT_CR_BUCKET_WEIGHTS } from '../npcs/generator/npc-generator.constants';
+
+// Mirrors NpcPipeline.pickCrBucket: the pipeline draws the CR bucket from the
+// loot sub-RNG before delegating, so parity tests must consume the same draw.
+const rollCrBucket = (rng: SeededRng) =>
+  rng.weightedPick(DEFAULT_CR_BUCKET_WEIGHTS.map(b => ({ value: b.bucket, weight: b.weight })));
 
 // Builds a LootRoller from the same seed-data fixture the NPC pipeline tests
 // use, with the NPC profession selection strategy.
-function npcRoller(selectTemplate?: LootTemplateSelector) {
+function npcRoller(selectTemplate?: LootTemplateSelector, extra: Partial<LootRollerData> = {}) {
   const data = buildSeedRefData();
   const templates: LootTemplate[] = data.lootTemplates.map(t => ({
     key: t.profession,
@@ -23,6 +29,7 @@ function npcRoller(selectTemplate?: LootTemplateSelector) {
     itemsByName: data.itemsByName,
     magicItems: data.magicItems,
     gameRules: data.gameRules,
+    ...extra,
   });
 }
 
@@ -50,16 +57,7 @@ describe('LootRoller — parity with NpcPipeline.pickLoot', () => {
           { profession }
         );
         const rng = new SeededRng(fullSeed);
-        const crBucket = rng.weightedPick(
-          // DEFAULT_CR_BUCKET_WEIGHTS, inlined to keep the consumption identical
-          [
-            { value: '0', weight: 60 },
-            { value: '0–1', weight: 25 },
-            { value: '2–4', weight: 10 },
-            { value: '5–10', weight: 4 },
-            { value: '11+', weight: 1 },
-          ]
-        );
+        const crBucket = rollCrBucket(rng);
         const actual = npcRoller().rollLoot({ selectionKey: profession, crBucket, rng });
         expect(actual).toEqual(expected);
       }
@@ -80,13 +78,7 @@ describe('LootRoller — parity with NpcPipeline.pickLoot', () => {
       { profession: 'merchant' }
     );
     const rng = new SeededRng('parity-overrides');
-    const crBucket = rng.weightedPick([
-      { value: '0', weight: 60 },
-      { value: '0–1', weight: 25 },
-      { value: '2–4', weight: 10 },
-      { value: '5–10', weight: 4 },
-      { value: '11+', weight: 1 },
-    ]);
+    const crBucket = rollCrBucket(rng);
     const actual = npcRoller().rollLoot({
       selectionKey: 'merchant',
       crBucket,
@@ -155,6 +147,31 @@ describe('LootRoller — pluggable template selection', () => {
     };
     npcRoller(selector).rollLoot({ selectionKey: 'guard', crBucket: '2–4', seed: 'strat-2' });
     expect(seen).toEqual([['guard', '2–4']]);
+  });
+
+  it('tags template items with the configured templateItemSource', () => {
+    // 'magic-item' is a synthetic stand-in: it proves the option is plumbed
+    // through. VEG-298 widens the source union with real monster values.
+    const roller = npcRoller(() => template(), { templateItemSource: 'magic-item' });
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'src-tag-1',
+      overrides: { trinketChance: 0, magicItemChance: 0, itemCountDie: '1d1' },
+    });
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0].source).toBe('magic-item');
+  });
+
+  it('template items default to source=profession when no templateItemSource is set', () => {
+    const loot = npcRoller(() => template()).rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'src-tag-2',
+      overrides: { trinketChance: 0, magicItemChance: 0, itemCountDie: '1d1' },
+    });
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0].source).toBe('profession');
   });
 
   it('a null template yields zero coinage and no template-sourced items', () => {

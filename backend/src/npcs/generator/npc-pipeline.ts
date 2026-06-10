@@ -20,7 +20,7 @@ import {
 import { SeededRng } from '../../common/helpers/seeded-rng';
 import { LootRoller } from '../../loot/loot-roller';
 import { createFallbackTemplateSelector } from '../../loot/loot-template-selector';
-import { LootItemRef, LootTemplateItem, LootTrinket } from '../../loot/loot.types';
+import { LootGameRules, LootItemRef, LootTemplateItem, LootTrinket } from '../../loot/loot.types';
 import {
   AGE_RANGE_BY_RACE,
   DEFAULT_AGE_RANGE,
@@ -67,20 +67,14 @@ export type AppearanceTraitRef = {
   trait: string;
 };
 
-export type LootTemplateItemRef = LootTemplateItem;
-
 // Same shape as the shared LootTemplate, but keyed by profession — the NPC
 // generator's selection key. Mapped to LootTemplate when building the roller.
 export type LootTemplateRef = {
   profession: string;
   crBucket: string;
   coinage: { gp: [number, number]; sp: [number, number]; cp: [number, number] };
-  items: LootTemplateItemRef[];
+  items: LootTemplateItem[];
 };
-
-export type TrinketRef = LootTrinket;
-
-export type ItemRef = LootItemRef;
 
 export type MonsterRef = {
   name: string;
@@ -115,13 +109,6 @@ export type MonsterRef = {
   legendaryActions: StatBlockAction[] | null;
 };
 
-export type GameRulesRef = {
-  trinketChance: number;
-  magicItemChanceByCr: Record<string, number>;
-  itemCountDie: string;
-  coinageMultiplier: number;
-};
-
 export type CustomPersonalityRef = {
   background: string;
   kind: 'personalityTraits' | 'ideals' | 'bonds' | 'flaws';
@@ -135,13 +122,13 @@ export type NpcRefData = {
   namePools: NamePoolRef[];
   appearanceTraits: AppearanceTraitRef[];
   lootTemplates: LootTemplateRef[];
-  trinkets: TrinketRef[];
+  trinkets: LootTrinket[];
   customPersonality: CustomPersonalityRef[];
-  itemsByName: Map<string, ItemRef>;
-  magicItems: ItemRef[];
+  itemsByName: Map<string, LootItemRef>;
+  magicItems: LootItemRef[];
   monsters: MonsterRef[];
   settingBiases: Record<string, Record<string, number>>;
-  gameRules: GameRulesRef;
+  gameRules: LootGameRules;
 };
 
 const PIPELINE_VERSION = 1;

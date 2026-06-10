@@ -21,6 +21,12 @@ export type LootRollerData = {
   itemsByName: ReadonlyMap<string, LootItemRef>;
   magicItems: LootItemRef[];
   gameRules: LootGameRules;
+  /**
+   * Source tag persisted on template-rolled items. Defaults to 'profession'
+   * (the NPC generator's historical tag); monster loot supplies its own once
+   * VEG-298 widens the source union.
+   */
+  templateItemSource?: GeneratedLootItem['source'];
 };
 
 export type LootRollInput = {
@@ -74,7 +80,7 @@ export class LootRoller {
           itemId: ref?.id ?? null,
           name: pick.itemName,
           quantity: qty,
-          source: 'profession',
+          source: this.data.templateItemSource ?? 'profession',
         });
       }
     }

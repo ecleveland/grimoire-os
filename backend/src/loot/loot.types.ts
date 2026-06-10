@@ -3,20 +3,14 @@
 // monster loot features can use the same engine without depending on each
 // other. The NPC generator re-exports these under its historical names.
 
-export type LootOverrides = {
-  trinketChance?: number;
-  magicItemChance?: number;
-  itemCountDie?: string;
-  coinageMultiplier?: number;
-};
+import type { NpcLootItem, NpcLootOverrides } from '@grimoire-os/shared';
 
-export type GeneratedLootItem = {
-  itemId: string | null;
-  name: string;
-  quantity: number;
-  source: 'profession' | 'trinket' | 'magic-item';
-  notes?: string;
-};
+// The shared package owns these two shapes — they are the API contract the
+// DTOs and frontend already consume. Aliased here under engine-neutral names
+// so the loot module has no NPC-flavored vocabulary of its own.
+export type LootOverrides = NpcLootOverrides;
+
+export type GeneratedLootItem = NpcLootItem;
 
 export type GeneratedLoot = {
   // `profession` holds the template selection key. The field name is
