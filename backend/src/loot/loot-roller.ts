@@ -23,8 +23,8 @@ export type LootRollerData = {
   gameRules: LootGameRules;
   /**
    * Source tag persisted on template-rolled items. Defaults to 'profession'
-   * (the NPC generator's historical tag); monster loot supplies its own once
-   * VEG-298 widens the source union.
+   * (the NPC generator's historical tag); the encounter-loot wiring (VEG-300)
+   * supplies a monster-appropriate tag and widens the source union.
    */
   templateItemSource?: GeneratedLootItem['source'];
 };

@@ -3,8 +3,12 @@
 // generation time). A `__generic__` profession exists per CR bucket as the
 // fallback for "Other (custom)" professions.
 
-export const NPC_LOOT_CR_BUCKETS = ['0', '0–1', '2–4', '5–10', '11+'] as const;
-export type NpcLootCrBucket = (typeof NPC_LOOT_CR_BUCKETS)[number];
+import { LOOT_CR_BUCKETS, LootCoinage, LootCrBucket } from '../../loot/loot.types';
+
+// The bucket list is owned by the neutral loot layer (shared with the
+// monster templates); re-exported here under the historical NPC names.
+export const NPC_LOOT_CR_BUCKETS = LOOT_CR_BUCKETS;
+export type NpcLootCrBucket = LootCrBucket;
 
 export const NPC_LOOT_PROFESSIONS = [
   'peasant',
@@ -22,11 +26,7 @@ export const NPC_LOOT_PROFESSIONS = [
 
 export const NPC_LOOT_GENERIC_PROFESSION = '__generic__';
 
-export type NpcLootCoinage = {
-  gp: [number, number];
-  sp: [number, number];
-  cp: [number, number];
-};
+export type NpcLootCoinage = LootCoinage;
 
 export type NpcLootItemEntry = {
   itemName: string;

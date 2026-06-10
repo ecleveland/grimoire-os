@@ -130,7 +130,12 @@ jobs:
       - name: Start postgres
         run: |
           docker compose up -d postgres
-          until docker compose exec postgres pg_isready -U grimoire -d grimoire_os; do sleep 1; done
+          # Probe over TCP, not the default unix socket: on a cold volume,
+          # initdb's temporary bootstrap server answers socket probes, so a
+          # socket pg_isready can pass and the next psql then lands in the
+          # bootstrap-restart window ("server closed the connection
+          # unexpectedly"). The bootstrap server never binds TCP.
+          until docker compose exec postgres pg_isready -h 127.0.0.1 -U grimoire -d grimoire_os; do sleep 1; done
       - name: Provision E2E database
         run: |
           DB_EXISTS=$(docker compose exec -T postgres psql -U grimoire -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'grimoire_os_e2e'")

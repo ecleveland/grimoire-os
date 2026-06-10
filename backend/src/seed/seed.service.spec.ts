@@ -476,15 +476,40 @@ describe('SeedService', () => {
     expect(call.data.length).toBeGreaterThan(0);
   });
 
-  it('seeds NPC loot templates after clearing curated rows', async () => {
+  it('seeds both loot-template families with explicit categories and scoped curated deletes', async () => {
     await service.seed();
 
+    // Each family clears exactly its own curated rows — neither delete may
+    // silently load-bear for the other.
     expect(prisma.npcLootTemplate.deleteMany).toHaveBeenCalledWith({
-      where: { source: 'curated' },
+      where: { source: 'curated', category: 'npc' },
     });
-    expect(prisma.npcLootTemplate.createMany).toHaveBeenCalled();
-    const call = prisma.npcLootTemplate.createMany.mock.calls[0][0];
-    expect(call.data.length).toBeGreaterThan(0);
+    expect(prisma.npcLootTemplate.deleteMany).toHaveBeenCalledWith({
+      where: { source: 'curated', category: 'monster' },
+    });
+
+    // Discriminate the createMany batches by row content, not call order.
+    const batches = prisma.npcLootTemplate.createMany.mock.calls.map(c => c[0]);
+    const npcRows = batches.flatMap(b =>
+      b.data.filter((r: { category?: string }) => r.category === 'npc')
+    );
+    const monsterRows = batches.flatMap(b =>
+      b.data.filter((r: { category?: string }) => r.category === 'monster')
+    );
+    expect(npcRows.length).toBeGreaterThan(0);
+    expect(monsterRows.length).toBeGreaterThan(0);
+    expect(npcRows.length + monsterRows.length).toBe(
+      batches.reduce((n, b) => n + b.data.length, 0)
+    );
+    for (const row of monsterRows) {
+      expect(typeof row.profession).toBe('string');
+    }
+
+    // skipDuplicates is inert on this table (no unique constraint) — it must
+    // not reappear and imply protection that does not exist.
+    for (const b of batches) {
+      expect(b.skipDuplicates).toBeUndefined();
+    }
   });
 
   it('seeds NPC alignment priors after clearing curated rows (compound unique with nullable background prevents upsert)', async () => {

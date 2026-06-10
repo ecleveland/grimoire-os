@@ -54,7 +54,7 @@ export class NpcRefDataLoader {
       this.prisma.npcAlignmentPrior.findMany({ where: { isActive: true } }),
       this.prisma.npcNamePool.findMany({ where: { isActive: true } }),
       this.prisma.npcAppearanceTrait.findMany({ where: { isActive: true } }),
-      this.prisma.npcLootTemplate.findMany({ where: { isActive: true } }),
+      this.prisma.npcLootTemplate.findMany({ where: { isActive: true, category: 'npc' } }),
       this.prisma.trinket.findMany({ where: { isActive: true }, select: { description: true } }),
       this.prisma.npcCustomPersonality.findMany({
         where: { isActive: true },

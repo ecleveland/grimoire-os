@@ -24,6 +24,7 @@ import { srdGameRules } from './data/game-rules';
 import { npcNamePools } from './data/npc-name-pools';
 import { npcAppearanceTraits } from './data/npc-appearance-traits';
 import { npcLootTemplates } from './data/npc-loot-templates';
+import { monsterLootTemplates } from './data/monster-loot-templates';
 import { npcAlignmentPriors } from './data/npc-alignment-priors';
 import { trinkets } from './data/trinkets';
 
@@ -318,17 +319,35 @@ export class SeedService {
       });
       console.log(`  NPC Appearance Traits: ${npcAppearanceTraits.length} entries`);
 
-      await tx.npcLootTemplate.deleteMany({ where: { source: 'curated' } });
+      // Each loot-template family clears and re-creates only its own curated
+      // rows, so neither block silently load-bears for the other. The table
+      // has no unique constraint, so skipDuplicates would be inert here —
+      // idempotency comes from these scoped deletes.
+      await tx.npcLootTemplate.deleteMany({ where: { source: 'curated', category: 'npc' } });
       await tx.npcLootTemplate.createMany({
         data: npcLootTemplates.map(t => ({
+          category: 'npc' as const,
           profession: t.profession,
           crBucket: t.crBucket,
           coinage: t.coinage as unknown as Prisma.InputJsonValue,
           items: t.items as unknown as Prisma.InputJsonValue,
         })),
-        skipDuplicates: true,
       });
       console.log(`  NPC Loot Templates: ${npcLootTemplates.length} entries`);
+
+      await tx.npcLootTemplate.deleteMany({
+        where: { source: 'curated', category: 'monster' },
+      });
+      await tx.npcLootTemplate.createMany({
+        data: monsterLootTemplates.map(t => ({
+          category: 'monster' as const,
+          profession: t.type,
+          crBucket: t.crBucket,
+          coinage: t.coinage as unknown as Prisma.InputJsonValue,
+          items: t.items as unknown as Prisma.InputJsonValue,
+        })),
+      });
+      console.log(`  Monster Loot Templates: ${monsterLootTemplates.length} entries`);
 
       // Alignment priors carry nullable `background` (default rows), and
       // Prisma compound uniques don't accept null. Drop curated rows and

@@ -686,16 +686,25 @@ model NpcAppearanceTrait {
   @@map("npc_appearance_traits")
 }
 
+// Discriminates loot-template families sharing npc_loot_templates: 'npc' rows
+// are keyed by profession, 'monster' rows by normalized creature type
+// (VEG-298). The `profession` column holds the selection key for both.
+enum LootTemplateCategory {
+  npc
+  monster
+}
+
 model NpcLootTemplate {
-  id         String  @id @default(uuid())
+  id         String               @id @default(uuid())
+  category   LootTemplateCategory @default(npc)
   profession String
   crBucket   String
   coinage    Json
   items      Json
-  source     String  @default("curated")
-  isActive   Boolean @default(true)
+  source     String               @default("curated")
+  isActive   Boolean              @default(true)
 
-  @@index([profession, crBucket])
+  @@index([category, profession, crBucket])
   @@map("npc_loot_templates")
 }
 
