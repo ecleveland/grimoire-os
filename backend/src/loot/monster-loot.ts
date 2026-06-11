@@ -2,36 +2,14 @@
 // string and real challenge rating onto the shared loot engine's selection
 // contract: a normalized type key plus a CR bucket. Pure — no Prisma, no I/O.
 
+import { MONSTER_LOOT_GENERIC_TYPE } from '@grimoire-os/shared';
 import { createFallbackTemplateSelector, LootTemplateSelector } from './loot-template-selector';
 import { LootCrBucket, LootTemplate } from './loot.types';
 
-/** Canonical 5e creature types monster loot templates are keyed by. */
-export const MONSTER_LOOT_TYPES = [
-  'aberration',
-  'beast',
-  'celestial',
-  'construct',
-  'dragon',
-  'elemental',
-  'fey',
-  'fiend',
-  'giant',
-  'humanoid',
-  'monstrosity',
-  'ooze',
-  'plant',
-  'undead',
-] as const;
-
-export type MonsterLootType = (typeof MONSTER_LOOT_TYPES)[number];
-
-/**
- * Fallback key for monster templates without a type match. The sentinel
- * string collides with the NPC one by design, so callers MUST pass only
- * category='monster' templates to the selector — an unfiltered template
- * query would silently mix the two families' generic fallbacks.
- */
-export const MONSTER_LOOT_GENERIC_TYPE = '__generic__';
+// The type keys and generic-fallback sentinel are owned by the shared package
+// (VEG-304) so the admin editor offers the exact keys the engine selects on.
+export { MONSTER_LOOT_TYPES, MONSTER_LOOT_GENERIC_TYPE } from '@grimoire-os/shared';
+export type { MonsterLootType } from '@grimoire-os/shared';
 
 /**
  * Normalizes a raw SRD type string ('Dragon (Chromatic)', 'Swarm of Tiny

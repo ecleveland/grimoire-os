@@ -9,10 +9,20 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import AdminSubnav from '@/components/AdminSubnav';
 import CoinRangeEditor from '@/components/CoinRangeEditor';
 import LootItemsEditor from '@/components/LootItemsEditor';
-import { LOOT_CR_BUCKETS } from '@grimoire-os/shared';
+import {
+  LOOT_CR_BUCKETS,
+  MONSTER_LOOT_GENERIC_TYPE,
+  MONSTER_LOOT_TYPES,
+} from '@grimoire-os/shared';
 import type { LootTemplateCoinage, LootTemplateItemEntry } from '@grimoire-os/shared';
 
-type TableSlug = 'names' | 'appearance' | 'loot-templates' | 'trinkets' | 'personality';
+type TableSlug =
+  | 'names'
+  | 'appearance'
+  | 'loot-templates'
+  | 'monster-loot'
+  | 'trinkets'
+  | 'personality';
 
 type AnyRow = {
   id: string;
@@ -90,6 +100,35 @@ const TABS: TabConfig[] = [
     ],
     fields: [
       { key: 'profession', label: 'Profession', required: true },
+      {
+        key: 'crBucket',
+        label: 'CR bucket',
+        required: true,
+        kind: 'select',
+        options: [...LOOT_CR_BUCKETS],
+      },
+      { key: 'coinage', label: 'Coinage', required: true, kind: 'coinage' },
+      { key: 'items', label: 'Items', required: true, kind: 'lootItems' },
+    ],
+    hasSource: true,
+  },
+  {
+    slug: 'monster-loot',
+    label: 'Monster Loot',
+    columns: [
+      { key: 'type', label: 'Type' },
+      { key: 'crBucket', label: 'CR' },
+    ],
+    fields: [
+      {
+        key: 'type',
+        label: 'Type',
+        required: true,
+        kind: 'select',
+        // The loot engine only selects on the canonical creature types plus
+        // the generic fallback — free text would create unreachable rows.
+        options: [...MONSTER_LOOT_TYPES, MONSTER_LOOT_GENERIC_TYPE],
+      },
       {
         key: 'crBucket',
         label: 'CR bucket',

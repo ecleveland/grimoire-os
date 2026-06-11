@@ -12,6 +12,7 @@ import { isNpcDataTable, NpcDataTable } from './admin-npc-data.types';
 import { CreateNameRowDto } from './dto/create-name-row.dto';
 import { CreateAppearanceRowDto } from './dto/create-appearance-row.dto';
 import { CreateLootTemplateRowDto } from './dto/create-loot-template-row.dto';
+import { CreateMonsterLootTemplateRowDto } from './dto/create-monster-loot-template-row.dto';
 import { CreateTrinketRowDto } from './dto/create-trinket-row.dto';
 import { CreatePersonalityRowDto } from './dto/create-personality-row.dto';
 
@@ -33,12 +34,19 @@ export class AdminNpcDataService {
           orderBy: [{ race: 'asc' }, { category: 'asc' }, { trait: 'asc' }],
         });
       case 'loot-templates':
-        // The admin NPC-data editor manages the 'npc' family only; monster
-        // templates get their own editor in VEG-304.
+        // Each loot-template family is managed under its own slug — 'npc'
+        // rows here, 'monster' rows under monster-loot (VEG-304).
         return this.prisma.npcLootTemplate.findMany({
           where: { category: 'npc' },
           orderBy: [{ profession: 'asc' }, { crBucket: 'asc' }],
         });
+      case 'monster-loot': {
+        const rows = await this.prisma.npcLootTemplate.findMany({
+          where: { category: 'monster' },
+          orderBy: [{ profession: 'asc' }, { crBucket: 'asc' }],
+        });
+        return rows.map(toMonsterRow);
+      }
       case 'trinkets':
         return this.prisma.trinket.findMany({ orderBy: { description: 'asc' } });
       case 'personality':
@@ -90,6 +98,21 @@ export class AdminNpcDataService {
           },
         });
       }
+      case 'monster-loot': {
+        const dto = validateRow(CreateMonsterLootTemplateRowDto, input);
+        await this.assertItemNamesResolvable(dto.items.map(i => i.itemName));
+        const row = await this.prisma.npcLootTemplate.create({
+          data: {
+            category: 'monster',
+            profession: dto.type,
+            crBucket: dto.crBucket,
+            coinage: { gp: dto.coinage.gp, sp: dto.coinage.sp, cp: dto.coinage.cp },
+            items: dto.items.map(i => ({ itemName: i.itemName, weight: i.weight, qty: i.qty })),
+            source: 'user',
+          },
+        });
+        return toMonsterRow(row);
+      }
       case 'trinkets': {
         const dto = validateRow(CreateTrinketRowDto, input);
         return this.prisma.trinket.create({
@@ -125,6 +148,10 @@ export class AdminNpcDataService {
         return this.prisma.npcAppearanceTrait.update({ where: { id }, data: { isActive } });
       case 'loot-templates':
         return this.prisma.npcLootTemplate.update({ where: { id }, data: { isActive } });
+      case 'monster-loot':
+        return toMonsterRow(
+          await this.prisma.npcLootTemplate.update({ where: { id }, data: { isActive } })
+        );
       case 'trinkets':
         return this.prisma.trinket.update({ where: { id }, data: { isActive } });
       case 'personality':
@@ -152,6 +179,7 @@ export class AdminNpcDataService {
       case 'appearance':
         return this.prisma.npcAppearanceTrait.delete({ where: { id } });
       case 'loot-templates':
+      case 'monster-loot':
         return this.prisma.npcLootTemplate.delete({ where: { id } });
       case 'trinkets':
         return this.prisma.trinket.delete({ where: { id } });
@@ -191,15 +219,29 @@ export class AdminNpcDataService {
       case 'appearance':
         return this.prisma.npcAppearanceTrait.findUnique({ where: { id } });
       case 'loot-templates':
-        // Scoped to the NPC family: monster-category ids must 404 here, not
-        // get mutated through the NPC editor (their editor is VEG-304).
+        // Each family's slug only resolves its own rows: a monster-category
+        // id must 404 here (and vice versa), not get mutated cross-editor.
         return this.prisma.npcLootTemplate.findFirst({ where: { id, category: 'npc' } });
+      case 'monster-loot':
+        return this.prisma.npcLootTemplate.findFirst({ where: { id, category: 'monster' } });
       case 'trinkets':
         return this.prisma.trinket.findUnique({ where: { id } });
       case 'personality':
         return this.prisma.npcCustomPersonality.findUnique({ where: { id } });
     }
   }
+}
+
+// Monster templates reuse the NpcLootTemplate table, with the creature type
+// stored in the shared `profession` column. The admin API speaks `type` —
+// `profession: 'dragon'` would leak the table reuse to every consumer.
+function toMonsterRow<T extends { profession: string }>(
+  row: T
+): Omit<T, 'profession'> & {
+  type: string;
+} {
+  const { profession, ...rest } = row;
+  return { ...rest, type: profession };
 }
 
 // Mirrors the global ValidationPipe's strictness, which cannot validate this

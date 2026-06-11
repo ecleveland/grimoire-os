@@ -97,4 +97,43 @@ test.describe('Admin NPC Reference Data', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByRole('row', { name: new RegExp(profession) })).toHaveCount(0);
   });
+
+  test('admin creates a monster loot template (type × CR), disables it, then deletes it', async ({
+    page,
+  }) => {
+    await registerAdmin(page);
+
+    await page.goto('/admin/npc-data');
+    await page.getByRole('tab', { name: 'Monster Loot' }).click();
+
+    // The seeded monster templates (VEG-298) are listed as non-deletable
+    // curated rows.
+    await expect(page.getByRole('row', { name: /curated/ }).first()).toBeVisible();
+
+    // Type is a closed select over the canonical creature types — free text
+    // would create rows the loot engine never picks.
+    const typeSelect = page.getByLabel(/^Type/);
+    await expect(typeSelect).toHaveRole('combobox');
+    await typeSelect.selectOption('dragon');
+    await page.getByLabel(/CR bucket/).selectOption('11+');
+    await page.getByLabel('gp min').fill('100');
+    await page.getByLabel('gp max').fill('600');
+
+    await page.getByLabel('Search items').fill('dagger');
+    await page.getByRole('button', { name: 'Add Dagger', exact: true }).click();
+
+    await page.getByRole('button', { name: 'Add row' }).click();
+
+    // Seeded dragon rows exist, so pin the assertion to the user-source row.
+    const row = page.getByRole('row', { name: /dragon/ }).filter({ hasText: 'user' });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('11+');
+
+    await row.getByRole('button', { name: 'Disable' }).click();
+    await expect(row).toContainText('Disabled');
+
+    await row.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
+    await expect(row).toHaveCount(0);
+  });
 });

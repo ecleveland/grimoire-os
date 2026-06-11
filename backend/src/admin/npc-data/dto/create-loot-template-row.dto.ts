@@ -20,7 +20,7 @@ import { IsLootRange } from '../../../common/validators/loot-range.decorator';
 // All-zero weights would make the roller's weightedPick throw at generation
 // time; duplicate names would silently stack pick weight (and the editor
 // keys its rows by name).
-function ValidItemEntrySet(validationOptions?: ValidationOptions): PropertyDecorator {
+export function ValidItemEntrySet(validationOptions?: ValidationOptions): PropertyDecorator {
   return function (target: object, propertyName: string | symbol) {
     registerDecorator({
       name: 'validItemEntrySet',
