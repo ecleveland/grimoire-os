@@ -4,6 +4,36 @@
 
 import type { Combatant, CombatantLootCoinage, CombatantLootItem } from './embedded';
 
+/**
+ * The CR buckets every loot-template family is keyed by (VEG-303). Note the
+ * en-dash (U+2013) in the range labels — an ASCII hyphen never matches a
+ * template, so editors must offer these exact values rather than free text.
+ */
+export const LOOT_CR_BUCKETS = ['0', '0–1', '2–4', '5–10', '11+'] as const;
+
+export type LootCrBucket = (typeof LOOT_CR_BUCKETS)[number];
+
+/** Inclusive [min, max] range rolled at generation time. */
+export type LootRange = [number, number];
+
+/** Per-denomination coinage ranges stored on a loot template. */
+export interface LootTemplateCoinage {
+  gp: LootRange;
+  sp: LootRange;
+  cp: LootRange;
+}
+
+/**
+ * One weighted item entry on a loot template. `itemName` is the exact catalog
+ * `Item.name` — generation resolves it to an id by name, so editors should
+ * pick from the catalog rather than accept free text.
+ */
+export interface LootTemplateItemEntry {
+  itemName: string;
+  weight: number;
+  qty: LootRange;
+}
+
 export interface EncounterLootTotal {
   coinage: CombatantLootCoinage;
   items: CombatantLootItem[];

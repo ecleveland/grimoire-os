@@ -32,6 +32,7 @@ describe('AdminNpcDataService', () => {
     npcLootTemplate: MockModel;
     trinket: MockModel;
     npcCustomPersonality: MockModel;
+    item: MockModel;
   };
 
   beforeEach(async () => {
@@ -41,6 +42,7 @@ describe('AdminNpcDataService', () => {
       npcLootTemplate: makeMockModel(),
       trinket: makeMockModel(),
       npcCustomPersonality: makeMockModel(),
+      item: makeMockModel(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -116,6 +118,66 @@ describe('AdminNpcDataService', () => {
           description: 'A glass eye that always faces north.',
           source: 'user',
         }),
+      });
+    });
+
+    describe('loot templates', () => {
+      const structured = {
+        profession: 'merchant',
+        crBucket: '2–4',
+        coinage: { gp: [0, 2], sp: [2, 8], cp: [4, 20] },
+        items: [
+          { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+          { itemName: 'Quarterstaff', weight: 80, qty: [1, 2] },
+        ],
+      };
+
+      it('creates a template, round-tripping the structured payload to the engine shape', async () => {
+        prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }, { name: 'Quarterstaff' }]);
+        prisma.npcLootTemplate.create.mockResolvedValue({ id: 'lt1' });
+
+        await service.create('loot-templates', USER_ID, structured);
+
+        // Stored exactly as the loot engine consumes it (LootTemplate shape).
+        expect(prisma.npcLootTemplate.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({
+            category: 'npc',
+            profession: 'merchant',
+            crBucket: '2–4',
+            coinage: { gp: [0, 2], sp: [2, 8], cp: [4, 20] },
+            items: [
+              { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+              { itemName: 'Quarterstaff', weight: 80, qty: [1, 2] },
+            ],
+            source: 'user',
+          }),
+        });
+      });
+
+      it('rejects item names that do not resolve in the catalog', async () => {
+        prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }]);
+
+        await expect(service.create('loot-templates', USER_ID, structured)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            message: expect.arrayContaining([expect.stringContaining('Quarterstaff')]),
+          }),
+        });
+        expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
+      });
+
+      it('rejects an invalid payload with messages naming the nested field', async () => {
+        await expect(
+          service.create('loot-templates', USER_ID, {
+            ...structured,
+            coinage: { gp: [5, 2], sp: [2, 8], cp: [4, 20] },
+          })
+        ).rejects.toMatchObject({
+          response: expect.objectContaining({
+            message: expect.arrayContaining([expect.stringContaining('gp')]),
+          }),
+        });
+        expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
+        expect(prisma.item.findMany).not.toHaveBeenCalled();
       });
     });
 
