@@ -224,6 +224,7 @@ export interface Npc {
 export interface NpcListItem {
   id: string;
   campaignId: string;
+  createdById: string;
   name: string;
   race: string;
   profession?: string | null;

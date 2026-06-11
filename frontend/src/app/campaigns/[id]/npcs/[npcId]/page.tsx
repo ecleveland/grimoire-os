@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import NpcFieldRow from '@/components/NpcFieldRow';
@@ -47,6 +48,7 @@ function statBlockShape(sb: Npc['statBlock']): NpcStatBlockShape | null {
 export default function NpcDetailPage() {
   const { id: campaignId, npcId } = useParams<{ id: string; npcId: string }>();
   const router = useRouter();
+  const { user, isDm } = useAuth();
   const [npc, setNpc] = useState<Npc | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -154,6 +156,10 @@ export default function NpcDetailPage() {
 
   const items = lootItems(npc.loot);
 
+  // Backend reroll access is campaign-owner scoped; mirror the encounter-page
+  // gate (DM role or creator) since the campaign's ownerId isn't in this payload.
+  const canRerollLoot = isDm || (user != null && npc.createdById === user.userId);
+
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
@@ -259,7 +265,21 @@ export default function NpcDetailPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6 mb-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Loot</h2>
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Loot</h2>
+          {canRerollLoot && (
+            <button
+              type="button"
+              onClick={() => reroll('loot')}
+              disabled={busy || isLocked(npc, 'loot')}
+              aria-label="Reroll loot"
+              title={isLocked(npc, 'loot') ? 'Loot is locked' : 'Reroll loot'}
+              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              ↻ Reroll Loot
+            </button>
+          )}
+        </div>
         <div className="text-sm text-gray-700 dark:text-gray-300 mb-2">
           {npc.goldPieces} gp · {npc.silverPieces} sp · {npc.copperPieces} cp
         </div>

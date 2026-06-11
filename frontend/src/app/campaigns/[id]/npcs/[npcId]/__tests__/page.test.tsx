@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import NpcDetailPage from '../page';
 import type { Npc } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 const mockApiFetch = vi.fn();
 const mockPush = vi.fn();
+const mockUseAuth = vi.fn();
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
@@ -16,6 +18,9 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
+}));
+vi.mock('@/lib/auth-context', () => ({
+  useAuth: () => mockUseAuth(),
 }));
 
 function makeNpc(over: Partial<Npc> = {}): Npc {
@@ -56,6 +61,11 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
+  mockUseAuth.mockReset();
+  mockUseAuth.mockReturnValue({
+    user: { userId: 'user-1', role: 'dungeon_master' },
+    isDm: true,
+  });
 });
 
 describe('NpcDetailPage', () => {
@@ -200,6 +210,90 @@ describe('NpcDetailPage', () => {
     );
     const link = screen.getByRole('link', { name: /edit/i });
     expect(link).toHaveAttribute('href', '/campaigns/campaign-1/npcs/npc-1/edit');
+  });
+
+  describe('inline loot reroll', () => {
+    it('rerolls loot via the Loot card button and updates the displayed loot in place', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValueOnce(
+        makeNpc({ loot: [{ name: 'Hemp Rope', quantity: 1 }], goldPieces: 1 })
+      );
+      mockApiFetch.mockResolvedValueOnce(
+        makeNpc({ loot: [{ name: 'Ruby Pendant', quantity: 2 }], goldPieces: 7 })
+      );
+      render(<NpcDetailPage />);
+      await waitFor(() => expect(screen.getByText('1× Hemp Rope')).toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(screen.getByText('2× Ruby Pendant')).toBeInTheDocument());
+      expect(screen.queryByText('1× Hemp Rope')).not.toBeInTheDocument();
+      expect(screen.getByText(/7 gp/)).toBeInTheDocument();
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ field: 'loot' }),
+        })
+      );
+    });
+
+    it('disables the Reroll Loot button when the loot field is locked', async () => {
+      mockApiFetch.mockResolvedValue(makeNpc({ lockedFields: ['loot'] }));
+      render(<NpcDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+      );
+      expect(screen.getByRole('button', { name: /^reroll loot$/i })).toBeDisabled();
+    });
+
+    it('hides the Reroll Loot button for users who are neither DM nor the NPC creator', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'user-2', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(makeNpc({ createdById: 'user-1' }));
+      render(<NpcDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+      );
+      expect(screen.queryByRole('button', { name: /^reroll loot$/i })).not.toBeInTheDocument();
+    });
+
+    it('shows the Reroll Loot button to the NPC creator even without the DM role', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'user-1', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(makeNpc({ createdById: 'user-1' }));
+      render(<NpcDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+      );
+      expect(screen.getByRole('button', { name: /^reroll loot$/i })).toBeInTheDocument();
+    });
+
+    it('toasts the error message when the reroll fails with an Error', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValueOnce(makeNpc());
+      mockApiFetch.mockRejectedValueOnce(new Error('Reroll failed badly'));
+      render(<NpcDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Reroll failed badly'));
+    });
+
+    it('toasts a generic message when the reroll fails with a non-Error', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValueOnce(makeNpc());
+      mockApiFetch.mockRejectedValueOnce('nope');
+      render(<NpcDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to reroll'));
+    });
   });
 
   describe('stat block', () => {

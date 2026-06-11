@@ -54,6 +54,7 @@ function toJsonValue(v: unknown): NpcJsonValue {
 const npcListSelect = {
   id: true,
   campaignId: true,
+  createdById: true,
   name: true,
   race: true,
   profession: true,
