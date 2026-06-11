@@ -333,6 +333,22 @@ describe('InitiativeTrackerPage', () => {
     expect(mockApiFetch).toHaveBeenCalledTimes(1); // GET only
   });
 
+  it('floors fractional raw HP edits to whole numbers', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeEncounter());
+    mockApiFetch.mockResolvedValueOnce(makeEncounter());
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('button', { name: /next turn/i });
+
+    const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+    fireEvent.change(hpInputs[1], { target: { value: '3.5' } });
+    fireEvent.blur(hpInputs[1]);
+
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+    const [, init] = mockApiFetch.mock.calls[1];
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.combatants[1].hp).toBe(3); // never persists fractional HP
+  });
+
   it('reverts to the server value when an empty HP edit is committed', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     render(<InitiativeTrackerPage />);

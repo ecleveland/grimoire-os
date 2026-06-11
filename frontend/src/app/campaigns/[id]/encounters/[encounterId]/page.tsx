@@ -42,6 +42,16 @@ const parseAmount = (value: string): number | null => {
   return parsed > 0 ? parsed : null;
 };
 
+// Resolve which sorted row a draft targets: a unique name binds to its
+// (possibly re-sorted) row; a duplicated name binds only to the exact row the
+// draft was typed in, and -1 means the target is gone (bail out). Every
+// combatant-mutating path must use this one rule so drafts can't land on the
+// wrong twin.
+const resolveCombatantRow = (sorted: Combatant[], name: string, rowIndex: number): number => {
+  const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
+  return matches.length === 1 ? matches[0] : sorted[rowIndex]?.name === name ? rowIndex : -1;
+};
+
 // Shared by the per-combatant drop and the encounter total — one copy of the
 // coinage + item-list markup, so the two views can't drift apart.
 function LootDisplay({
@@ -217,10 +227,9 @@ export default function InitiativeTrackerPage() {
   };
 
   // Commit the drafted HP: one clamped, version-guarded PATCH. Empty/invalid
-  // or unchanged drafts revert silently. Target resolution: a unique name is
-  // looked up fresh (correct even if the list reordered mid-edit); a duplicated
-  // name falls back to the draft's row index, bailing out unless that row still
-  // holds the name. A combatant removed mid-edit bails out too.
+  // or unchanged drafts revert silently; fractional entries floor (HP is
+  // always a whole number). Targeting goes through resolveCombatantRow, and a
+  // combatant removed mid-edit bails out.
   const commitCombatantHp = async (name: string) => {
     if (!encounter || !hpDraft || hpDraft.name !== name) return;
     const { index: draftIndex, value } = hpDraft;
@@ -233,12 +242,10 @@ export default function InitiativeTrackerPage() {
     const parsed = Number(raw);
     if (raw === '' || Number.isNaN(parsed)) return;
     const sorted = sortByInitiative(encounter.combatants);
-    const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
-    const index =
-      matches.length === 1 ? matches[0] : sorted[draftIndex]?.name === name ? draftIndex : -1;
+    const index = resolveCombatantRow(sorted, name, draftIndex);
     if (index === -1) return;
     const target = sorted[index];
-    const clamped = Math.max(0, Math.min(parsed, target.maxHp));
+    const clamped = Math.max(0, Math.min(Math.floor(parsed), target.maxHp));
     if (clamped === target.hp) return;
     sorted[index] = { ...target, hp: clamped };
     const updated = await patchEncounter({ combatants: sorted });
@@ -252,8 +259,6 @@ export default function InitiativeTrackerPage() {
   // Apply the drafted amount as damage, healing, or a temp HP grant (VEG-286).
   // Damage spends temp HP before real HP; heal clamps to maxHp; temp grants
   // take the higher value (5e non-stacking) — all via the pure helpers.
-  // Target resolution mirrors commitCombatantHp: a unique name binds to its
-  // (possibly re-sorted) row, a duplicated one only to the row it was typed in.
   // No-op results (lower temp grant, damaging a 0-HP combatant) just clear the
   // draft instead of sending an empty PATCH.
   const applyHpAction = async (
@@ -266,9 +271,7 @@ export default function InitiativeTrackerPage() {
     const amount = parseAmount(amountDraft.value);
     if (amount === null) return;
     const sorted = sortByInitiative(encounter.combatants);
-    const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
-    const index =
-      matches.length === 1 ? matches[0] : sorted[rowIndex]?.name === name ? rowIndex : -1;
+    const index = resolveCombatantRow(sorted, name, rowIndex);
     if (index === -1) return;
     const target = sorted[index];
     const next: Combatant =
@@ -357,16 +360,17 @@ export default function InitiativeTrackerPage() {
   const lootTotal = encounter.combatants.some(c => c.loot)
     ? aggregateCombatantLoot(encounter.combatants)
     : null;
-  // Mirror of the commit-target rule: a unique draft name binds to its (possibly
-  // re-sorted) row; a duplicated one binds only to the exact row it was typed in.
-  const draftNameIsUnique =
-    hpDraft !== null && sorted.filter(c => c.name === hpDraft.name).length === 1;
-  const rowHoldsDraft = (c: Combatant, i: number) =>
-    hpDraft?.name === c.name && (draftNameIsUnique || hpDraft.index === i);
-  const amountNameIsUnique =
-    amountDraft !== null && sorted.filter(c => c.name === amountDraft.name).length === 1;
-  const rowHoldsAmount = (c: Combatant, i: number) =>
-    amountDraft?.name === c.name && (amountNameIsUnique || amountDraft.index === i);
+  // Render-side mirror of resolveCombatantRow: a unique draft name binds to
+  // its (possibly re-sorted) row; a duplicated one binds only to the exact row
+  // it was typed in. One factory serves both drafts so the binding rule can't
+  // drift between them.
+  const makeRowHoldsDraft = (draft: { name: string; index: number } | null) => {
+    const nameIsUnique = draft !== null && sorted.filter(c => c.name === draft.name).length === 1;
+    return (c: Combatant, i: number) =>
+      draft?.name === c.name && (nameIsUnique || draft.index === i);
+  };
+  const rowHoldsDraft = makeRowHoldsDraft(hpDraft);
+  const rowHoldsAmount = makeRowHoldsDraft(amountDraft);
 
   return (
     <div className="max-w-3xl mx-auto">
