@@ -1,6 +1,8 @@
-// Encounter-loot aggregation (VEG-300). Pure and shared so the backend's roll
-// endpoint and any frontend view derive the same total from the same
-// combatants — the aggregate is never persisted, which rules out drift.
+// Shared loot types: the template shapes the loot engine and admin editors
+// both consume (VEG-303) — persisted as JSON columns on NpcLootTemplate —
+// plus encounter-loot aggregation (VEG-300), whose aggregate is never
+// persisted (derived identically by backend and frontend), which rules out
+// drift for that half.
 
 import type { Combatant, CombatantLootCoinage, CombatantLootItem } from './embedded';
 

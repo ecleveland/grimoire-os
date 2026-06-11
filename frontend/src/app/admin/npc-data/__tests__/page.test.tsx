@@ -238,6 +238,27 @@ describe('AdminNpcDataPage', () => {
       ).toBeUndefined();
     });
 
+    it('blocks submitting a template whose items all have weight 0', async () => {
+      const { toast } = await import('sonner');
+      routeLootApi();
+      await openLootTab();
+
+      await userEvent.type(screen.getByLabelText(/^Profession/), 'merchant');
+      await userEvent.selectOptions(screen.getByLabelText(/CR bucket/), '0');
+      await userEvent.type(screen.getByLabelText(/search items/i), 'dag');
+      await userEvent.click(await screen.findByRole('button', { name: /add dagger/i }));
+      fireEvent.change(screen.getByLabelText('Dagger weight'), { target: { value: '0' } });
+
+      await userEvent.click(screen.getByRole('button', { name: /Add row/i }));
+
+      expect(toast.error).toHaveBeenCalledWith('At least one item needs a weight above 0');
+      expect(
+        mockApiFetch.mock.calls.find(
+          c => c[0] === '/admin/npc-data/loot-templates' && c[1]?.method === 'POST'
+        )
+      ).toBeUndefined();
+    });
+
     it('still disables and deletes loot rows', async () => {
       routeLootApi([
         {

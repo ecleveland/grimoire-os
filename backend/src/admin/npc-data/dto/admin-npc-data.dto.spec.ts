@@ -94,13 +94,60 @@ describe('CreateLootTemplateRowDto', () => {
     expect(validate(CreateLootTemplateRowDto, valid)).toEqual([]);
   });
 
-  it('accepts a zero item weight', () => {
+  it('accepts a zero item weight alongside a positive one', () => {
     expect(
       validate(CreateLootTemplateRowDto, {
         ...valid,
-        items: [{ itemName: 'Dagger', weight: 0, qty: [1, 1] }],
+        items: [
+          { itemName: 'Dagger', weight: 0, qty: [1, 1] },
+          { itemName: 'Club', weight: 50, qty: [1, 1] },
+        ],
       })
     ).toEqual([]);
+  });
+
+  it('rejects items where every weight is 0 (weightedPick would throw at generation)', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [
+        { itemName: 'Dagger', weight: 0, qty: [1, 1] },
+        { itemName: 'Club', weight: 0, qty: [1, 1] },
+      ],
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('weight > 0')])
+    );
+  });
+
+  it('rejects duplicate itemName entries', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [
+        { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+        { itemName: 'Dagger', weight: 20, qty: [1, 2] },
+      ],
+    });
+    expect(messages(errors)).toEqual(expect.arrayContaining([expect.stringContaining('unique')]));
+  });
+
+  it('rejects the legacy string-dice coinage shape', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { gp: '2d6', sp: [2, 8], cp: [4, 20] },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('gp must be a [min, max] pair')])
+    );
+  });
+
+  it.each([[[1]], [[1, 2, 3]]])('rejects a range with wrong arity %j', range => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, gp: range },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('gp must be a [min, max] pair')])
+    );
   });
 
   it('rejects a crBucket outside LOOT_CR_BUCKETS (ASCII hyphen never matches a template)', () => {

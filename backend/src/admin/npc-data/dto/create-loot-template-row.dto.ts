@@ -6,12 +6,42 @@ import {
   IsNumber,
   IsObject,
   Min,
+  registerDecorator,
   ValidateNested,
+  ValidationOptions,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { LOOT_CR_BUCKETS } from '@grimoire-os/shared';
+import type { LootCrBucket } from '@grimoire-os/shared';
 import { IsNonBlankString } from '../../../common/validators/non-blank-string.decorator';
 import { IsLootRange } from '../../../common/validators/loot-range.decorator';
+
+// Array-level item-entry invariants the per-entry decorators can't see.
+// All-zero weights would make the roller's weightedPick throw at generation
+// time; duplicate names would silently stack pick weight (and the editor
+// keys its rows by name).
+function ValidItemEntrySet(validationOptions?: ValidationOptions): PropertyDecorator {
+  return function (target: object, propertyName: string | symbol) {
+    registerDecorator({
+      name: 'validItemEntrySet',
+      target: target.constructor,
+      propertyName: propertyName as string,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          if (!Array.isArray(value)) return true; // IsArray reports that case
+          const entries = value as { itemName?: unknown; weight?: unknown }[];
+          const names = entries.map(e => e.itemName);
+          if (new Set(names).size !== names.length) return false;
+          return entries.some(e => typeof e.weight === 'number' && e.weight > 0);
+        },
+        defaultMessage(): string {
+          return 'items must have unique itemName values and at least one entry with weight > 0';
+        },
+      },
+    });
+  };
+}
 
 export class LootCoinageDto {
   @ApiProperty({ example: [0, 2], description: 'Inclusive [min, max] gp rolled per generation' })
@@ -52,7 +82,7 @@ export class CreateLootTemplateRowDto {
 
   @ApiProperty({ enum: LOOT_CR_BUCKETS, example: '2–4' })
   @IsIn(LOOT_CR_BUCKETS, { message: `crBucket must be one of ${LOOT_CR_BUCKETS.join('|')}` })
-  crBucket!: string;
+  crBucket!: LootCrBucket;
 
   @ApiProperty({ type: LootCoinageDto })
   @IsObject({ message: 'coinage must be an object' })
@@ -63,6 +93,7 @@ export class CreateLootTemplateRowDto {
   @ApiProperty({ type: [LootTemplateItemDto] })
   @IsArray({ message: 'items must be an array' })
   @ArrayMinSize(1, { message: 'items must contain at least one item entry' })
+  @ValidItemEntrySet()
   @ValidateNested({ each: true })
   @Type(() => LootTemplateItemDto)
   items!: LootTemplateItemDto[];

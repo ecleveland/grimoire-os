@@ -3,12 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
-import type {
-  LootRange,
-  LootTemplateItemEntry,
-  PaginatedResponse,
-  SrdItem,
-} from '@grimoire-os/shared';
+import type { LootTemplateItemEntry, PaginatedResponse, SrdItem } from '@grimoire-os/shared';
+import RangeInputPair from '@/components/RangeInputPair';
 
 const LIMIT = 8;
 
@@ -20,12 +16,43 @@ interface Props {
   onChange: (next: LootTemplateItemEntry[]) => void;
 }
 
+// Draft-while-focused weight input: clearing the field never commits a
+// destructive 0; blur restores the committed value. Weights are clamped to
+// ≥ 0 and may be fractional (the engine's weightedPick takes any ratio).
+function WeightInput({
+  value,
+  ariaLabel,
+  onCommit,
+}: {
+  value: number;
+  ariaLabel: string;
+  onCommit: (weight: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      min={0}
+      aria-label={ariaLabel}
+      value={draft ?? String(value)}
+      onChange={e => {
+        const raw = e.target.value;
+        setDraft(raw);
+        if (raw.trim() === '') return;
+        const n = Number(raw);
+        if (Number.isFinite(n)) onCommit(Math.max(0, n));
+      }}
+      onBlur={() => setDraft(null)}
+      className={numberInputClass}
+    />
+  );
+}
+
 /**
  * Structured editor for a loot template's weighted item entries (VEG-303).
  * New entries are picked from the items catalog via a debounced
  * `/srd/items` search — generation resolves entries to catalog ids by exact
  * `Item.name`, so free-typed names would silently produce id-less loot.
- * Weights are floored to ≥ 0 and qty ranges stay ordered with min ≥ 1.
  */
 export default function LootItemsEditor({ value, onChange }: Props) {
   const [searchInput, setSearchInput] = useState('');
@@ -50,11 +77,26 @@ export default function LootItemsEditor({ value, onChange }: Props) {
       return;
     }
     setLoading(true);
+    // Stale guard: a slow response for an old query must not overwrite the
+    // newer query's results or end its loading state.
+    let stale = false;
     const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
     apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
-      .then(res => setResults(res.data))
-      .catch(() => toast.error('Failed to search items'))
-      .finally(() => setLoading(false));
+      .then(res => {
+        if (!stale) setResults(res.data);
+      })
+      .catch(err => {
+        if (stale) return;
+        console.error('Item search failed:', err);
+        setResults([]);
+        toast.error(err instanceof Error ? err.message : 'Failed to search items');
+      })
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => {
+      stale = true;
+    };
   }, [query]);
 
   const addItem = (item: SrdItem) => {
@@ -66,19 +108,6 @@ export default function LootItemsEditor({ value, onChange }: Props) {
 
   const updateEntry = (index: number, entry: LootTemplateItemEntry) => {
     onChange(value.map((e, i) => (i === index ? entry : e)));
-  };
-
-  const handleWeight = (index: number, raw: string) => {
-    const weight = Math.max(0, Number(raw) || 0);
-    updateEntry(index, { ...value[index], weight });
-  };
-
-  const handleQty = (index: number, bound: 'min' | 'max', raw: string) => {
-    const parsed = Math.max(1, Math.floor(Number(raw) || 1));
-    const [min, max] = value[index].qty;
-    const qty: LootRange =
-      bound === 'min' ? [parsed, Math.max(parsed, max)] : [Math.min(min, parsed), parsed];
-    updateEntry(index, { ...value[index], qty });
   };
 
   const removeEntry = (index: number) => {
@@ -101,36 +130,18 @@ export default function LootItemsEditor({ value, onChange }: Props) {
               <span className="w-32 truncate text-sm font-medium text-gray-900 dark:text-white">
                 {entry.itemName}
               </span>
-              <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                weight
-                <input
-                  type="number"
-                  min={0}
-                  aria-label={`${entry.itemName} weight`}
-                  value={entry.weight}
-                  onChange={e => handleWeight(index, e.target.value)}
-                  className={numberInputClass}
-                />
-              </label>
-              <label className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                qty
-                <input
-                  type="number"
-                  min={1}
-                  aria-label={`${entry.itemName} qty min`}
-                  value={entry.qty[0]}
-                  onChange={e => handleQty(index, 'min', e.target.value)}
-                  className={numberInputClass}
-                />
-              </label>
-              <span className="text-xs text-gray-500 dark:text-gray-400">to</span>
-              <input
-                type="number"
-                min={1}
-                aria-label={`${entry.itemName} qty max`}
-                value={entry.qty[1]}
-                onChange={e => handleQty(index, 'max', e.target.value)}
-                className={numberInputClass}
+              <span className="text-xs text-gray-500 dark:text-gray-400">weight</span>
+              <WeightInput
+                value={entry.weight}
+                ariaLabel={`${entry.itemName} weight`}
+                onCommit={weight => updateEntry(index, { ...value[index], weight })}
+              />
+              <span className="text-xs text-gray-500 dark:text-gray-400">qty</span>
+              <RangeInputPair
+                value={entry.qty}
+                floor={1}
+                labelPrefix={`${entry.itemName} qty`}
+                onChange={qty => updateEntry(index, { ...value[index], qty })}
               />
               <button
                 type="button"

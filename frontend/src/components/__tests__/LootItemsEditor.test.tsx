@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import LootItemsEditor from '../LootItemsEditor';
@@ -29,6 +30,37 @@ function setup(value: LootTemplateItemEntry[] = []) {
   const onChange = vi.fn();
   render(<LootItemsEditor value={value} onChange={onChange} />);
   return { onChange };
+}
+
+// Stateful harness: blur-time qty normalization reads the committed value,
+// so those tests need onChange to actually update the prop.
+function Harness({
+  initial,
+  onChange,
+}: {
+  initial: LootTemplateItemEntry[];
+  onChange: (v: LootTemplateItemEntry[]) => void;
+}) {
+  const [val, setVal] = useState(initial);
+  return (
+    <LootItemsEditor
+      value={val}
+      onChange={v => {
+        setVal(v);
+        onChange(v);
+      }}
+    />
+  );
+}
+
+function setupStateful(initial: LootTemplateItemEntry[]) {
+  const onChange = vi.fn();
+  render(<Harness initial={initial} onChange={onChange} />);
+  return { onChange };
+}
+
+function lastChange(onChange: ReturnType<typeof vi.fn>) {
+  return onChange.mock.calls[onChange.mock.calls.length - 1]?.[0];
 }
 
 beforeEach(() => {
@@ -96,15 +128,56 @@ describe('LootItemsEditor', () => {
     expect(await screen.findByText(/no matching items/i)).toBeInTheDocument();
   });
 
-  it('surfaces a toast when the search fails', async () => {
+  it('surfaces the server message and clears stale results when the search fails', async () => {
     const { toast } = await import('sonner');
-    mockApiFetch.mockRejectedValue(new Error('boom'));
+    mockApiFetch
+      .mockResolvedValueOnce(makeResponse([dagger]))
+      .mockRejectedValueOnce(new Error('boom'));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'dag');
+    await screen.findByRole('button', { name: /add dagger/i });
+
+    await user.type(screen.getByLabelText(/search items/i), 'ger');
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    // The previous query's matches must not linger under the new query text.
+    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
+  });
+
+  it('falls back to a generic message for non-Error rejections', async () => {
+    const { toast } = await import('sonner');
+    mockApiFetch.mockRejectedValue('nope');
     const user = userEvent.setup();
     setup();
 
     await user.type(screen.getByLabelText(/search items/i), 'dag');
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search items'));
+  });
+
+  it('ignores a stale response that resolves after a newer query', async () => {
+    let resolveFirst!: (v: unknown) => void;
+    const first = new Promise(r => {
+      resolveFirst = r;
+    });
+    mockApiFetch.mockReturnValueOnce(first).mockResolvedValueOnce(makeResponse([quarterstaff]));
+    const user = userEvent.setup();
+    setup();
+
+    const search = screen.getByLabelText(/search items/i);
+    await user.type(search, 'dag');
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(1));
+    // Newer query fires while the first request is still in flight.
+    await user.type(search, 'ger');
+    await screen.findByRole('button', { name: /add quarterstaff/i });
+
+    // The slow first response lands last — it must not overwrite the results.
+    resolveFirst(makeResponse([dagger]));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /add quarterstaff/i })).toBeInTheDocument()
+    );
+    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
   it('renders existing entries with their weight and qty', () => {
@@ -124,13 +197,32 @@ describe('LootItemsEditor', () => {
     ]);
   });
 
-  it('raising qty min above max pulls max up with it', () => {
+  it('clearing a weight keeps the prior value and restores it on blur', () => {
     const { onChange } = setup(twoEntries);
-    fireEvent.change(screen.getByLabelText('Dagger qty min'), { target: { value: '4' } });
-    expect(onChange).toHaveBeenCalledWith([
+    const input = screen.getByLabelText('Dagger weight');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(input).toHaveValue(60);
+  });
+
+  it('raising qty min above max resolves to the edited bound on blur', () => {
+    const { onChange } = setupStateful(twoEntries);
+    const min = screen.getByLabelText('Dagger qty min');
+    fireEvent.change(min, { target: { value: '4' } });
+    fireEvent.blur(min);
+    expect(lastChange(onChange)).toEqual([
       { itemName: 'Dagger', weight: 60, qty: [4, 4] },
       { itemName: 'Quarterstaff', weight: 80, qty: [1, 2] },
     ]);
+  });
+
+  it('lowering qty max below min pulls min down on blur', () => {
+    const { onChange } = setupStateful([{ itemName: 'Dagger', weight: 60, qty: [3, 5] }]);
+    const max = screen.getByLabelText('Dagger qty max');
+    fireEvent.change(max, { target: { value: '2' } });
+    fireEvent.blur(max);
+    expect(lastChange(onChange)).toEqual([{ itemName: 'Dagger', weight: 60, qty: [2, 2] }]);
   });
 
   it('clamps qty below 1 up to 1', () => {

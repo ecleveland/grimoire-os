@@ -15,6 +15,14 @@ export class ApiError extends Error {
     this.body = body;
   }
 }
+// Nest validation 400s carry `message` as a string[]; joining keeps the toast
+// readable instead of Error's bare-comma String coercion.
+function errorMessage(message: unknown, status: number): string {
+  if (Array.isArray(message)) return message.join('; ');
+  if (typeof message === 'string' && message) return message;
+  return `API error: ${status}`;
+}
+
 const REFRESH_PATH = '/auth/refresh';
 const CSRF_COOKIE_NAME = 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
@@ -104,7 +112,7 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     if (res.status === 403) {
       body = await res.json().catch(() => ({}));
       if (body?.message !== CSRF_REJECTION_MESSAGE) {
-        throw new ApiError(res.status, body?.message || `API error: ${res.status}`, body);
+        throw new ApiError(res.status, errorMessage(body?.message, res.status), body);
       }
     }
 
@@ -126,7 +134,7 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.message || `API error: ${res.status}`, body);
+    throw new ApiError(res.status, errorMessage(body.message, res.status), body);
   }
 
   if (res.status === 204) {

@@ -380,6 +380,16 @@ describe('apiFetch', () => {
       await expect(apiFetch('/test')).rejects.toThrow('Bad request data');
     });
 
+    it('joins array messages (Nest validation 400s) instead of String-coercing them', async () => {
+      vi.mocked(fetch).mockResolvedValue(
+        mockResponse(400, {
+          message: ['gp must be ordered', 'weight must be ≥ 0'],
+        }) as unknown as Response
+      );
+
+      await expect(apiFetch('/test')).rejects.toThrow('gp must be ordered; weight must be ≥ 0');
+    });
+
     it('throws Error with status code fallback when body has no message', async () => {
       vi.mocked(fetch).mockResolvedValue(mockResponse(500, {}) as unknown as Response);
 

@@ -198,6 +198,12 @@ export default function AdminNpcDataPage() {
           toast.error('Add at least one item');
           return;
         }
+        // All-zero weights would make the loot roller's weightedPick throw
+        // at generation time; the backend rejects this too.
+        if (items.length > 0 && !items.some(i => i.weight > 0)) {
+          toast.error('At least one item needs a weight above 0');
+          return;
+        }
         body[f.key] = items;
         continue;
       }
