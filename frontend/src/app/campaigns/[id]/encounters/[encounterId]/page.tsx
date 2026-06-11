@@ -75,11 +75,16 @@ export default function InitiativeTrackerPage() {
   // Auto-roll loot when a monster combatant drops to 0 HP (VEG-301).
   // Session-local DM preference, intentionally not persisted on the encounter.
   const [autoRollLoot, setAutoRollLoot] = useState(false);
-  // True while any version-guarded write (PATCH or loot POST) is in flight.
-  // The loot buttons disable on it, so the blur-commit → button-click
-  // sequence can't fire two writes against the same expectedVersion (the
-  // second would always 409), and double-clicks can't double-POST.
-  const [writePending, setWritePending] = useState(false);
+  // Count of version-guarded writes (PATCHes and loot POSTs) in flight. A
+  // counter, not a boolean: a quick write resolving mid-roll must not drop
+  // the lock while the roll POST is still pending. While any write is
+  // pending, the loot buttons disable and HP commits bail, so a single user
+  // can't fire two writes against the same expectedVersion (the second
+  // would always 409 and one write would be dropped).
+  const [pendingWrites, setPendingWrites] = useState(0);
+  const writePending = pendingWrites > 0;
+  const beginWrite = () => setPendingWrites(n => n + 1);
+  const endWrite = () => setPendingWrites(n => n - 1);
   // Encounter-wide roll replaces existing drops (backend re-rolls every
   // monster combatant) — confirm before doing that destructively.
   const [confirmBulkRoll, setConfirmBulkRoll] = useState(false);
@@ -112,7 +117,7 @@ export default function InitiativeTrackerPage() {
   // (auto-roll on death) off the fresh version; null when the PATCH failed.
   const patchEncounter = async (updates: Partial<Encounter>): Promise<Encounter | null> => {
     if (!encounter) return null;
-    setWritePending(true);
+    beginWrite();
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
@@ -125,7 +130,7 @@ export default function InitiativeTrackerPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to update encounter');
       return null;
     } finally {
-      setWritePending(false);
+      endWrite();
     }
   };
 
@@ -139,7 +144,7 @@ export default function InitiativeTrackerPage() {
     combatantIndex: number | undefined,
     successMsg: string
   ) => {
-    setWritePending(true);
+    beginWrite();
     try {
       const { encounter: updated } = await apiFetch<{
         encounter: Encounter;
@@ -157,7 +162,7 @@ export default function InitiativeTrackerPage() {
       if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to roll loot');
     } finally {
-      setWritePending(false);
+      endWrite();
     }
   };
 
@@ -201,6 +206,10 @@ export default function InitiativeTrackerPage() {
     if (!encounter || !hpDraft || hpDraft.name !== name) return;
     const { index: draftIndex, value } = hpDraft;
     setHpDraft(null);
+    // A write is already in flight — the commit would race its version guard
+    // and one of the two writes would 409. Revert the draft instead (the
+    // same silent-revert convention as empty/invalid drafts).
+    if (writePending) return;
     const raw = value.trim();
     const parsed = Number(raw);
     if (raw === '' || Number.isNaN(parsed)) return;
@@ -238,6 +247,7 @@ export default function InitiativeTrackerPage() {
       { quantity, initiatives },
       encounter.combatants.map(c => c.name)
     );
+    beginWrite();
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
@@ -255,6 +265,8 @@ export default function InitiativeTrackerPage() {
     } catch (err) {
       if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
+    } finally {
+      endWrite();
     }
   };
 

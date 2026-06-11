@@ -941,6 +941,118 @@ describe('InitiativeTrackerPage', () => {
       await waitFor(() => expect(btn).toBeEnabled());
     });
 
+    it('keeps the loot guard up while an overlapping shorter write resolves', async () => {
+      // writePending must count overlapping writes: a quick Next Turn PATCH
+      // finishing mid-roll must not re-enable the loot buttons while the roll
+      // POST is still in flight.
+      let resolveRoll!: (v: unknown) => void;
+      const enc = makeEncounter({
+        combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' })],
+      });
+      routeLootFlow({
+        encounter: enc,
+        onRoll: () =>
+          new Promise(res => {
+            resolveRoll = res;
+          }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const rollBtn = screen.getByRole('button', { name: /roll loot for goblin a/i });
+      fireEvent.click(rollBtn); // roll POST pending
+      expect(rollBtn).toBeDisabled();
+
+      // Next Turn's PATCH starts and resolves while the roll is still pending.
+      fireEvent.click(screen.getByRole('button', { name: /next turn/i }));
+      await waitFor(() => {
+        const patch = mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(patch).toBeDefined();
+      });
+      expect(rollBtn).toBeDisabled(); // still guarded by the in-flight POST
+
+      resolveRoll({
+        encounter: {
+          ...enc,
+          version: 2,
+          combatants: [{ ...enc.combatants[0], loot: makeLoot() }],
+        },
+        lootTotal: null,
+      });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /reroll loot for goblin a/i })).toBeEnabled()
+      );
+    });
+
+    it('guards the add-monster PATCH with the same write lock', async () => {
+      let resolvePatch!: (v: unknown) => void;
+      const enc = makeEncounter({
+        version: 3,
+        combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' })],
+      });
+      routeAddFlow({
+        encounter: enc,
+        onPatch: () =>
+          new Promise(res => {
+            resolvePatch = res;
+          }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await addGoblinFromLookup(user); // add PATCH now pending
+
+      expect(screen.getByRole('button', { name: /roll loot for goblin a/i })).toBeDisabled();
+      resolvePatch({ ...enc, version: 4 });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /roll loot for goblin a/i })).toBeEnabled()
+      );
+    });
+
+    it('drops an HP draft committed during a roll instead of racing the version guard', async () => {
+      let resolveRoll!: (v: unknown) => void;
+      const enc = makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+        ],
+      });
+      routeLootFlow({
+        encounter: enc,
+        onRoll: () =>
+          new Promise(res => {
+            resolveRoll = res;
+          }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
+      const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+      fireEvent.change(hpInputs[0], { target: { value: '5' } });
+      fireEvent.blur(hpInputs[0]); // committed mid-roll: reverts, no PATCH
+
+      expect(
+        mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+      ).toBeUndefined();
+      expect((screen.getAllByRole('spinbutton')[0] as HTMLInputElement).value).toBe('24');
+
+      resolveRoll({
+        encounter: {
+          ...enc,
+          version: 2,
+          combatants: [enc.combatants[0], { ...enc.combatants[1], loot: makeLoot() }],
+        },
+        lootTotal: null,
+      });
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /reroll loot for goblin a/i })).toBeEnabled()
+      );
+    });
+
     it('keeps the drop view at full contrast on a dead row', async () => {
       routeLootFlow({
         encounter: makeEncounter({
@@ -1055,20 +1167,22 @@ describe('InitiativeTrackerPage', () => {
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
 
+      const patchCount = () =>
+        mockApiFetch.mock.calls.filter(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        ).length;
+
       const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
-      // Hero (no monsterId) dies — no roll.
+      // Hero (no monsterId) dies — no roll. Wait for the commit to settle:
+      // a second commit fired mid-write is intentionally dropped by the
+      // write lock.
       fireEvent.change(hpInputs[0], { target: { value: '0' } });
       fireEvent.blur(hpInputs[0]);
+      await waitFor(() => expect(patchCount()).toBe(1));
       // Goblin A already rolled — dying again must not clobber its drop.
       fireEvent.change(hpInputs[1], { target: { value: '0' } });
       fireEvent.blur(hpInputs[1]);
-
-      await waitFor(() => {
-        const patches = mockApiFetch.mock.calls.filter(
-          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
-        );
-        expect(patches.length).toBe(2);
-      });
+      await waitFor(() => expect(patchCount()).toBe(2));
       expect(mockApiFetch.mock.calls.find(([p]) => p === '/encounters/enc-1/loot')).toBeUndefined();
     });
 
