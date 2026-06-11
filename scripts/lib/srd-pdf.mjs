@@ -201,6 +201,42 @@ export function reconstructTable(lines, { name = null, minGap = 2 } = {}) {
   return { name, columns, rows };
 }
 
+// ── 6. Word-level cell rows ────────────────────────────────────────────────
+// Group bbox words into lines by y-proximity, then split each line into cells
+// wherever the horizontal gap between adjacent words exceeds `minGap` points.
+// Unlike splitColumns (which needs `pdftotext -layout` text), this works on the
+// bbox words directly, so table cells survive even where linearizeColumns
+// would collapse the column gaps to single spaces (VEG-308: the Equipment
+// chapter's dense cost/weight/damage tables).
+// Returns [{ page, y, cells: [{ x, xMax, text }] }] ordered page → y → x.
+export function wordsToCellRows(words, { yTol = LINE_Y_TOLERANCE, minGap = 8 } = {}) {
+  const sorted = words.slice().sort((a, b) => a.page - b.page || a.y - b.y || a.x - b.x);
+  const lines = [];
+  let cur = null;
+  for (const w of sorted) {
+    if (cur && w.page === cur.page && Math.abs(w.y - cur.y) <= yTol) cur.words.push(w);
+    else {
+      cur = { page: w.page, y: w.y, words: [w] };
+      lines.push(cur);
+    }
+  }
+  return lines.map(line => {
+    const ws = line.words.sort((a, b) => a.x - b.x);
+    const cells = [];
+    let cell = null;
+    for (const w of ws) {
+      if (cell && w.x - cell.xMax <= minGap) {
+        cell.text += ` ${w.text}`;
+        cell.xMax = Math.max(cell.xMax, w.xMax);
+      } else {
+        cell = { x: w.x, xMax: w.xMax, text: w.text };
+        cells.push(cell);
+      }
+    }
+    return { page: line.page, y: line.y, cells };
+  });
+}
+
 // Render a reconstructed table as GitHub-flavored markdown.
 export function tableToMarkdown({ columns, rows }) {
   const header = `| ${columns.join(' | ')} |`;

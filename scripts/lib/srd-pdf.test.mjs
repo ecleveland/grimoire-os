@@ -15,6 +15,7 @@ import {
   splitColumns,
   reconstructTable,
   tableToMarkdown,
+  wordsToCellRows,
   SRD_PAGE_FURNITURE,
 } from './srd-pdf.mjs';
 
@@ -120,6 +121,59 @@ test('reconstructTable drops rows whose width differs from the modal width', () 
   ]);
   assert.deepEqual(table.columns, ['A', 'B', 'C']);
   assert.equal(table.rows.length, 2);
+});
+
+// A bbox word for wordsToCellRows tests: explicit xMax so gaps are controlled.
+const w = (x, xMax, y, text, page = 0) => ({ page, x, xMax, y, yMax: y + 8, text });
+
+test('wordsToCellRows splits a line into cells on wide x-gaps only', () => {
+  // "Club" | "1d4 Bludgeoning" | "1 SP" — intra-cell gap 4pt, inter-cell gaps 20pt+.
+  const rows = wordsToCellRows([
+    w(63, 80, 68, 'Club'),
+    w(138, 152, 68, '1d4'),
+    w(156, 210, 68, 'Bludgeoning'),
+    w(533, 545, 68, '1'),
+    w(548, 560, 68, 'SP'),
+  ]);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    rows[0].cells.map(c => c.text),
+    ['Club', '1d4 Bludgeoning', '1 SP']
+  );
+});
+
+test('wordsToCellRows groups words within y-tolerance and reports cell extents', () => {
+  const rows = wordsToCellRows([
+    w(138, 152, 100, '1d4'),
+    w(156, 210, 102, 'Bludgeoning'), // within default yTol(4) of 100
+  ]);
+  assert.equal(rows.length, 1);
+  const [cell] = rows[0].cells;
+  assert.deepEqual({ x: cell.x, xMax: cell.xMax, text: cell.text }, {
+    x: 138,
+    xMax: 210,
+    text: '1d4 Bludgeoning',
+  });
+});
+
+test('wordsToCellRows orders rows by page then y, cells left-to-right', () => {
+  const rows = wordsToCellRows([
+    w(63, 80, 200, 'second'),
+    w(90, 110, 68, 'first-b'),
+    w(63, 80, 68, 'first-a'),
+    w(63, 80, 30, 'next-page', 1),
+  ]);
+  assert.deepEqual(
+    rows.map(r => r.cells.map(c => c.text).join('|')),
+    ['first-a|first-b', 'second', 'next-page']
+  );
+  assert.deepEqual(rows.map(r => r.page), [0, 0, 1]);
+});
+
+test('wordsToCellRows honours a custom minGap', () => {
+  const words = [w(63, 80, 68, 'a'), w(95, 110, 68, 'b')]; // 15pt gap
+  assert.equal(wordsToCellRows(words)[0].cells.length, 2);
+  assert.equal(wordsToCellRows(words, { minGap: 20 })[0].cells.length, 1);
 });
 
 test('tableToMarkdown renders GitHub-flavored markdown', () => {

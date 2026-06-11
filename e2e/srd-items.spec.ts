@@ -12,6 +12,46 @@ async function registerAndLogin(page: Page): Promise<void> {
   expect(reg.ok(), `register failed: ${reg.status()}`).toBeTruthy();
 }
 
+test.describe('SRD basic equipment (VEG-308)', () => {
+  test('finds seeded equipment by search and filters by the new categories', async ({ page }) => {
+    await registerAndLogin(page);
+
+    await page.goto('/srd/items');
+    await expect(page.getByRole('heading', { name: /^Items$/ })).toBeVisible();
+
+    // A seeded weapon from the extracted Weapons table, with table data intact.
+    await page.getByPlaceholder('Search items...').fill('Longsword');
+    const longsword = page.getByTestId('item-card').filter({ hasText: 'Longsword' }).first();
+    await expect(longsword).toBeVisible({ timeout: 10_000 });
+    await expect(longsword.getByText('Martial Melee Weapon')).toBeVisible();
+    await expect(longsword.getByText('Cost: 15 GP')).toBeVisible();
+    await expect(longsword.getByText('Mastery: Sap')).toBeVisible();
+
+    // The category filter matches the seeded values: all 7 equipment packs.
+    await page.getByPlaceholder('Search items...').clear();
+    await page.getByRole('combobox').selectOption('Equipment Pack');
+    await expect(page.getByText('7 items found')).toBeVisible({ timeout: 10_000 });
+    const burglars = page.getByTestId('item-card').filter({ hasText: 'Burglar’s Pack' });
+    await expect(burglars).toBeVisible();
+
+    // Pack contents survive in the description prose.
+    await burglars.getByRole('button', { name: 'Show details' }).click();
+    await expect(burglars.getByText(/10 Candles/)).toBeVisible();
+
+    // The detail endpoint resolves the pack's bundle entries against the real
+    // database — a silently empty item_bundle_entries table fails here even
+    // though the prose above would still render.
+    const list = await page.request.get(`${BACKEND}/api/srd/items?q=Burglar%27s%20Pack&limit=1`);
+    expect(list.ok()).toBeTruthy();
+    const packId = (await list.json()).data[0].id as string;
+    const detail = await page.request.get(`${BACKEND}/api/srd/items/${packId}`);
+    expect(detail.ok()).toBeTruthy();
+    const pack = await detail.json();
+    expect(pack.contents).toContainEqual(expect.objectContaining({ name: 'Candle', quantity: 10 }));
+    expect(pack.contents.length).toBeGreaterThanOrEqual(10);
+  });
+});
+
 test.describe('SRD magic-item descriptions (VEG-272)', () => {
   test('expands a magic item to reveal its reconstructed table', async ({ page }) => {
     await registerAndLogin(page);

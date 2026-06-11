@@ -148,6 +148,17 @@ export interface SrdMonster extends ContentOwnership {
   source: string;
 }
 
+/**
+ * A component line of an equipment-pack bundle: the contained item with its
+ * quantity (e.g. Burglar's Pack → 10× Candle). Returned on the item detail
+ * endpoint for items with category "Equipment Pack" (VEG-308).
+ */
+export interface SrdItemBundleComponent {
+  itemId: string;
+  name: string;
+  quantity: number;
+}
+
 export interface SrdItem extends ContentOwnership {
   id: string;
   name: string;
@@ -157,7 +168,12 @@ export interface SrdItem extends ContentOwnership {
   description?: string;
   damage?: string;
   damageType?: string;
-  armorClass?: number;
+  /**
+   * Wearable-armor AC as self-describing text — "11 + Dex modifier",
+   * "13 + Dex modifier (max 2)", "16", "+2" (shield). Distinct from the
+   * numeric creature AC on monsters/characters/NPCs.
+   */
+  armorClass?: string;
   stealthDisadvantage?: boolean;
   strengthRequirement?: number;
   properties: string[];
@@ -165,6 +181,12 @@ export interface SrdItem extends ContentOwnership {
   requiresAttunement?: boolean;
   isMagic?: boolean;
   source: string;
+  /**
+   * Resolved bundle contents. Returned by the item *detail* endpoint only
+   * (the list endpoint never includes it), and only when the item has bundle
+   * entries — in practice the seeded equipment packs.
+   */
+  contents?: SrdItemBundleComponent[];
 }
 
 export interface SrdClass {

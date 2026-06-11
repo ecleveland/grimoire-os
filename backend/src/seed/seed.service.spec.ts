@@ -10,6 +10,7 @@ jest.mock('./srd-json.loader', () => ({
   loadSpellsFromJson: jest.fn(),
   loadMonstersFromJson: jest.fn(),
   loadMagicItemsFromJson: jest.fn(),
+  loadEquipmentFromJson: jest.fn(),
   loadSpeciesAsRacesFromJson: jest.fn(),
 }));
 
@@ -17,6 +18,7 @@ import {
   loadSpellsFromJson,
   loadMonstersFromJson,
   loadMagicItemsFromJson,
+  loadEquipmentFromJson,
   loadSpeciesAsRacesFromJson,
 } from './srd-json.loader';
 
@@ -24,6 +26,9 @@ const mockLoadSpells = loadSpellsFromJson as jest.MockedFunction<typeof loadSpel
 const mockLoadMonsters = loadMonstersFromJson as jest.MockedFunction<typeof loadMonstersFromJson>;
 const mockLoadMagicItems = loadMagicItemsFromJson as jest.MockedFunction<
   typeof loadMagicItemsFromJson
+>;
+const mockLoadEquipment = loadEquipmentFromJson as jest.MockedFunction<
+  typeof loadEquipmentFromJson
 >;
 const mockLoadSpecies = loadSpeciesAsRacesFromJson as jest.MockedFunction<
   typeof loadSpeciesAsRacesFromJson
@@ -180,6 +185,61 @@ describe('SeedService', () => {
         properties: [],
       },
     ]);
+    mockLoadEquipment.mockReturnValue({
+      items: [
+        {
+          name: 'Longsword',
+          category: 'Martial Melee Weapon',
+          cost: '15 GP',
+          weight: 3,
+          description: null,
+          damage: '1d8',
+          damageType: 'Slashing',
+          armorClass: null,
+          stealthDisadvantage: false,
+          strengthRequirement: null,
+          properties: ['Versatile (1d10)', 'Mastery: Sap'],
+          isMagic: false,
+        },
+        {
+          name: 'Backpack',
+          category: 'Adventuring Gear',
+          cost: '2 GP',
+          weight: 5,
+          description: 'Holds 30 pounds.',
+          damage: null,
+          damageType: null,
+          armorClass: null,
+          stealthDisadvantage: false,
+          strengthRequirement: null,
+          properties: [],
+          isMagic: false,
+        },
+        {
+          name: 'Explorer’s Pack',
+          category: 'Equipment Pack',
+          cost: '10 GP',
+          weight: 55,
+          description: 'Contains a Backpack.',
+          damage: null,
+          damageType: null,
+          armorClass: null,
+          stealthDisadvantage: false,
+          strengthRequirement: null,
+          properties: [],
+          isMagic: false,
+        },
+      ],
+      bundles: [{ bundleName: 'Explorer’s Pack', components: [{ name: 'Backpack', quantity: 1 }] }],
+    });
+    // Bundle FK resolution: items looked up by name get name-derived ids.
+    prisma.item.findMany.mockImplementation((args: any) => {
+      const names = (args?.where?.name?.in ?? []) as string[];
+      return Promise.resolve(names.map(name => ({ id: `id-${name}`, name })));
+    });
+    prisma.item.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.itemBundleEntry.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.itemBundleEntry.createMany.mockResolvedValue({ count: 0 });
     mockLoadSpecies.mockReturnValue([
       {
         name: 'Test Species',
@@ -236,15 +296,99 @@ describe('SeedService', () => {
     );
   });
 
-  it('merges mundane items with magic items from JSON', async () => {
+  it('merges extracted equipment with magic items from JSON (no hand-authored stub)', async () => {
     await service.seed();
 
-    // 5 mundane items from static data + 1 magic item from JSON mock, each created by name.
+    // 3 equipment items from the extracted JSON + 1 magic item, each created by name.
     const createdItems = prisma.item.create.mock.calls.map(([args]: [any]) => args.data);
-    expect(createdItems).toHaveLength(6);
+    expect(createdItems).toHaveLength(4);
     expect(createdItems[0].name).toBe('Longsword');
-    expect(createdItems[5].name).toBe('Test Wand');
-    expect(createdItems[5].isMagic).toBe(true);
+    expect(createdItems[0].isMagic).toBe(false);
+    expect(createdItems[3].name).toBe('Test Wand');
+    expect(createdItems[3].isMagic).toBe(true);
+  });
+
+  // ── Equipment seeding (VEG-308) ────────────────────────
+
+  it('fails loudly before writing when an item name collides across sources', async () => {
+    mockLoadMagicItems.mockReturnValue([
+      {
+        name: 'Longsword', // collides with the equipment dataset
+        category: 'Weapon',
+        description: 'A magic longsword.',
+        rarity: 'Rare',
+        requiresAttunement: false,
+        isMagic: true,
+        properties: [],
+      },
+    ]);
+
+    await expect(service.seed()).rejects.toThrow(/Longsword/);
+    expect(prisma.item.create).not.toHaveBeenCalled();
+  });
+
+  it('seeds pack bundle entries in a second pass with resolved component ids', async () => {
+    await service.seed();
+
+    // Pass 2 resolves pack + component ids by name within the srd partition…
+    expect(prisma.item.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          contentSource: 'srd',
+          name: { in: expect.arrayContaining(['Explorer’s Pack', 'Backpack']) },
+        }),
+      })
+    );
+    // …then rewrites each pack's entries idempotently (delete + recreate).
+    expect(prisma.itemBundleEntry.deleteMany).toHaveBeenCalledWith({
+      where: { bundleId: 'id-Explorer’s Pack' },
+    });
+    expect(prisma.itemBundleEntry.createMany).toHaveBeenCalledWith({
+      data: [{ bundleId: 'id-Explorer’s Pack', componentId: 'id-Backpack', quantity: 1 }],
+    });
+    // Order matters: createMany after deleteMany, or every reseed would leave
+    // the bundles empty while the calls-were-made assertions still pass.
+    expect(prisma.itemBundleEntry.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.itemBundleEntry.createMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('logs how many stale srd items the cleanup retired', async () => {
+    prisma.item.deleteMany.mockResolvedValue({ count: 2 });
+    const log = jest.spyOn(console, 'log').mockImplementation();
+
+    await service.seed();
+
+    expect(log.mock.calls.map(c => c.join(' '))).toEqual(
+      expect.arrayContaining([expect.stringMatching(/retired: 2/)])
+    );
+  });
+
+  it('rejects duplicate names within a single dataset fed to the by-name upsert', async () => {
+    mockLoadSpells.mockReturnValue([
+      { name: 'Twin Spell' },
+      { name: 'Twin Spell' },
+    ] as unknown as ReturnType<typeof loadSpellsFromJson>);
+
+    await expect(service.seed()).rejects.toThrow(/Twin Spell/);
+    expect(prisma.spell.create).not.toHaveBeenCalled();
+  });
+
+  it('throws when a bundle name cannot be resolved to a seeded item', async () => {
+    prisma.item.findMany.mockResolvedValue([]); // nothing resolves
+
+    await expect(service.seed()).rejects.toThrow(/Explorer’s Pack/);
+  });
+
+  it('removes stale srd items no longer present in any source (old placeholders)', async () => {
+    await service.seed();
+
+    expect(prisma.item.deleteMany).toHaveBeenCalledWith({
+      where: {
+        contentSource: 'srd',
+        name: { notIn: ['Longsword', 'Backpack', 'Explorer’s Pack', 'Test Wand'] },
+      },
+    });
   });
 
   // ── Content source (VEG-292) ───────────────────────────
@@ -286,12 +430,22 @@ describe('SeedService', () => {
     expect(prisma.spell.create).not.toHaveBeenCalled();
   });
 
-  it('never deletes spells/monsters/items/feats on reseed (user homebrew survives)', async () => {
+  it('never deletes spells/monsters/feats on reseed (user homebrew survives)', async () => {
     await service.seed();
 
-    for (const model of [prisma.spell, prisma.monster, prisma.item, prisma.feat]) {
+    for (const model of [prisma.spell, prisma.monster, prisma.feat]) {
       expect(model.deleteMany).not.toHaveBeenCalled();
       expect(model.delete).not.toHaveBeenCalled();
+    }
+  });
+
+  it('scopes the stale-item cleanup to the srd partition (user homebrew survives)', async () => {
+    await service.seed();
+
+    expect(prisma.item.delete).not.toHaveBeenCalled();
+    expect(prisma.item.deleteMany).toHaveBeenCalledTimes(1);
+    for (const [args] of prisma.item.deleteMany.mock.calls) {
+      expect(args.where.contentSource).toBe('srd');
     }
   });
 

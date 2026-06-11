@@ -689,14 +689,53 @@ describe('SrdService', () => {
   });
 
   describe('findItem', () => {
-    it('returns item by id, scoped to the global catalog', async () => {
-      const item = { id: '1', name: 'Healing Potion' };
+    it('returns item by id, scoped to the global catalog, without contents for non-packs', async () => {
+      const item = { id: '1', name: 'Healing Potion', bundleContents: [] };
       prisma.item.findFirst.mockResolvedValue(item);
 
       const result = await service.findItem('1');
 
-      expect(prisma.item.findFirst).toHaveBeenCalledWith({ where: { id: '1', ...GLOBAL_WHERE } });
-      expect(result).toEqual(item);
+      expect(prisma.item.findFirst).toHaveBeenCalledWith({
+        where: { id: '1', ...GLOBAL_WHERE },
+        include: {
+          bundleContents: {
+            include: { component: { select: { id: true, name: true } } },
+            orderBy: { component: { name: 'asc' } },
+          },
+        },
+      });
+      expect(result).toEqual({ id: '1', name: 'Healing Potion' });
+      expect(result).not.toHaveProperty('contents');
+    });
+
+    it('resolves an equipment pack to its component items with quantities (VEG-308)', async () => {
+      prisma.item.findFirst.mockResolvedValue({
+        id: 'pack-1',
+        name: 'Burglar’s Pack',
+        category: 'Equipment Pack',
+        bundleContents: [
+          { quantity: 10, component: { id: 'c-1', name: 'Candle' } },
+          { quantity: 1, component: { id: 'c-2', name: 'Crowbar' } },
+        ],
+      });
+
+      const result = await service.findItem('pack-1');
+
+      expect(result).toMatchObject({
+        id: 'pack-1',
+        name: 'Burglar’s Pack',
+        contents: [
+          { itemId: 'c-1', name: 'Candle', quantity: 10 },
+          { itemId: 'c-2', name: 'Crowbar', quantity: 1 },
+        ],
+      });
+      expect(result).not.toHaveProperty('bundleContents');
+    });
+
+    it('returns null when the item does not exist', async () => {
+      prisma.item.findFirst.mockResolvedValue(null);
+
+      expect(await service.findItem('missing')).toBeNull();
     });
   });
 

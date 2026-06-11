@@ -9,9 +9,10 @@ import {
   loadSpellsFromJson,
   loadMonstersFromJson,
   loadMagicItemsFromJson,
+  loadEquipmentFromJson,
   loadSpeciesAsRacesFromJson,
 } from './srd-json.loader';
-import { srdItems as mundaneItems } from './data/items';
+import { assertUniqueSeedNames } from './seed-guards';
 import { srdClasses } from './data/classes';
 import { srdSubclasses } from './data/subclasses';
 import { srdSubraces } from './data/subraces';
@@ -55,7 +56,16 @@ export class SeedService {
   // Scoping every read and write to contentSource='srd' guarantees a re-seed can
   // never read, update, or delete a user's homebrew row. Corrected SRD data still
   // propagates to existing rows on re-seed, preserving ids/FKs.
-  private async seedSrdByName(delegate: SrdSeedDelegate, rows: { name: string }[]): Promise<void> {
+  private async seedSrdByName(
+    delegate: SrdSeedDelegate,
+    rows: { name: string }[],
+    kind: string
+  ): Promise<void> {
+    // Upserting by name makes duplicate names a silent last-write-wins clobber;
+    // every dataset fed to this mechanism is dedup-checked here so a future
+    // second source can't skip the guard (the cross-source item check in seed()
+    // additionally attributes collisions to their files).
+    assertUniqueSeedNames(kind, { [kind]: rows.map(r => r.name) });
     for (const row of rows) {
       const data = { ...row, contentSource: 'srd' as const };
       const existing = await delegate.findFirst({
@@ -77,9 +87,16 @@ export class SeedService {
     const spells = loadSpellsFromJson() as unknown as Prisma.SpellCreateManyInput[];
     const monsters = loadMonstersFromJson() as unknown as Prisma.MonsterCreateManyInput[];
     const magicItems = loadMagicItemsFromJson() as unknown as Prisma.ItemCreateManyInput[];
+    const equipment = loadEquipmentFromJson();
     const races = loadSpeciesAsRacesFromJson();
 
-    const items = [...(mundaneItems as unknown as Prisma.ItemCreateManyInput[]), ...magicItems];
+    // Both item sources feed the same table and are upserted by name — fail
+    // loudly on any collision before touching the database (VEG-308).
+    assertUniqueSeedNames('item', {
+      'equipment.json': equipment.items.map(i => i.name),
+      'magic_items.json': magicItems.map(i => i.name),
+    });
+    const items = [...(equipment.items as unknown as Prisma.ItemCreateManyInput[]), ...magicItems];
 
     const backgrounds: Prisma.BackgroundCreateManyInput[] = srdBackgrounds.map(b => ({
       name: b.name,
@@ -111,17 +128,60 @@ export class SeedService {
       // field-bleed fixes and the VEG-271 spell description/table fixes —
       // propagates to existing rows on re-seed (preserving ids/FKs) while leaving
       // any user homebrew rows in the same tables untouched (VEG-292).
-      await this.seedSrdByName(tx.spell as unknown as SrdSeedDelegate, spells);
+      await this.seedSrdByName(tx.spell as unknown as SrdSeedDelegate, spells, 'spell');
       console.log(`  Spells: ${spells.length} entries`);
 
-      await this.seedSrdByName(tx.monster as unknown as SrdSeedDelegate, monsters);
+      await this.seedSrdByName(tx.monster as unknown as SrdSeedDelegate, monsters, 'monster');
       console.log(`  Monsters: ${monsters.length} entries`);
 
-      // Item names are unique across the mundane (hand-authored) and magic (JSON)
-      // SRD rows that share this table; the contentSource='srd' partial unique
-      // index enforces it.
-      await this.seedSrdByName(tx.item as unknown as SrdSeedDelegate, items);
+      // Item names are unique across the equipment and magic-item JSON sources
+      // (assertUniqueSeedNames above); the contentSource='srd' partial unique
+      // index enforces it at the database level.
+      await this.seedSrdByName(tx.item as unknown as SrdSeedDelegate, items, 'item');
       console.log(`  Items: ${items.length} entries`);
+
+      // Retire srd rows that no longer exist in any source — e.g. the old
+      // 5-item hand-authored stub's "Rope, Hempen (50 feet)" and the mundane
+      // "Potion of Healing" copy (canonical entry: the "Potions of Healing"
+      // magic item). Scoped to contentSource='srd', so homebrew/shared rows
+      // are untouchable; ItemBundleEntry rows cascade. This is the seed's only
+      // destructive step, so the count is always logged.
+      const itemNames = items.map(i => i.name);
+      const retired = await tx.item.deleteMany({
+        where: { contentSource: 'srd', name: { notIn: itemNames } },
+      });
+      console.log(`  Items retired: ${retired.count}`);
+
+      // Equipment packs, second pass: with all item rows in place, resolve the
+      // pack and component ids by name and rewrite each pack's bundle entries
+      // (delete + recreate keeps re-seeding idempotent).
+      const bundleNames = [
+        ...new Set(
+          equipment.bundles.flatMap(b => [b.bundleName, ...b.components.map(c => c.name)])
+        ),
+      ];
+      const bundleRows = await tx.item.findMany({
+        where: { contentSource: 'srd', name: { in: bundleNames } },
+        select: { id: true, name: true },
+      });
+      const idByName = new Map(bundleRows.map(r => [r.name, r.id]));
+      const resolveId = (name: string): string => {
+        const id = idByName.get(name);
+        if (!id) throw new Error(`Seed aborted: bundle item "${name}" did not resolve to a row`);
+        return id;
+      };
+      for (const bundle of equipment.bundles) {
+        const bundleId = resolveId(bundle.bundleName);
+        await tx.itemBundleEntry.deleteMany({ where: { bundleId } });
+        await tx.itemBundleEntry.createMany({
+          data: bundle.components.map(c => ({
+            bundleId,
+            componentId: resolveId(c.name),
+            quantity: c.quantity,
+          })),
+        });
+      }
+      console.log(`  Equipment packs: ${equipment.bundles.length} bundles`);
 
       if (backgrounds.length) {
         for (const background of backgrounds) {
@@ -135,7 +195,7 @@ export class SeedService {
       }
 
       if (feats.length) {
-        await this.seedSrdByName(tx.feat as unknown as SrdSeedDelegate, feats);
+        await this.seedSrdByName(tx.feat as unknown as SrdSeedDelegate, feats, 'feat');
         console.log(`  Feats: ${feats.length} entries`);
       }
 

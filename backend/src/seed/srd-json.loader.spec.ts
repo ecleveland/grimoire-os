@@ -4,6 +4,7 @@ import {
   loadSpellsFromJson,
   loadMonstersFromJson,
   loadMagicItemsFromJson,
+  loadEquipmentFromJson,
   loadSpeciesAsRacesFromJson,
   validateMonsterData,
   trailingForeignTitle,
@@ -529,6 +530,249 @@ describe('srd-json.loader', () => {
     it('returns correct count', () => {
       const items = loadMagicItemsFromJson();
       expect(items).toHaveLength(2);
+    });
+  });
+
+  describe('loadEquipmentFromJson', () => {
+    const sampleEquipmentJson = {
+      equipment: [
+        {
+          name: 'Longsword',
+          category: 'Martial Melee Weapon',
+          cost: '15 GP',
+          weight: 3,
+          damage: '1d8',
+          damage_type: 'Slashing',
+          properties: ['Versatile (1d10)'],
+          mastery: 'Sap',
+        },
+        {
+          name: 'Chain Mail',
+          category: 'Heavy Armor',
+          cost: '75 GP',
+          weight: 55,
+          armor_class: '16',
+          stealth_disadvantage: true,
+          strength_requirement: 13,
+          description: 'Heavy Armor (10 Minutes to Don and 5 Minutes to Doff).',
+          properties: [],
+        },
+        {
+          name: 'Backpack',
+          category: 'Adventuring Gear',
+          cost: '2 GP',
+          weight: 5,
+          description: 'A Backpack holds up to 30 pounds within 1 cubic foot.',
+          properties: [],
+        },
+        {
+          name: 'Explorer’s Pack',
+          category: 'Equipment Pack',
+          cost: '10 GP',
+          weight: 55,
+          description: 'An Explorer’s Pack contains the following items: Backpack.',
+          properties: [],
+          contents: [{ name: 'Backpack', quantity: 1 }],
+        },
+      ],
+    };
+
+    beforeEach(() => mockJsonFile('equipment.json', sampleEquipmentJson));
+
+    it('maps snake_case fields to the Prisma Item shape with isMagic false', () => {
+      const { items } = loadEquipmentFromJson();
+      expect(items[0]).toMatchObject({
+        name: 'Longsword',
+        category: 'Martial Melee Weapon',
+        cost: '15 GP',
+        weight: 3,
+        damage: '1d8',
+        damageType: 'Slashing',
+        isMagic: false,
+      });
+    });
+
+    it('appends the weapon mastery to properties', () => {
+      const { items } = loadEquipmentFromJson();
+      expect(items[0].properties).toEqual(['Versatile (1d10)', 'Mastery: Sap']);
+    });
+
+    it('keeps armorClass as a self-describing string and maps armor fields', () => {
+      const { items } = loadEquipmentFromJson();
+      expect(items[1]).toMatchObject({
+        name: 'Chain Mail',
+        armorClass: '16',
+        stealthDisadvantage: true,
+        strengthRequirement: 13,
+      });
+    });
+
+    it('defaults stealthDisadvantage to false and nullable fields to null', () => {
+      const { items } = loadEquipmentFromJson();
+      expect(items[2]).toMatchObject({
+        stealthDisadvantage: false,
+        strengthRequirement: null,
+        armorClass: null,
+        damage: null,
+        damageType: null,
+      });
+    });
+
+    it('extracts pack contents as bundles with quantities', () => {
+      const { bundles } = loadEquipmentFromJson();
+      expect(bundles).toEqual([
+        { bundleName: 'Explorer’s Pack', components: [{ name: 'Backpack', quantity: 1 }] },
+      ]);
+    });
+
+    it('throws when a pack component has a non-positive or fractional quantity', () => {
+      const pack = (quantity: number) => ({
+        equipment: [
+          { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            description: 'Contains things.',
+            properties: [],
+            contents: [{ name: 'Backpack', quantity }],
+          },
+        ],
+      });
+      for (const bad of [0, -1, 1.5]) {
+        mockJsonFile('equipment.json', pack(bad));
+        expect(() => loadEquipmentFromJson()).toThrow(/invalid quantity/);
+      }
+      mockJsonFile('equipment.json', pack(1));
+      expect(() => loadEquipmentFromJson()).not.toThrow();
+    });
+
+    it('throws when a non-pack entry carries contents or a pack contains itself or another pack', () => {
+      const base = [
+        { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+      ];
+      // contents on a non-pack
+      mockJsonFile('equipment.json', {
+        equipment: [
+          ...base,
+          {
+            name: 'Rope',
+            category: 'Adventuring Gear',
+            cost: '1 GP',
+            properties: [],
+            contents: [{ name: 'Backpack', quantity: 1 }],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/Rope/);
+      // self-containment
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            description: 'Contains itself.',
+            properties: [],
+            contents: [{ name: 'Explorer’s Pack', quantity: 1 }],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/contain itself/);
+      // pack-in-pack (cycles are representable; the reader resolves one level)
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Burglar’s Pack',
+            category: 'Equipment Pack',
+            cost: '16 GP',
+            description: 'Contains a pack.',
+            properties: [],
+            contents: [{ name: 'Explorer’s Pack', quantity: 1 }],
+          },
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            description: 'Contains nothing.',
+            properties: [],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/another pack/);
+    });
+
+    it('throws on a malformed armor_class string', () => {
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Odd Armor',
+            category: 'Light Armor',
+            cost: '5 GP',
+            properties: [],
+            armor_class: '1 1 + Dex modifier',
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/armor_class/);
+    });
+
+    it('accepts every armor_class shape the SRD uses', () => {
+      mockJsonFile('equipment.json', {
+        equipment: ['11 + Dex modifier', '13 + Dex modifier (max 2)', '16', '+2'].map(
+          (armor_class, i) => ({
+            name: `Armor ${i}`,
+            category: 'Light Armor',
+            cost: '5 GP',
+            properties: [],
+            armor_class,
+          })
+        ),
+      });
+      expect(() => loadEquipmentFromJson()).not.toThrow();
+    });
+
+    it('throws when a pack component does not resolve to an equipment item', () => {
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            weight: 55,
+            description: 'Contains things.',
+            properties: [],
+            contents: [{ name: 'Nonexistent Widget', quantity: 1 }],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/Nonexistent Widget/);
+    });
+
+    it('throws on duplicate names within the file', () => {
+      mockJsonFile('equipment.json', {
+        equipment: [
+          { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+          { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/Backpack/);
+    });
+
+    it('runs the free-text guard over descriptions (foreign-title bleed throws)', () => {
+      mockJsonFile('equipment.json', {
+        equipment: [
+          { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+          {
+            name: 'Bedroll',
+            category: 'Adventuring Gear',
+            cost: '1 GP',
+            properties: [],
+            description: 'A Bedroll sleeps one creature.\nBackpack',
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/Backpack/);
     });
   });
 
