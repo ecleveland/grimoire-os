@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AdminNpcDataPage from '../page';
 
@@ -149,6 +149,150 @@ describe('AdminNpcDataPage', () => {
         })
       )
     );
+  });
+
+  describe('loot templates tab', () => {
+    const dagger = { id: 'item-1', name: 'Dagger', category: 'Weapon', isMagic: false };
+
+    /** Routes the loot-templates list/create and the item-picker search. */
+    function routeLootApi(rows: object[] = [], items: object[] = [dagger]) {
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
+        if (path.startsWith('/srd/items')) {
+          return Promise.resolve({ data: items, total: items.length, page: 1, lastPage: 1 });
+        }
+        if (init?.method === 'POST') return Promise.resolve({ id: 'lt-new' });
+        return Promise.resolve(rows);
+      });
+    }
+
+    async function openLootTab() {
+      render(<AdminNpcDataPage />);
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/admin/npc-data/names'));
+      await userEvent.click(screen.getByRole('tab', { name: 'Loot Templates' }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenCalledWith('/admin/npc-data/loot-templates')
+      );
+    }
+
+    it('renders structured editors instead of JSON textareas', async () => {
+      routeLootApi();
+      await openLootTab();
+
+      expect(screen.getByLabelText('gp min')).toBeInTheDocument();
+      expect(screen.getByLabelText('sp max')).toBeInTheDocument();
+      expect(screen.getByLabelText(/search items/i)).toBeInTheDocument();
+      // CR bucket is a select offering the en-dash bucket labels — free text
+      // with an ASCII hyphen would never match a template at generation time.
+      const crSelect = screen.getByLabelText(/CR bucket/);
+      expect(crSelect.tagName).toBe('SELECT');
+      expect(within(crSelect as HTMLElement).getByRole('option', { name: '2–4' })).toBeDefined();
+      expect(document.querySelector('textarea')).toBeNull();
+    });
+
+    it('creates a loot template from the structured editors', async () => {
+      routeLootApi();
+      await openLootTab();
+
+      await userEvent.type(screen.getByLabelText(/^Profession/), 'merchant');
+      await userEvent.selectOptions(screen.getByLabelText(/CR bucket/), '2–4');
+      fireEvent.change(screen.getByLabelText('gp max'), { target: { value: '2' } });
+      fireEvent.change(screen.getByLabelText('sp min'), { target: { value: '2' } });
+      fireEvent.change(screen.getByLabelText('sp max'), { target: { value: '8' } });
+
+      await userEvent.type(screen.getByLabelText(/search items/i), 'dag');
+      await userEvent.click(await screen.findByRole('button', { name: /add dagger/i }));
+
+      await userEvent.click(screen.getByRole('button', { name: /Add row/i }));
+
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/admin/npc-data/loot-templates',
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const postCall = mockApiFetch.mock.calls.find(
+        c => c[0] === '/admin/npc-data/loot-templates' && c[1]?.method === 'POST'
+      );
+      expect(JSON.parse(postCall![1].body)).toEqual({
+        profession: 'merchant',
+        crBucket: '2–4',
+        coinage: { gp: [0, 2], sp: [2, 8], cp: [0, 0] },
+        items: [{ itemName: 'Dagger', weight: 1, qty: [1, 1] }],
+      });
+    });
+
+    it('blocks submitting a template with no items', async () => {
+      const { toast } = await import('sonner');
+      routeLootApi();
+      await openLootTab();
+
+      await userEvent.type(screen.getByLabelText(/^Profession/), 'merchant');
+      await userEvent.selectOptions(screen.getByLabelText(/CR bucket/), '0');
+      await userEvent.click(screen.getByRole('button', { name: /Add row/i }));
+
+      expect(toast.error).toHaveBeenCalledWith('Add at least one item');
+      expect(
+        mockApiFetch.mock.calls.find(
+          c => c[0] === '/admin/npc-data/loot-templates' && c[1]?.method === 'POST'
+        )
+      ).toBeUndefined();
+    });
+
+    it('blocks submitting a template whose items all have weight 0', async () => {
+      const { toast } = await import('sonner');
+      routeLootApi();
+      await openLootTab();
+
+      await userEvent.type(screen.getByLabelText(/^Profession/), 'merchant');
+      await userEvent.selectOptions(screen.getByLabelText(/CR bucket/), '0');
+      await userEvent.type(screen.getByLabelText(/search items/i), 'dag');
+      await userEvent.click(await screen.findByRole('button', { name: /add dagger/i }));
+      fireEvent.change(screen.getByLabelText('Dagger weight'), { target: { value: '0' } });
+
+      await userEvent.click(screen.getByRole('button', { name: /Add row/i }));
+
+      expect(toast.error).toHaveBeenCalledWith('At least one item needs a weight above 0');
+      expect(
+        mockApiFetch.mock.calls.find(
+          c => c[0] === '/admin/npc-data/loot-templates' && c[1]?.method === 'POST'
+        )
+      ).toBeUndefined();
+    });
+
+    it('still disables and deletes loot rows', async () => {
+      routeLootApi([
+        {
+          id: 'lt1',
+          profession: 'merchant',
+          crBucket: '2–4',
+          coinage: { gp: [0, 2], sp: [2, 8], cp: [4, 20] },
+          items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1] }],
+          source: 'user',
+          isActive: true,
+        },
+      ]);
+      await openLootTab();
+      await screen.findByText('merchant');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Disable' }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/admin/npc-data/loot-templates/lt1',
+          expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ isActive: false }) })
+        )
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+      await userEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' })
+      );
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/admin/npc-data/loot-templates/lt1',
+          expect.objectContaining({ method: 'DELETE' })
+        )
+      );
+    });
   });
 
   it('filters rows by the search field', async () => {

@@ -4,9 +4,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
-import { validateSync } from 'class-validator';
+import { ValidationError, validateSync } from 'class-validator';
 import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isNpcDataTable, NpcDataTable } from './admin-npc-data.types';
@@ -77,13 +76,16 @@ export class AdminNpcDataService {
       }
       case 'loot-templates': {
         const dto = validateRow(CreateLootTemplateRowDto, input);
+        await this.assertItemNamesResolvable(dto.items.map(i => i.itemName));
         return this.prisma.npcLootTemplate.create({
           data: {
             category: 'npc',
             profession: dto.profession,
             crBucket: dto.crBucket,
-            coinage: dto.coinage as Prisma.InputJsonValue,
-            items: dto.items as Prisma.InputJsonValue,
+            // Mapped to plain literals: the stored JSON is exactly the
+            // LootTemplate shape the loot engine consumes.
+            coinage: { gp: dto.coinage.gp, sp: dto.coinage.sp, cp: dto.coinage.cp },
+            items: dto.items.map(i => ({ itemName: i.itemName, weight: i.weight, qty: i.qty })),
             source: 'user',
           },
         });
@@ -158,6 +160,24 @@ export class AdminNpcDataService {
     }
   }
 
+  // Generation resolves template items to catalog ids by exact Item.name
+  // (loot-roller), so a name that doesn't resolve would silently produce
+  // id-less loot. Reject it at write time instead.
+  private async assertItemNamesResolvable(itemNames: string[]): Promise<void> {
+    const unique = [...new Set(itemNames)];
+    const found = await this.prisma.item.findMany({
+      where: { name: { in: unique } },
+      select: { name: true },
+    });
+    const known = new Set(found.map(i => i.name));
+    const unknown = unique.filter(n => !known.has(n));
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        unknown.map(n => `Unknown item "${n}" — item names must match the items catalog exactly`)
+      );
+    }
+  }
+
   private assertTable(table: string): asserts table is NpcDataTable {
     if (!isNpcDataTable(table)) {
       throw new BadRequestException(`Unknown npc-data table: ${table}`);
@@ -188,7 +208,16 @@ function validateRow<T extends object>(cls: new () => T, input: CreateRowInput):
   const instance = plainToInstance(cls, input);
   const errors = validateSync(instance, VALIDATOR_STRICTNESS);
   if (errors.length > 0) {
-    throw new BadRequestException(errors.flatMap(e => Object.values(e.constraints ?? {})));
+    throw new BadRequestException(collectMessages(errors));
   }
   return instance;
+}
+
+// Flattens nested validation errors (e.g. coinage ranges, item entries) so
+// the 400 body names the offending field instead of arriving empty.
+function collectMessages(errors: ValidationError[]): string[] {
+  return errors.flatMap(e => [
+    ...Object.values(e.constraints ?? {}),
+    ...collectMessages(e.children ?? []),
+  ]);
 }

@@ -16,8 +16,11 @@ function validate<T extends object>(cls: new () => T, payload: Record<string, un
   });
 }
 
-function messages(errors: ReturnType<typeof validateSync>) {
-  return errors.flatMap(e => Object.values(e.constraints ?? {}));
+function messages(errors: ReturnType<typeof validateSync>): string[] {
+  return errors.flatMap(e => [
+    ...Object.values(e.constraints ?? {}),
+    ...messages(e.children ?? []),
+  ]);
 }
 
 describe('CreateNameRowDto', () => {
@@ -82,13 +85,76 @@ describe('CreateAppearanceRowDto', () => {
 describe('CreateLootTemplateRowDto', () => {
   const valid = {
     profession: 'merchant',
-    crBucket: '0-4',
-    coinage: { gp: '2d6' },
-    items: [{ name: 'ledger' }],
+    crBucket: '2–4', // en-dash, matching LOOT_CR_BUCKETS
+    coinage: { gp: [0, 2], sp: [2, 8], cp: [4, 20] },
+    items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1] }],
   };
 
-  it('accepts a valid row', () => {
+  it('accepts a valid structured row', () => {
     expect(validate(CreateLootTemplateRowDto, valid)).toEqual([]);
+  });
+
+  it('accepts a zero item weight alongside a positive one', () => {
+    expect(
+      validate(CreateLootTemplateRowDto, {
+        ...valid,
+        items: [
+          { itemName: 'Dagger', weight: 0, qty: [1, 1] },
+          { itemName: 'Club', weight: 50, qty: [1, 1] },
+        ],
+      })
+    ).toEqual([]);
+  });
+
+  it('rejects items where every weight is 0 (weightedPick would throw at generation)', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [
+        { itemName: 'Dagger', weight: 0, qty: [1, 1] },
+        { itemName: 'Club', weight: 0, qty: [1, 1] },
+      ],
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('weight > 0')])
+    );
+  });
+
+  it('rejects duplicate itemName entries', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [
+        { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+        { itemName: 'Dagger', weight: 20, qty: [1, 2] },
+      ],
+    });
+    expect(messages(errors)).toEqual(expect.arrayContaining([expect.stringContaining('unique')]));
+  });
+
+  it('rejects the legacy string-dice coinage shape', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { gp: '2d6', sp: [2, 8], cp: [4, 20] },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('gp must be a [min, max] pair')])
+    );
+  });
+
+  it.each([[[1]], [[1, 2, 3]]])('rejects a range with wrong arity %j', range => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, gp: range },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('gp must be a [min, max] pair')])
+    );
+  });
+
+  it('rejects a crBucket outside LOOT_CR_BUCKETS (ASCII hyphen never matches a template)', () => {
+    const errors = validate(CreateLootTemplateRowDto, { ...valid, crBucket: '2-4' });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('crBucket must be one of')])
+    );
   });
 
   it('rejects a non-object coinage', () => {
@@ -96,9 +162,108 @@ describe('CreateLootTemplateRowDto', () => {
     expect(messages(errors)).toEqual(expect.arrayContaining(['coinage must be an object']));
   });
 
+  it('rejects coinage missing a denomination', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { gp: [0, 2], sp: [2, 8] },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('cp must be a [min, max] pair')])
+    );
+  });
+
+  it('rejects an unordered coinage range', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, gp: [5, 2] },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('gp must be a [min, max] pair')])
+    );
+  });
+
+  it('rejects negative coinage values', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, gp: [-1, 2] },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects non-integer coinage values', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, gp: [0.5, 2] },
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects unknown extra coinage denominations', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, pp: [0, 1] },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('pp should not exist')])
+    );
+  });
+
   it('rejects non-array items', () => {
     const errors = validate(CreateLootTemplateRowDto, { ...valid, items: { name: 'ledger' } });
     expect(messages(errors)).toEqual(expect.arrayContaining(['items must be an array']));
+  });
+
+  it('rejects an empty items array', () => {
+    const errors = validate(CreateLootTemplateRowDto, { ...valid, items: [] });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('at least one item')])
+    );
+  });
+
+  it('rejects a blank itemName', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [{ itemName: '   ', weight: 60, qty: [1, 1] }],
+    });
+    expect(messages(errors)).toEqual(expect.arrayContaining(['itemName is required']));
+  });
+
+  it('rejects a negative item weight', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [{ itemName: 'Dagger', weight: -1, qty: [1, 1] }],
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('weight must not be less than 0')])
+    );
+  });
+
+  it('rejects an unordered qty range', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [{ itemName: 'Dagger', weight: 60, qty: [3, 1] }],
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('qty must be a [min, max] pair')])
+    );
+  });
+
+  it('rejects a qty below 1', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [{ itemName: 'Dagger', weight: 60, qty: [0, 1] }],
+    });
+    expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects unknown extra fields on an item entry', () => {
+    const errors = validate(CreateLootTemplateRowDto, {
+      ...valid,
+      items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1], chance: 0.5 }],
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('chance should not exist')])
+    );
   });
 });
 

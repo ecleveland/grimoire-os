@@ -7,6 +7,10 @@ import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import AdminSubnav from '@/components/AdminSubnav';
+import CoinRangeEditor from '@/components/CoinRangeEditor';
+import LootItemsEditor from '@/components/LootItemsEditor';
+import { LOOT_CR_BUCKETS } from '@grimoire-os/shared';
+import type { LootTemplateCoinage, LootTemplateItemEntry } from '@grimoire-os/shared';
 
 type TableSlug = 'names' | 'appearance' | 'loot-templates' | 'trinkets' | 'personality';
 
@@ -21,9 +25,12 @@ type FieldDef = {
   key: string;
   label: string;
   required?: boolean;
-  kind?: 'text' | 'select' | 'json';
+  kind?: 'text' | 'select' | 'coinage' | 'lootItems';
   options?: string[];
 };
+
+type FieldValue = string | LootTemplateCoinage | LootTemplateItemEntry[];
+type FormState = Record<string, FieldValue>;
 
 type TabConfig = {
   slug: TableSlug;
@@ -83,9 +90,15 @@ const TABS: TabConfig[] = [
     ],
     fields: [
       { key: 'profession', label: 'Profession', required: true },
-      { key: 'crBucket', label: 'CR bucket', required: true },
-      { key: 'coinage', label: 'Coinage (JSON)', required: true, kind: 'json' },
-      { key: 'items', label: 'Items (JSON array)', required: true, kind: 'json' },
+      {
+        key: 'crBucket',
+        label: 'CR bucket',
+        required: true,
+        kind: 'select',
+        options: [...LOOT_CR_BUCKETS],
+      },
+      { key: 'coinage', label: 'Coinage', required: true, kind: 'coinage' },
+      { key: 'items', label: 'Items', required: true, kind: 'lootItems' },
     ],
     hasSource: true,
   },
@@ -122,8 +135,14 @@ const TABS: TabConfig[] = [
 const inputClass =
   'w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
 
-function emptyForm(tab: TabConfig): Record<string, string> {
-  return Object.fromEntries(tab.fields.map(f => [f.key, '']));
+function emptyValue(field: FieldDef): FieldValue {
+  if (field.kind === 'coinage') return { gp: [0, 0], sp: [0, 0], cp: [0, 0] };
+  if (field.kind === 'lootItems') return [];
+  return '';
+}
+
+function emptyForm(tab: TabConfig): FormState {
+  return Object.fromEntries(tab.fields.map(f => [f.key, emptyValue(f)]));
 }
 
 function isDeletable(tab: TabConfig, row: AnyRow): boolean {
@@ -138,7 +157,7 @@ export default function AdminNpcDataPage() {
   const tab = useMemo(() => TABS.find(t => t.slug === activeSlug) as TabConfig, [activeSlug]);
   const [rows, setRows] = useState<AnyRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [form, setForm] = useState<Record<string, string>>(() => emptyForm(TABS[0]));
+  const [form, setForm] = useState<FormState>(() => emptyForm(TABS[0]));
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
   const [pendingDelete, setPendingDelete] = useState<AnyRow | null>(null);
@@ -173,21 +192,33 @@ export default function AdminNpcDataPage() {
     const body: Record<string, unknown> = {};
     for (const f of tab.fields) {
       const raw = form[f.key];
-      if (f.required && (!raw || raw.trim() === '')) {
+      if (f.kind === 'lootItems') {
+        const items = raw as LootTemplateItemEntry[];
+        if (f.required && items.length === 0) {
+          toast.error('Add at least one item');
+          return;
+        }
+        // All-zero weights would make the loot roller's weightedPick throw
+        // at generation time; the backend rejects this too.
+        if (items.length > 0 && !items.some(i => i.weight > 0)) {
+          toast.error('At least one item needs a weight above 0');
+          return;
+        }
+        body[f.key] = items;
+        continue;
+      }
+      if (f.kind === 'coinage') {
+        // The editor keeps every range valid by construction.
+        body[f.key] = raw;
+        continue;
+      }
+      const text = (raw as string) ?? '';
+      if (f.required && text.trim() === '') {
         toast.error(`${f.label} is required`);
         return;
       }
-      if (raw === '' || raw === undefined) continue;
-      if (f.kind === 'json') {
-        try {
-          body[f.key] = JSON.parse(raw);
-        } catch {
-          toast.error(`${f.label} must be valid JSON`);
-          return;
-        }
-      } else {
-        body[f.key] = raw;
-      }
+      if (text === '') continue;
+      body[f.key] = text;
     }
     setSubmitting(true);
     try {
@@ -253,19 +284,42 @@ export default function AdminNpcDataPage() {
       <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add to {tab.label}</h2>
       {tab.fields.map(f => {
         const inputId = `npc-data-${tab.slug}-${f.key}`;
+        const labelText = `${f.label}${f.required ? ' *' : ''}`;
+        // The structured editors manage their own inputs, so they get a
+        // heading instead of a control-bound <label>.
+        if (f.kind === 'coinage' || f.kind === 'lootItems') {
+          return (
+            <div key={f.key}>
+              <span className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
+                {labelText}
+              </span>
+              {f.kind === 'coinage' ? (
+                <CoinRangeEditor
+                  value={form[f.key] as LootTemplateCoinage}
+                  onChange={v => setForm(prev => ({ ...prev, [f.key]: v }))}
+                />
+              ) : (
+                <LootItemsEditor
+                  value={form[f.key] as LootTemplateItemEntry[]}
+                  onChange={v => setForm(prev => ({ ...prev, [f.key]: v }))}
+                />
+              )}
+            </div>
+          );
+        }
+        const text = (form[f.key] as string) ?? '';
         return (
           <div key={f.key}>
             <label
               htmlFor={inputId}
               className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1"
             >
-              {f.label}
-              {f.required ? ' *' : ''}
+              {labelText}
             </label>
             {f.kind === 'select' && f.options ? (
               <select
                 id={inputId}
-                value={form[f.key] ?? ''}
+                value={text}
                 onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
                 className={inputClass}
               >
@@ -276,19 +330,11 @@ export default function AdminNpcDataPage() {
                   </option>
                 ))}
               </select>
-            ) : f.kind === 'json' ? (
-              <textarea
-                id={inputId}
-                value={form[f.key] ?? ''}
-                onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                className={`${inputClass} font-mono text-xs h-24`}
-                placeholder='{"gp":[0,2],"sp":[2,8],"cp":[4,20]}'
-              />
             ) : (
               <input
                 id={inputId}
                 type="text"
-                value={form[f.key] ?? ''}
+                value={text}
                 onChange={e => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
                 className={inputClass}
               />
@@ -319,7 +365,12 @@ export default function AdminNpcDataPage() {
               key={t.slug}
               role="tab"
               aria-selected={selected}
-              onClick={() => setActiveSlug(t.slug)}
+              onClick={() => {
+                setActiveSlug(t.slug);
+                // Reset synchronously: the structured editors render before
+                // the tab-change effect fires and need this tab's defaults.
+                setForm(emptyForm(t));
+              }}
               className={`px-3 py-1.5 text-sm rounded-lg border ${
                 selected
                   ? 'bg-indigo-600 text-white border-indigo-600'

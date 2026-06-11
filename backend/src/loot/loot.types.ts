@@ -3,7 +3,13 @@
 // monster loot features can use the same engine without depending on each
 // other. The NPC generator re-exports these under its historical names.
 
-import type { NpcLootItem, NpcLootOverrides } from '@grimoire-os/shared';
+import type {
+  LootTemplateCoinage,
+  LootTemplateItemEntry,
+  NpcLootItem,
+  NpcLootOverrides,
+} from '@grimoire-os/shared';
+import { LOOT_CR_BUCKETS as SHARED_LOOT_CR_BUCKETS } from '@grimoire-os/shared';
 
 // The shared package owns these two shapes — they are the API contract the
 // DTOs and frontend already consume. Aliased here under engine-neutral names
@@ -30,18 +36,16 @@ export type GeneratedLoot = {
 /**
  * The CR buckets every loot template family is keyed by. Note the en-dash
  * (U+2013) in the range labels — an ASCII hyphen never matches a template.
+ * Owned by the shared package since VEG-303 so the admin editors offer the
+ * same values; re-exported here under the engine's historical names.
  */
-export const LOOT_CR_BUCKETS = ['0', '0–1', '2–4', '5–10', '11+'] as const;
+export const LOOT_CR_BUCKETS = SHARED_LOOT_CR_BUCKETS;
 
 export type LootCrBucket = (typeof LOOT_CR_BUCKETS)[number];
 
-export type LootCoinage = {
-  gp: [number, number];
-  sp: [number, number];
-  cp: [number, number];
-};
+export type LootCoinage = LootTemplateCoinage;
 
-export type LootTemplateItem = { itemName: string; weight: number; qty: [number, number] };
+export type LootTemplateItem = LootTemplateItemEntry;
 
 export type LootTemplate = {
   // Selection key: the NPC generator keys templates by profession; monster
