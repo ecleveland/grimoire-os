@@ -19,7 +19,11 @@ export class RollEncounterLootDto {
 
   /**
    * Last-read version for optimistic locking (VEG-137). When supplied, the
-   * roll is rejected with 409 if the row has moved on. Omit to skip the guard.
+   * roll is rejected with 409 if another version-checked write has bumped the
+   * version since (unguarded writes don't bump it and stay invisible to the
+   * guard). Omit to skip the check — but note an unguarded roll rewrites the
+   * whole combatants array server-side, so concurrent combatant edits can be
+   * silently reverted; clients should send this.
    */
   @ApiPropertyOptional({ description: 'Last-read version for optimistic locking' })
   @IsOptional()

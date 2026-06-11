@@ -73,7 +73,7 @@ describe('aggregateCombatantLoot', () => {
     expect(result.coinage).toEqual({ gp: 7, sp: 9, cp: 31 });
   });
 
-  it('merges identical items (same itemId, name, source) by summing quantity', () => {
+  it('merges identical items (same itemId, name, source, notes) by summing quantity', () => {
     const result = aggregateCombatantLoot([
       combatant({
         loot: loot({
@@ -112,6 +112,27 @@ describe('aggregateCombatantLoot', () => {
       { itemId: null, name: 'Wolf pelt', quantity: 1, source: 'monster' },
       { itemId: 'i2', name: 'Potion of Healing', quantity: 1, source: 'magic-item' },
       { itemId: null, name: 'Wolf pelt', quantity: 1, source: 'trinket' },
+    ]);
+  });
+
+  it('does not merge items whose notes differ — merging would silently drop one note', () => {
+    const result = aggregateCombatantLoot([
+      combatant({
+        loot: loot({
+          items: [{ itemId: 'i1', name: 'Dagger', quantity: 1, source: 'monster', notes: 'rusty' }],
+        }),
+      }),
+      combatant({
+        loot: loot({
+          items: [
+            { itemId: 'i1', name: 'Dagger', quantity: 1, source: 'monster', notes: 'ornate' },
+          ],
+        }),
+      }),
+    ]);
+    expect(result.items).toEqual([
+      { itemId: 'i1', name: 'Dagger', quantity: 1, source: 'monster', notes: 'rusty' },
+      { itemId: 'i1', name: 'Dagger', quantity: 1, source: 'monster', notes: 'ornate' },
     ]);
   });
 

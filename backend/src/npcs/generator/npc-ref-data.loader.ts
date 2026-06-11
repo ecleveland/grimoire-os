@@ -8,6 +8,7 @@ import { NpcRefData, MonsterRef } from './npc-pipeline';
 import { StatBlockAction } from './npc-generator.types';
 import { npcSettingBiases } from '../../seed/data/npc-setting-biases';
 import { LOOT_GAME_RULE_CATEGORY, resolveLootGameRules } from '../../loot/loot-game-rules';
+import { buildItemCatalogMaps } from '../../loot/item-catalog';
 
 @Injectable()
 export class NpcRefDataLoader {
@@ -51,12 +52,7 @@ export class NpcRefDataLoader {
       this.prisma.gameRule.findMany({ where: { category: LOOT_GAME_RULE_CATEGORY } }),
     ]);
 
-    const itemsByName = new Map<string, { id: string; name: string; isMagic: boolean }>();
-    const magicItems: { id: string; name: string; isMagic: boolean }[] = [];
-    for (const it of items) {
-      itemsByName.set(it.name, it);
-      if (it.isMagic) magicItems.push(it);
-    }
+    const { itemsByName, magicItems } = buildItemCatalogMaps(items);
 
     return {
       species: species.map(s => ({ name: s.name, size: s.size })),

@@ -169,7 +169,7 @@ describe('EncountersService', () => {
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: { id: { in: [MONSTER_ID] } },
-        select: { id: true },
+        select: { id: true, type: true, challengeRating: true },
       });
       expect(prisma.encounter.create).toHaveBeenCalledWith({
         data: {
@@ -375,7 +375,7 @@ describe('EncountersService', () => {
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: { id: { in: [MONSTER_ID] } },
-        select: { id: true },
+        select: { id: true, type: true, challengeRating: true },
       });
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
@@ -584,6 +584,29 @@ describe('EncountersService', () => {
           { itemId: 'item-gem', name: 'Ruby', quantity: 2, source: 'monster' },
         ],
       });
+    });
+
+    it('rolls independently for combatants sharing the same monster (ids deduped in the query)', async () => {
+      const wolfA = { ...wolf, name: 'Wolf A' };
+      const wolfB = { ...wolf, name: 'Wolf B' };
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolfA, wolfB]));
+
+      await service.rollLoot(ENCOUNTER_ID, USER_ID, { seed: 'pack' });
+
+      // The lookup dedupes the shared id — without the dedup the count check
+      // would spuriously 400 on the most common encounter shape.
+      expect(prisma.monster.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: { in: [MONSTER_ID] } } })
+      );
+      expect(rollForMonster).toHaveBeenCalledTimes(2);
+      const written = prisma.encounter.update.mock.calls[0][0].data.combatants;
+      expect(written[0].loot).toBeDefined();
+      expect(written[1].loot).toBeDefined();
+      // Distinct per-index rng streams despite the shared monster.
+      const [, rngA] = rollForMonster.mock.calls[0];
+      const [, rngB] = rollForMonster.mock.calls[1];
+      expect((rngA as SeededRng).nextFloat()).toBe(new SeededRng('pack:0').nextFloat());
+      expect((rngB as SeededRng).nextFloat()).toBe(new SeededRng('pack:1').nextFloat());
     });
 
     it('derives a deterministic per-combatant rng from the seed and combatant index', async () => {

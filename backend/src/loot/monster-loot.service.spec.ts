@@ -54,20 +54,59 @@ describe('MonsterLootService', () => {
     service = module.get<MonsterLootService>(MonsterLootService);
     prisma = module.get<MockPrismaService>(PrismaService as never);
 
-    prisma.npcLootTemplate.findMany.mockResolvedValue([]);
+    prisma.npcLootTemplate.findMany.mockResolvedValue([templateRow()]);
     prisma.trinket.findMany.mockResolvedValue([]);
     prisma.item.findMany.mockResolvedValue([]);
     prisma.gameRule.findMany.mockResolvedValue(pinnedGameRules);
   });
 
-  it('loads only active monster-category templates, ordered by crBucket', async () => {
+  it('loads only active monster-category templates', async () => {
     await service.loadRoller();
     expect(prisma.npcLootTemplate.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { isActive: true, category: 'monster' },
-        orderBy: { crBucket: 'asc' },
       })
     );
+  });
+
+  it('throws 422 when no active monster templates exist (unseeded database)', async () => {
+    prisma.npcLootTemplate.findMany.mockResolvedValue([]);
+    await expect(service.loadRoller()).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('seed'),
+    });
+  });
+
+  it('falls back to the poorest available bucket for a type missing its derived bucket', async () => {
+    // Rows arrive in lexicographic crBucket order — exactly what a DB
+    // `orderBy crBucket asc` would produce ('11+' sorts before '2–4').
+    prisma.npcLootTemplate.findMany.mockResolvedValue([
+      templateRow({
+        id: 'g11',
+        profession: 'giant',
+        crBucket: '11+',
+        coinage: { gp: [300, 300], sp: [0, 0], cp: [0, 0] },
+      }),
+      templateRow({
+        id: 'g24',
+        profession: 'giant',
+        crBucket: '2–4',
+        coinage: { gp: [2, 2], sp: [0, 0], cp: [0, 0] },
+      }),
+      templateRow({
+        id: 'g510',
+        profession: 'giant',
+        crBucket: '5–10',
+        coinage: { gp: [40, 40], sp: [0, 0], cp: [0, 0] },
+      }),
+    ]);
+    const roller = await service.loadRoller();
+
+    // CR 1 giant has no '0–1' template; the any-bucket fallback must pick
+    // the poorest bucket ('2–4'), not the lexicographically-first '11+'.
+    const result = roller.rollForMonster({ type: 'Giant', challengeRating: 1 }, new SeededRng('s'));
+    expect(result.template).toEqual({ profession: 'giant', crBucket: '2–4' });
+    expect(result.coinage.gp).toBe(2);
   });
 
   it('reads loot tuning from the shared npc-generation game-rule category', async () => {

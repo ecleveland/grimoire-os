@@ -7,8 +7,9 @@ import { LootGameRules } from './loot.types';
 
 /**
  * The GameRule category holding the loot knobs. Historically named for the
- * NPC generator (the rows predate the shared engine); kept because rows may
- * already exist under it in deployed databases.
+ * NPC generator (the rows predate the shared engine); the seed writes the
+ * four loot rows under it (see seed/data/game-rules.ts), so renaming the
+ * category means migrating those rows in lockstep.
  */
 export const LOOT_GAME_RULE_CATEGORY = 'npc-generation';
 
@@ -25,9 +26,26 @@ export const DEFAULT_LOOT_GAME_RULES: LootGameRules = {
   coinageMultiplier: 1,
 };
 
+const asFiniteNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : undefined;
+
+const asChanceMap = (value: unknown): Record<string, number> | undefined => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.values(value);
+  return entries.every(v => typeof v === 'number' && Number.isFinite(v))
+    ? (value as Record<string, number>)
+    : undefined;
+};
+
 /**
  * Resolves the effective loot game rules from raw GameRule rows, falling back
- * to {@link DEFAULT_LOOT_GAME_RULES} per key when a row is absent.
+ * to {@link DEFAULT_LOOT_GAME_RULES} per key when a row is absent OR its Json
+ * value has the wrong shape. Malformed values must never flow through: a
+ * numeric die spec crashes the die parser with an opaque 500, a non-numeric
+ * multiplier turns coinage into NaN, and NaN chances silently disable drops.
  */
 export function resolveLootGameRules(
   rows: readonly { key: string; value: unknown }[]
@@ -37,14 +55,12 @@ export function resolveLootGameRules(
 
   return {
     trinketChance:
-      (byKey.get('trinket-chance') as number | undefined) ?? DEFAULT_LOOT_GAME_RULES.trinketChance,
+      asFiniteNumber(byKey.get('trinket-chance')) ?? DEFAULT_LOOT_GAME_RULES.trinketChance,
     magicItemChanceByCr:
-      (byKey.get('magic-item-chance-by-cr') as Record<string, number> | undefined) ??
+      asChanceMap(byKey.get('magic-item-chance-by-cr')) ??
       DEFAULT_LOOT_GAME_RULES.magicItemChanceByCr,
-    itemCountDie:
-      (byKey.get('item-count-die') as string | undefined) ?? DEFAULT_LOOT_GAME_RULES.itemCountDie,
+    itemCountDie: asString(byKey.get('item-count-die')) ?? DEFAULT_LOOT_GAME_RULES.itemCountDie,
     coinageMultiplier:
-      (byKey.get('coinage-multiplier') as number | undefined) ??
-      DEFAULT_LOOT_GAME_RULES.coinageMultiplier,
+      asFiniteNumber(byKey.get('coinage-multiplier')) ?? DEFAULT_LOOT_GAME_RULES.coinageMultiplier,
   };
 }

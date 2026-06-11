@@ -54,7 +54,10 @@ export interface Feature {
 export type LootItemSource = 'profession' | 'trinket' | 'magic-item' | 'monster';
 
 export interface CombatantLootItem {
-  /** Resolved SRD item id, or null for flavor entries with no catalog match. */
+  /**
+   * Resolved catalog item id (the Item table spans srd/shared/homebrew
+   * tiers), or null for flavor entries with no catalog match.
+   */
   itemId: string | null;
   name: string;
   quantity: number;

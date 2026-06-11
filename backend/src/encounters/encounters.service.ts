@@ -40,6 +40,25 @@ export class EncountersService {
   ) {}
 
   /**
+   * Loads the monsters for a set of (already deduplicated) ids, throwing 400
+   * listing any unknown references. Single source of truth for monsterId
+   * resolution: combatant-write validation (VEG-258) and loot rolls (VEG-300)
+   * must agree on what a dangling reference looks like.
+   */
+  private async getReferencedMonsters(ids: string[]) {
+    const monsters = await this.prisma.monster.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, type: true, challengeRating: true },
+    });
+    if (monsters.length !== ids.length) {
+      const foundIds = new Set(monsters.map(m => m.id));
+      const missing = ids.filter(id => !foundIds.has(id));
+      throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
+    }
+    return monsters;
+  }
+
+  /**
    * VEG-258: when combatants carry a `monsterId`, verify each one references an
    * existing SRD monster. Combatants without a `monsterId` (manual entries) are
    * left untouched. Throws 400 listing any unknown references.
@@ -52,16 +71,7 @@ export class EncountersService {
       ...new Set(combatants.map(c => c.monsterId).filter((id): id is string => id !== undefined)),
     ];
     if (ids.length === 0) return;
-
-    const found = await this.prisma.monster.findMany({
-      where: { id: { in: ids } },
-      select: { id: true },
-    });
-    if (found.length !== ids.length) {
-      const foundIds = new Set(found.map(m => m.id));
-      const missing = ids.filter(id => !foundIds.has(id));
-      throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
-    }
+    await this.getReferencedMonsters(ids);
   }
 
   async create(userId: string, dto: CreateEncounterDto) {
@@ -141,7 +151,9 @@ export class EncountersService {
    * (VEG-137): no `expectedVersion` → plain write; otherwise the write only
    * succeeds while the row is still at that version, incrementing it. Shared
    * by field updates and loot rolls so every encounter write conflicts the
-   * same way.
+   * same way. Note the contract's blind spot: unguarded writes do NOT bump
+   * `version`, so they are invisible to later guarded writes — the 409 only
+   * fires when the intervening write itself carried an `expectedVersion`.
    */
   private async writeWithVersionGuard(
     id: string,
@@ -205,15 +217,7 @@ export class EncountersService {
     const targetIndexes = this.resolveLootTargets(combatants, dto.combatantIndex);
 
     const monsterIds = [...new Set(targetIndexes.map(i => combatants[i].monsterId as string))];
-    const monsters = await this.prisma.monster.findMany({
-      where: { id: { in: monsterIds } },
-      select: { id: true, type: true, challengeRating: true },
-    });
-    if (monsters.length !== monsterIds.length) {
-      const found = new Set(monsters.map(m => m.id));
-      const missing = monsterIds.filter(mid => !found.has(mid));
-      throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
-    }
+    const monsters = await this.getReferencedMonsters(monsterIds);
     const monstersById = new Map(monsters.map(m => [m.id, m]));
 
     const roller = await this.monsterLoot.loadRoller();
