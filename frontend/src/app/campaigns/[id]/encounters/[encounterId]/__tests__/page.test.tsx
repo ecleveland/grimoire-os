@@ -817,6 +817,160 @@ describe('InitiativeTrackerPage', () => {
       });
     });
 
+    it('confirms before an encounter roll that would replace existing drops', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          version: 2,
+          combatants: [
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+            makeCombatant({ name: 'Goblin B', initiative: 8, monsterId: 'monster-1' }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
+      // No POST yet — a confirm dialog explains the drop replacement first.
+      expect(mockApiFetch.mock.calls.find(([p]) => p === '/encounters/enc-1/loot')).toBeUndefined();
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog).toHaveTextContent(/replace/i);
+
+      await user.click(screen.getByRole('button', { name: /roll all/i }));
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1/loot' &&
+            (o as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(call).toBeDefined();
+        expect(JSON.parse((call![1] as { body: string }).body)).toEqual({ expectedVersion: 2 });
+      });
+    });
+
+    it('cancelling the replace-drops confirm sends nothing', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(mockApiFetch.mock.calls.find(([p]) => p === '/encounters/enc-1/loot')).toBeUndefined();
+    });
+
+    // ── Write serialization: loot buttons disable while a write is in flight ──
+
+    it('disables the loot buttons while an HP commit PATCH is in flight', async () => {
+      // The blur-then-click sequence: typing HP and clicking Roll loot fires
+      // blur (PATCH) before click (POST). With the buttons disabled during the
+      // pending write, the click is swallowed instead of 409ing on the stale
+      // version and dropping a write.
+      let resolvePatch!: (v: unknown) => void;
+      const enc = makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+        ],
+      });
+      routeLootFlow({
+        encounter: enc,
+        onPatch: () =>
+          new Promise(res => {
+            resolvePatch = res;
+          }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const rollBtn = screen.getByRole('button', { name: /roll loot for goblin a/i });
+      expect(rollBtn).toBeEnabled();
+      const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+      fireEvent.change(hpInputs[1], { target: { value: '3' } });
+      fireEvent.blur(hpInputs[1]); // PATCH now pending
+      expect(rollBtn).toBeDisabled();
+      expect(screen.getByRole('button', { name: /roll loot for encounter/i })).toBeDisabled();
+
+      resolvePatch({ ...enc, version: 2 });
+      await waitFor(() => expect(rollBtn).toBeEnabled());
+    });
+
+    it('sends a single POST when a roll button is double-clicked', async () => {
+      let resolveRoll!: (v: unknown) => void;
+      const enc = makeEncounter({
+        combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' })],
+      });
+      routeLootFlow({
+        encounter: enc,
+        onRoll: () =>
+          new Promise(res => {
+            resolveRoll = res;
+          }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const btn = screen.getByRole('button', { name: /roll loot for encounter/i });
+      fireEvent.click(btn);
+      fireEvent.click(btn); // second click lands on a disabled button
+      const posts = mockApiFetch.mock.calls.filter(([p]) => p === '/encounters/enc-1/loot');
+      expect(posts).toHaveLength(1);
+
+      resolveRoll({
+        encounter: { ...enc, version: 2, combatants: enc.combatants },
+        lootTotal: null,
+      });
+      await waitFor(() => expect(btn).toBeEnabled());
+    });
+
+    it('keeps the drop view at full contrast on a dead row', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          // Hero holds the current turn so the dead goblin gets the dimmed
+          // (non-current) styling.
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              hp: 0,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      // The drop (first match = the row copy) must not inherit the dead-row
+      // dimming — it's exactly the text the DM needs to read out.
+      const coin = screen.getAllByText('2 gp · 5 sp · 10 cp')[0];
+      expect(coin.closest('.opacity-60')).toBeNull();
+      // The combatant's stats line still dims.
+      expect(
+        screen.getByRole('button', { name: /^goblin a$/i }).closest('.opacity-60')
+      ).not.toBeNull();
+    });
+
     // ── Auto-roll on death ───────────────────────────────────────────────────
 
     it('auto-rolls loot when an HP commit drops a monster to 0 and the toggle is on', async () => {

@@ -13,14 +13,49 @@ import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import { buildMonsterCombatants } from '@/lib/encounter-combatants';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { aggregateCombatantLoot } from '@grimoire-os/shared';
-import type { CombatantLootCoinage, EncounterLootTotal } from '@grimoire-os/shared';
+import type {
+  CombatantLootCoinage,
+  CombatantLootItem,
+  EncounterLootTotal,
+} from '@grimoire-os/shared';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { formatCoinage } from '@/lib/coinage';
 
 // The single ordering rule for the tracker — render, turn order, and HP
-// commits must all agree on it.
+// commits must all agree on it. Returns a shallow copy: the elements keep
+// their identity with the input array, which the loot index mapping below
+// relies on (sorted row → stored-array index via indexOf).
 const sortByInitiative = (combatants: Combatant[]) =>
   [...combatants].sort((a, b) => b.initiative - a.initiative);
 
-const formatCoinage = (c: CombatantLootCoinage) => `${c.gp} gp · ${c.sp} sp · ${c.cp} cp`;
+const lootButtonClass =
+  'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+
+// Shared by the per-combatant drop and the encounter total — one copy of the
+// coinage + item-list markup, so the two views can't drift apart.
+function LootDisplay({
+  coinage,
+  items,
+}: {
+  coinage: CombatantLootCoinage;
+  items: CombatantLootItem[];
+}) {
+  return (
+    <div className="min-w-0">
+      <span className="text-gray-700 dark:text-gray-300">{formatCoinage(coinage)}</span>
+      {items.length > 0 && (
+        <ul className="mt-1 list-disc list-inside text-gray-600 dark:text-gray-400">
+          {items.map((item, j) => (
+            <li key={j}>
+              {item.quantity}&times; {item.name}
+              {item.notes ? ` — ${item.notes}` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function InitiativeTrackerPage() {
   const { encounterId } = useParams<{ id: string; encounterId: string }>();
@@ -40,6 +75,14 @@ export default function InitiativeTrackerPage() {
   // Auto-roll loot when a monster combatant drops to 0 HP (VEG-301).
   // Session-local DM preference, intentionally not persisted on the encounter.
   const [autoRollLoot, setAutoRollLoot] = useState(false);
+  // True while any version-guarded write (PATCH or loot POST) is in flight.
+  // The loot buttons disable on it, so the blur-commit → button-click
+  // sequence can't fire two writes against the same expectedVersion (the
+  // second would always 409), and double-clicks can't double-POST.
+  const [writePending, setWritePending] = useState(false);
+  // Encounter-wide roll replaces existing drops (backend re-rolls every
+  // monster combatant) — confirm before doing that destructively.
+  const [confirmBulkRoll, setConfirmBulkRoll] = useState(false);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -69,6 +112,7 @@ export default function InitiativeTrackerPage() {
   // (auto-roll on death) off the fresh version; null when the PATCH failed.
   const patchEncounter = async (updates: Partial<Encounter>): Promise<Encounter | null> => {
     if (!encounter) return null;
+    setWritePending(true);
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
@@ -80,6 +124,8 @@ export default function InitiativeTrackerPage() {
       if (handleEncounterConflict(err)) return null;
       toast.error(err instanceof Error ? err.message : 'Failed to update encounter');
       return null;
+    } finally {
+      setWritePending(false);
     }
   };
 
@@ -93,6 +139,7 @@ export default function InitiativeTrackerPage() {
     combatantIndex: number | undefined,
     successMsg: string
   ) => {
+    setWritePending(true);
     try {
       const { encounter: updated } = await apiFetch<{
         encounter: Encounter;
@@ -109,7 +156,25 @@ export default function InitiativeTrackerPage() {
     } catch (err) {
       if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to roll loot');
+    } finally {
+      setWritePending(false);
     }
+  };
+
+  // The single on-death hook (VEG-301): every HP-lowering path must funnel
+  // its post-write 0-crossing through here, so future damage/heal controls
+  // (VEG-286) inherit auto-roll instead of re-implementing the guards.
+  // Only fires on the 0-crossing of a monster-linked combatant with no drop
+  // yet — never silently replaces an existing roll. `index` must address
+  // `updated.combatants`.
+  const maybeAutoRollLootOnDeath = async (
+    updated: Encounter,
+    target: Combatant,
+    index: number,
+    newHp: number
+  ) => {
+    if (!autoRollLoot || newHp !== 0 || target.hp <= 0 || !target.monsterId || target.loot) return;
+    await rollLoot(updated, index, `Rolled loot for ${target.name}`);
   };
 
   const nextTurn = () => {
@@ -149,19 +214,10 @@ export default function InitiativeTrackerPage() {
     if (clamped === target.hp) return;
     sorted[index] = { ...target, hp: clamped };
     const updated = await patchEncounter({ combatants: sorted });
-    // Auto-roll on death (VEG-301): only on the 0-crossing of a monster-linked
-    // combatant with no drop yet — never silently replaces an existing roll.
-    // The PATCH persisted `sorted` verbatim, so `index` is also the combatant's
-    // position in the updated combatants array.
-    if (
-      updated &&
-      autoRollLoot &&
-      clamped === 0 &&
-      target.hp > 0 &&
-      target.monsterId &&
-      !target.loot
-    ) {
-      await rollLoot(updated, index, `Rolled loot for ${name}`);
+    // The PATCH persisted `sorted` verbatim, so `index` is also the
+    // combatant's position in the updated combatants array.
+    if (updated) {
+      await maybeAutoRollLootOnDeath(updated, target, index, clamped);
     }
   };
 
@@ -222,6 +278,7 @@ export default function InitiativeTrackerPage() {
   const sorted = sortByInitiative(encounter.combatants);
   const isController = isDm || (user && encounter.createdBy === user.userId);
   const hasMonsterCombatants = encounter.combatants.some(c => c.monsterId);
+  const rolledDropCount = encounter.combatants.filter(c => c.loot).length;
   // Derived fresh from the combatants (same pure helper the backend uses), so
   // the total can never drift from the per-monster drops it sums.
   const lootTotal = encounter.combatants.some(c => c.loot)
@@ -282,11 +339,16 @@ export default function InitiativeTrackerPage() {
                 isCurrent
                   ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-300 dark:border-indigo-700'
                   : isDead
-                    ? 'bg-red-50/50 dark:bg-red-900/10 border-gray-200 dark:border-gray-700 opacity-60'
+                    ? 'bg-red-50/50 dark:bg-red-900/10 border-gray-200 dark:border-gray-700'
                     : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
               }`}
             >
-              <div className="flex items-center gap-4">
+              {/* Dimming applies to the stats line only — the drop view below
+                  must stay legible, since dead monsters are exactly the ones
+                  whose loot the DM reads out. */}
+              <div
+                className={`flex items-center gap-4${isDead && !isCurrent ? ' opacity-60' : ''}`}
+              >
                 {isCurrent && (
                   <span className="text-indigo-600 dark:text-indigo-400 text-lg font-bold">
                     &raquo;
@@ -317,7 +379,8 @@ export default function InitiativeTrackerPage() {
                     type="button"
                     aria-label={`Roll loot for ${c.name}`}
                     onClick={() => rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)}
-                    className="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                    disabled={writePending}
+                    className={lootButtonClass}
                   >
                     Roll loot
                   </button>
@@ -364,26 +427,13 @@ export default function InitiativeTrackerPage() {
               {/* DM-only drop view (VEG-301) — the player reveal is a separate ticket. */}
               {isController && c.loot && (
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex items-start justify-between gap-2 text-sm">
-                  <div className="min-w-0">
-                    <span className="text-gray-700 dark:text-gray-300">
-                      {formatCoinage(c.loot.coinage)}
-                    </span>
-                    {c.loot.items.length > 0 && (
-                      <ul className="mt-1 list-disc list-inside text-gray-600 dark:text-gray-400">
-                        {c.loot.items.map((item, j) => (
-                          <li key={j}>
-                            {item.quantity}&times; {item.name}
-                            {item.notes ? ` — ${item.notes}` : ''}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
+                  <LootDisplay coinage={c.loot.coinage} items={c.loot.items} />
                   <button
                     type="button"
                     aria-label={`Reroll loot for ${c.name}`}
                     onClick={() => rollLoot(encounter, arrayIndex, `Re-rolled loot for ${c.name}`)}
-                    className="shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                    disabled={writePending}
+                    className={lootButtonClass}
                   >
                     Reroll
                   </button>
@@ -410,8 +460,13 @@ export default function InitiativeTrackerPage() {
               </label>
               <button
                 type="button"
-                onClick={() => rollLoot(encounter, undefined, 'Rolled loot for the encounter')}
-                disabled={!hasMonsterCombatants}
+                onClick={() => {
+                  // Rolling the whole encounter replaces existing drops on the
+                  // backend — confirm before clobbering anything already rolled.
+                  if (rolledDropCount > 0) setConfirmBulkRoll(true);
+                  else rollLoot(encounter, undefined, 'Rolled loot for the encounter');
+                }}
+                disabled={!hasMonsterCombatants || writePending}
                 className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Roll loot for encounter
@@ -420,25 +475,24 @@ export default function InitiativeTrackerPage() {
           </div>
           {lootTotal ? (
             <div className="mt-3 text-sm">
-              <span className="text-gray-700 dark:text-gray-300">
-                {formatCoinage(lootTotal.coinage)}
-              </span>
-              {lootTotal.items.length > 0 && (
-                <ul className="mt-1 list-disc list-inside text-gray-600 dark:text-gray-400">
-                  {lootTotal.items.map((item, j) => (
-                    <li key={j}>
-                      {item.quantity}&times; {item.name}
-                      {item.notes ? ` — ${item.notes}` : ''}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <LootDisplay coinage={lootTotal.coinage} items={lootTotal.items} />
             </div>
           ) : (
             <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">No loot rolled yet.</p>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmBulkRoll}
+        onOpenChange={setConfirmBulkRoll}
+        title="Reroll existing loot?"
+        description={`Rolling loot for the encounter will replace the ${rolledDropCount} drop${
+          rolledDropCount === 1 ? '' : 's'
+        } already rolled.`}
+        confirmLabel="Roll all"
+        onConfirm={() => rollLoot(encounter, undefined, 'Rolled loot for the encounter')}
+      />
 
       <MonsterLookupPanel canAdd={!!isController} onAdd={addMonsterToEncounter} />
 
