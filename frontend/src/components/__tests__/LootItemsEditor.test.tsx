@@ -180,6 +180,20 @@ describe('LootItemsEditor', () => {
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
+  it('explains weight/qty semantics via tooltips and a caption when entries exist', () => {
+    setup(twoEntries);
+    expect(screen.getByText(/picked by relative weight/i)).toBeInTheDocument();
+    const weightLabels = screen.getAllByText('weight');
+    expect(weightLabels[0]).toHaveAttribute('title', expect.stringMatching(/pick chance/i));
+    const qtyLabels = screen.getAllByText('qty');
+    expect(qtyLabels[0]).toHaveAttribute('title', expect.stringMatching(/how many/i));
+  });
+
+  it('omits the semantics caption while the list is empty', () => {
+    setup([]);
+    expect(screen.queryByText(/picked by relative weight/i)).toBeNull();
+  });
+
   it('renders existing entries with their weight and qty', () => {
     setup(twoEntries);
     expect(screen.getByLabelText('Dagger weight')).toHaveValue(60);

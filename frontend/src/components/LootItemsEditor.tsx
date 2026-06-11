@@ -130,13 +130,23 @@ export default function LootItemsEditor({ value, onChange }: Props) {
               <span className="w-32 truncate text-sm font-medium text-gray-900 dark:text-white">
                 {entry.itemName}
               </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">weight</span>
+              <span
+                title="Relative pick chance compared to the other items in this template (ratios, not percentages)"
+                className="text-xs text-gray-500 dark:text-gray-400 cursor-help"
+              >
+                weight
+              </span>
               <WeightInput
                 value={entry.weight}
                 ariaLabel={`${entry.itemName} weight`}
                 onCommit={weight => updateEntry(index, { ...value[index], weight })}
               />
-              <span className="text-xs text-gray-500 dark:text-gray-400">qty</span>
+              <span
+                title="How many copies are rolled when this item is picked (inclusive min–max)"
+                className="text-xs text-gray-500 dark:text-gray-400 cursor-help"
+              >
+                qty
+              </span>
               <RangeInputPair
                 value={entry.qty}
                 floor={1}
@@ -154,6 +164,11 @@ export default function LootItemsEditor({ value, onChange }: Props) {
             </li>
           ))}
         </ul>
+      )}
+      {value.length > 0 && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Items are picked by relative weight; qty is how many drop when picked.
+        </p>
       )}
 
       <div>
