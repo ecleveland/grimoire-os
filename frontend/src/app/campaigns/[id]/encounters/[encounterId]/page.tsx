@@ -11,6 +11,7 @@ import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import { buildMonsterCombatants } from '@/lib/encounter-combatants';
+import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { aggregateCombatantLoot } from '@grimoire-os/shared';
 import type {
@@ -28,8 +29,28 @@ import { formatCoinage } from '@/lib/coinage';
 const sortByInitiative = (combatants: Combatant[]) =>
   [...combatants].sort((a, b) => b.initiative - a.initiative);
 
-const lootButtonClass =
-  'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+const smallButtonBase =
+  'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
+const lootButtonClass = `${smallButtonBase} text-gray-700 dark:text-gray-300`;
+
+// A damage/heal/temp amount must be a positive whole number; anything else
+// (empty, 0, decimals, text) keeps the action buttons disabled.
+const parseAmount = (value: string): number | null => {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return parsed > 0 ? parsed : null;
+};
+
+// Resolve which sorted row a draft targets: a unique name binds to its
+// (possibly re-sorted) row; a duplicated name binds only to the exact row the
+// draft was typed in, and -1 means the target is gone (bail out). Every
+// combatant-mutating path must use this one rule so drafts can't land on the
+// wrong twin.
+const resolveCombatantRow = (sorted: Combatant[], name: string, rowIndex: number): number => {
+  const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
+  return matches.length === 1 ? matches[0] : sorted[rowIndex]?.name === name ? rowIndex : -1;
+};
 
 // Shared by the per-combatant drop and the encounter total — one copy of the
 // coinage + item-list markup, so the two views can't drift apart.
@@ -69,6 +90,14 @@ export default function InitiativeTrackerPage() {
   const [hpDraft, setHpDraft] = useState<{ name: string; index: number; value: string } | null>(
     null
   );
+  // In-progress damage/heal/temp amount (VEG-286), committed by the action
+  // buttons. Same keying scheme as hpDraft, for the same reorder/duplicate
+  // reasons.
+  const [amountDraft, setAmountDraft] = useState<{
+    name: string;
+    index: number;
+    value: string;
+  } | null>(null);
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -198,10 +227,9 @@ export default function InitiativeTrackerPage() {
   };
 
   // Commit the drafted HP: one clamped, version-guarded PATCH. Empty/invalid
-  // or unchanged drafts revert silently. Target resolution: a unique name is
-  // looked up fresh (correct even if the list reordered mid-edit); a duplicated
-  // name falls back to the draft's row index, bailing out unless that row still
-  // holds the name. A combatant removed mid-edit bails out too.
+  // or unchanged drafts revert silently; fractional entries floor (HP is
+  // always a whole number). Targeting goes through resolveCombatantRow, and a
+  // combatant removed mid-edit bails out.
   const commitCombatantHp = async (name: string) => {
     if (!encounter || !hpDraft || hpDraft.name !== name) return;
     const { index: draftIndex, value } = hpDraft;
@@ -214,12 +242,10 @@ export default function InitiativeTrackerPage() {
     const parsed = Number(raw);
     if (raw === '' || Number.isNaN(parsed)) return;
     const sorted = sortByInitiative(encounter.combatants);
-    const matches = sorted.flatMap((c, idx) => (c.name === name ? [idx] : []));
-    const index =
-      matches.length === 1 ? matches[0] : sorted[draftIndex]?.name === name ? draftIndex : -1;
+    const index = resolveCombatantRow(sorted, name, draftIndex);
     if (index === -1) return;
     const target = sorted[index];
-    const clamped = Math.max(0, Math.min(parsed, target.maxHp));
+    const clamped = Math.max(0, Math.min(Math.floor(parsed), target.maxHp));
     if (clamped === target.hp) return;
     sorted[index] = { ...target, hp: clamped };
     const updated = await patchEncounter({ combatants: sorted });
@@ -227,6 +253,44 @@ export default function InitiativeTrackerPage() {
     // combatant's position in the updated combatants array.
     if (updated) {
       await maybeAutoRollLootOnDeath(updated, target, index, clamped);
+    }
+  };
+
+  // Apply the drafted amount as damage, healing, or a temp HP grant (VEG-286).
+  // Damage spends temp HP before real HP; heal clamps to maxHp; temp grants
+  // take the higher value (5e non-stacking) — all via the pure helpers.
+  // No-op results (lower temp grant, damaging a 0-HP combatant) just clear the
+  // draft instead of sending an empty PATCH.
+  const applyHpAction = async (
+    kind: 'damage' | 'heal' | 'temp',
+    name: string,
+    rowIndex: number
+  ) => {
+    if (!encounter || writePending) return;
+    if (!amountDraft || amountDraft.name !== name) return;
+    const amount = parseAmount(amountDraft.value);
+    if (amount === null) return;
+    const sorted = sortByInitiative(encounter.combatants);
+    const index = resolveCombatantRow(sorted, name, rowIndex);
+    if (index === -1) return;
+    const target = sorted[index];
+    const next: Combatant =
+      kind === 'damage'
+        ? { ...target, ...applyDamage(target, amount) }
+        : kind === 'heal'
+          ? { ...target, ...applyHeal(target, amount) }
+          : { ...target, tempHp: grantTempHp(target, amount) };
+    if (next.hp === target.hp && (next.tempHp ?? 0) === (target.tempHp ?? 0)) {
+      setAmountDraft(null);
+      return;
+    }
+    sorted[index] = next;
+    const updated = await patchEncounter({ combatants: sorted });
+    if (updated) {
+      setAmountDraft(null);
+      // The PATCH persisted `sorted` verbatim, so `index` also addresses the
+      // updated combatants array (same invariant as commitCombatantHp).
+      if (kind === 'damage') await maybeAutoRollLootOnDeath(updated, target, index, next.hp);
     }
   };
 
@@ -296,12 +360,17 @@ export default function InitiativeTrackerPage() {
   const lootTotal = encounter.combatants.some(c => c.loot)
     ? aggregateCombatantLoot(encounter.combatants)
     : null;
-  // Mirror of the commit-target rule: a unique draft name binds to its (possibly
-  // re-sorted) row; a duplicated one binds only to the exact row it was typed in.
-  const draftNameIsUnique =
-    hpDraft !== null && sorted.filter(c => c.name === hpDraft.name).length === 1;
-  const rowHoldsDraft = (c: Combatant, i: number) =>
-    hpDraft?.name === c.name && (draftNameIsUnique || hpDraft.index === i);
+  // Render-side mirror of resolveCombatantRow: a unique draft name binds to
+  // its (possibly re-sorted) row; a duplicated one binds only to the exact row
+  // it was typed in. One factory serves both drafts so the binding rule can't
+  // drift between them.
+  const makeRowHoldsDraft = (draft: { name: string; index: number } | null) => {
+    const nameIsUnique = draft !== null && sorted.filter(c => c.name === draft.name).length === 1;
+    return (c: Combatant, i: number) =>
+      draft?.name === c.name && (nameIsUnique || draft.index === i);
+  };
+  const rowHoldsDraft = makeRowHoldsDraft(hpDraft);
+  const rowHoldsAmount = makeRowHoldsDraft(amountDraft);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -415,6 +484,7 @@ export default function InitiativeTrackerPage() {
                     {isController ? (
                       <input
                         type="number"
+                        aria-label={`HP for ${c.name}`}
                         value={rowHoldsDraft(c, i) ? hpDraft!.value : c.hp}
                         onChange={e =>
                           setHpDraft({ name: c.name, index: i, value: e.target.value })
@@ -434,8 +504,66 @@ export default function InitiativeTrackerPage() {
                     )}
                   </div>
                   {isController && <div className="text-xs text-gray-400">/{c.maxHp}</div>}
+                  {(c.tempHp ?? 0) > 0 && (
+                    <div
+                      className="text-xs font-mono font-medium text-sky-600 dark:text-sky-400"
+                      title="Temporary HP"
+                    >
+                      +{c.tempHp} temp
+                    </div>
+                  )}
                 </div>
               </div>
+              {/* Damage / heal / temp HP controls (VEG-286). The raw HP input
+                  above stays as the advanced affordance for direct corrections;
+                  these are the table-friendly paths. */}
+              {isController &&
+                (() => {
+                  const rowAmount = rowHoldsAmount(c, i) ? parseAmount(amountDraft!.value) : null;
+                  const actionsDisabled = writePending || rowAmount === null;
+                  return (
+                    <div className="mt-2 flex items-center justify-end gap-2">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Amount"
+                        aria-label={`Damage or heal amount for ${c.name}`}
+                        value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
+                        onChange={e =>
+                          setAmountDraft({ name: c.name, index: i, value: e.target.value })
+                        }
+                        className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      <button
+                        type="button"
+                        aria-label={`Damage ${c.name}`}
+                        onClick={() => applyHpAction('damage', c.name, i)}
+                        disabled={actionsDisabled}
+                        className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                      >
+                        Damage
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Heal ${c.name}`}
+                        onClick={() => applyHpAction('heal', c.name, i)}
+                        disabled={actionsDisabled}
+                        className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
+                      >
+                        Heal
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Grant temp HP to ${c.name}`}
+                        onClick={() => applyHpAction('temp', c.name, i)}
+                        disabled={actionsDisabled}
+                        className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
+                      >
+                        Temp HP
+                      </button>
+                    </div>
+                  );
+                })()}
               {/* DM-only drop view (VEG-301) — the player reveal is a separate ticket. */}
               {isController && c.loot && (
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex items-start justify-between gap-2 text-sm">

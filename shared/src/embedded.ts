@@ -86,6 +86,11 @@ export interface Combatant {
   initiative: number;
   hp: number;
   maxHp: number;
+  /**
+   * Temporary hit points (VEG-286). Damage spends these before real HP; new
+   * grants don't stack — the higher value wins, per 5e. Absent means 0.
+   */
+  tempHp?: number;
   ac: number;
   isNpc: boolean;
   notes?: string;
