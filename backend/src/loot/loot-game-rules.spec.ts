@@ -51,4 +51,21 @@ describe('resolveLootGameRules', () => {
     const rules = resolveLootGameRules([{ key: 'trinket-chance', value: null }]);
     expect(rules.trinketChance).toBe(DEFAULT_LOOT_GAME_RULES.trinketChance);
   });
+
+  // Negative knobs are misconfigurations, not tunings: a negative multiplier
+  // writes negative coinage onto combatants, which the combatant DTO then
+  // rejects (@Min(0)) on the next client PATCH — bricking encounter edits.
+  it('rejects negative numbers for chances and multiplier', () => {
+    const rules = resolveLootGameRules([
+      { key: 'trinket-chance', value: -0.5 },
+      { key: 'coinage-multiplier', value: -1 },
+      { key: 'magic-item-chance-by-cr', value: { '0': -0.1, '11+': 0.2 } },
+    ]);
+    expect(rules).toEqual(DEFAULT_LOOT_GAME_RULES);
+  });
+
+  it('treats an empty chance map as absent (explicit zeros disable drops, {} does not)', () => {
+    const rules = resolveLootGameRules([{ key: 'magic-item-chance-by-cr', value: {} }]);
+    expect(rules.magicItemChanceByCr).toEqual(DEFAULT_LOOT_GAME_RULES.magicItemChanceByCr);
+  });
 });

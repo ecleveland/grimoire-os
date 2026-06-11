@@ -26,8 +26,11 @@ export const DEFAULT_LOOT_GAME_RULES: LootGameRules = {
   coinageMultiplier: 1,
 };
 
-const asFiniteNumber = (value: unknown): number | undefined =>
-  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+// Negative values are misconfigurations, not tunings: a negative multiplier
+// would persist negative coinage onto combatants, which the combatant DTO
+// then rejects (@Min(0)) on the client's next encounter PATCH.
+const asNonNegativeNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 
 const asString = (value: unknown): string | undefined =>
   typeof value === 'string' ? value : undefined;
@@ -35,7 +38,9 @@ const asString = (value: unknown): string | undefined =>
 const asChanceMap = (value: unknown): Record<string, number> | undefined => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const entries = Object.values(value);
-  return entries.every(v => typeof v === 'number' && Number.isFinite(v))
+  // {} is treated as absent — disabling drops is expressed with explicit
+  // zero values, not an empty map.
+  return entries.length > 0 && entries.every(v => asNonNegativeNumber(v) !== undefined)
     ? (value as Record<string, number>)
     : undefined;
 };
@@ -55,12 +60,13 @@ export function resolveLootGameRules(
 
   return {
     trinketChance:
-      asFiniteNumber(byKey.get('trinket-chance')) ?? DEFAULT_LOOT_GAME_RULES.trinketChance,
+      asNonNegativeNumber(byKey.get('trinket-chance')) ?? DEFAULT_LOOT_GAME_RULES.trinketChance,
     magicItemChanceByCr:
       asChanceMap(byKey.get('magic-item-chance-by-cr')) ??
       DEFAULT_LOOT_GAME_RULES.magicItemChanceByCr,
     itemCountDie: asString(byKey.get('item-count-die')) ?? DEFAULT_LOOT_GAME_RULES.itemCountDie,
     coinageMultiplier:
-      asFiniteNumber(byKey.get('coinage-multiplier')) ?? DEFAULT_LOOT_GAME_RULES.coinageMultiplier,
+      asNonNegativeNumber(byKey.get('coinage-multiplier')) ??
+      DEFAULT_LOOT_GAME_RULES.coinageMultiplier,
   };
 }

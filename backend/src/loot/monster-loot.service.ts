@@ -43,6 +43,9 @@ export class MonsterLootService {
    * the loot game rules, and returns a roller over it. One load per request,
    * shared across all combatants of a roll — the dataset is small (same
    * trade-off as NpcRefDataLoader).
+   *
+   * @throws UnprocessableEntityException (422) when the monster template
+   * table is empty — i.e. the database was never seeded.
    */
   async loadRoller(): Promise<MonsterLootRoller> {
     const [templates, trinkets, items, gameRules] = await Promise.all([
