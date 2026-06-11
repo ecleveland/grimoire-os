@@ -41,6 +41,7 @@ export type MockPrismaService = {
     | 'spell'
     | 'monster'
     | 'item'
+    | 'itemBundleEntry'
     | 'srdClass'
     | 'race'
     | 'subclass'
@@ -81,6 +82,7 @@ export function createMockPrismaService(): MockPrismaService {
     spell: mockModel(),
     monster: mockModel(),
     item: mockModel(),
+    itemBundleEntry: mockModel(),
     srdClass: mockModel(),
     race: mockModel(),
     subclass: mockModel(),

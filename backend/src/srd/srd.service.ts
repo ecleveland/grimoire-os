@@ -328,8 +328,29 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
+  // Equipment packs resolve their bundle contents to real catalog rows
+  // (VEG-308); `contents` is present on the response only when non-empty.
   async findItem(id: string) {
-    return this.prisma.item.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
+    const item = await this.prisma.item.findFirst({
+      where: { id, ...this.contentAccess.globalWhere() },
+      include: {
+        bundleContents: {
+          include: { component: { select: { id: true, name: true } } },
+          orderBy: { component: { name: 'asc' } },
+        },
+      },
+    });
+    if (!item) return null;
+    const { bundleContents, ...rest } = item;
+    if (bundleContents.length === 0) return rest;
+    return {
+      ...rest,
+      contents: bundleContents.map(e => ({
+        itemId: e.component.id,
+        name: e.component.name,
+        quantity: e.quantity,
+      })),
+    };
   }
 
   // ── Classes ─────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, act, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, act, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ItemListPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -26,11 +26,11 @@ vi.mock('@/components/Pagination', () => ({
 const longsword: SrdItem = {
   id: 'item-1',
   name: 'Longsword',
-  category: 'Martial Melee',
-  cost: '15 gp',
+  category: 'Martial Melee Weapon',
+  cost: '15 GP',
   weight: '3 lb.',
   damage: '1d8 slashing',
-  properties: ['Versatile'],
+  properties: ['Versatile (1d10)', 'Mastery: Sap'],
   source: 'SRD 5.2.1',
 };
 
@@ -102,6 +102,50 @@ describe('ItemListPage', () => {
       await user.click(screen.getByRole('button', { name: 'Remove Longsword from print set' }));
 
       expect(storedTray()).toEqual([]);
+    });
+  });
+
+  describe('category filter', () => {
+    it('offers the real catalog category values, not the stale pre-VEG-308 labels', async () => {
+      renderPage();
+      await screen.findByText('Longsword');
+
+      const options = within(screen.getByRole('combobox'))
+        .getAllByRole('option')
+        .map(o => o.textContent);
+
+      // New equipment categories seeded by VEG-308…
+      for (const expected of [
+        'Martial Melee Weapon',
+        "Artisan's Tools",
+        'Adventuring Gear',
+        'Equipment Pack',
+        'Tack, Harness, or Drawn Vehicle',
+        'Airborne or Waterborne Vehicle',
+        'Lifestyle Expense',
+        'Food, Drink, or Lodging',
+        'Service',
+      ]) {
+        expect(options).toContain(expected);
+      }
+      // …and none of the stale values that match no catalog row.
+      for (const stale of ['Martial Melee', 'Artisan Tools', 'Vehicle', 'Other']) {
+        expect(options).not.toContain(stale);
+      }
+    });
+
+    it('requests items filtered by the exact category value', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByText('Longsword');
+
+      await user.selectOptions(screen.getByRole('combobox'), 'Equipment Pack');
+
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          expect.stringMatching(/category=Equipment(\+|%20)Pack/)
+        )
+      );
     });
   });
 

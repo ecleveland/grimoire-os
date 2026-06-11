@@ -373,6 +373,71 @@ export function validateMagicItemData(items: JsonMagicItem[]): void {
   );
 }
 
+// Equipment (VEG-308): the free-text predicates plus two dataset-specific
+// guarantees — no duplicate names within the file, and every pack component
+// resolving to a real equipment item. Tool entries legitimately end with item
+// enumerations in their structured "Craft:" / "Variants:" lines (e.g. Cobbler's
+// Tools ends "Craft: Climber's Kit"), so those lines are exempt from the
+// trailing-foreign-title check; they are field lists, not column bleed.
+const TOOL_FIELD_LINE = /^(Ability|Utilize|Craft|Variants):/;
+
+export function validateEquipmentData(equipment: JsonEquipmentItem[]): void {
+  const errors: string[] = [];
+
+  const titles = new Set<string>();
+  for (const e of equipment) {
+    if (titles.has(e.name)) errors.push(`duplicate item name "${e.name}"`);
+    titles.add(e.name);
+  }
+
+  for (const e of equipment) {
+    const text = e.description ?? '';
+    if (!text) continue;
+
+    const foreign = new Set(titles);
+    foreign.delete(e.name);
+
+    const trimmed = text.trimEnd();
+    const lastLine = trimmed.slice(trimmed.lastIndexOf('\n') + 1).trim();
+    if (!TOOL_FIELD_LINE.test(lastLine)) {
+      const bled = trailingForeignTitle(text, foreign);
+      if (bled) {
+        errors.push(`${e.name}: description ends with another entry's title "${bled}"`);
+      }
+    }
+
+    const frag = danglingFragmentTail(text);
+    if (frag) {
+      errors.push(`${e.name}: dangling word fragment at end of description "…${frag}"`);
+    }
+
+    // Tool descriptions are labeled "Key: value" lines (short by design);
+    // strip them before the table-soup heuristics or a three-field tool
+    // (e.g. Disguise Kit) reads as a run of orphaned table cells.
+    const prose = text
+      .split('\n')
+      .filter(l => !TOOL_FIELD_LINE.test(l.trim()))
+      .join('\n');
+    const flattened = flattenedTableSignals(prose);
+    if (flattened.length > 0) {
+      errors.push(`${e.name}: flattened table in description — ${flattened.join('; ')}`);
+    }
+  }
+
+  for (const e of equipment) {
+    for (const c of e.contents ?? []) {
+      if (!titles.has(c.name)) {
+        errors.push(`${e.name}: pack component "${c.name}" does not resolve to an equipment item`);
+      }
+      if (!(Number.isInteger(c.quantity) && c.quantity >= 1)) {
+        errors.push(`${e.name}: pack component "${c.name}" has invalid quantity ${c.quantity}`);
+      }
+    }
+  }
+
+  raiseIfAnomalies('equipment', errors);
+}
+
 // Species traits reference an option table by name ("…from the Elven Lineages
 // table") or an inline list ("…the following benefits:"). A referenced table is
 // only well-formed when the matching structured `table`/`options` survived
@@ -432,6 +497,25 @@ interface JsonMagicItem {
   rarity: string;
   requires_attunement: boolean;
   description: string;
+}
+
+// One entry of docs/extracted-srd-json/equipment.json (scripts/
+// extract-srd-equipment.mjs, VEG-308). Fields are present only where the SRD
+// table carries them; packs additionally carry structured `contents`.
+interface JsonEquipmentItem {
+  name: string;
+  category: string;
+  cost?: string | null;
+  weight?: number | null;
+  description?: string | null;
+  damage?: string;
+  damage_type?: string;
+  properties?: string[];
+  mastery?: string;
+  armor_class?: string;
+  stealth_disadvantage?: boolean;
+  strength_requirement?: number | null;
+  contents?: { name: string; quantity: number }[];
 }
 
 interface JsonSpeciesTrait {
@@ -596,6 +680,43 @@ export function loadMagicItemsFromJson() {
     isMagic: true,
     properties: item.subcategory ? [item.subcategory] : [],
   }));
+}
+
+/**
+ * Basic equipment (VEG-308): the SRD 5.2.1 Equipment chapter extracted by
+ * scripts/extract-srd-equipment.mjs. Returns the Item rows plus the equipment
+ * packs' bundle definitions, which seed.service writes to ItemBundleEntry in a
+ * second pass once the item rows (and their ids) exist.
+ */
+export function loadEquipmentFromJson() {
+  const data = readJsonFile<{ equipment: JsonEquipmentItem[] }>('equipment.json');
+  validateEquipmentData(data.equipment);
+
+  const items = data.equipment.map(e => ({
+    name: e.name,
+    category: e.category,
+    cost: e.cost ?? null,
+    weight: e.weight ?? null,
+    description: e.description ?? null,
+    damage: e.damage ?? null,
+    damageType: e.damage_type ?? null,
+    armorClass: e.armor_class ?? null,
+    stealthDisadvantage: e.stealth_disadvantage ?? false,
+    strengthRequirement: e.strength_requirement ?? null,
+    // The weapon-mastery property (a 5.2.1 addition) rides along in properties
+    // rather than a dedicated column.
+    properties: [...(e.properties ?? []), ...(e.mastery ? [`Mastery: ${e.mastery}`] : [])],
+    isMagic: false,
+  }));
+
+  const bundles = data.equipment
+    .filter(e => (e.contents ?? []).length > 0)
+    .map(e => ({
+      bundleName: e.name,
+      components: e.contents!.map(c => ({ name: c.name, quantity: c.quantity })),
+    }));
+
+  return { items, bundles };
 }
 
 // Surface a lineage/ancestry trait's structured options into its flattened
