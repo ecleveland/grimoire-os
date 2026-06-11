@@ -19,6 +19,7 @@ import { EncountersService } from './encounters.service';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { UpdateEncounterDto } from './dto/update-encounter.dto';
 import { QueryEncountersDto } from './dto/query-encounters.dto';
+import { RollEncounterLootDto } from './dto/roll-encounter-loot.dto';
 
 @ApiTags('Encounters')
 @ApiBearerAuth()
@@ -53,6 +54,18 @@ export class EncountersController {
     @Body() dto: UpdateEncounterDto
   ) {
     return this.encountersService.update(id, req.user.userId, dto);
+  }
+
+  @Post(':id/loot')
+  @ApiOperation({
+    summary: 'Roll loot for monster combatants (all, or one via combatantIndex) [VEG-300]',
+  })
+  rollLoot(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: RollEncounterLootDto
+  ) {
+    return this.encountersService.rollLoot(id, req.user.userId, dto);
   }
 
   @Delete(':id')

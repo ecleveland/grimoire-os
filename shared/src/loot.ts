@@ -1,0 +1,44 @@
+// Encounter-loot aggregation (VEG-300). Pure and shared so the backend's roll
+// endpoint and any frontend view derive the same total from the same
+// combatants — the aggregate is never persisted, which rules out drift.
+
+import type { Combatant, CombatantLootCoinage, CombatantLootItem } from './embedded';
+
+export interface EncounterLootTotal {
+  coinage: CombatantLootCoinage;
+  items: CombatantLootItem[];
+}
+
+/**
+ * Sums coinage and merges items across every combatant that has rolled loot.
+ * Items merge when itemId, name, source, and notes all match (quantities
+ * add); merged items preserve first-seen order. Combatants without loot are
+ * ignored. Never mutates its input.
+ */
+export function aggregateCombatantLoot(
+  combatants: readonly Combatant[] | null | undefined
+): EncounterLootTotal {
+  const coinage: CombatantLootCoinage = { gp: 0, sp: 0, cp: 0 };
+  const items = new Map<string, CombatantLootItem>();
+
+  for (const combatant of combatants ?? []) {
+    const loot = combatant.loot;
+    if (!loot) continue;
+    coinage.gp += loot.coinage.gp;
+    coinage.sp += loot.coinage.sp;
+    coinage.cp += loot.coinage.cp;
+    for (const item of loot.items) {
+      // Tuple-serialized so item names can never forge a collision with a
+      // hand-rolled delimiter.
+      const key = JSON.stringify([item.itemId, item.name, item.source, item.notes ?? null]);
+      const existing = items.get(key);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        items.set(key, { ...item });
+      }
+    }
+  }
+
+  return { coinage, items: [...items.values()] };
+}

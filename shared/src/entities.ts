@@ -2,6 +2,7 @@ import type { CampaignStatus, NoteVisibility, Role } from './enums';
 import type {
   AbilityScores,
   Combatant,
+  CombatantLootItem,
   Currency,
   DeathSaves,
   Feature,
@@ -171,13 +172,10 @@ export type NpcLootOverrides = {
   coinageMultiplier?: number;
 };
 
-export type NpcLootItem = {
-  itemId: string | null;
-  name: string;
-  quantity: number;
-  source: 'profession' | 'trinket' | 'magic-item';
-  notes?: string;
-};
+// Historical name for the loot-engine item shape, kept because it is the
+// persisted Npc.loot contract. The shape (and its widened `source` union)
+// lives in embedded.ts so Combatant.loot can share it (VEG-300).
+export type NpcLootItem = CombatantLootItem;
 
 export interface NpcRelation {
   id: string;

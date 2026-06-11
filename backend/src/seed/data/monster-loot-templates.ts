@@ -12,9 +12,12 @@
 // the shared fallback chain picks the first entry for the type when the
 // exact bucket is missing. That convention only holds for this in-memory
 // array: any loader that round-trips these rows through the database MUST
-// impose a deterministic order (Postgres row order without ORDER BY is
-// unspecified) — e.g. orderBy crBucket ascending, which keeps the poorest
-// bucket as the fallback.
+// impose a deterministic order itself (Postgres row order without ORDER BY
+// is unspecified). Do NOT use `orderBy crBucket` for that — the buckets sort
+// lexicographically ('11+' before '2–4'), handing low-CR monsters the
+// richest fallback. Sort by canonical LOOT_CR_BUCKETS rank in JS instead
+// (see sortByBucketRank in loot/monster-loot.service.ts), which keeps the
+// poorest bucket as the fallback.
 
 import { MONSTER_LOOT_GENERIC_TYPE, MonsterLootType } from '../../loot/monster-loot';
 import { LootCoinage, LootCrBucket, LootTemplateItem } from '../../loot/loot.types';
