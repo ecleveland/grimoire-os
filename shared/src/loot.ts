@@ -47,6 +47,14 @@ export type MonsterLootType = (typeof MONSTER_LOOT_TYPES)[number];
  */
 export const MONSTER_LOOT_GENERIC_TYPE = '__generic__';
 
+/**
+ * The full selectable key set monster loot templates are stored under —
+ * what the admin editor offers and the create API accepts.
+ */
+export const MONSTER_LOOT_TYPE_KEYS = [...MONSTER_LOOT_TYPES, MONSTER_LOOT_GENERIC_TYPE] as const;
+
+export type MonsterLootTypeKey = (typeof MONSTER_LOOT_TYPE_KEYS)[number];
+
 /** Inclusive [min, max] range rolled at generation time. */
 export type LootRange = [number, number];
 

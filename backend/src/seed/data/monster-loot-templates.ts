@@ -19,11 +19,12 @@
 // (see sortByBucketRank in loot/monster-loot.service.ts), which keeps the
 // poorest bucket as the fallback.
 
-import { MONSTER_LOOT_GENERIC_TYPE, MonsterLootType } from '../../loot/monster-loot';
+import { MONSTER_LOOT_GENERIC_TYPE } from '@grimoire-os/shared';
+import type { MonsterLootTypeKey } from '@grimoire-os/shared';
 import { LootCoinage, LootCrBucket, LootTemplateItem } from '../../loot/loot.types';
 
 export type MonsterLootTemplate = {
-  type: MonsterLootType | typeof MONSTER_LOOT_GENERIC_TYPE;
+  type: MonsterLootTypeKey;
   crBucket: LootCrBucket;
   coinage: LootCoinage;
   items: LootTemplateItem[];

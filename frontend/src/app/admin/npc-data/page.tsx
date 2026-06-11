@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
@@ -9,11 +9,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import AdminSubnav from '@/components/AdminSubnav';
 import CoinRangeEditor from '@/components/CoinRangeEditor';
 import LootItemsEditor from '@/components/LootItemsEditor';
-import {
-  LOOT_CR_BUCKETS,
-  MONSTER_LOOT_GENERIC_TYPE,
-  MONSTER_LOOT_TYPES,
-} from '@grimoire-os/shared';
+import { LOOT_CR_BUCKETS, MONSTER_LOOT_TYPE_KEYS } from '@grimoire-os/shared';
 import type { LootTemplateCoinage, LootTemplateItemEntry } from '@grimoire-os/shared';
 
 type TableSlug =
@@ -127,7 +123,7 @@ const TABS: TabConfig[] = [
         kind: 'select',
         // The loot engine only selects on the canonical creature types plus
         // the generic fallback — free text would create unreachable rows.
-        options: [...MONSTER_LOOT_TYPES, MONSTER_LOOT_GENERIC_TYPE],
+        options: [...MONSTER_LOOT_TYPE_KEYS],
       },
       {
         key: 'crBucket',
@@ -207,15 +203,23 @@ export default function AdminNpcDataPage() {
     }
   }, [isAdmin, router]);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async (slug: TableSlug) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
+    // Clear eagerly: on failure (or a slow response) the previous tab's rows
+    // would otherwise keep rendering under this tab's columns — plausibly,
+    // since the two loot tabs share most row keys.
+    setRows([]);
     try {
       const data = await apiFetch<AnyRow[]>(`/admin/npc-data/${slug}`);
+      if (seq !== loadSeq.current) return; // a newer load owns the table now
       setRows(data);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       toast.error(err instanceof Error ? err.message : 'Failed to load rows');
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 

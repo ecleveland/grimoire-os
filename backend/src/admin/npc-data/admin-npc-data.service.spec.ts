@@ -269,6 +269,38 @@ describe('AdminNpcDataService', () => {
         });
         expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
       });
+
+      it('rejects a create that an existing active template for the same type×CR would shadow', async () => {
+        // The loot engine resolves duplicate keys first-match over an
+        // arbitrary id order, so a second active row would silently never
+        // (or nondeterministically) be picked.
+        prisma.npcLootTemplate.findFirst.mockResolvedValue({
+          id: 'seeded',
+          source: 'curated',
+          isActive: true,
+        });
+
+        await expect(service.create('monster-loot', USER_ID, structured)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            message: expect.stringContaining('dragon'),
+          }),
+        });
+
+        expect(prisma.npcLootTemplate.findFirst).toHaveBeenCalledWith({
+          where: { category: 'monster', profession: 'dragon', crBucket: '11+', isActive: true },
+        });
+        expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
+      });
+
+      it('allows a create when the only template for the key is disabled', async () => {
+        prisma.npcLootTemplate.findFirst.mockResolvedValue(null);
+        prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }]);
+        prisma.npcLootTemplate.create.mockResolvedValue({ id: 'mlt3', profession: 'dragon' });
+
+        await service.create('monster-loot', USER_ID, structured);
+
+        expect(prisma.npcLootTemplate.create).toHaveBeenCalled();
+      });
     });
 
     it('creates personality with addedById', async () => {

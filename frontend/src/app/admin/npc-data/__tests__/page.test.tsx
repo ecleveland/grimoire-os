@@ -73,6 +73,61 @@ describe('AdminNpcDataPage', () => {
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/admin/npc-data/personality'));
   });
 
+  it('clears the previous tab’s rows when a load fails', async () => {
+    const { toast } = await import('sonner');
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/admin/npc-data/monster-loot') {
+        return Promise.reject(new Error('boom'));
+      }
+      return Promise.resolve([
+        {
+          id: 'n1',
+          race: 'Elf',
+          kind: 'first',
+          value: 'Arannis',
+          source: 'curated',
+          isActive: true,
+        },
+      ]);
+    });
+    render(<AdminNpcDataPage />);
+    await screen.findByText('Arannis');
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Monster Loot' }));
+
+    // The names rows must not keep rendering under the Monster Loot columns.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    expect(screen.queryByText('Arannis')).toBeNull();
+    expect(screen.getByText('No rows.')).toBeInTheDocument();
+  });
+
+  it('ignores an out-of-order response from a previously selected tab', async () => {
+    let resolveNames!: (rows: object[]) => void;
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/admin/npc-data/names') {
+        return new Promise(resolve => {
+          resolveNames = resolve;
+        });
+      }
+      return Promise.resolve([
+        { id: 'p1', background: 'Acolyte', kind: 'ideals', value: 'Faith.', isActive: true },
+      ]);
+    });
+    render(<AdminNpcDataPage />);
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/admin/npc-data/names'));
+
+    // Switch tabs while the names request is still in flight, then let the
+    // stale names response land after the personality rows rendered.
+    await userEvent.click(screen.getByRole('tab', { name: 'Personality' }));
+    await screen.findByText('Faith.');
+    resolveNames([
+      { id: 'n1', race: 'Elf', kind: 'first', value: 'Arannis', source: 'curated', isActive: true },
+    ]);
+
+    await waitFor(() => expect(screen.queryByText('Arannis')).toBeNull());
+    expect(screen.getByText('Faith.')).toBeInTheDocument();
+  });
+
   it('disables Delete on curated rows for tables with source', async () => {
     mockApiFetch.mockResolvedValue([
       { id: 'n1', race: 'Elf', kind: 'first', value: 'Arannis', source: 'curated', isActive: true },
@@ -152,20 +207,21 @@ describe('AdminNpcDataPage', () => {
     );
   });
 
+  // Shared by both loot tabs: routes the tab's list/create and the
+  // item-picker search.
+  const dagger = { id: 'item-1', name: 'Dagger', category: 'Weapon', isMagic: false };
+
+  function routeLootApi(rows: object[] = [], items: object[] = [dagger]) {
+    mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
+      if (path.startsWith('/srd/items')) {
+        return Promise.resolve({ data: items, total: items.length, page: 1, lastPage: 1 });
+      }
+      if (init?.method === 'POST') return Promise.resolve({ id: 'new-row' });
+      return Promise.resolve(rows);
+    });
+  }
+
   describe('loot templates tab', () => {
-    const dagger = { id: 'item-1', name: 'Dagger', category: 'Weapon', isMagic: false };
-
-    /** Routes the loot-templates list/create and the item-picker search. */
-    function routeLootApi(rows: object[] = [], items: object[] = [dagger]) {
-      mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
-        if (path.startsWith('/srd/items')) {
-          return Promise.resolve({ data: items, total: items.length, page: 1, lastPage: 1 });
-        }
-        if (init?.method === 'POST') return Promise.resolve({ id: 'lt-new' });
-        return Promise.resolve(rows);
-      });
-    }
-
     async function openLootTab() {
       render(<AdminNpcDataPage />);
       await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/admin/npc-data/names'));
@@ -297,19 +353,6 @@ describe('AdminNpcDataPage', () => {
   });
 
   describe('monster loot tab', () => {
-    const dagger = { id: 'item-1', name: 'Dagger', category: 'Weapon', isMagic: false };
-
-    /** Routes the monster-loot list/create and the item-picker search. */
-    function routeMonsterLootApi(rows: object[] = [], items: object[] = [dagger]) {
-      mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
-        if (path.startsWith('/srd/items')) {
-          return Promise.resolve({ data: items, total: items.length, page: 1, lastPage: 1 });
-        }
-        if (init?.method === 'POST') return Promise.resolve({ id: 'mlt-new' });
-        return Promise.resolve(rows);
-      });
-    }
-
     async function openMonsterLootTab() {
       render(<AdminNpcDataPage />);
       await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/admin/npc-data/names'));
@@ -320,7 +363,7 @@ describe('AdminNpcDataPage', () => {
     }
 
     it('offers the canonical monster types in a select — free text would create unreachable rows', async () => {
-      routeMonsterLootApi();
+      routeLootApi();
       await openMonsterLootTab();
 
       const typeSelect = screen.getByLabelText(/^Type \*/);
@@ -338,7 +381,7 @@ describe('AdminNpcDataPage', () => {
     });
 
     it('creates a monster loot template from the structured editors', async () => {
-      routeMonsterLootApi();
+      routeLootApi();
       await openMonsterLootTab();
 
       await userEvent.selectOptions(screen.getByLabelText(/^Type \*/), 'dragon');
@@ -370,7 +413,7 @@ describe('AdminNpcDataPage', () => {
 
     it('blocks submitting without a type', async () => {
       const { toast } = await import('sonner');
-      routeMonsterLootApi();
+      routeLootApi();
       await openMonsterLootTab();
 
       await userEvent.selectOptions(screen.getByLabelText(/CR bucket/), '0');
@@ -388,7 +431,7 @@ describe('AdminNpcDataPage', () => {
 
     it('surfaces a create failure as a toast', async () => {
       const { toast } = await import('sonner');
-      routeMonsterLootApi();
+      routeLootApi();
       await openMonsterLootTab();
 
       mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
@@ -411,7 +454,7 @@ describe('AdminNpcDataPage', () => {
     });
 
     it('lists rows by type and CR, disables and deletes like the NPC loot tab', async () => {
-      routeMonsterLootApi([
+      routeLootApi([
         {
           id: 'mlt1',
           type: 'beast',

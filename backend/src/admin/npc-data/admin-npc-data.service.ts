@@ -100,6 +100,24 @@ export class AdminNpcDataService {
       }
       case 'monster-loot': {
         const dto = validateRow(CreateMonsterLootTemplateRowDto, input);
+        // The loot engine resolves duplicate keys first-match over an
+        // arbitrary id order, so a second active row for the same type×CR
+        // would silently shadow one of the two — and the seed covers most
+        // combinations, making collisions the common case, not the edge.
+        const clash = await this.prisma.npcLootTemplate.findFirst({
+          where: {
+            category: 'monster',
+            profession: dto.type,
+            crBucket: dto.crBucket,
+            isActive: true,
+          },
+        });
+        if (clash) {
+          throw new BadRequestException(
+            `An active ${dto.type} / ${dto.crBucket} template already exists ` +
+              `(source: ${clash.source}); disable it first so the loot engine picks this one.`
+          );
+        }
         await this.assertItemNamesResolvable(dto.items.map(i => i.itemName));
         const row = await this.prisma.npcLootTemplate.create({
           data: {
@@ -159,7 +177,9 @@ export class AdminNpcDataService {
     }
   }
 
-  async remove(table: string, id: string) {
+  // Returns void so no exit can leak a raw row — for monster-loot the
+  // deleted row still carries the internal `profession` column.
+  async remove(table: string, id: string): Promise<void> {
     this.assertTable(table);
     const existing = await this.findById(table, id);
     if (!existing) throw new NotFoundException(`Row ${id} not found in ${table}`);
@@ -175,16 +195,21 @@ export class AdminNpcDataService {
 
     switch (table) {
       case 'names':
-        return this.prisma.npcNamePool.delete({ where: { id } });
+        await this.prisma.npcNamePool.delete({ where: { id } });
+        return;
       case 'appearance':
-        return this.prisma.npcAppearanceTrait.delete({ where: { id } });
+        await this.prisma.npcAppearanceTrait.delete({ where: { id } });
+        return;
       case 'loot-templates':
       case 'monster-loot':
-        return this.prisma.npcLootTemplate.delete({ where: { id } });
+        await this.prisma.npcLootTemplate.delete({ where: { id } });
+        return;
       case 'trinkets':
-        return this.prisma.trinket.delete({ where: { id } });
+        await this.prisma.trinket.delete({ where: { id } });
+        return;
       case 'personality':
-        return this.prisma.npcCustomPersonality.delete({ where: { id } });
+        await this.prisma.npcCustomPersonality.delete({ where: { id } });
+        return;
     }
   }
 
