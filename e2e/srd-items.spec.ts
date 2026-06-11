@@ -37,6 +37,18 @@ test.describe('SRD basic equipment (VEG-308)', () => {
     // Pack contents survive in the description prose.
     await burglars.getByRole('button', { name: 'Show details' }).click();
     await expect(burglars.getByText(/10 Candles/)).toBeVisible();
+
+    // The detail endpoint resolves the pack's bundle entries against the real
+    // database — a silently empty item_bundle_entries table fails here even
+    // though the prose above would still render.
+    const list = await page.request.get(`${BACKEND}/api/srd/items?q=Burglar%27s%20Pack&limit=1`);
+    expect(list.ok()).toBeTruthy();
+    const packId = (await list.json()).data[0].id as string;
+    const detail = await page.request.get(`${BACKEND}/api/srd/items/${packId}`);
+    expect(detail.ok()).toBeTruthy();
+    const pack = await detail.json();
+    expect(pack.contents).toContainEqual(expect.objectContaining({ name: 'Candle', quantity: 10 }));
+    expect(pack.contents.length).toBeGreaterThanOrEqual(10);
   });
 });
 

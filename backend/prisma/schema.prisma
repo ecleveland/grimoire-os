@@ -383,7 +383,10 @@ model Item {
 // A bundle item's (equipment pack's) component line: bundle → component with a
 // quantity (e.g. Burglar's Pack → 10× Candle). Self-referential through Item so
 // pack contents resolve to real catalog rows (VEG-308). Cascade on both sides:
-// an entry is meaningless without either endpoint.
+// an entry is meaningless without either endpoint — note the component-side
+// cascade silently shrinks packs if component items ever become user-deletable.
+// Hand-authored CHECKs in the migration (Prisma cannot model them) enforce
+// quantity >= 1 and bundleId <> componentId beyond the seed-time validator.
 model ItemBundleEntry {
   id          String @id @default(uuid())
   bundleId    String

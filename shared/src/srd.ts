@@ -181,7 +181,11 @@ export interface SrdItem extends ContentOwnership {
   requiresAttunement?: boolean;
   isMagic?: boolean;
   source: string;
-  /** Resolved bundle contents; present only for equipment packs. */
+  /**
+   * Resolved bundle contents. Returned by the item *detail* endpoint only
+   * (the list endpoint never includes it), and only when the item has bundle
+   * entries — in practice the seeded equipment packs.
+   */
   contents?: SrdItemBundleComponent[];
 }
 

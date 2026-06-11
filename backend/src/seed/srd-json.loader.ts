@@ -424,10 +424,32 @@ export function validateEquipmentData(equipment: JsonEquipmentItem[]): void {
     }
   }
 
+  // Wearable-armor AC must match one of the SRD's shapes: "16", "+2",
+  // "11 + Dex modifier", "13 + Dex modifier (max 2)".
+  const ARMOR_CLASS_SHAPE = /^(\d+|\+\d+|\d+ \+ Dex modifier( \(max \d+\))?)$/;
   for (const e of equipment) {
+    if (e.armor_class != null && !ARMOR_CLASS_SHAPE.test(e.armor_class)) {
+      errors.push(`${e.name}: malformed armor_class "${e.armor_class}"`);
+    }
+  }
+
+  const packs = new Set(equipment.filter(e => e.category === 'Equipment Pack').map(e => e.name));
+  for (const e of equipment) {
+    if ((e.contents ?? []).length > 0 && e.category !== 'Equipment Pack') {
+      errors.push(`${e.name}: only Equipment Pack entries may carry contents`);
+    }
     for (const c of e.contents ?? []) {
       if (!titles.has(c.name)) {
         errors.push(`${e.name}: pack component "${c.name}" does not resolve to an equipment item`);
+      }
+      if (c.name === e.name) {
+        errors.push(`${e.name}: a pack must not contain itself`);
+      } else if (packs.has(c.name)) {
+        // Containment cycles are representable in ItemBundleEntry; the API
+        // reader resolves exactly one level, so forbid nesting at the source.
+        errors.push(
+          `${e.name}: pack component "${c.name}" is another pack — nesting is not supported`
+        );
       }
       if (!(Number.isInteger(c.quantity) && c.quantity >= 1)) {
         errors.push(`${e.name}: pack component "${c.name}" has invalid quantity ${c.quantity}`);

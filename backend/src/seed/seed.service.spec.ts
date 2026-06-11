@@ -346,6 +346,32 @@ describe('SeedService', () => {
     expect(prisma.itemBundleEntry.createMany).toHaveBeenCalledWith({
       data: [{ bundleId: 'id-Explorer’s Pack', componentId: 'id-Backpack', quantity: 1 }],
     });
+    // Order matters: createMany after deleteMany, or every reseed would leave
+    // the bundles empty while the calls-were-made assertions still pass.
+    expect(prisma.itemBundleEntry.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.itemBundleEntry.createMany.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('logs how many stale srd items the cleanup retired', async () => {
+    prisma.item.deleteMany.mockResolvedValue({ count: 2 });
+    const log = jest.spyOn(console, 'log').mockImplementation();
+
+    await service.seed();
+
+    expect(log.mock.calls.map(c => c.join(' '))).toEqual(
+      expect.arrayContaining([expect.stringMatching(/retired: 2/)])
+    );
+  });
+
+  it('rejects duplicate names within a single dataset fed to the by-name upsert', async () => {
+    mockLoadSpells.mockReturnValue([
+      { name: 'Twin Spell' },
+      { name: 'Twin Spell' },
+    ] as unknown as ReturnType<typeof loadSpellsFromJson>);
+
+    await expect(service.seed()).rejects.toThrow(/Twin Spell/);
+    expect(prisma.spell.create).not.toHaveBeenCalled();
   });
 
   it('throws when a bundle name cannot be resolved to a seeded item', async () => {

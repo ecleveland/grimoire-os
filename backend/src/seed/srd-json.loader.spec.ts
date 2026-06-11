@@ -625,6 +625,113 @@ describe('srd-json.loader', () => {
       ]);
     });
 
+    it('throws when a pack component has a non-positive or fractional quantity', () => {
+      const pack = (quantity: number) => ({
+        equipment: [
+          { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            description: 'Contains things.',
+            properties: [],
+            contents: [{ name: 'Backpack', quantity }],
+          },
+        ],
+      });
+      for (const bad of [0, -1, 1.5]) {
+        mockJsonFile('equipment.json', pack(bad));
+        expect(() => loadEquipmentFromJson()).toThrow(/invalid quantity/);
+      }
+      mockJsonFile('equipment.json', pack(1));
+      expect(() => loadEquipmentFromJson()).not.toThrow();
+    });
+
+    it('throws when a non-pack entry carries contents or a pack contains itself or another pack', () => {
+      const base = [
+        { name: 'Backpack', category: 'Adventuring Gear', cost: '2 GP', properties: [] },
+      ];
+      // contents on a non-pack
+      mockJsonFile('equipment.json', {
+        equipment: [
+          ...base,
+          {
+            name: 'Rope',
+            category: 'Adventuring Gear',
+            cost: '1 GP',
+            properties: [],
+            contents: [{ name: 'Backpack', quantity: 1 }],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/Rope/);
+      // self-containment
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            description: 'Contains itself.',
+            properties: [],
+            contents: [{ name: 'Explorer’s Pack', quantity: 1 }],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/contain itself/);
+      // pack-in-pack (cycles are representable; the reader resolves one level)
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Burglar’s Pack',
+            category: 'Equipment Pack',
+            cost: '16 GP',
+            description: 'Contains a pack.',
+            properties: [],
+            contents: [{ name: 'Explorer’s Pack', quantity: 1 }],
+          },
+          {
+            name: 'Explorer’s Pack',
+            category: 'Equipment Pack',
+            cost: '10 GP',
+            description: 'Contains nothing.',
+            properties: [],
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/another pack/);
+    });
+
+    it('throws on a malformed armor_class string', () => {
+      mockJsonFile('equipment.json', {
+        equipment: [
+          {
+            name: 'Odd Armor',
+            category: 'Light Armor',
+            cost: '5 GP',
+            properties: [],
+            armor_class: '1 1 + Dex modifier',
+          },
+        ],
+      });
+      expect(() => loadEquipmentFromJson()).toThrow(/armor_class/);
+    });
+
+    it('accepts every armor_class shape the SRD uses', () => {
+      mockJsonFile('equipment.json', {
+        equipment: ['11 + Dex modifier', '13 + Dex modifier (max 2)', '16', '+2'].map(
+          (armor_class, i) => ({
+            name: `Armor ${i}`,
+            category: 'Light Armor',
+            cost: '5 GP',
+            properties: [],
+            armor_class,
+          })
+        ),
+      });
+      expect(() => loadEquipmentFromJson()).not.toThrow();
+    });
+
     it('throws when a pack component does not resolve to an equipment item', () => {
       mockJsonFile('equipment.json', {
         equipment: [

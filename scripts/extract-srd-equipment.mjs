@@ -43,7 +43,13 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { bboxLayout, extractWords, wordsToCellRows, COLUMN_SPLIT_X } from './lib/srd-pdf.mjs';
+import {
+  bboxLayout,
+  extractWords,
+  wordsToCellRows,
+  COLUMN_SPLIT_X,
+  SRD_PAGE_FURNITURE,
+} from './lib/srd-pdf.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PDF = path.join(ROOT, 'resources', 'SRD_CC_v5.2.1.pdf');
@@ -74,8 +80,7 @@ function buildStreams() {
   const endPage = Math.min(...sp.map(w => w.page)); // exclusive
 
   const chapterWords = words.filter(w => w.page >= startPage && w.page < endPage);
-  const isFurniture = row =>
-    /^(\d{1,3} )?System Reference Document 5\.2\.1$/.test(row.cells.map(c => c.text).join(' '));
+  const isFurniture = row => SRD_PAGE_FURNITURE(row.cells.map(c => c.text).join(' '));
 
   // The PDF text occasionally carries literal tabs; collapse to single spaces.
   const clean = row => {
@@ -231,7 +236,9 @@ function parseWeapons(full) {
     }
     break; // end of table
   }
-  if (items.length < 30) fail(`only ${items.length} weapons parsed`);
+  // SRD 5.2.1 has exactly 38 weapons; a mid-table truncation must fail here,
+  // not in a downstream count assertion.
+  if (items.length !== 38) fail(`expected 38 weapons, parsed ${items.length}`);
   return items;
 }
 
@@ -325,7 +332,7 @@ function parseTools(halves) {
     }
   }
 
-  if (items.length < 20) fail(`only ${items.length} tools parsed`);
+  if (items.length !== 25) fail(`expected 25 tools, parsed ${items.length}`);
   return items.map(t => ({
     name: t.name,
     category: t.category,
@@ -415,9 +422,11 @@ function parseGearSection(halves) {
       i++;
       continue;
     }
-    if (entry && r.cells.length === 1) {
+    if (entry) {
       // 'Adventuring Gear' table title row (it precedes the header) — skip.
       if (text === 'Adventuring Gear') continue;
+      // A prose line occasionally splits into >1 cells (one wide inter-word
+      // gap); join the cells rather than silently dropping the row.
       const base = r.side === 'L' ? 63 : 313;
       entry.rows.push({ cells: r.cells, indent: r.cells[0].x - base });
     }
@@ -488,7 +497,7 @@ function parseMountsSection(halves, full) {
       properties: [],
     });
   }
-  if (!items.some(i => i.name === 'Warhorse')) fail('Warhorse missing from mounts table');
+  if (items.length !== 8) fail(`expected 8 mounts, parsed ${items.length}`);
 
   // The "Saddles" prose paragraph describes the saddle variants.
   const saddlesAt = indexOfRow(halves, 'Saddles', start);
@@ -527,7 +536,9 @@ function parseMountsSection(halves, full) {
       properties: [],
     });
   }
-  if (!items.some(i => i.name === 'Saddle, Military')) fail('Saddle variants missing from tack');
+  const tackCount = items.length - 8;
+  if (tackCount !== 10 || !items.some(i => i.name === 'Saddle, Military'))
+    fail(`expected 10 tack rows incl. saddle variants, parsed ${tackCount}`);
 
   // Airborne and Waterborne Vehicles — full width: Ship / Speed / Crew /
   // Passengers / Cargo (Tons) / AC / HP / Damage Threshold / Cost.
@@ -549,7 +560,8 @@ function parseMountsSection(halves, full) {
       properties: [],
     });
   }
-  if (!items.some(i => i.name === 'Galley')) fail('Galley missing from ships table');
+  const shipCount = items.length - 18;
+  if (shipCount !== 7) fail(`expected 7 ships, parsed ${shipCount}`);
   return items;
 }
 
@@ -561,7 +573,8 @@ function parseLifestyles(halves) {
   let entry = null;
   for (let i = start + 1; i < end; i++) {
     const r = halves[i];
-    const head = r.cells.length === 1 && rowText(r).match(/^(\w+) \((Free|[\d,]+ [CSG]P per Day)\)$/);
+    const head =
+      r.cells.length === 1 && rowText(r).match(/^(\w+) \((Free|[\d,]+ [CSG]P per Day)\)$/);
     if (head) {
       entry = { tier: head[1], cost: head[2], rows: [] };
       items.push(entry);
@@ -585,7 +598,11 @@ function parseLifestyles(halves) {
 
 // ── Food, drink, and lodging (two-up paired table with variant groups) ─────
 function parseFoodDrinkLodging(halves) {
-  const titleAt = indexOfRow(halves, 'Food, Drink, and Lodging', indexOfRow(halves, 'Lifestyle Expenses'));
+  const titleAt = indexOfRow(
+    halves,
+    'Food, Drink, and Lodging',
+    indexOfRow(halves, 'Lifestyle Expenses')
+  );
   const tableAt = indexOfRow(halves, 'Food, Drink, and Lodging', titleAt + 1);
   const end = indexOfRow(halves, 'Hirelings', tableAt);
 
@@ -639,7 +656,10 @@ function parseFoodDrinkLodging(halves) {
       properties: [],
     });
   }
-  if (!items.some(i => i.name === 'Inn Stay per Day (Squalid)') || !items.some(i => i.name === 'Wine, Fine (bottle)'))
+  if (
+    !items.some(i => i.name === 'Inn Stay per Day (Squalid)') ||
+    !items.some(i => i.name === 'Wine, Fine (bottle)')
+  )
     fail('food/drink/lodging groups not resolved');
   return items;
 }
@@ -648,7 +668,11 @@ function parseFoodDrinkLodging(halves) {
 function parseServices(halves) {
   const items = [];
 
-  const hirelingsAt = indexOfRow(halves, 'Hirelings', indexOfRow(halves, 'Food, Drink, and Lodging'));
+  const hirelingsAt = indexOfRow(
+    halves,
+    'Hirelings',
+    indexOfRow(halves, 'Food, Drink, and Lodging')
+  );
   const tableAt = indexOfRow(halves, 'Hirelings', hirelingsAt + 1); // table title after section heading
   for (let i = tableAt + 1; i < halves.length; i++) {
     const r = halves[i];
@@ -741,13 +765,15 @@ function main() {
       gear.push(item);
     }
   }
-  if (tableRows.size < 50) fail(`only ${tableRows.size} gear table rows parsed`);
+  // 70 gear items + 7 packs + 4 "Varies" parents + the reconciled Potion of Healing.
+  if (tableRows.size !== 82) fail(`expected 82 gear table rows, parsed ${tableRows.size}`);
 
   // Variant sub-tables → concrete items.
   for (const [title, rows] of subTables) {
     const { parent } = SUBTABLES[title];
     const parentProse = proseByName.get(parent);
-    const parentDesc = parentProse && parentProse.rows.length ? reflowProse(parentProse.rows) : null;
+    const parentDesc =
+      parentProse && parentProse.rows.length ? reflowProse(parentProse.rows) : null;
     for (const cells of rows) {
       if (title === 'Ammunition') {
         const [type, amount, storage, weight, cost] = cells;
@@ -797,8 +823,7 @@ function main() {
     pack.contents = pack.contents.map(({ name, quantity }) => {
       const aliased = COMPONENT_ALIASES[name] ?? name;
       const singular = aliased.replace(/s$/, '');
-      const resolved =
-        lower.get(aliased.toLowerCase()) ?? lower.get(singular.toLowerCase());
+      const resolved = lower.get(aliased.toLowerCase()) ?? lower.get(singular.toLowerCase());
       if (!resolved) fail(`pack ${pack.name}: component "${name}" does not resolve to an item`);
       return { name: resolved, quantity };
     });
