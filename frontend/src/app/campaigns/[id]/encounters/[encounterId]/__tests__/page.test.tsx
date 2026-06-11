@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
 import { ApiError } from '@/lib/api';
 import type { Encounter, Combatant, SrdMonster } from '@/lib/types';
+import type { CombatantLoot } from '@grimoire-os/shared';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -65,6 +66,15 @@ const goblinMonster: SrdMonster = {
   specialAbilities: [{ name: 'Nimble Escape', description: 'Disengage as a bonus action.' }],
   source: 'SRD 5.2.1',
 };
+
+function makeLoot(over: Partial<CombatantLoot> = {}): CombatantLoot {
+  return {
+    coinage: { gp: 2, sp: 5, cp: 10 },
+    items: [{ itemId: 'item-1', name: 'Dagger', quantity: 1, source: 'monster' }],
+    rolledAt: '2026-06-10T00:00:00.000Z',
+    ...over,
+  };
+}
 
 function makeEncounter(over: Partial<Encounter> = {}): Encounter {
   return {
@@ -595,10 +605,400 @@ describe('InitiativeTrackerPage', () => {
 
     // Linked combatant exposes a clickable affordance; the plain one does not.
     expect(screen.queryByRole('button', { name: /^hero$/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /goblin a/i }));
+    await user.click(screen.getByRole('button', { name: /^goblin a$/i }));
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1'));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+  });
+
+  // ── Encounter loot: roll triggers, drops, total (VEG-301) ────────────────────
+
+  describe('encounter loot', () => {
+    /**
+     * Routes the encounter GET, the loot POST, and the PATCH used by HP
+     * commits. The default loot roll mirrors the backend: every monster-linked
+     * combatant (or just `combatantIndex`) gets `makeLoot()`, version bumps.
+     */
+    function routeLootFlow(opts: {
+      encounter: Encounter;
+      onRoll?: (body: { combatantIndex?: number; expectedVersion?: number }) => Promise<unknown>;
+      onPatch?: (body: { combatants?: Combatant[]; expectedVersion?: number }) => Promise<unknown>;
+    }) {
+      const { encounter, onRoll, onPatch } = opts;
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        if (path === '/encounters/enc-1/loot' && init?.method === 'POST') {
+          if (onRoll) return onRoll(body);
+          const updated = {
+            ...encounter,
+            version: encounter.version + 1,
+            combatants: encounter.combatants.map((c, idx) =>
+              c.monsterId && (body.combatantIndex === undefined || body.combatantIndex === idx)
+                ? { ...c, loot: makeLoot() }
+                : c
+            ),
+          };
+          return Promise.resolve({ encounter: updated, lootTotal: null });
+        }
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          if (onPatch) return onPatch(body);
+          return Promise.resolve({ ...encounter, ...body, version: encounter.version + 1 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+    }
+
+    it('offers roll-loot only on monster-linked rows', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+            makeCombatant({ name: 'Orc', initiative: 8 }), // manual NPC, no monsterId
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByRole('button', { name: /roll loot for goblin a/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /roll loot for hero/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /roll loot for orc/i })).not.toBeInTheDocument();
+    });
+
+    it('rolls loot for one combatant via its combatants-array index and renders the drop', async () => {
+      // Array order ≠ sorted order on purpose: Goblin A renders as row 1 but
+      // lives at array index 2 — the POST must carry the ARRAY index.
+      routeLootFlow({
+        encounter: makeEncounter({
+          version: 3,
+          combatants: [
+            makeCombatant({ name: 'Goblin B', initiative: 8, monsterId: 'monster-1' }),
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
+
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1/loot' &&
+            (o as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(call).toBeDefined();
+        expect(JSON.parse((call![1] as { body: string }).body)).toEqual({
+          combatantIndex: 2,
+          expectedVersion: 3,
+        });
+      });
+
+      // The drop renders inline (row) and feeds the encounter total — with a
+      // single rolled combatant both show the same line.
+      expect(await screen.findAllByText('2 gp · 5 sp · 10 cp')).toHaveLength(2);
+      expect(screen.getAllByText(/1× Dagger/)).toHaveLength(2);
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+    });
+
+    it('rolls loot for the whole encounter and shows per-monster drops plus the aggregated total', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          version: 2,
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+            makeCombatant({ name: 'Goblin B', initiative: 8, monsterId: 'monster-1' }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
+
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1/loot' &&
+            (o as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(call).toBeDefined();
+        // No combatantIndex → backend rolls every monster combatant.
+        expect(JSON.parse((call![1] as { body: string }).body)).toEqual({ expectedVersion: 2 });
+      });
+
+      // Per-monster drops (one per goblin)...
+      expect(await screen.findAllByText('2 gp · 5 sp · 10 cp')).toHaveLength(2);
+      // ...and the aggregated encounter total: summed coin, merged items.
+      expect(screen.getByText('4 gp · 10 sp · 20 cp')).toBeInTheDocument();
+      expect(screen.getByText(/2× Dagger/)).toBeInTheDocument();
+    });
+
+    it('aggregates the encounter total from loot already present on load', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+            makeCombatant({
+              name: 'Goblin B',
+              initiative: 8,
+              monsterId: 'monster-1',
+              loot: makeLoot({ coinage: { gp: 1, sp: 0, cp: 2 } }),
+            }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('3 gp · 5 sp · 12 cp')).toBeInTheDocument();
+      expect(screen.getByText(/2× Dagger/)).toBeInTheDocument();
+    });
+
+    it('disables the encounter roll when no combatant links to a monster', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByRole('button', { name: /roll loot for encounter/i })).toBeDisabled();
+    });
+
+    it('rerolls an already-looted combatant', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          version: 4,
+          combatants: [
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      // A looted row offers reroll, not a fresh roll.
+      expect(
+        screen.queryByRole('button', { name: /^roll loot for goblin a/i })
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /reroll loot for goblin a/i }));
+
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1/loot' &&
+            (o as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(call).toBeDefined();
+        expect(JSON.parse((call![1] as { body: string }).body)).toEqual({
+          combatantIndex: 0,
+          expectedVersion: 4,
+        });
+      });
+    });
+
+    // ── Auto-roll on death ───────────────────────────────────────────────────
+
+    it('auto-rolls loot when an HP commit drops a monster to 0 and the toggle is on', async () => {
+      const enc = makeEncounter({
+        version: 1,
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+        ],
+      });
+      routeLootFlow({
+        encounter: enc,
+        // PATCH lands at version 5 — the follow-up roll must guard on THAT
+        // version, not the stale pre-patch one.
+        onPatch: body => Promise.resolve({ ...enc, ...body, version: 5 }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
+      const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+      fireEvent.change(hpInputs[1], { target: { value: '0' } }); // Goblin A, sorted row 1
+      fireEvent.blur(hpInputs[1]);
+
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1/loot' &&
+            (o as { method?: string } | undefined)?.method === 'POST'
+        );
+        expect(call).toBeDefined();
+        expect(JSON.parse((call![1] as { body: string }).body)).toEqual({
+          combatantIndex: 1,
+          expectedVersion: 5,
+        });
+      });
+      expect(await screen.findAllByText('2 gp · 5 sp · 10 cp')).toHaveLength(2);
+    });
+
+    it('does not auto-roll when the toggle is off (the default)', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+      fireEvent.change(hpInputs[1], { target: { value: '0' } });
+      fireEvent.blur(hpInputs[1]);
+
+      await waitFor(() => {
+        const patch = mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(patch).toBeDefined();
+      });
+      expect(mockApiFetch.mock.calls.find(([p]) => p === '/encounters/enc-1/loot')).toBeUndefined();
+    });
+
+    it('does not auto-roll for unlinked combatants or ones that already have loot', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
+
+      const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
+      // Hero (no monsterId) dies — no roll.
+      fireEvent.change(hpInputs[0], { target: { value: '0' } });
+      fireEvent.blur(hpInputs[0]);
+      // Goblin A already rolled — dying again must not clobber its drop.
+      fireEvent.change(hpInputs[1], { target: { value: '0' } });
+      fireEvent.blur(hpInputs[1]);
+
+      await waitFor(() => {
+        const patches = mockApiFetch.mock.calls.filter(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(patches.length).toBe(2);
+      });
+      expect(mockApiFetch.mock.calls.find(([p]) => p === '/encounters/enc-1/loot')).toBeUndefined();
+    });
+
+    // ── Gating + failure paths ───────────────────────────────────────────────
+
+    it('hides all loot UI from non-controllers, even when loot exists', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      routeLootFlow({
+        encounter: makeEncounter({
+          createdBy: 'user-1',
+          combatants: [
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot(),
+            }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /roll loot/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /reroll loot/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox', { name: /auto-roll/i })).not.toBeInTheDocument();
+      expect(screen.queryByText(/encounter loot/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/dagger/i)).not.toBeInTheDocument();
+    });
+
+    it('refetches and warns when the loot roll hits a 409 conflict', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' })],
+        }),
+        onRoll: () =>
+          Promise.reject(
+            new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+              currentVersion: 9,
+            })
+          ),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+      expect(String(mockToastError.mock.calls.at(-1)?.[0] ?? '')).toMatch(/chang|refresh|again/i);
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+      const getCalls = mockApiFetch.mock.calls.filter(
+        ([p, o]) => p === '/encounters/enc-1' && !(o as { method?: string } | undefined)?.method
+      );
+      expect(getCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('toasts the message when the loot roll fails with an Error', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' })],
+        }),
+        onRoll: () => Promise.reject(new Error('loot service down')),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('loot service down'));
+    });
+
+    it('toasts a generic message when the loot roll rejection is not an Error', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' })],
+        }),
+        onRoll: () => Promise.reject('boom'),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to roll loot'));
+    });
   });
 });
