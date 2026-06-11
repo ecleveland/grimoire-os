@@ -2,6 +2,7 @@ export const NPC_DATA_TABLES = [
   'names',
   'appearance',
   'loot-templates',
+  'monster-loot',
   'trinkets',
   'personality',
 ] as const;

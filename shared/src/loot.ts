@@ -15,6 +15,46 @@ export const LOOT_CR_BUCKETS = ['0', '0–1', '2–4', '5–10', '11+'] as const
 
 export type LootCrBucket = (typeof LOOT_CR_BUCKETS)[number];
 
+/**
+ * Canonical 5e creature types monster loot templates are keyed by (VEG-298).
+ * Owned by the shared package since VEG-304 so the admin editor offers the
+ * exact keys the loot engine selects on.
+ */
+export const MONSTER_LOOT_TYPES = [
+  'aberration',
+  'beast',
+  'celestial',
+  'construct',
+  'dragon',
+  'elemental',
+  'fey',
+  'fiend',
+  'giant',
+  'humanoid',
+  'monstrosity',
+  'ooze',
+  'plant',
+  'undead',
+] as const;
+
+export type MonsterLootType = (typeof MONSTER_LOOT_TYPES)[number];
+
+/**
+ * Fallback key for monster templates without a type match. The sentinel
+ * string collides with the NPC one by design, so callers MUST pass only
+ * category='monster' templates to the selector — an unfiltered template
+ * query would silently mix the two families' generic fallbacks.
+ */
+export const MONSTER_LOOT_GENERIC_TYPE = '__generic__';
+
+/**
+ * The full selectable key set monster loot templates are stored under —
+ * what the admin editor offers and the create API accepts.
+ */
+export const MONSTER_LOOT_TYPE_KEYS = [...MONSTER_LOOT_TYPES, MONSTER_LOOT_GENERIC_TYPE] as const;
+
+export type MonsterLootTypeKey = (typeof MONSTER_LOOT_TYPE_KEYS)[number];
+
 /** Inclusive [min, max] range rolled at generation time. */
 export type LootRange = [number, number];
 

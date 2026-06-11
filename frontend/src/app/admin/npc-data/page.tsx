@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
@@ -9,10 +9,16 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import AdminSubnav from '@/components/AdminSubnav';
 import CoinRangeEditor from '@/components/CoinRangeEditor';
 import LootItemsEditor from '@/components/LootItemsEditor';
-import { LOOT_CR_BUCKETS } from '@grimoire-os/shared';
+import { LOOT_CR_BUCKETS, MONSTER_LOOT_TYPE_KEYS } from '@grimoire-os/shared';
 import type { LootTemplateCoinage, LootTemplateItemEntry } from '@grimoire-os/shared';
 
-type TableSlug = 'names' | 'appearance' | 'loot-templates' | 'trinkets' | 'personality';
+type TableSlug =
+  | 'names'
+  | 'appearance'
+  | 'loot-templates'
+  | 'monster-loot'
+  | 'trinkets'
+  | 'personality';
 
 type AnyRow = {
   id: string;
@@ -103,6 +109,35 @@ const TABS: TabConfig[] = [
     hasSource: true,
   },
   {
+    slug: 'monster-loot',
+    label: 'Monster Loot',
+    columns: [
+      { key: 'type', label: 'Type' },
+      { key: 'crBucket', label: 'CR' },
+    ],
+    fields: [
+      {
+        key: 'type',
+        label: 'Type',
+        required: true,
+        kind: 'select',
+        // The loot engine only selects on the canonical creature types plus
+        // the generic fallback — free text would create unreachable rows.
+        options: [...MONSTER_LOOT_TYPE_KEYS],
+      },
+      {
+        key: 'crBucket',
+        label: 'CR bucket',
+        required: true,
+        kind: 'select',
+        options: [...LOOT_CR_BUCKETS],
+      },
+      { key: 'coinage', label: 'Coinage', required: true, kind: 'coinage' },
+      { key: 'items', label: 'Items', required: true, kind: 'lootItems' },
+    ],
+    hasSource: true,
+  },
+  {
     slug: 'trinkets',
     label: 'Trinkets',
     columns: [{ key: 'description', label: 'Description' }],
@@ -168,15 +203,23 @@ export default function AdminNpcDataPage() {
     }
   }, [isAdmin, router]);
 
+  const loadSeq = useRef(0);
   const load = useCallback(async (slug: TableSlug) => {
+    const seq = ++loadSeq.current;
     setLoading(true);
+    // Clear eagerly: on failure (or a slow response) the previous tab's rows
+    // would otherwise keep rendering under this tab's columns — plausibly,
+    // since the two loot tabs share most row keys.
+    setRows([]);
     try {
       const data = await apiFetch<AnyRow[]>(`/admin/npc-data/${slug}`);
+      if (seq !== loadSeq.current) return; // a newer load owns the table now
       setRows(data);
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       toast.error(err instanceof Error ? err.message : 'Failed to load rows');
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 

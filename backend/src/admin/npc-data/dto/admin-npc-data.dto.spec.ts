@@ -5,6 +5,7 @@ import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../../../bootstrap-config';
 import { CreateNameRowDto } from './create-name-row.dto';
 import { CreateAppearanceRowDto } from './create-appearance-row.dto';
 import { CreateLootTemplateRowDto } from './create-loot-template-row.dto';
+import { CreateMonsterLootTemplateRowDto } from './create-monster-loot-template-row.dto';
 import { CreateTrinketRowDto } from './create-trinket-row.dto';
 import { CreatePersonalityRowDto } from './create-personality-row.dto';
 import { SetActiveDto } from './set-active.dto';
@@ -263,6 +264,88 @@ describe('CreateLootTemplateRowDto', () => {
     });
     expect(messages(errors)).toEqual(
       expect.arrayContaining([expect.stringContaining('chance should not exist')])
+    );
+  });
+});
+
+describe('CreateMonsterLootTemplateRowDto', () => {
+  const valid = {
+    type: 'dragon',
+    crBucket: '11+',
+    coinage: { gp: [100, 600], sp: [0, 0], cp: [0, 0] },
+    items: [{ itemName: 'Dagger', weight: 60, qty: [1, 2] }],
+  };
+
+  it('accepts a valid structured row', () => {
+    expect(validate(CreateMonsterLootTemplateRowDto, valid)).toEqual([]);
+  });
+
+  it('accepts the generic fallback type', () => {
+    expect(validate(CreateMonsterLootTemplateRowDto, { ...valid, type: '__generic__' })).toEqual(
+      []
+    );
+  });
+
+  it('rejects a type outside the canonical creature types', () => {
+    const errors = validate(CreateMonsterLootTemplateRowDto, { ...valid, type: 'merchant' });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('type must be one of')])
+    );
+  });
+
+  it('rejects the NPC field name — the monster API speaks type, not profession', () => {
+    const { type: _type, ...rest } = valid;
+    const errors = validate(CreateMonsterLootTemplateRowDto, { ...rest, profession: 'dragon' });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('profession should not exist'),
+        expect.stringContaining('type must be one of'),
+      ])
+    );
+  });
+
+  it('rejects a crBucket outside LOOT_CR_BUCKETS (ASCII hyphen never matches a template)', () => {
+    const errors = validate(CreateMonsterLootTemplateRowDto, { ...valid, crBucket: '11-20' });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('crBucket must be one of')])
+    );
+  });
+
+  it('rejects items where every weight is 0 (weightedPick would throw at generation)', () => {
+    const errors = validate(CreateMonsterLootTemplateRowDto, {
+      ...valid,
+      items: [{ itemName: 'Dagger', weight: 0, qty: [1, 1] }],
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('weight > 0')])
+    );
+  });
+
+  it('rejects an empty items array', () => {
+    const errors = validate(CreateMonsterLootTemplateRowDto, { ...valid, items: [] });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('at least one item')])
+    );
+  });
+
+  it('rejects duplicate itemName entries', () => {
+    const errors = validate(CreateMonsterLootTemplateRowDto, {
+      ...valid,
+      items: [
+        { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+        { itemName: 'Dagger', weight: 20, qty: [1, 2] },
+      ],
+    });
+    expect(messages(errors)).toEqual(expect.arrayContaining([expect.stringContaining('unique')]));
+  });
+
+  it('rejects an unordered coinage range', () => {
+    const errors = validate(CreateMonsterLootTemplateRowDto, {
+      ...valid,
+      coinage: { ...valid.coinage, gp: [600, 100] },
+    });
+    expect(messages(errors)).toEqual(
+      expect.arrayContaining([expect.stringContaining('gp must be a [min, max] pair')])
     );
   });
 });

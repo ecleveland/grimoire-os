@@ -97,4 +97,55 @@ test.describe('Admin NPC Reference Data', () => {
     await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByRole('row', { name: new RegExp(profession) })).toHaveCount(0);
   });
+
+  test('admin creates a monster loot template (type × CR) after disabling the seeded one, then deletes it', async ({
+    page,
+  }) => {
+    await registerAdmin(page);
+
+    await page.goto('/admin/npc-data');
+    await page.getByRole('tab', { name: 'Monster Loot' }).click();
+
+    // The seeded monster templates (VEG-298) are listed as non-deletable
+    // curated rows.
+    const seededRow = page
+      .getByRole('row', { name: /dragon/ })
+      .filter({ hasText: '11+' })
+      .filter({ hasText: 'curated' });
+    await expect(seededRow).toHaveCount(1);
+    await expect(seededRow.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+
+    // Type is a closed select over the canonical creature types — free text
+    // would create rows the loot engine never picks.
+    const typeSelect = page.getByLabel(/^Type/);
+    await expect(typeSelect).toHaveRole('combobox');
+    await typeSelect.selectOption('dragon');
+    await page.getByLabel(/CR bucket/).selectOption('11+');
+    await page.getByLabel('gp min').fill('100');
+    await page.getByLabel('gp max').fill('600');
+
+    await page.getByLabel('Search items').fill('dagger');
+    await page.getByRole('button', { name: 'Add Dagger', exact: true }).click();
+
+    // Creating over the active seeded dragon/11+ template is rejected — the
+    // loot engine would resolve the duplicate key arbitrarily.
+    await page.getByRole('button', { name: 'Add row' }).click();
+    await expect(page.getByText(/already exists/)).toBeVisible();
+
+    // Disable the seeded row, then the same create goes through.
+    await seededRow.getByRole('button', { name: 'Disable' }).click();
+    await expect(seededRow).toContainText('Disabled');
+    await page.getByRole('button', { name: 'Add row' }).click();
+
+    const userRow = page.getByRole('row', { name: /dragon/ }).filter({ hasText: 'user' });
+    await expect(userRow).toHaveCount(1);
+    await expect(userRow).toContainText('11+');
+
+    // Clean up through the UI: delete the user row, re-enable the seeded one.
+    await userRow.getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
+    await expect(userRow).toHaveCount(0);
+    await seededRow.getByRole('button', { name: 'Enable' }).click();
+    await expect(seededRow).toContainText('Active');
+  });
 });
