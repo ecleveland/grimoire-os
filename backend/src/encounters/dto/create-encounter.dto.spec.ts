@@ -78,3 +78,45 @@ describe('CombatantDto loot round-trip (global validator strictness)', () => {
     expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).not.toEqual([]);
   });
 });
+
+// Same write-contract concern as loot above (VEG-286): the tracker echoes
+// whole combatants back on every PATCH, so tempHp must be whitelisted on
+// CombatantDto or the first temp-HP grant bricks all subsequent writes.
+describe('CombatantDto tempHp (global validator strictness)', () => {
+  it('accepts a combatant carrying tempHp through UpdateEncounterDto', () => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), tempHp: 5 }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
+  });
+
+  it('accepts tempHp of 0 (fully spent)', () => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), tempHp: 0 }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
+  });
+
+  it('accepts a tempHp-carrying combatant on CreateEncounterDto', () => {
+    const instance = plainToInstance(CreateEncounterDto, {
+      campaignId: 'camp-1',
+      name: 'Ambush',
+      combatants: [{ ...lootCombatant(), tempHp: 3 }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
+  });
+
+  it('rejects negative tempHp', () => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), tempHp: -3 }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).not.toEqual([]);
+  });
+
+  it('rejects non-integer tempHp', () => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), tempHp: 2.5 }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).not.toEqual([]);
+  });
+});

@@ -101,6 +101,15 @@ class CombatantDto {
   @IsNumber()
   maxHp?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'Temporary hit points (VEG-286). Damage spends these before real HP; grants take the higher value (5e non-stacking).',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  tempHp?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()

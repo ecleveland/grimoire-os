@@ -1269,4 +1269,419 @@ describe('InitiativeTrackerPage', () => {
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to roll loot'));
     });
   });
+
+  // ── Damage / heal controls + temporary HP (VEG-286) ──────────────────────────
+
+  describe('damage, heal & temporary HP', () => {
+    /** Routes the encounter GET, the combatants PATCH, and the loot POST. */
+    function routeHpControls(opts: {
+      encounter: Encounter;
+      onPatch?: (body: { combatants?: Combatant[]; expectedVersion?: number }) => Promise<unknown>;
+      onRoll?: (body: { combatantIndex?: number; expectedVersion?: number }) => Promise<unknown>;
+    }) {
+      const { encounter, onPatch, onRoll } = opts;
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        const body = init?.body ? JSON.parse(init.body) : {};
+        if (path === '/encounters/enc-1/loot' && init?.method === 'POST') {
+          if (onRoll) return onRoll(body);
+          return Promise.reject(new Error('unexpected loot roll'));
+        }
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          if (onPatch) return onPatch(body);
+          return Promise.resolve({ ...encounter, ...body, version: encounter.version + 1 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+    }
+
+    const amountInput = (name: string) =>
+      screen.getByRole('textbox', {
+        name: new RegExp(`damage or heal amount for ${name}`, 'i'),
+      }) as HTMLInputElement;
+
+    const lastPatchBody = () => {
+      const call = mockApiFetch.mock.calls
+        .filter(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+        .at(-1);
+      expect(call).toBeDefined();
+      return JSON.parse((call![1] as { body: string }).body) as {
+        combatants: Combatant[];
+        expectedVersion: number;
+      };
+    };
+
+    it('shows the temp HP badge to controllers and non-controllers alike', async () => {
+      const enc = makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, tempHp: 5 }),
+        ],
+      });
+      routeHpControls({ encounter: enc });
+      const { unmount } = render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('+5 temp')).toBeInTheDocument();
+      unmount();
+
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('+5 temp')).toBeInTheDocument();
+    });
+
+    it('hides the damage/heal controls from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      routeHpControls({
+        encounter: makeEncounter({
+          createdBy: 'user-1',
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, tempHp: 5 })],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /damage goblin a/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /heal goblin a/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /grant temp hp/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('textbox', { name: /damage or heal amount/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('damage spends temp HP first, spills into real HP, and PATCHes the result', async () => {
+      const enc = makeEncounter({
+        version: 4,
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7, maxHp: 7, tempHp: 5 }),
+        ],
+      });
+      routeHpControls({ encounter: enc });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '8' } });
+      // Typing alone never PATCHes — the buttons commit.
+      expect(
+        mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+      ).toBeUndefined();
+      await user.click(screen.getByRole('button', { name: /damage goblin a/i }));
+
+      await waitFor(() => {
+        const body = lastPatchBody();
+        expect(body.expectedVersion).toBe(4);
+        expect(body.combatants[1]).toMatchObject({ name: 'Goblin A', hp: 4, tempHp: 0 });
+        // The untouched combatant is echoed back unchanged.
+        expect(body.combatants[0]).toMatchObject({ name: 'Hero', hp: 24 });
+      });
+      // The amount draft clears once the write lands.
+      await waitFor(() => expect(amountInput('Goblin A').value).toBe(''));
+    });
+
+    it('damage that only eats temp HP leaves real HP untouched', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7, tempHp: 5 })],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '3' } });
+      await user.click(screen.getByRole('button', { name: /damage goblin a/i }));
+
+      await waitFor(() => {
+        expect(lastPatchBody().combatants[0]).toMatchObject({ hp: 7, tempHp: 2 });
+      });
+    });
+
+    it('overkill damage clamps real HP at 0', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 3, tempHp: 2 })],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '99' } });
+      await user.click(screen.getByRole('button', { name: /damage goblin a/i }));
+
+      await waitFor(() => {
+        expect(lastPatchBody().combatants[0]).toMatchObject({ hp: 0, tempHp: 0 });
+      });
+    });
+
+    it('heal clamps to maxHp and never touches temp HP', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Goblin A', initiative: 12, hp: 5, maxHp: 7, tempHp: 4 }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '10' } });
+      await user.click(screen.getByRole('button', { name: /heal goblin a/i }));
+
+      await waitFor(() => {
+        expect(lastPatchBody().combatants[0]).toMatchObject({ hp: 7, tempHp: 4 });
+      });
+    });
+
+    it('a temp HP grant takes the higher value', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7, tempHp: 5 })],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '8' } });
+      await user.click(screen.getByRole('button', { name: /grant temp hp to goblin a/i }));
+
+      await waitFor(() => {
+        expect(lastPatchBody().combatants[0]).toMatchObject({ hp: 7, tempHp: 8 });
+      });
+    });
+
+    it('a lower temp HP grant is a no-op — no PATCH is sent', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7, tempHp: 5 })],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '3' } });
+      await user.click(screen.getByRole('button', { name: /grant temp hp to goblin a/i }));
+
+      expect(
+        mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+      ).toBeUndefined();
+      // The draft clears so it's obvious the action was consumed.
+      expect(amountInput('Goblin A').value).toBe('');
+    });
+
+    it('disables the action buttons until a positive whole number is entered', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7 })],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const damageBtn = screen.getByRole('button', { name: /damage goblin a/i });
+      const healBtn = screen.getByRole('button', { name: /heal goblin a/i });
+      const tempBtn = screen.getByRole('button', { name: /grant temp hp to goblin a/i });
+      expect(damageBtn).toBeDisabled(); // empty
+      expect(healBtn).toBeDisabled();
+      expect(tempBtn).toBeDisabled();
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '0' } });
+      expect(damageBtn).toBeDisabled();
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '2.5' } });
+      expect(damageBtn).toBeDisabled();
+      fireEvent.change(amountInput('Goblin A'), { target: { value: 'abc' } });
+      expect(damageBtn).toBeDisabled();
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '5' } });
+      expect(damageBtn).toBeEnabled();
+      expect(healBtn).toBeEnabled();
+      expect(tempBtn).toBeEnabled();
+    });
+
+    it('targets the edited row, not the first name match, when names collide', async () => {
+      // Two goblins named "Goblin": damaging the second (sorted row 2) must
+      // not bleed onto its twin at row 1.
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin', initiative: 12, hp: 5, maxHp: 7 }),
+            makeCombatant({ name: 'Goblin', initiative: 8, hp: 7, maxHp: 7 }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const amounts = screen.getAllByRole('textbox', {
+        name: /damage or heal amount for goblin/i,
+      }) as HTMLInputElement[];
+      fireEvent.change(amounts[1], { target: { value: '4' } });
+      // The draft renders only on the edited row.
+      expect(amounts[0].value).toBe('');
+      await user.click(screen.getAllByRole('button', { name: /^damage goblin$/i })[1]);
+
+      await waitFor(() => {
+        const body = lastPatchBody();
+        expect(body.combatants[2].hp).toBe(3); // the edited twin
+        expect(body.combatants[1].hp).toBe(5); // the first name match is untouched
+      });
+    });
+
+    it('damage that drops a monster to 0 funnels through auto-roll-on-death', async () => {
+      const enc = makeEncounter({
+        version: 1,
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({
+            name: 'Goblin A',
+            initiative: 12,
+            hp: 3,
+            tempHp: 2,
+            monsterId: 'monster-1',
+          }),
+        ],
+      });
+      let rollBody: { combatantIndex?: number; expectedVersion?: number } | undefined;
+      routeHpControls({
+        encounter: enc,
+        // PATCH lands at version 5 — the follow-up roll must guard on THAT
+        // version, not the stale pre-patch one.
+        onPatch: body => Promise.resolve({ ...enc, ...body, version: 5 }),
+        onRoll: body => {
+          rollBody = body;
+          return Promise.resolve({
+            encounter: { ...enc, version: 6 },
+            lootTotal: null,
+          });
+        },
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '5' } });
+      await user.click(screen.getByRole('button', { name: /damage goblin a/i }));
+
+      await waitFor(() => {
+        expect(rollBody).toEqual({ combatantIndex: 1, expectedVersion: 5 });
+      });
+    });
+
+    it('damage that leaves real HP above 0 does not auto-roll', async () => {
+      const enc = makeEncounter({
+        combatants: [
+          makeCombatant({
+            name: 'Goblin A',
+            initiative: 12,
+            hp: 7,
+            tempHp: 5,
+            monsterId: 'monster-1',
+          }),
+        ],
+      });
+      routeHpControls({ encounter: enc });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '5' } }); // eats temp only
+      await user.click(screen.getByRole('button', { name: /damage goblin a/i }));
+
+      await waitFor(() => {
+        expect(lastPatchBody().combatants[0]).toMatchObject({ hp: 7, tempHp: 0 });
+      });
+      expect(mockApiFetch.mock.calls.find(([p]) => p === '/encounters/enc-1/loot')).toBeUndefined();
+    });
+
+    it('toasts the message when the damage PATCH fails with an Error', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7 })],
+        }),
+        onPatch: () => Promise.reject(new Error('save failed')),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '4' } });
+      await user.click(screen.getByRole('button', { name: /damage goblin a/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('save failed'));
+    });
+
+    it('toasts a generic message when the heal PATCH rejection is not an Error', async () => {
+      routeHpControls({
+        encounter: makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 5, maxHp: 7 })],
+        }),
+        onPatch: () => Promise.reject('boom'),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '2' } });
+      await user.click(screen.getByRole('button', { name: /heal goblin a/i }));
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith('Failed to update encounter')
+      );
+    });
+
+    it('sends a single PATCH when an action button is double-clicked mid-write', async () => {
+      let resolvePatch!: (v: unknown) => void;
+      const enc = makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7 }),
+        ],
+      });
+      routeHpControls({
+        encounter: enc,
+        onPatch: () =>
+          new Promise(res => {
+            resolvePatch = res;
+          }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(amountInput('Goblin A'), { target: { value: '4' } });
+      const damageBtn = screen.getByRole('button', { name: /damage goblin a/i });
+      fireEvent.click(damageBtn); // PATCH now pending
+      // While the write is in flight every action button is disabled, so the
+      // second click is swallowed instead of racing the version guard.
+      expect(damageBtn).toBeDisabled();
+      expect(screen.getByRole('button', { name: /heal goblin a/i })).toBeDisabled();
+      fireEvent.click(damageBtn);
+      const patches = mockApiFetch.mock.calls.filter(
+        ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      expect(patches).toHaveLength(1);
+
+      resolvePatch({ ...enc, version: 2 });
+      // The draft clears once the write lands.
+      await waitFor(() => expect(amountInput('Goblin A').value).toBe(''));
+    });
+  });
 });
