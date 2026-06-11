@@ -160,6 +160,7 @@ describe('NpcsService', () => {
         select: {
           id: true,
           campaignId: true,
+          createdById: true,
           name: true,
           race: true,
           profession: true,
@@ -176,6 +177,7 @@ describe('NpcsService', () => {
           {
             id: mockNpc.id,
             campaignId: mockNpc.campaignId,
+            createdById: mockNpc.createdById,
             name: mockNpc.name,
             race: mockNpc.race,
             profession: mockNpc.profession,
@@ -211,6 +213,7 @@ describe('NpcsService', () => {
         select: {
           id: true,
           campaignId: true,
+          createdById: true,
           name: true,
           race: true,
           profession: true,

@@ -53,6 +53,7 @@ export class NpcDto {
 export class NpcListItemDto {
   @Expose() id!: string;
   @Expose() campaignId!: string;
+  @Expose() createdById!: string;
   @Expose() name!: string;
   @Expose() race!: string;
   @Expose() profession!: string | null;
