@@ -9,6 +9,7 @@ import LootOddsAdvanced from '@/components/LootOddsAdvanced';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
 import { NPC_ALIGNMENTS, NPC_HOSTILITIES, NPC_PROFESSIONS, NPC_RACES } from '@/lib/npc-constants';
 import type { GenerateNpcRequest, GeneratedNpcPreview, Npc, NpcLootOverrides } from '@/lib/types';
+import { formatCoinage } from '@/lib/coinage';
 
 const PROFESSION_OTHER = '__other__';
 
@@ -401,7 +402,11 @@ export default function NewNpcPage() {
           )}
 
           <PreviewSection title="Coinage">
-            {preview.goldPieces} gp · {preview.silverPieces} sp · {preview.copperPieces} cp
+            {formatCoinage({
+              gp: preview.goldPieces,
+              sp: preview.silverPieces,
+              cp: preview.copperPieces,
+            })}
           </PreviewSection>
 
           {preview.loot.length > 0 && (
