@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import SpellListPage from '../page';
@@ -166,6 +166,48 @@ describe('SpellListPage', () => {
         const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
         expect(url).toContain('level=0');
       });
+    });
+
+    async function goToPage2(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByText('Fireball');
+      await user.click(screen.getByTestId('pagination'));
+      await waitFor(() => {
+        const last = String(mockApiFetch.mock.calls.at(-1)?.[0]);
+        expect(new URLSearchParams(last.split('?')[1]).get('page')).toBe('2');
+      });
+      mockApiFetch.mockClear();
+    }
+
+    it('issues exactly one fetch, with page=1, when a filter changes from page 2', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await goToPage2(user);
+
+      await user.selectOptions(screen.getByLabelText('School'), 'Evocation');
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      // The page reset and the filter change must land in the same commit —
+      // the buggy effect-based reset issued a first fetch still on page=2.
+      const params = new URLSearchParams(String(mockApiFetch.mock.calls[0][0]).split('?')[1]);
+      expect(params.get('page')).toBe('1');
+      expect(params.get('school')).toBe('Evocation');
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('issues exactly one fetch, with page=1, when the debounced search commits from page 2', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await goToPage2(user);
+
+      fireEvent.change(screen.getByPlaceholderText('Search spells...'), {
+        target: { value: 'fire' },
+      });
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      const params = new URLSearchParams(String(mockApiFetch.mock.calls[0][0]).split('?')[1]);
+      expect(params.get('page')).toBe('1');
+      expect(params.get('q')).toBe('fire');
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
     });
   });
 

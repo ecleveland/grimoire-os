@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import type { PaginatedResponse, SrdSpell, SrdFeat } from '@/lib/types';
+import type { PaginatedResponse, SrdFeat } from '@/lib/types';
 import {
   ALL_SEARCH_KINDS,
   KIND_LABEL,
@@ -17,9 +17,10 @@ import {
 import SearchBox from '@/components/SearchBox';
 import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
-import Markdown from '@/components/Markdown';
+import Badge from '@/components/Badge';
+import SpellDetail from '@/components/SpellDetail';
 import PrintToggle from '@/components/PrintToggle';
-import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS } from '@/lib/spell-constants';
+import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
 
 const LIMIT = 20;
 
@@ -227,7 +228,7 @@ export default function SrdSearchPage() {
                   <option value="">All Levels</option>
                   {SPELL_LEVELS.map(l => (
                     <option key={l} value={l}>
-                      {l === 0 ? 'Cantrip' : `Level ${l}`}
+                      {levelLabel(l)}
                     </option>
                   ))}
                 </select>
@@ -381,9 +382,9 @@ function ResultCard({
                 </span>
               )}
               {hit.kind === 'spell' && hit.data.contentSource === 'homebrew' && (
-                <span className="ml-2 inline-block rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium align-middle">
+                <Badge variant="homebrew" className="ml-2 inline-block align-middle">
                   Homebrew
-                </span>
+                </Badge>
               )}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
@@ -417,8 +418,7 @@ function ResultCard({
 
 function subtitleFor(hit: UnifiedSearchHit): string {
   if (hit.kind === 'spell') {
-    const levelLabel = hit.data.level === 0 ? 'Cantrip' : `Level ${hit.data.level}`;
-    return `${levelLabel} · ${hit.data.school} · ${hit.data.castingTime}`;
+    return `${levelLabel(hit.data.level)} · ${hit.data.school} · ${hit.data.castingTime}`;
   }
   if (hit.kind === 'feat') {
     const parts = [hit.data.category, hit.data.prerequisite].filter(Boolean) as string[];
@@ -427,58 +427,6 @@ function subtitleFor(hit: UnifiedSearchHit): string {
   // feature
   const lvl = hit.data.level !== undefined ? ` · Level ${hit.data.level}` : '';
   return `${capitalize(hit.data.parent.kind)}: ${hit.data.parent.name}${lvl}`;
-}
-
-function SpellDetail({ spell }: { spell: SrdSpell }) {
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Range</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.range}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Components</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.components}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Duration</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.duration}</p>
-        </div>
-      </div>
-      {spell.material && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Material</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.material}</p>
-        </div>
-      )}
-      <div>
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</h3>
-        <Markdown>{spell.description}</Markdown>
-      </div>
-      {spell.higherLevels && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">At Higher Levels</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.higherLevels}</p>
-        </div>
-      )}
-      {spell.classes.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Classes</h3>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {spell.classes.map(c => (
-              <span
-                key={c}
-                className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-              >
-                {c}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 function FeatDetail({ feat }: { feat: SrdFeat }) {

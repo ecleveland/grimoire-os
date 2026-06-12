@@ -1,38 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Spell } from '@prisma/client';
-import type { ContentSource } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContentAccessService, ContentActor } from './content-access.service';
+import { HOMEBREW_SOURCE_LABEL, mapWriteError } from './homebrew-write.helpers';
 import { CreateSpellDto } from './dto/create-spell.dto';
 import { UpdateSpellDto } from './dto/update-spell.dto';
-
-/** Display label stored in the legacy `source` column for user-authored rows. */
-const HOMEBREW_SOURCE_LABEL = 'Homebrew';
-
-function isPrismaError(err: unknown, code: string): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
-}
-
-/**
- * Map the write-path Prisma errors to HTTP semantics: a duplicate name (P2002,
- * per-owner for homebrew / global for shared — see the partial unique indexes)
- * becomes 409 with tier-appropriate copy, and a row that vanished between
- * authorize and write (P2025 race) becomes the same 404 it would have been a
- * moment earlier. Everything else rethrows.
- */
-function mapWriteError(err: unknown, contentSource: ContentSource): never {
-  if (isPrismaError(err, 'P2002')) {
-    throw new ConflictException(
-      contentSource === 'shared'
-        ? 'A shared spell with this name already exists'
-        : 'You already have a spell with this name'
-    );
-  }
-  if (isPrismaError(err, 'P2025')) {
-    throw new NotFoundException('Spell not found');
-  }
-  throw err;
-}
 
 /**
  * CRUD for user-authored (homebrew) spells (VEG-294), following the
@@ -61,7 +33,7 @@ export class HomebrewSpellsService {
         } as Prisma.SpellUncheckedCreateInput,
       });
     } catch (err) {
-      mapWriteError(err, 'homebrew');
+      mapWriteError(err, 'homebrew', 'spell');
     }
   }
 
@@ -74,7 +46,7 @@ export class HomebrewSpellsService {
         data: this.toColumnData(dto) as Prisma.SpellUpdateInput,
       });
     } catch (err) {
-      mapWriteError(err, row.contentSource);
+      mapWriteError(err, row.contentSource, 'spell');
     }
   }
 
@@ -83,7 +55,7 @@ export class HomebrewSpellsService {
     try {
       await this.prisma.spell.delete({ where: { id } });
     } catch (err) {
-      mapWriteError(err, row.contentSource);
+      mapWriteError(err, row.contentSource, 'spell');
     }
   }
 

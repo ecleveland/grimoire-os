@@ -15,7 +15,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
 import { HomebrewMonstersService } from './homebrew-monsters.service';
-import { ContentActor } from './content-access.service';
+import { toActor } from './homebrew-write.helpers';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { CreateMonsterDto } from './dto/create-monster.dto';
 import { UpdateMonsterDto } from './dto/update-monster.dto';
@@ -23,14 +23,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type {
   AuthenticatedRequest,
-  JwtUser,
   OptionallyAuthenticatedRequest,
 } from '../auth/interfaces/jwt-payload.interface';
-import { Role } from '../common/enums';
-
-function toActor(user: JwtUser): ContentActor {
-  return { userId: user.userId, isAdmin: user.role === Role.ADMIN };
-}
 
 /**
  * Monster reads + homebrew CRUD (VEG-293). Lives apart from {@link SrdController}

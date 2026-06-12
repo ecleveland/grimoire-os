@@ -15,7 +15,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
 import { HomebrewSpellsService } from './homebrew-spells.service';
-import { ContentActor } from './content-access.service';
+import { toActor } from './homebrew-write.helpers';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { CreateSpellDto } from './dto/create-spell.dto';
 import { UpdateSpellDto } from './dto/update-spell.dto';
@@ -23,14 +23,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type {
   AuthenticatedRequest,
-  JwtUser,
   OptionallyAuthenticatedRequest,
 } from '../auth/interfaces/jwt-payload.interface';
-import { Role } from '../common/enums';
-
-function toActor(user: JwtUser): ContentActor {
-  return { userId: user.userId, isAdmin: user.role === Role.ADMIN };
-}
 
 /**
  * Spell reads + homebrew CRUD (VEG-294). Lives apart from {@link SrdController}

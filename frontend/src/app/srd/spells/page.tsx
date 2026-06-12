@@ -9,15 +9,12 @@ import type { SrdSpell, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import Markdown from '@/components/Markdown';
+import Badge from '@/components/Badge';
+import SpellDetail from '@/components/SpellDetail';
 import PrintToggle from '@/components/PrintToggle';
-import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS } from '@/lib/spell-constants';
+import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
 
 const LIMIT = 20;
-
-function levelLabel(level: number): string {
-  return level === 0 ? 'Cantrip' : `Level ${level}`;
-}
 
 export default function SpellListPage() {
   const { isAdmin, isAuthenticated, user } = useAuth();
@@ -84,21 +81,25 @@ export default function SpellListPage() {
       .finally(() => setDetailLoading(false));
   }
 
-  // Debounce search input
+  // Filter changes reset to page 1 in the same commit as the filter itself so
+  // the fetch effect fires exactly once. An effect-based reset would issue a
+  // first fetch still on the old page, then a second one for page 1.
+  const applyFilter = (setter: (v: string) => void) => (value: string) => {
+    setter(value);
+    setPage(1);
+  };
+
+  // Debounce search input; the page reset rides along in the same commit.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setSearch(searchInput);
+      setPage(1);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [searchInput]);
-
-  // Reset page to 1 when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [search, levelFilter, schoolFilter, classFilter]);
 
   // Fetch spells from API
   useEffect(() => {
@@ -157,7 +158,7 @@ export default function SpellListPage() {
         <select
           aria-label="Level"
           value={levelFilter}
-          onChange={e => setLevelFilter(e.target.value)}
+          onChange={e => applyFilter(setLevelFilter)(e.target.value)}
           className={inputClass}
         >
           <option value="">All Levels</option>
@@ -170,7 +171,7 @@ export default function SpellListPage() {
         <select
           aria-label="School"
           value={schoolFilter}
-          onChange={e => setSchoolFilter(e.target.value)}
+          onChange={e => applyFilter(setSchoolFilter)(e.target.value)}
           className={inputClass}
         >
           <option value="">All Schools</option>
@@ -183,7 +184,7 @@ export default function SpellListPage() {
         <select
           aria-label="Class"
           value={classFilter}
-          onChange={e => setClassFilter(e.target.value)}
+          onChange={e => applyFilter(setClassFilter)(e.target.value)}
           className={inputClass}
         >
           <option value="">All Classes</option>
@@ -214,9 +215,9 @@ export default function SpellListPage() {
               <h3 className="font-semibold text-gray-900 dark:text-white pr-8">
                 {s.name}
                 {s.contentSource === 'homebrew' && (
-                  <span className="ml-2 inline-block rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium align-middle">
+                  <Badge variant="homebrew" className="ml-2 inline-block align-middle">
                     Homebrew
-                  </span>
+                  </Badge>
                 )}
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -250,9 +251,9 @@ export default function SpellListPage() {
                     </span>
                   )}
                   {detail.contentSource === 'homebrew' && (
-                    <span className="ml-2 inline-block rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium align-middle">
+                    <Badge variant="homebrew" className="ml-2 inline-block align-middle">
                       Homebrew
-                    </span>
+                    </Badge>
                   )}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -303,62 +304,6 @@ export default function SpellListPage() {
         limit={LIMIT}
         onPageChange={setPage}
       />
-    </div>
-  );
-}
-
-function SpellDetail({ spell }: { spell: SrdSpell }) {
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Casting Time</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.castingTime}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Range</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.range}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Components</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.components}</p>
-        </div>
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Duration</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.duration}</p>
-        </div>
-      </div>
-      {spell.material && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Material</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.material}</p>
-        </div>
-      )}
-      <div>
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Description</h3>
-        <Markdown>{spell.description}</Markdown>
-      </div>
-      {spell.higherLevels && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">At Higher Levels</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{spell.higherLevels}</p>
-        </div>
-      )}
-      {spell.classes.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Classes</h3>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {spell.classes.map(c => (
-              <span
-                key={c}
-                className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-              >
-                {c}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

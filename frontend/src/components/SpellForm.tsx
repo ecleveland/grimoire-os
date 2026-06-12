@@ -3,7 +3,7 @@
 import { useId, useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
-import { SPELL_SCHOOLS, SPELL_LEVELS } from '@/lib/spell-constants';
+import { SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
 import type { SrdSpell } from '@/lib/types';
 import {
   emptySpellFormState,
@@ -74,7 +74,7 @@ export default function SpellForm({
           >
             {SPELL_LEVELS.map(l => (
               <option key={l} value={l}>
-                {l === 0 ? 'Cantrip' : `Level ${l}`}
+                {levelLabel(l)}
               </option>
             ))}
           </FormField>

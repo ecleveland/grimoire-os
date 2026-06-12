@@ -9,6 +9,7 @@ import type { SrdMonster, PaginatedResponse, Encounter } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import Badge from '@/components/Badge';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import PrintToggle from '@/components/PrintToggle';
 import EncounterPicker from '@/components/EncounterPicker';
@@ -166,21 +167,25 @@ export default function MonsterListPage() {
     }
   }
 
-  // Debounce search input
+  // Filter changes reset to page 1 in the same commit as the filter itself so
+  // the fetch effect fires exactly once. An effect-based reset would issue a
+  // first fetch still on the old page, then a second one for page 1.
+  const applyFilter = (setter: (v: string) => void) => (value: string) => {
+    setter(value);
+    setPage(1);
+  };
+
+  // Debounce search input; the page reset rides along in the same commit.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setSearch(searchInput);
+      setPage(1);
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [searchInput]);
-
-  // Reset page to 1 when filters change
-  useEffect(() => {
-    setPage(1);
-  }, [search, typeFilter, crFilter]);
 
   // Fetch monsters from API
   useEffect(() => {
@@ -236,8 +241,9 @@ export default function MonsterListPage() {
           className={inputClass}
         />
         <select
+          aria-label="Type"
           value={typeFilter}
-          onChange={e => setTypeFilter(e.target.value)}
+          onChange={e => applyFilter(setTypeFilter)(e.target.value)}
           className={inputClass}
         >
           <option value="">All Types</option>
@@ -247,7 +253,12 @@ export default function MonsterListPage() {
             </option>
           ))}
         </select>
-        <select value={crFilter} onChange={e => setCrFilter(e.target.value)} className={inputClass}>
+        <select
+          aria-label="CR"
+          value={crFilter}
+          onChange={e => applyFilter(setCrFilter)(e.target.value)}
+          className={inputClass}
+        >
           <option value="">All CRs</option>
           {CHALLENGE_RATINGS.map(cr => (
             <option key={cr} value={cr}>
@@ -279,9 +290,9 @@ export default function MonsterListPage() {
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {m.size} {m.type} &middot; {m.alignment}
                 {m.contentSource === 'homebrew' && (
-                  <span className="ml-2 inline-block rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium align-middle">
+                  <Badge variant="homebrew" className="ml-2 inline-block align-middle">
                     Homebrew
-                  </span>
+                  </Badge>
                 )}
               </p>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center text-sm">

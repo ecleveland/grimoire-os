@@ -41,6 +41,16 @@ describe('Badge', () => {
       expect(el).toHaveClass('bg-gray-100', 'dark:bg-gray-700');
       expect(el).toHaveClass('text-gray-800', 'dark:text-gray-300');
     });
+
+    it('applies homebrew (amber, font-medium) variant for user-created content', () => {
+      render(<Badge variant="homebrew">Homebrew</Badge>);
+      const el = screen.getByText('Homebrew');
+      expect(el).toHaveClass('bg-amber-50', 'dark:bg-amber-900/30');
+      expect(el).toHaveClass('text-amber-700', 'dark:text-amber-400');
+      expect(el).toHaveClass('font-medium');
+      // Visual parity with the hand-rolled spans it replaces.
+      expect(el).toHaveClass('rounded-full', 'px-2', 'py-0.5', 'text-xs');
+    });
   });
 
   describe('size', () => {
