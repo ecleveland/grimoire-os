@@ -133,6 +133,11 @@ export default function InitiativeTrackerPage() {
   // Link-monster picker (VEG-328): which unlinked row is being linked. Keyed
   // by name + sorted-row index, the same identity scheme as the HP drafts.
   const [linkTarget, setLinkTarget] = useState<{ name: string; index: number } | null>(null);
+  // Remove-combatant confirm (VEG-284): which row is pending removal. Same
+  // name + sorted-row-index identity as the drafts and the link picker.
+  const [removeTarget, setRemoveTarget] = useState<{ name: string; index: number } | null>(null);
+  // Clear-all confirm (VEG-284).
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -463,6 +468,33 @@ export default function InitiativeTrackerPage() {
     if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
   };
 
+  // Remove one combatant (VEG-284). Persists the filtered array and, when the
+  // removal pushes currentTurn past the end of the list, re-clamps it in the
+  // same PATCH so the turn pointer can never address a missing row.
+  const removeCombatant = async (name: string, rowIndex: number) => {
+    if (!encounter || writePending) return;
+    const sorted = sortByInitiative(encounter.combatants);
+    const index = resolveCombatantRow(sorted, name, rowIndex);
+    if (index === -1) {
+      toast.error('That combatant is no longer in the encounter.');
+      return;
+    }
+    sorted.splice(index, 1);
+    const clampedTurn = Math.max(0, Math.min(encounter.currentTurn, sorted.length - 1));
+    const updated = await patchEncounter({
+      combatants: sorted,
+      ...(clampedTurn !== encounter.currentTurn && { currentTurn: clampedTurn }),
+    });
+    if (updated) toast.success(`Removed ${name}`);
+  };
+
+  // Reset the board (VEG-284): drop every combatant and rewind the tracker.
+  const clearAllCombatants = async () => {
+    if (!encounter || writePending) return;
+    const updated = await patchEncounter({ combatants: [], currentTurn: 0, round: 1 });
+    if (updated) toast.success('Cleared all combatants');
+  };
+
   const viewCombatantMonster = (monsterId: string) => {
     setViewMonster(null);
     setViewLoading(true);
@@ -618,6 +650,18 @@ export default function InitiativeTrackerPage() {
                     Roll loot
                   </button>
                 )}
+                {/* Remove the row (VEG-284) — confirmed via dialog below. */}
+                {isController && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${c.name}`}
+                    onClick={() => setRemoveTarget({ name: c.name, index: i })}
+                    disabled={writePending}
+                    className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                  >
+                    Remove
+                  </button>
+                )}
                 <div className="flex items-center gap-4 text-sm">
                   <div className="text-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">Init</div>
@@ -758,6 +802,15 @@ export default function InitiativeTrackerPage() {
           >
             Add party
           </button>
+          {encounter.combatants.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(true)}
+              className="ml-auto px-3 py-1.5 text-sm border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 transition-colors"
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 
@@ -799,6 +852,28 @@ export default function InitiativeTrackerPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={open => {
+          if (!open) setRemoveTarget(null);
+        }}
+        title="Remove combatant?"
+        description={`Remove ${removeTarget?.name ?? ''} from the encounter? Their HP and any rolled loot are discarded.`}
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (removeTarget) removeCombatant(removeTarget.name, removeTarget.index);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmClearAll}
+        onOpenChange={setConfirmClearAll}
+        title="Clear all combatants?"
+        description="This removes every combatant from the tracker and resets it to round 1."
+        confirmLabel="Clear all"
+        onConfirm={clearAllCombatants}
+      />
 
       <ConfirmDialog
         open={confirmBulkRoll}

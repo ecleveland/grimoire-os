@@ -2247,4 +2247,169 @@ describe('InitiativeTrackerPage', () => {
       await waitFor(() => expect(amountInput('Goblin A').value).toBe(''));
     });
   });
+
+  // ── Remove combatant + clear all (VEG-284) ──
+
+  describe('remove combatant + clear all', () => {
+    const lastPatchBody = () => {
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      expect(call).toBeDefined();
+      return JSON.parse((call![1] as { body: string }).body) as Record<string, unknown>;
+    };
+
+    it('removes a row after confirm: PATCHes the filtered combatants array', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /remove goblin a/i }));
+      // No PATCH yet — the confirm dialog gates the destructive write.
+      expect(
+        mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+      ).toBeUndefined();
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog).toHaveTextContent(/goblin a/i);
+
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Removed Goblin A'));
+      const body = lastPatchBody();
+      expect((body.combatants as { name: string }[]).map(c => c.name)).toEqual([
+        'Hero',
+        'Goblin B',
+      ]);
+      expect(body.expectedVersion).toBe(1);
+      // currentTurn (0) is still in range after the removal — not re-sent.
+      expect('currentTurn' in body).toBe(false);
+      // The row is gone from the tracker.
+      await waitFor(() => expect(screen.queryByText('Goblin A')).not.toBeInTheDocument());
+    });
+
+    it('re-clamps currentTurn in the same PATCH when removal pushes it out of range', async () => {
+      routeAddFlow({ encounter: makeEncounter({ currentTurn: 2 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /remove goblin b/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Removed Goblin B'));
+      const body = lastPatchBody();
+      expect((body.combatants as { name: string }[]).map(c => c.name)).toEqual([
+        'Hero',
+        'Goblin A',
+      ]);
+      expect(body.currentTurn).toBe(1);
+    });
+
+    it('cancelling the remove confirm sends nothing', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /remove goblin a/i }));
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+      ).toBeUndefined();
+      // The row survives.
+      expect(screen.getByText('Goblin A')).toBeInTheDocument();
+    });
+
+    it('clears all combatants after confirm: empty array plus turn/round reset', async () => {
+      routeAddFlow({ encounter: makeEncounter({ currentTurn: 2, round: 3 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /clear all/i }));
+      const dialog = await screen.findByRole('dialog');
+      expect(dialog).toHaveTextContent(/round 1/i);
+      await user.click(within(dialog).getByRole('button', { name: /clear all/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Cleared all combatants'));
+      expect(lastPatchBody()).toEqual({
+        combatants: [],
+        currentTurn: 0,
+        round: 1,
+        expectedVersion: 1,
+      });
+      // Every row is gone, and so is the clear-all control.
+      await waitFor(() => expect(screen.queryByText('Hero')).not.toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: /clear all/i })).not.toBeInTheDocument();
+    });
+
+    it('cancelling the clear-all confirm sends nothing', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /clear all/i }));
+      await user.click(screen.getByRole('button', { name: /cancel/i }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        mockApiFetch.mock.calls.find(
+          ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+      ).toBeUndefined();
+    });
+
+    it('hides the remove and clear-all controls from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      routeAddFlow({ encounter: makeEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /clear all/i })).not.toBeInTheDocument();
+    });
+
+    it('refetches and toasts on a 409 remove conflict', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        onPatch: () =>
+          Promise.reject(
+            new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+              statusCode: 409,
+            })
+          ),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /remove goblin a/i }));
+      const dialog = await screen.findByRole('dialog');
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith(
+          'This encounter changed since you opened it — refreshed, please try again.'
+        )
+      );
+      // The conflict recovery refetches the encounter (initial GET + refetch).
+      await waitFor(() => {
+        const gets = mockApiFetch.mock.calls.filter(
+          ([p, o]) => p === '/encounters/enc-1' && !(o as { method?: string } | undefined)?.method
+        );
+        expect(gets).toHaveLength(2);
+      });
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+  });
 });
