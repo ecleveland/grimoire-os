@@ -3,6 +3,7 @@ import { SrdController } from './srd.controller';
 import { MonstersController } from './monsters.controller';
 import { SpellsController } from './spells.controller';
 import { FeatsController } from './feats.controller';
+import { ItemsController } from './items.controller';
 import { SearchController } from './search.controller';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
@@ -10,6 +11,7 @@ import { ContentAccessService } from './content-access.service';
 import { HomebrewMonstersService } from './homebrew-monsters.service';
 import { HomebrewSpellsService } from './homebrew-spells.service';
 import { HomebrewFeatsService } from './homebrew-feats.service';
+import { HomebrewItemsService } from './homebrew-items.service';
 
 @Module({
   controllers: [
@@ -17,6 +19,7 @@ import { HomebrewFeatsService } from './homebrew-feats.service';
     MonstersController,
     SpellsController,
     FeatsController,
+    ItemsController,
     SearchController,
   ],
   providers: [
@@ -26,6 +29,7 @@ import { HomebrewFeatsService } from './homebrew-feats.service';
     HomebrewMonstersService,
     HomebrewSpellsService,
     HomebrewFeatsService,
+    HomebrewItemsService,
   ],
   exports: [SrdService, ContentAccessService],
 })

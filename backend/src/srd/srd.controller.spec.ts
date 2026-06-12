@@ -13,8 +13,6 @@ describe('SrdController', () => {
     service = {
       searchMonsters: jest.fn(),
       findMonster: jest.fn(),
-      searchItems: jest.fn(),
-      findItem: jest.fn(),
       findAllClasses: jest.fn(),
       findClass: jest.fn(),
       findAllRaces: jest.fn(),
@@ -53,32 +51,7 @@ describe('SrdController', () => {
   // Spell routes moved to SpellsController (VEG-294) — see spells.controller.spec.ts.
   // Monster routes moved to MonstersController (VEG-293) — see monsters.controller.spec.ts.
   // Feat routes moved to FeatsController (VEG-295) — see feats.controller.spec.ts.
-
-  // ── Items ───────────────────────────────────────────
-
-  describe('searchItems', () => {
-    it('delegates to service with query', async () => {
-      const query = { category: 'Potion' };
-      service.searchItems.mockResolvedValue({ data: [], total: 0 });
-
-      const result = await controller.searchItems(query as any);
-
-      expect(service.searchItems).toHaveBeenCalledWith(query);
-      expect(result).toEqual({ data: [], total: 0 });
-    });
-  });
-
-  describe('findItem', () => {
-    it('delegates to service with id', async () => {
-      const item = { id: '1', name: 'Healing Potion' };
-      service.findItem.mockResolvedValue(item);
-
-      const result = await controller.findItem('1');
-
-      expect(service.findItem).toHaveBeenCalledWith('1');
-      expect(result).toEqual(item);
-    });
-  });
+  // Item routes moved to ItemsController (VEG-296) — see items.controller.spec.ts.
 
   // ── Classes ─────────────────────────────────────────
 

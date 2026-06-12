@@ -15,7 +15,6 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
-import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto } from './dto/query-features.dto';
 import { HydratePrintCardsDto } from './dto/hydrate-cards.dto';
 
@@ -29,23 +28,10 @@ export class SrdController {
   ) {}
 
   // Spell routes live in SpellsController (VEG-294), monster routes in
-  // MonstersController (VEG-293), and feat routes in FeatsController
-  // (VEG-295): their responses vary per user (caller's homebrew included), so
-  // they must stay off this controller's URL-keyed CacheInterceptor.
-
-  // ── Items ───────────────────────────────────────────
-
-  @Get('items')
-  @ApiOperation({ summary: 'Search SRD items' })
-  searchItems(@Query() query: QueryItemsDto) {
-    return this.srdService.searchItems(query);
-  }
-
-  @Get('items/:id')
-  @ApiOperation({ summary: 'Get item by ID' })
-  findItem(@Param('id') id: string) {
-    return this.srdService.findItem(id);
-  }
+  // MonstersController (VEG-293), feat routes in FeatsController (VEG-295),
+  // and item routes in ItemsController (VEG-296): their responses vary per
+  // user (caller's homebrew included), so they must stay off this
+  // controller's URL-keyed CacheInterceptor.
 
   // ── Classes ─────────────────────────────────────────
 

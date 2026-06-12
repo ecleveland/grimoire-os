@@ -4,9 +4,9 @@ import { Transform } from 'class-transformer';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import type { FeatureParentType } from './query-features.dto';
 
-export type SearchKind = 'spell' | 'feat' | 'feature';
+export type SearchKind = 'spell' | 'feat' | 'item' | 'feature';
 
-const ALL_KINDS: SearchKind[] = ['spell', 'feat', 'feature'];
+const ALL_KINDS: SearchKind[] = ['spell', 'feat', 'item', 'feature'];
 
 export class QuerySearchDto extends PaginationDto {
   @ApiPropertyOptional({ description: 'Free-text search across name and description' })
@@ -16,7 +16,7 @@ export class QuerySearchDto extends PaginationDto {
 
   @ApiPropertyOptional({
     description:
-      'Comma-separated list of kinds to include. Defaults to all (spell, feat, feature).',
+      'Comma-separated list of kinds to include. Defaults to all (spell, feat, item, feature).',
     example: 'spell,feature',
   })
   @IsOptional()
@@ -55,7 +55,9 @@ export class QuerySearchDto extends PaginationDto {
   @IsBooleanString()
   hasPrerequisite?: string;
 
-  @ApiPropertyOptional({ description: 'Feat category filter (only applies when kind=feat)' })
+  @ApiPropertyOptional({
+    description: 'Category filter, applied to the feat and item sources',
+  })
   @IsOptional()
   @IsString()
   category?: string;
@@ -66,6 +68,19 @@ export class QuerySearchDto extends PaginationDto {
   @IsOptional()
   @IsBooleanString()
   repeatable?: string;
+
+  // ── Item sub-filters ──────────────────────────────────
+  @ApiPropertyOptional({ description: 'Item rarity filter (only applies when kind=item)' })
+  @IsOptional()
+  @IsString()
+  rarity?: string;
+
+  @ApiPropertyOptional({
+    description: 'When "true", only magic items. When "false", only mundane items.',
+  })
+  @IsOptional()
+  @IsBooleanString()
+  isMagic?: string;
 
   // ── Feature sub-filters ───────────────────────────────
   @ApiPropertyOptional({ enum: ['class', 'subclass', 'race', 'background'] })

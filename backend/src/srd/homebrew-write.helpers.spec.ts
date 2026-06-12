@@ -13,6 +13,12 @@ describe('mapWriteError', () => {
     );
   });
 
+  it('uses "an" for vowel-initial nouns in the homebrew conflict copy', () => {
+    expect(() => mapWriteError(prismaError('P2002'), 'homebrew', 'item')).toThrow(
+      'You already have an item with this name'
+    );
+  });
+
   it('maps P2002 to Conflict with global copy for shared', () => {
     expect(() => mapWriteError(prismaError('P2002'), 'shared', 'feat')).toThrow(
       'A shared feat with this name already exists'
