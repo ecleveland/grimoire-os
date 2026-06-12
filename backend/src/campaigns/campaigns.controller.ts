@@ -84,6 +84,12 @@ export class CampaignsController {
     return this.campaignsService.joinByInviteCode(code, req.user.userId);
   }
 
+  @Get(':id/characters')
+  @ApiOperation({ summary: 'List the campaign party roster (slim character projection)' })
+  findCharacters(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.campaignsService.findCharactersForMember(id, req.user.userId);
+  }
+
   @Post(':id/characters/:characterId')
   @ApiOperation({ summary: 'Add character to campaign' })
   addCharacter(

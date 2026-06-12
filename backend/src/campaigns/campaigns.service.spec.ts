@@ -496,6 +496,75 @@ describe('CampaignsService', () => {
     });
   });
 
+  describe('findCharactersForMember', () => {
+    // A full sheet row, including fields the roster must never expose.
+    const fullCharacter = {
+      id: CHARACTER_ID,
+      userId: USER_ID_2,
+      campaignId: CAMPAIGN_ID,
+      name: 'Thia',
+      race: 'Elf',
+      class: 'Wizard',
+      level: 5,
+      armorClass: 12,
+      initiative: 2,
+      hitPoints: { max: 22, current: 17, temporary: 0 },
+      abilityScores: { dexterity: 14 },
+      backstory: 'a secret tragic past',
+      inventory: [{ name: 'Spellbook' }],
+      currency: { gp: 120 },
+    };
+
+    it('checks membership then returns the slim party-roster projection', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([fullCharacter]);
+
+      const result = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.character.findMany).toHaveBeenCalledWith({
+        where: { campaignId: CAMPAIGN_ID },
+        orderBy: { name: 'asc' },
+      });
+      expect(result).toEqual([
+        {
+          id: CHARACTER_ID,
+          userId: USER_ID_2,
+          name: 'Thia',
+          race: 'Elf',
+          class: 'Wizard',
+          level: 5,
+          armorClass: 12,
+          initiative: 2,
+          hitPoints: { max: 22, current: 17, temporary: 0 },
+        },
+      ]);
+    });
+
+    it('never leaks sheet fields beyond the roster projection', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([fullCharacter]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+
+      expect(roster).not.toHaveProperty('backstory');
+      expect(roster).not.toHaveProperty('inventory');
+      expect(roster).not.toHaveProperty('currency');
+      expect(roster).not.toHaveProperty('abilityScores');
+    });
+
+    it('propagates ForbiddenException for non-members without querying characters', async () => {
+      campaignAuth.assertCampaignMember.mockRejectedValue(
+        new ForbiddenException('You are not a member of this campaign')
+      );
+
+      await expect(service.findCharactersForMember(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('removeCharacter', () => {
     it('removes character from campaign when called by owner', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
