@@ -5,6 +5,7 @@ import {
   rollInitiative,
   rollInitiativeMod,
   nextCombatantNames,
+  parseIntField,
   buildMonsterCombatants,
   buildManualCombatant,
   buildPartyCombatants,
@@ -283,5 +284,44 @@ describe('buildPartyCombatants', () => {
   it('never sets monsterId on a party combatant', () => {
     const [c] = buildPartyCombatants([{ character: makePartyCharacter(), initiative: 12 }], []);
     expect(c).not.toHaveProperty('monsterId');
+  });
+
+  it('carries temporary HP from the sheet into tempHp', () => {
+    const [c] = buildPartyCombatants(
+      [
+        {
+          character: makePartyCharacter({ hitPoints: { max: 22, current: 17, temporary: 5 } }),
+          initiative: 10,
+        },
+      ],
+      []
+    );
+    expect(c).toMatchObject({ hp: 17, maxHp: 22, tempHp: 5 });
+  });
+
+  it('omits tempHp entirely when the sheet has none', () => {
+    const [zero] = buildPartyCombatants([{ character: makePartyCharacter(), initiative: 10 }], []);
+    expect(zero).not.toHaveProperty('tempHp');
+    const [noHp] = buildPartyCombatants(
+      [{ character: makePartyCharacter({ hitPoints: null }), initiative: 10 }],
+      []
+    );
+    expect(noHp).not.toHaveProperty('tempHp');
+  });
+});
+
+describe('parseIntField', () => {
+  it('truncates finite numeric strings to integers', () => {
+    expect(parseIntField('12')).toBe(12);
+    expect(parseIntField('12.7')).toBe(12);
+    expect(parseIntField('-3')).toBe(-3);
+    expect(parseIntField('0')).toBe(0);
+  });
+
+  it('falls back to 0 for blank or non-numeric input', () => {
+    expect(parseIntField('')).toBe(0);
+    expect(parseIntField('   ')).toBe(0);
+    expect(parseIntField('abc')).toBe(0);
+    expect(parseIntField('Infinity')).toBe(0);
   });
 });

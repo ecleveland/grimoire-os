@@ -522,9 +522,22 @@ describe('CampaignsService', () => {
       const result = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
 
       expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      // The DB-level select is the projection — full sheets (large JSON blobs,
+      // private fields) are never fetched, not merely dropped at the DTO layer.
       expect(prisma.character.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
         orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          userId: true,
+          name: true,
+          race: true,
+          class: true,
+          level: true,
+          armorClass: true,
+          initiative: true,
+          hitPoints: true,
+        },
       });
       expect(result).toEqual([
         {

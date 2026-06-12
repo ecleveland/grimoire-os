@@ -761,6 +761,63 @@ describe('InitiativeTrackerPage', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
+    it('passes the encounter combatant names so already-present PCs start deselected', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        characters: [thia, { ...mort, name: 'Goblin A' }],
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      // "Goblin A" is already a combatant — the picker starts it deselected.
+      expect(dialog.getByRole('checkbox', { name: /add thia/i })).toBeChecked();
+      expect(dialog.getByRole('checkbox', { name: /add goblin a/i })).not.toBeChecked();
+      expect(dialog.getByText(/already in encounter/i)).toBeInTheDocument();
+    });
+
+    it('retries after a 409 with the refreshed expectedVersion', async () => {
+      let currentEncounter = makeEncounter({ version: 5 });
+      let patchCount = 0;
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          patchCount += 1;
+          if (patchCount === 1) {
+            // Another writer won the race — the refetch must observe v9.
+            currentEncounter = makeEncounter({ version: 9 });
+            return Promise.reject(
+              new ApiError(409, 'Encounter was modified by another request.', {
+                currentVersion: 9,
+              })
+            );
+          }
+          const body = JSON.parse(init.body ?? '{}');
+          return Promise.resolve({ ...currentEncounter, ...body, version: 10 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(currentEncounter);
+        if (path === '/campaigns/camp-1/characters') return Promise.resolve([thia]);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+
+      // Retry from the still-open dialog: the second PATCH must carry the
+      // refetched version, not the stale v5 the dialog was opened against.
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const patches = mockApiFetch.mock.calls.filter(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      expect(patches).toHaveLength(2);
+      const retryBody = JSON.parse((patches[1][1] as { body: string }).body);
+      expect(retryBody.expectedVersion).toBe(9);
+    });
+
     it('toasts a generic message when the add-party PATCH rejection is not an Error', async () => {
       routeAddFlow({
         encounter: makeEncounter(),

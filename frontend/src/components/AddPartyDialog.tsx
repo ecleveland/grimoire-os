@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { PartyCharacter } from '@/lib/types';
-import { rollInitiativeMod } from '@/lib/encounter-combatants';
+import { parseIntField, rollInitiativeMod } from '@/lib/encounter-combatants';
 import type { PartyCombatantEntry } from '@/lib/encounter-combatants';
 
 interface Props {
@@ -19,11 +19,6 @@ interface Props {
 }
 
 const DEFAULT_INIT = '10';
-
-function parseInit(value: string): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.trunc(n) : 0;
-}
 
 /**
  * Picks campaign PCs to add as combatants (VEG-283). Every PC starts selected
@@ -78,7 +73,7 @@ export default function AddPartyDialog({
     onConfirm(
       characters
         .filter(c => selected.has(c.id))
-        .map(c => ({ character: c, initiative: parseInit(initValue(c.id)) }))
+        .map(c => ({ character: c, initiative: parseIntField(initValue(c.id)) }))
     );
   }
 
@@ -137,9 +132,11 @@ export default function AddPartyDialog({
                 <div className="font-medium text-gray-900 dark:text-white truncate">{c.name}</div>
                 <div className="text-xs text-gray-500 dark:text-gray-400">
                   {summary && <span>{summary} · </span>}
+                  {/* A sheet missing AC/HP gets defaults on add — say so at the
+                      point of decision instead of silently inventing numbers. */}
                   <span>
-                    AC {c.armorClass ?? '—'} · HP{' '}
-                    {c.hitPoints ? `${c.hitPoints.current}/${c.hitPoints.max}` : '—'}
+                    AC {c.armorClass ?? '— (uses 10)'} · HP{' '}
+                    {c.hitPoints ? `${c.hitPoints.current}/${c.hitPoints.max}` : '— (uses 10/10)'}
                   </span>
                   {existing.has(c.name.trim()) && (
                     <span className="ml-1 text-amber-600 dark:text-amber-400">

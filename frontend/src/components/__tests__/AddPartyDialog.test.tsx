@@ -53,6 +53,11 @@ describe('AddPartyDialog', () => {
     expect(screen.getAllByText(/AC 12 · HP 17\/22/)).toHaveLength(2);
   });
 
+  it('flags rows with missing AC/HP with the default that will be used', () => {
+    renderDialog({ characters: [makeCharacter({ armorClass: null, hitPoints: null })] });
+    expect(screen.getByText(/AC — \(uses 10\) · HP — \(uses 10\/10\)/)).toBeInTheDocument();
+  });
+
   it('shows an empty state when the campaign has no characters', () => {
     renderDialog({ characters: [] });
     expect(screen.getByText(/no characters .* campaign/i)).toBeInTheDocument();

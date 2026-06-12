@@ -311,18 +311,17 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ isActive: !encounter.isActive });
   };
 
-  // Append monster combatant(s) from the lookup panel. Kept separate from
-  // patchEncounter for its add-specific success/error toasts.
-  const addMonsterToEncounter = async (
-    monster: SrdMonster,
-    { quantity, initiatives }: AddToEncounterResult
+  // The one version-guarded append shared by all three add paths (monster
+  // lookup, manual form, party picker): PATCH with expectedVersion, the shared
+  // 409 recovery, per-path toasts. `onSuccess` closes the originating dialog —
+  // only on success, so a conflict keeps it open and the user's entry survives
+  // the refetch for a retry. Kept separate from patchEncounter for the
+  // add-specific toasts.
+  const appendCombatants = async (
+    additions: Combatant[],
+    opts: { successMsg: string; errorMsg: string; onSuccess?: () => void }
   ) => {
-    if (!encounter) return;
-    const additions = buildMonsterCombatants(
-      monster,
-      { quantity, initiatives },
-      encounter.combatants.map(c => c.name)
-    );
+    if (!encounter || additions.length === 0) return;
     beginWrite();
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
@@ -333,46 +332,48 @@ export default function InitiativeTrackerPage() {
         }),
       });
       setEncounter(updated);
-      toast.success(
-        quantity > 1
-          ? `Added ${quantity} ${monster.name}s to the encounter`
-          : `Added ${monster.name} to the encounter`
-      );
+      opts.onSuccess?.();
+      toast.success(opts.successMsg);
     } catch (err) {
       if (handleEncounterConflict(err)) return;
-      toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
+      toast.error(err instanceof Error ? err.message : opts.errorMsg);
     } finally {
       endWrite();
     }
   };
 
-  // Append a hand-entered combatant (VEG-282). Same version-guarded PATCH and
-  // 409 recovery as the add-monster path; on conflict the dialog stays open so
-  // the typed entry survives the refetch and can be retried.
+  // Append monster combatant(s) from the lookup panel (VEG-260).
+  const addMonsterToEncounter = async (
+    monster: SrdMonster,
+    { quantity, initiatives }: AddToEncounterResult
+  ) => {
+    if (!encounter) return;
+    const additions = buildMonsterCombatants(
+      monster,
+      { quantity, initiatives },
+      encounter.combatants.map(c => c.name)
+    );
+    await appendCombatants(additions, {
+      successMsg:
+        quantity > 1
+          ? `Added ${quantity} ${monster.name}s to the encounter`
+          : `Added ${monster.name} to the encounter`,
+      errorMsg: 'Failed to add to encounter',
+    });
+  };
+
+  // Append a hand-entered combatant (VEG-282).
   const addManualCombatant = async (input: ManualCombatantInput) => {
     if (!encounter) return;
     const combatant = buildManualCombatant(
       input,
       encounter.combatants.map(c => c.name)
     );
-    beginWrite();
-    try {
-      const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          combatants: [...encounter.combatants, combatant],
-          expectedVersion: encounter.version,
-        }),
-      });
-      setEncounter(updated);
-      setAddCombatantOpen(false);
-      toast.success(`Added ${combatant.name} to the encounter`);
-    } catch (err) {
-      if (handleEncounterConflict(err)) return;
-      toast.error(err instanceof Error ? err.message : 'Failed to add combatant');
-    } finally {
-      endWrite();
-    }
+    await appendCombatants([combatant], {
+      successMsg: `Added ${combatant.name} to the encounter`,
+      errorMsg: 'Failed to add combatant',
+      onSuccess: () => setAddCombatantOpen(false),
+    });
   };
 
   // Open the party picker and fetch the campaign roster (VEG-283). Mirrors the
@@ -389,37 +390,22 @@ export default function InitiativeTrackerPage() {
       });
   };
 
-  // Append the selected PCs (VEG-283). Same version-guarded PATCH and 409
-  // recovery as the other add paths; on conflict the dialog stays open so the
-  // selection survives the refetch and can be retried.
+  // Append the selected PCs (VEG-283). The empty-entries guard backstops the
+  // dialog's disabled confirm — onConfirm is a public prop boundary.
   const addPartyToEncounter = async (entries: PartyCombatantEntry[]) => {
-    if (!encounter) return;
+    if (!encounter || entries.length === 0) return;
     const additions = buildPartyCombatants(
       entries,
       encounter.combatants.map(c => c.name)
     );
-    beginWrite();
-    try {
-      const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          combatants: [...encounter.combatants, ...additions],
-          expectedVersion: encounter.version,
-        }),
-      });
-      setEncounter(updated);
-      setAddPartyOpen(false);
-      toast.success(
+    await appendCombatants(additions, {
+      successMsg:
         additions.length > 1
           ? `Added ${additions.length} party members to the encounter`
-          : `Added ${additions[0].name} to the encounter`
-      );
-    } catch (err) {
-      if (handleEncounterConflict(err)) return;
-      toast.error(err instanceof Error ? err.message : 'Failed to add party');
-    } finally {
-      endWrite();
-    }
+          : `Added ${additions[0].name} to the encounter`,
+      errorMsg: 'Failed to add party',
+      onSuccess: () => setAddPartyOpen(false),
+    });
   };
 
   const viewCombatantMonster = (monsterId: string) => {

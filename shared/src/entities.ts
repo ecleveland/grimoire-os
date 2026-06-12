@@ -114,6 +114,25 @@ export interface CharacterListItem {
   updatedAt: string;
 }
 
+/**
+ * Slim party-roster projection returned by GET /campaigns/:id/characters
+ * (VEG-283): the combatant-relevant snapshot (AC/HP, initiative modifier)
+ * plus display fields. Deliberately omits the rest of the sheet — members
+ * must not see each other's backstory, inventory, or currency through the
+ * roster; full sheets stay owner-only.
+ */
+export interface PartyCharacter {
+  id: string;
+  userId: string;
+  name: string;
+  race: string | null;
+  class: string | null;
+  level: number;
+  armorClass: number | null;
+  initiative: number | null;
+  hitPoints: HitPoints | null;
+}
+
 export interface Note {
   id: string;
   campaignId: string;

@@ -26,6 +26,7 @@ export type {
   Currency,
   Feature,
   Combatant,
+  PartyCharacter,
   // Entity types
   User,
   Campaign,
@@ -74,20 +75,3 @@ export type {
   SrdSkill,
   SrdLanguage,
 } from '@grimoire-os/shared';
-
-/**
- * Slim party-roster projection returned by GET /campaigns/:id/characters
- * (VEG-283): the combatant-relevant snapshot plus display fields. Full sheets
- * stay owner-only.
- */
-export interface PartyCharacter {
-  id: string;
-  userId: string;
-  name: string;
-  race?: string | null;
-  class?: string | null;
-  level: number;
-  armorClass: number | null;
-  initiative: number | null;
-  hitPoints: { max: number; current: number; temporary: number } | null;
-}

@@ -20,6 +20,16 @@ export function rollInitiative(monster: SrdMonster, rng: () => number = Math.ran
 }
 
 /**
+ * Parse a freeform integer form field: finite numbers truncate to whole
+ * values, blank or non-numeric input falls back to 0. The one parser shared
+ * by all the add-combatant dialogs so their semantics can't drift.
+ */
+export function parseIntField(value: string): number {
+  const n = Number(value);
+  return Number.isFinite(n) && value.trim() !== '' ? Math.trunc(n) : 0;
+}
+
+/**
  * Produce `count` fresh combatant names for `base`, auto-numbering on collision
  * within the encounter. The first free name is the bare base ("Goblin"); further
  * ones append an incrementing suffix ("Goblin 2", "Goblin 3", …). Names already
@@ -86,11 +96,12 @@ export interface PartyCombatantEntry {
 }
 
 /**
- * Build PC combatants from the party roster (VEG-283). AC and current/max HP
- * are an add-time snapshot of the sheet (missing values fall back to 10, and
- * current HP clamps into [0, max] in case the sheet is stale), names
- * auto-number against the encounter and within the batch, and `isNpc` is
- * always false. No `characterId` linkage yet — gated on VEG-256.
+ * Build PC combatants from the party roster (VEG-283). AC and current/max/temp
+ * HP are an add-time snapshot of the sheet (missing values fall back to 10,
+ * current HP clamps into [0, max] in case the sheet is stale, and zero temp HP
+ * is omitted like the rest of the tracker does), names auto-number against the
+ * encounter and within the batch, and `isNpc` is always false. No
+ * `characterId` linkage yet — gated on VEG-256.
  */
 export function buildPartyCombatants(
   entries: PartyCombatantEntry[],
@@ -102,11 +113,13 @@ export function buildPartyCombatants(
     taken.push(name);
     const maxHp = character.hitPoints?.max ?? 10;
     const current = character.hitPoints?.current ?? maxHp;
+    const tempHp = character.hitPoints?.temporary ?? 0;
     return {
       name,
       initiative,
       hp: Math.max(0, Math.min(current, maxHp)),
       maxHp,
+      ...(tempHp > 0 ? { tempHp } : {}),
       ac: character.armorClass ?? 10,
       isNpc: false,
     };
