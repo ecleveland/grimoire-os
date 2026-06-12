@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import type {
   Campaign,
   NoteListItem,
@@ -44,6 +45,10 @@ export default function CampaignDetailPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
+  const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
+  const [encountersRefresh, setEncountersRefresh] = useState(0);
+  const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
   const isOwner = campaign && user && campaign.ownerId === user.userId;
 
@@ -80,6 +85,11 @@ export default function CampaignDetailPage() {
           setEncounters(res.data);
           setEncountersTotal(res.total);
           setEncountersLastPage(res.lastPage);
+          // Self-heal: if this page no longer exists on the server (rows were
+          // deleted elsewhere), step to the real last page.
+          if (res.data.length === 0 && encountersPage > Math.max(1, res.lastPage)) {
+            setEncountersPage(Math.max(1, res.lastPage));
+          }
         })
         .catch(err => {
           console.error('Failed to load encounters:', err);
@@ -97,7 +107,7 @@ export default function CampaignDetailPage() {
           toast.error('Failed to load NPCs', { id: 'load-npcs' });
         });
     }
-  }, [tab, id, notesPage, encountersPage]);
+  }, [tab, id, notesPage, encountersPage, encountersRefresh]);
 
   const handleTabChange = (newTab: Tab) => {
     if (newTab !== tab) {
@@ -126,6 +136,32 @@ export default function CampaignDetailPage() {
       toast.success('Invite code revoked');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to revoke invite code');
+    }
+  };
+
+  const performDeleteEncounter = async () => {
+    if (!encounterToDelete || deletingEncounterId) return;
+    setDeletingEncounterId(encounterToDelete.id);
+    try {
+      await apiFetch(`/encounters/${encounterToDelete.id}`, { method: 'DELETE' });
+      toast.success('Encounter deleted');
+      // Re-sync from the server so the page contents, total, and lastPage stay
+      // consistent; clamp the page in case the last row of the final page went
+      // away. Both updates land in one batch, so the effect refetches once even
+      // when the page is unchanged (or its setter bails out).
+      const lastPageAfterDelete = Math.max(1, Math.ceil((encountersTotal - 1) / LIMIT));
+      setEncountersPage(p => Math.min(p, lastPageAfterDelete));
+      setEncountersRefresh(r => r + 1);
+      // The row that held focus is about to unmount; if focus was dropped on
+      // <body>, land it somewhere stable — but never steal it from an element
+      // the user has since moved to.
+      if (document.activeElement === document.body) {
+        encountersHeadingRef.current?.focus();
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete encounter');
+    } finally {
+      setDeletingEncounterId(null);
     }
   };
 
@@ -370,7 +406,13 @@ export default function CampaignDetailPage() {
       {tab === 'encounters' && (
         <div>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Encounters</h2>
+            <h2
+              ref={encountersHeadingRef}
+              tabIndex={-1}
+              className="text-lg font-semibold text-gray-900 dark:text-white focus:outline-none"
+            >
+              Encounters
+            </h2>
             <Link
               href={`/campaigns/${id}/encounters/new`}
               className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
@@ -384,22 +426,33 @@ export default function CampaignDetailPage() {
             <>
               <div className="space-y-3">
                 {encounters.map(enc => (
-                  <Link
-                    key={enc.id}
-                    href={`/campaigns/${id}/encounters/${enc.id}`}
-                    className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
-                      <Badge variant={enc.isActive ? 'success' : 'neutral'}>
-                        {enc.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
-                      &middot; Round {enc.round}
-                    </p>
-                  </Link>
+                  <div key={enc.id} className="flex items-stretch gap-2">
+                    <Link
+                      href={`/campaigns/${id}/encounters/${enc.id}`}
+                      className="flex-1 block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
+                        <Badge variant={enc.isActive ? 'success' : 'neutral'}>
+                          {enc.isActive ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
+                        &middot; Round {enc.round}
+                      </p>
+                    </Link>
+                    {isOwner && (
+                      <button
+                        onClick={() => setEncounterToDelete(enc)}
+                        disabled={deletingEncounterId !== null}
+                        aria-label={`Delete ${enc.name}`}
+                        className="px-3 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
               <Pagination
@@ -413,6 +466,18 @@ export default function CampaignDetailPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={encounterToDelete !== null}
+        onOpenChange={open => {
+          if (!open) setEncounterToDelete(null);
+        }}
+        title="Delete encounter?"
+        description={`Delete "${encounterToDelete?.name ?? ''}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={performDeleteEncounter}
+      />
     </div>
   );
 }

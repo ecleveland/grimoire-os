@@ -352,6 +352,199 @@ describe('CampaignDetailPage', () => {
     expect(screen.queryByText(/^session /i)).not.toBeInTheDocument();
   });
 
+  describe('encounter delete (VEG-291)', () => {
+    async function openEncountersTab(
+      user: ReturnType<typeof userEvent.setup>,
+      campaign = makeCampaign(),
+      encounters = [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })]
+    ) {
+      mockApiFetch.mockResolvedValueOnce(campaign);
+      mockApiFetch.mockResolvedValueOnce(makeListResponse(encounters));
+      render(<CampaignDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^encounters$/i }));
+      await waitFor(() => expect(screen.getByText('Goblin Ambush')).toBeInTheDocument());
+    }
+
+    it('shows a delete button per encounter for the campaign owner', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      expect(screen.getByRole('button', { name: /delete goblin ambush/i })).toBeInTheDocument();
+    });
+
+    it('hides the delete button for non-owners', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user, makeCampaign({ ownerId: 'someone-else' }));
+      expect(
+        screen.queryByRole('button', { name: /delete goblin ambush/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('confirming sends DELETE with the right id, refetches the page, and toasts success', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
+      mockApiFetch.mockResolvedValueOnce(makeListResponse<Encounter>([])); // refetch
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/delete encounter/i);
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(screen.queryByText('Goblin Ambush')).not.toBeInTheDocument());
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/encounters/enc-a',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      // The list is re-synced from the server, not patched locally.
+      const encounterListCalls = mockApiFetch.mock.calls.filter(
+        c => typeof c[0] === 'string' && c[0].startsWith('/encounters?campaignId=camp-1&page=1')
+      );
+      expect(encounterListCalls.length).toBe(2);
+      expect(mockToastSuccess).toHaveBeenCalledWith('Encounter deleted');
+    });
+
+    it('deleting the last row of a later page refetches the previous page', async () => {
+      const user = userEvent.setup();
+      const pageOne = Array.from({ length: 20 }, (_, i) =>
+        makeEncounter({ id: `enc-${i}`, name: `Encounter ${i}` })
+      );
+      mockApiFetch.mockResolvedValueOnce(makeCampaign());
+      mockApiFetch.mockResolvedValueOnce({
+        data: pageOne,
+        total: 21,
+        page: 1,
+        lastPage: 2,
+        limit: 20,
+      });
+      render(<CampaignDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^encounters$/i }));
+      await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
+
+      mockApiFetch.mockResolvedValueOnce({
+        data: [makeEncounter({ id: 'enc-last', name: 'Last One' })],
+        total: 21,
+        page: 2,
+        lastPage: 2,
+        limit: 20,
+      });
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      await waitFor(() => expect(screen.getByText('Last One')).toBeInTheDocument());
+
+      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
+      mockApiFetch.mockResolvedValueOnce({
+        data: pageOne,
+        total: 20,
+        page: 1,
+        lastPage: 1,
+        limit: 20,
+      });
+      await user.click(screen.getByRole('button', { name: /delete last one/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          expect.stringContaining('/encounters?campaignId=camp-1&page=1')
+        )
+      );
+      await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
+    });
+
+    it('re-clamps to the server lastPage when a fetched page comes back empty', async () => {
+      const user = userEvent.setup();
+      const pageOne = Array.from({ length: 20 }, (_, i) =>
+        makeEncounter({ id: `enc-${i}`, name: `Encounter ${i}` })
+      );
+      mockApiFetch.mockResolvedValueOnce(makeCampaign());
+      mockApiFetch.mockResolvedValueOnce({
+        data: pageOne,
+        total: 21,
+        page: 1,
+        lastPage: 2,
+        limit: 20,
+      });
+      render(<CampaignDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^encounters$/i }));
+      await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
+
+      // The server shrank while we were looking at page 1 (another DM deleted
+      // encounters): page 2 no longer exists.
+      mockApiFetch.mockResolvedValueOnce({ data: [], total: 20, page: 2, lastPage: 1, limit: 20 });
+      mockApiFetch.mockResolvedValueOnce({
+        data: pageOne,
+        total: 20,
+        page: 1,
+        lastPage: 1,
+        limit: 20,
+      });
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          expect.stringContaining('/encounters?campaignId=camp-1&page=1')
+        )
+      );
+      await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
+    });
+
+    it('disables the delete button while the DELETE is in flight', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockReturnValueOnce(new Promise(() => {})); // DELETE never resolves
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      expect(screen.getByRole('button', { name: /delete goblin ambush/i })).toBeDisabled();
+    });
+
+    it('moves focus to the Encounters heading after a successful delete', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
+      mockApiFetch.mockResolvedValueOnce(makeListResponse<Encounter>([])); // refetch
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(screen.queryByText('Goblin Ambush')).not.toBeInTheDocument());
+      expect(screen.getByRole('heading', { name: 'Encounters' })).toHaveFocus();
+    });
+
+    it('cancelling closes the dialog without calling DELETE and keeps the row', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      const callsBefore = mockApiFetch.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(mockApiFetch.mock.calls.length).toBe(callsBefore);
+      expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
+    });
+
+    it('toasts the error message when DELETE rejects with an Error and keeps the row', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockRejectedValueOnce(new Error('not yours'));
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('not yours'));
+      expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
+    });
+
+    it('toasts a generic message when DELETE rejects with a non-Error', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockRejectedValueOnce('boom');
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith('Failed to delete encounter')
+      );
+      expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
+    });
+  });
+
   it('uses singular "player" wording when there is exactly one player', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ playerIds: ['only-one'] }));
     render(<CampaignDetailPage />);
