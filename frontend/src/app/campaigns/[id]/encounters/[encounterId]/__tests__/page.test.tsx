@@ -2442,4 +2442,347 @@ describe('InitiativeTrackerPage', () => {
       expect(mockToastSuccess).not.toHaveBeenCalled();
     });
   });
+
+  describe('inline initiative editing & tie reorder (VEG-285)', () => {
+    it('renders an initiative input per row for controllers, sorted top-down', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const inits = screen.getAllByRole('textbox', {
+        name: /^initiative for/i,
+      }) as HTMLInputElement[];
+      expect(inits.map(i => i.value)).toEqual(['18', '12', '8']);
+    });
+
+    it('hides the initiative input and reorder controls from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      // A tie pair, so reorder buttons WOULD render for a controller.
+      routeAddFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin A', initiative: 12 }),
+            makeCombatant({ name: 'Goblin B', initiative: 12 }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      expect(screen.queryByRole('textbox', { name: /^initiative for/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^move /i })).not.toBeInTheDocument();
+      // Initiative still displays as static text.
+      expect(screen.getByText('18')).toBeInTheDocument();
+    });
+
+    it('does not PATCH while typing — one re-sorted, version-guarded PATCH on blur', async () => {
+      routeAddFlow({ encounter: makeEncounter({ version: 4 }) });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', {
+        name: 'Initiative for Goblin B',
+      }) as HTMLInputElement;
+      fireEvent.change(init, { target: { value: '2' } });
+      fireEvent.change(init, { target: { value: '20' } });
+      expect(mockApiFetch).toHaveBeenCalledTimes(1); // initial GET only
+      expect(init.value).toBe('20'); // draft shown while editing
+
+      fireEvent.blur(init);
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      // Goblin B (20) now sorts above Hero (18); the list persists re-sorted.
+      expect(body.combatants.map((c: Combatant) => c.name)).toEqual([
+        'Goblin B',
+        'Hero',
+        'Goblin A',
+      ]);
+      expect(body.combatants[0].initiative).toBe(20);
+      // Hero held the turn at sorted index 0 — the pointer follows him to index 1.
+      expect(body.currentTurn).toBe(1);
+      expect(body.expectedVersion).toBe(4);
+    });
+
+    it('commits on Enter and omits currentTurn when the active combatant keeps its row', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', { name: 'Initiative for Goblin A' });
+      // Focus first so the Enter handler's blur() actually dispatches in jsdom.
+      init.focus();
+      fireEvent.change(init, { target: { value: '1' } });
+      fireEvent.keyDown(init, { key: 'Enter' });
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      expect(body.combatants.map((c: Combatant) => c.name)).toEqual([
+        'Hero',
+        'Goblin B',
+        'Goblin A',
+      ]);
+      expect(body.combatants[2].initiative).toBe(1);
+      // Hero (the active combatant) is still sorted index 0 — no pointer write.
+      expect(body.currentTurn).toBeUndefined();
+    });
+
+    it('keeps the turn marker on the active combatant when its own initiative moves it', async () => {
+      routeAddFlow({ encounter: makeEncounter({ currentTurn: 1 }) }); // Goblin A's turn
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', { name: 'Initiative for Goblin A' });
+      init.focus();
+      fireEvent.change(init, { target: { value: '30' } });
+      fireEvent.keyDown(init, { key: 'Enter' });
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      expect(body.combatants.map((c: Combatant) => c.name)).toEqual([
+        'Goblin A',
+        'Hero',
+        'Goblin B',
+      ]);
+      expect(body.currentTurn).toBe(0);
+
+      // The UI re-renders from the PATCH response: rows re-sorted, marker still
+      // on Goblin A.
+      await waitFor(() => {
+        const names = screen.getAllByText(/^(Hero|Goblin A|Goblin B)$/).map(n => n.textContent);
+        expect(names).toEqual(['Goblin A', 'Hero', 'Goblin B']);
+      });
+      expect(screen.getByText('»').closest('div.p-4')).toHaveTextContent('Goblin A');
+    });
+
+    it('truncates fractional entries and accepts negative initiative', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', { name: 'Initiative for Goblin B' });
+      fireEvent.change(init, { target: { value: '-2.7' } });
+      fireEvent.blur(init);
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      expect(body.combatants[2].name).toBe('Goblin B');
+      expect(body.combatants[2].initiative).toBe(-2);
+    });
+
+    it('skips the PATCH when the committed initiative is unchanged, empty, or non-numeric', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', {
+        name: 'Initiative for Goblin B',
+      }) as HTMLInputElement;
+      fireEvent.change(init, { target: { value: '8' } }); // unchanged
+      fireEvent.blur(init);
+      fireEvent.change(init, { target: { value: '' } }); // empty
+      fireEvent.blur(init);
+      fireEvent.change(init, { target: { value: 'abc' } }); // non-numeric
+      fireEvent.blur(init);
+
+      expect(mockApiFetch).toHaveBeenCalledTimes(1); // initial GET only
+      expect(init.value).toBe('8'); // draft reverted to the server value
+    });
+
+    it('a new tie keeps the existing relative order instead of reshuffling', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      // Hero 18 → 12 ties Goblin A; the stable tiebreak keeps Hero above A.
+      const init = screen.getByRole('textbox', { name: 'Initiative for Hero' });
+      fireEvent.change(init, { target: { value: '12' } });
+      fireEvent.blur(init);
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      expect(body.combatants.map((c: Combatant) => c.name)).toEqual([
+        'Hero',
+        'Goblin A',
+        'Goblin B',
+      ]);
+      expect(body.combatants[0].initiative).toBe(12);
+
+      // Once the update lands, the tie pair grows reorder affordances — and
+      // only the tie pair.
+      await screen.findByRole('button', { name: 'Move Hero down' });
+      expect(screen.getByRole('button', { name: 'Move Goblin A up' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move Hero up' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move Goblin A down' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move Goblin B up' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move Goblin B down' })).not.toBeInTheDocument();
+    });
+
+    it('targets the edited row, not the first name match, when names collide', async () => {
+      routeAddFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+            makeCombatant({ name: 'Goblin', initiative: 12 }),
+            makeCombatant({ name: 'Goblin', initiative: 8 }),
+          ],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const inits = screen.getAllByRole('textbox', { name: 'Initiative for Goblin' });
+      fireEvent.change(inits[1], { target: { value: '15' } });
+      fireEvent.blur(inits[1]);
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      // The SECOND Goblin (init 8) was edited to 15 and re-sorted between Hero
+      // and its twin — the first Goblin keeps its 12.
+      expect(body.combatants.map((c: Combatant) => c.initiative)).toEqual([18, 15, 12]);
+    });
+
+    it('toasts the message when the initiative PATCH fails', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        onPatch: () => Promise.reject(new Error('boom')),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', { name: 'Initiative for Goblin B' });
+      fireEvent.change(init, { target: { value: '20' } });
+      fireEvent.blur(init);
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('boom'));
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+
+    it('refetches and warns when the initiative edit hits a 409 conflict', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        onPatch: () =>
+          Promise.reject(
+            new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+              statusCode: 409,
+            })
+          ),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      const init = screen.getByRole('textbox', { name: 'Initiative for Goblin B' });
+      fireEvent.change(init, { target: { value: '20' } });
+      fireEvent.blur(init);
+
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith(
+          'This encounter changed since you opened it — refreshed, please try again.'
+        )
+      );
+      await waitFor(() => {
+        const gets = mockApiFetch.mock.calls.filter(
+          ([p, o]) => p === '/encounters/enc-1' && !(o as { method?: string } | undefined)?.method
+        );
+        expect(gets).toHaveLength(2);
+      });
+    });
+
+    // Four combatants with a tie in the middle — the shared fixture for the
+    // reorder tests. Sorted: Hero(18), Goblin A(12), Goblin B(12), Wolf(8).
+    const tieEncounter = (over: Partial<Encounter> = {}) =>
+      makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, hp: 24, maxHp: 24, isNpc: false }),
+          makeCombatant({ name: 'Goblin A', initiative: 12 }),
+          makeCombatant({ name: 'Goblin B', initiative: 12 }),
+          makeCombatant({ name: 'Wolf', initiative: 8 }),
+        ],
+        ...over,
+      });
+
+    it('offers up/down only inside a tie group', async () => {
+      routeAddFlow({ encounter: tieEncounter() });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      expect(screen.getByRole('button', { name: 'Move Goblin A down' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Move Goblin B up' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move Goblin A up' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Move Goblin B down' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^move hero/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^move wolf/i })).not.toBeInTheDocument();
+    });
+
+    it('swaps a tied pair and keeps the turn marker on the moved combatant', async () => {
+      routeAddFlow({ encounter: tieEncounter({ currentTurn: 1, version: 7 }) }); // Goblin A's turn
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Move Goblin A down' }));
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      expect(body.combatants.map((c: Combatant) => c.name)).toEqual([
+        'Hero',
+        'Goblin B',
+        'Goblin A',
+        'Wolf',
+      ]);
+      expect(body.currentTurn).toBe(2); // pointer follows Goblin A's identity
+      expect(body.expectedVersion).toBe(7);
+
+      await waitFor(() =>
+        expect(screen.getByText('»').closest('div.p-4')).toHaveTextContent('Goblin A')
+      );
+    });
+
+    it('moves a combatant up without touching an unaffected turn pointer', async () => {
+      routeAddFlow({ encounter: tieEncounter() }); // Hero's turn (index 0)
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Move Goblin B up' }));
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      const [, reqInit] = mockApiFetch.mock.calls[1];
+      const body = JSON.parse((reqInit as { body: string }).body);
+      expect(body.combatants.map((c: Combatant) => c.name)).toEqual([
+        'Hero',
+        'Goblin B',
+        'Goblin A',
+        'Wolf',
+      ]);
+      expect(body.currentTurn).toBeUndefined(); // Hero stays at sorted index 0
+    });
+
+    it('toasts a generic message when the reorder PATCH rejection is not an Error', async () => {
+      routeAddFlow({
+        encounter: tieEncounter(),
+        onPatch: () => Promise.reject('nope'),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Move Goblin A down' }));
+
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith('Failed to update encounter')
+      );
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+  });
 });
