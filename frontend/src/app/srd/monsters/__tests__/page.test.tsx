@@ -460,4 +460,157 @@ describe('MonsterListPage', () => {
       expect(toast.success).not.toHaveBeenCalled();
     });
   });
+
+  // ── Homebrew monsters (VEG-293) ─────────────────────────────────────────────
+
+  describe('homebrew monsters', () => {
+    const caveTroll: SrdMonster = {
+      ...goblin,
+      id: 'hb-1',
+      name: 'Cave Troll',
+      contentSource: 'homebrew',
+      createdById: 'u1',
+      source: 'Homebrew',
+    };
+
+    function routeApi(overrides: { onDelete?: () => Promise<unknown> } = {}) {
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+        if (options?.method === 'DELETE') {
+          return (overrides.onDelete ?? (() => Promise.resolve(undefined)))();
+        }
+        if (path.startsWith('/srd/monsters/hb-1')) return Promise.resolve(caveTroll);
+        if (path.startsWith('/srd/monsters/')) return Promise.resolve(goblin);
+        return Promise.resolve(makeResponse([goblin, caveTroll]));
+      });
+    }
+
+    function authAsOwner() {
+      mockUseAuth.mockReturnValue({
+        isDm: false,
+        isAdmin: false,
+        isAuthenticated: true,
+        user: { userId: 'u1' },
+      });
+    }
+
+    it('shows a Create monster link for signed-in users', async () => {
+      authAsOwner();
+      renderPage();
+
+      const link = await screen.findByRole('link', { name: /create monster/i });
+      expect(link).toHaveAttribute('href', '/srd/monsters/new');
+    });
+
+    it('hides the Create monster link for anonymous visitors', async () => {
+      mockUseAuth.mockReturnValue({ isDm: false, isAuthenticated: false, user: null });
+      renderPage();
+
+      await screen.findByText('Goblin');
+      expect(screen.queryByRole('link', { name: /create monster/i })).not.toBeInTheDocument();
+    });
+
+    it('flags homebrew monsters with a badge in the list', async () => {
+      authAsOwner();
+      routeApi();
+      renderPage();
+
+      const card = (await screen.findByText('Cave Troll')).closest('button')!;
+      expect(within(card).getByText('Homebrew')).toBeInTheDocument();
+
+      const goblinCard = screen.getByText('Goblin').closest('button')!;
+      expect(within(goblinCard).queryByText('Homebrew')).not.toBeInTheDocument();
+    });
+
+    it('offers Edit and Delete on the owner’s homebrew monster in the detail modal', async () => {
+      authAsOwner();
+      routeApi();
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Cave Troll/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByRole('link', { name: /edit/i })).toHaveAttribute(
+        'href',
+        '/srd/monsters/hb-1/edit'
+      );
+      expect(within(dialog).getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    });
+
+    it('offers no Edit/Delete on SRD monsters', async () => {
+      authAsOwner();
+      routeApi();
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Goblin/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).queryByRole('link', { name: /edit/i })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    });
+
+    it('offers no Edit/Delete on someone else’s homebrew (defensive — not normally visible)', async () => {
+      mockUseAuth.mockReturnValue({
+        isDm: false,
+        isAdmin: false,
+        isAuthenticated: true,
+        user: { userId: 'someone-else' },
+      });
+      routeApi();
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Cave Troll/i }));
+
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+    });
+
+    it('deletes a homebrew monster after confirmation and refreshes the list', async () => {
+      authAsOwner();
+      routeApi();
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Cave Troll/i }));
+      await user.click(await screen.findByRole('button', { name: /delete/i }));
+
+      // ConfirmDialog: confirm the destructive action.
+      await user.click(await screen.findByRole('button', { name: /^Delete monster$/i }));
+
+      await waitFor(() => {
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/srd/monsters/hb-1',
+          expect.objectContaining({ method: 'DELETE' })
+        );
+      });
+      expect(toast.success).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+      // List refetched after the delete (initial load + post-delete).
+      const listCalls = mockApiFetch.mock.calls.filter(([path]) =>
+        String(path).startsWith('/srd/monsters?')
+      );
+      expect(listCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('toasts and keeps the modal open when the delete fails', async () => {
+      authAsOwner();
+      routeApi({ onDelete: () => Promise.reject(new Error('nope')) });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Cave Troll/i }));
+      await user.click(await screen.findByRole('button', { name: /delete/i }));
+      await user.click(await screen.findByRole('button', { name: /^Delete monster$/i }));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('nope');
+      });
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
 });

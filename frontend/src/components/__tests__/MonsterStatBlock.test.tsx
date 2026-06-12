@@ -150,4 +150,20 @@ describe('MonsterStatBlock', () => {
       expect(screen.getByText('Club.')).toBeInTheDocument();
     });
   });
+
+  describe('homebrew flag (VEG-293)', () => {
+    it('shows a Homebrew badge for homebrew monsters', () => {
+      render(
+        <MonsterStatBlock
+          monster={{ ...sparseMonster, contentSource: 'homebrew', createdById: 'u1' }}
+        />
+      );
+      expect(screen.getByText('Homebrew')).toBeInTheDocument();
+    });
+
+    it('shows no badge for catalog monsters', () => {
+      render(<MonsterStatBlock monster={fullMonster} />);
+      expect(screen.queryByText('Homebrew')).not.toBeInTheDocument();
+    });
+  });
 });

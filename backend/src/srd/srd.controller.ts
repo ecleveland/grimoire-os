@@ -4,7 +4,6 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
 import { QuerySpellsDto } from './dto/query-spells.dto';
-import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto } from './dto/query-features.dto';
 import { QuerySearchDto } from './dto/query-search.dto';
@@ -33,19 +32,9 @@ export class SrdController {
     return this.srdService.findSpell(id);
   }
 
-  // ── Monsters ────────────────────────────────────────
-
-  @Get('monsters')
-  @ApiOperation({ summary: 'Search SRD monsters' })
-  searchMonsters(@Query() query: QueryMonstersDto) {
-    return this.srdService.searchMonsters(query);
-  }
-
-  @Get('monsters/:id')
-  @ApiOperation({ summary: 'Get monster by ID' })
-  findMonster(@Param('id') id: string) {
-    return this.srdService.findMonster(id);
-  }
+  // Monster routes live in MonstersController: their responses vary per user
+  // (caller's homebrew included, VEG-293), so they must stay off this
+  // controller's URL-keyed CacheInterceptor.
 
   // ── Items ───────────────────────────────────────────
 

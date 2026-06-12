@@ -221,16 +221,81 @@ describe('SrdService', () => {
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
-          ...GLOBAL_WHERE,
-          OR: [
-            { name: { contains: 'a', mode: 'insensitive' } },
-            { description: { contains: 'a', mode: 'insensitive' } },
+          AND: [
+            { ...GLOBAL_WHERE },
+            {
+              OR: [
+                { name: { contains: 'a', mode: 'insensitive' } },
+                { description: { contains: 'a', mode: 'insensitive' } },
+              ],
+            },
           ],
         },
         orderBy: { name: 'asc' },
         skip: 0,
         take: 20,
       });
+    });
+
+    // ── Owner-aware reads (VEG-293): authenticated callers also see their own homebrew ──
+
+    it('widens the where to the caller’s own homebrew when a userId is passed', async () => {
+      prisma.monster.findMany.mockResolvedValue([]);
+      prisma.monster.count.mockResolvedValue(0);
+
+      await service.searchMonsters({}, 'u1');
+
+      expect(prisma.monster.findMany).toHaveBeenCalledWith({
+        where: { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('keeps visibility and substring search independent for authed single-char queries', async () => {
+      prisma.monster.findMany.mockResolvedValue([]);
+      prisma.monster.count.mockResolvedValue(0);
+
+      await service.searchMonsters({ q: 'a' }, 'u1');
+
+      expect(prisma.monster.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+            {
+              OR: [
+                { name: { contains: 'a', mode: 'insensitive' } },
+                { description: { contains: 'a', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('includes the caller’s homebrew in the fuzzy SQL path', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchMonsters({ q: 'drg' }, 'u1');
+
+      const { dataQuery, countQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"createdById" =');
+      expect(dataQuery?.values).toContain('u1');
+      expect(countQuery?.sql).toContain('"createdById" =');
+      expect(countQuery?.values).toContain('u1');
+    });
+
+    it('keeps the fuzzy SQL pinned to the global catalog for anonymous callers', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchMonsters({ q: 'drg' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).not.toContain('"createdById"');
     });
 
     it('applies type/size/cr filters alongside fuzzy search SQL', async () => {
@@ -683,6 +748,18 @@ describe('SrdService', () => {
 
       expect(prisma.monster.findFirst).toHaveBeenCalledWith({
         where: { id: '1', ...GLOBAL_WHERE },
+      });
+      expect(result).toEqual(monster);
+    });
+
+    it('also resolves the caller’s own homebrew when a userId is passed (VEG-293)', async () => {
+      const monster = { id: 'hb1', name: 'Cave Troll', contentSource: 'homebrew' };
+      prisma.monster.findFirst.mockResolvedValue(monster);
+
+      const result = await service.findMonster('hb1', 'u1');
+
+      expect(prisma.monster.findFirst).toHaveBeenCalledWith({
+        where: { id: 'hb1', OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
       });
       expect(result).toEqual(monster);
     });

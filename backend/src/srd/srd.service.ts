@@ -20,6 +20,13 @@ const GLOBAL_SOURCE_SQL = Prisma.sql`"contentSource"::text IN (${Prisma.join([
   ...GLOBAL_CONTENT_SOURCES,
 ])})`;
 
+// Owner-aware raw-SQL counterpart of ContentAccessService.visibleTo() (VEG-293):
+// the global catalog plus, for authenticated callers, their own homebrew rows.
+function visibleSourceSql(userId?: string): Prisma.Sql {
+  if (!userId) return GLOBAL_SOURCE_SQL;
+  return Prisma.sql`(${GLOBAL_SOURCE_SQL} OR "createdById" = ${userId})`;
+}
+
 // Minimum query length that triggers pg_trgm similarity matching. Below this we
 // fall back to plain ILIKE substring matching — single-char fuzzy queries return
 // too much noise (every word has at least one character of overlap).
@@ -206,21 +213,32 @@ export class SrdService {
 
   // ── Monsters ────────────────────────────────────────
 
-  async searchMonsters(dto: QueryMonstersDto) {
+  // Monster reads take an optional userId (VEG-293): authenticated callers see
+  // the global catalog plus their own homebrew; anonymous callers see only the
+  // catalog. The visibility fragment can itself be an OR, so a free-text query
+  // joins it under AND instead of clobbering it.
+  async searchMonsters(dto: QueryMonstersDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
 
     if (shouldUseFuzzy(dto.q)) {
-      return this.fuzzySearchMonsters(dto, dto.q, page, limit);
+      return this.fuzzySearchMonsters(dto, dto.q, page, limit, userId);
     }
 
-    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
-    if (dto.q) {
-      where.OR = [
-        { name: { contains: dto.q, mode: 'insensitive' } },
-        { description: { contains: dto.q, mode: 'insensitive' } },
-      ];
-    }
+    const visible = this.contentAccess.visibleTo(userId);
+    const where: Record<string, unknown> = dto.q
+      ? {
+          AND: [
+            { ...visible },
+            {
+              OR: [
+                { name: { contains: dto.q, mode: 'insensitive' } },
+                { description: { contains: dto.q, mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }
+      : { ...visible };
     if (dto.type) where.type = dto.type;
     if (dto.cr) where.challengeRating = parseFloat(dto.cr);
     if (dto.size) where.size = dto.size;
@@ -244,8 +262,17 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
-  private async fuzzySearchMonsters(dto: QueryMonstersDto, q: string, page: number, limit: number) {
-    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL, buildFuzzyMatchSql(q, MONSTER_FUZZY_THRESHOLD)];
+  private async fuzzySearchMonsters(
+    dto: QueryMonstersDto,
+    q: string,
+    page: number,
+    limit: number,
+    userId?: string
+  ) {
+    const conds: Prisma.Sql[] = [
+      visibleSourceSql(userId),
+      buildFuzzyMatchSql(q, MONSTER_FUZZY_THRESHOLD),
+    ];
     if (dto.type) conds.push(Prisma.sql`"type" = ${dto.type}`);
     if (dto.size) conds.push(Prisma.sql`"size" = ${dto.size}`);
     if (dto.cr) conds.push(Prisma.sql`"challengeRating" = ${parseFloat(dto.cr)}`);
@@ -268,8 +295,10 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
-  async findMonster(id: string) {
-    return this.prisma.monster.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
+  async findMonster(id: string, userId?: string) {
+    return this.prisma.monster.findFirst({
+      where: { id, ...this.contentAccess.visibleTo(userId) },
+    });
   }
 
   // ── Items ───────────────────────────────────────────

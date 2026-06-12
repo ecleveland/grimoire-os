@@ -632,6 +632,101 @@ describe('InitiativeTrackerPage', () => {
     expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
   });
 
+  // ── Homebrew monsters in tracker flows (VEG-293) ─────────────────────────────
+  // Same code paths as SRD monsters — these pin that a homebrew monster coming
+  // back from the (now owner-aware) endpoints flows through lookup, add, and
+  // click-to-view, flagged as homebrew in the stat block.
+
+  describe('homebrew monsters in tracker flows', () => {
+    const homebrewTroll: SrdMonster = {
+      ...goblinMonster,
+      id: 'hb-1',
+      name: 'Cave Troll',
+      armorClass: 14,
+      hitPoints: 84,
+      contentSource: 'homebrew',
+      createdById: 'user-1',
+      source: 'Homebrew',
+      specialAbilities: [{ name: 'Regeneration', description: 'Regains 10 hp.' }],
+    };
+
+    function routeHomebrew(onPatch?: (body: unknown) => Promise<unknown>) {
+      const encounter = makeEncounter({ version: 3 });
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          const body = JSON.parse(init.body ?? '{}');
+          return onPatch ? onPatch(body) : Promise.resolve({ ...encounter, ...body, version: 99 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+        if (path.startsWith('/srd/monsters/')) return Promise.resolve(homebrewTroll);
+        if (path.startsWith('/srd/monsters?')) {
+          return Promise.resolve({ data: [homebrewTroll], total: 1, page: 1, lastPage: 1 });
+        }
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+    }
+
+    it('adds a homebrew monster from the lookup panel exactly like an SRD one', async () => {
+      routeHomebrew();
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.type(screen.getByPlaceholderText(/search monsters/i), 'troll');
+      await user.click(await screen.findByTestId('lookup-result'));
+      const statBlock = await screen.findByTestId('monster-stat-block');
+      expect(within(statBlock).getByText('Homebrew')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+      await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+
+      let patchBody: { combatants: Array<Record<string, unknown>> } | undefined;
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(call).toBeDefined();
+        patchBody = JSON.parse((call![1] as { body: string }).body);
+      });
+
+      const added = patchBody!.combatants[patchBody!.combatants.length - 1];
+      expect(added).toMatchObject({
+        name: 'Cave Troll',
+        ac: 14,
+        hp: 84,
+        maxHp: 84,
+        isNpc: true,
+        monsterId: 'hb-1',
+      });
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+    });
+
+    it('resolves a homebrew monster on click-combatant-to-view, flagged as homebrew', async () => {
+      mockApiFetch.mockImplementation((path: string) => {
+        if (path === '/encounters/enc-1') {
+          return Promise.resolve(
+            makeEncounter({
+              combatants: [makeCombatant({ name: 'Cave Troll 1', monsterId: 'hb-1' })],
+            })
+          );
+        }
+        if (path === '/srd/monsters/hb-1') return Promise.resolve(homebrewTroll);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /^cave troll 1$/i }));
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/hb-1'));
+      const statBlock = await screen.findByTestId('monster-stat-block');
+      expect(within(statBlock).getByText('Homebrew')).toBeInTheDocument();
+      expect(within(statBlock).getByText(/Regeneration/)).toBeInTheDocument();
+    });
+  });
+
   // ── Add party PCs as combatants (VEG-283) ────────────────────────────────────
 
   describe('add party PCs', () => {
