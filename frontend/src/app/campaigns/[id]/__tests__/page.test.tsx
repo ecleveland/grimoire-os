@@ -452,6 +452,45 @@ describe('CampaignDetailPage', () => {
       await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
     });
 
+    it('re-clamps to the server lastPage when a fetched page comes back empty', async () => {
+      const user = userEvent.setup();
+      const pageOne = Array.from({ length: 20 }, (_, i) =>
+        makeEncounter({ id: `enc-${i}`, name: `Encounter ${i}` })
+      );
+      mockApiFetch.mockResolvedValueOnce(makeCampaign());
+      mockApiFetch.mockResolvedValueOnce({
+        data: pageOne,
+        total: 21,
+        page: 1,
+        lastPage: 2,
+        limit: 20,
+      });
+      render(<CampaignDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^encounters$/i }));
+      await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
+
+      // The server shrank while we were looking at page 1 (another DM deleted
+      // encounters): page 2 no longer exists.
+      mockApiFetch.mockResolvedValueOnce({ data: [], total: 20, page: 2, lastPage: 1, limit: 20 });
+      mockApiFetch.mockResolvedValueOnce({
+        data: pageOne,
+        total: 20,
+        page: 1,
+        lastPage: 1,
+        limit: 20,
+      });
+      await user.click(screen.getByRole('button', { name: 'Next' }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          expect.stringContaining('/encounters?campaignId=camp-1&page=1')
+        )
+      );
+      await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
+    });
+
     it('disables the delete button while the DELETE is in flight', async () => {
       const user = userEvent.setup();
       await openEncountersTab(user);

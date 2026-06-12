@@ -85,6 +85,11 @@ export default function CampaignDetailPage() {
           setEncounters(res.data);
           setEncountersTotal(res.total);
           setEncountersLastPage(res.lastPage);
+          // Self-heal: if this page no longer exists on the server (rows were
+          // deleted elsewhere), step to the real last page.
+          if (res.data.length === 0 && encountersPage > Math.max(1, res.lastPage)) {
+            setEncountersPage(Math.max(1, res.lastPage));
+          }
         })
         .catch(err => {
           console.error('Failed to load encounters:', err);
@@ -141,16 +146,18 @@ export default function CampaignDetailPage() {
       await apiFetch(`/encounters/${encounterToDelete.id}`, { method: 'DELETE' });
       toast.success('Encounter deleted');
       // Re-sync from the server so the page contents, total, and lastPage stay
-      // consistent; clamp the page in case the last row of the final page went away.
+      // consistent; clamp the page in case the last row of the final page went
+      // away. Both updates land in one batch, so the effect refetches once even
+      // when the page is unchanged (or its setter bails out).
       const lastPageAfterDelete = Math.max(1, Math.ceil((encountersTotal - 1) / LIMIT));
-      const nextPage = Math.min(encountersPage, lastPageAfterDelete);
-      if (nextPage !== encountersPage) {
-        setEncountersPage(nextPage);
-      } else {
-        setEncountersRefresh(r => r + 1);
+      setEncountersPage(p => Math.min(p, lastPageAfterDelete));
+      setEncountersRefresh(r => r + 1);
+      // The row that held focus is about to unmount; if focus was dropped on
+      // <body>, land it somewhere stable — but never steal it from an element
+      // the user has since moved to.
+      if (document.activeElement === document.body) {
+        encountersHeadingRef.current?.focus();
       }
-      // The row that held focus is about to unmount; land focus somewhere stable.
-      encountersHeadingRef.current?.focus();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete encounter');
     } finally {
