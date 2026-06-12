@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import type { SrdMonster, PaginatedResponse } from '@/lib/types';
+import type { SrdMonster } from '@/lib/types';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import AddToEncounterDialog, { type AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { formatCr } from '@/lib/srd-format';
+import { useMonsterSearch } from '@/lib/use-monster-search';
 
 const LIMIT = 8;
 
@@ -26,48 +27,12 @@ interface Props {
  * unobtrusive below the tracker on mobile.
  */
 export default function MonsterLookupPanel({ canAdd = false, onAdd }: Props) {
-  const [searchInput, setSearchInput] = useState('');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SrdMonster[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const { searchInput, setSearchInput, query, results, total, loading } = useMonsterSearch(LIMIT);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<SrdMonster | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Debounce the raw input into the query that drives the fetch.
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setQuery(searchInput.trim()), 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchInput]);
-
-  // Only hit the API once there's something to search for.
-  useEffect(() => {
-    if (!query) {
-      setResults([]);
-      setTotal(0);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
-    apiFetch<PaginatedResponse<SrdMonster>>(`/srd/monsters?${params.toString()}`)
-      .then(res => {
-        setResults(res.data);
-        setTotal(res.total);
-      })
-      .catch(err => {
-        console.error('Failed to search monsters:', err);
-        toast.error('Failed to search monsters', { id: 'lookup-search' });
-      })
-      .finally(() => setLoading(false));
-  }, [query]);
 
   function openMonster(id: string) {
     setDetail(null);

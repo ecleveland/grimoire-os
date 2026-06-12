@@ -1012,6 +1012,169 @@ describe('InitiativeTrackerPage', () => {
     });
   });
 
+  // ── Link / unlink a combatant to a monster stat block (VEG-328) ──────────────
+
+  describe('link monster to combatant', () => {
+    /** Hero is unlinked; Goblin A is linked. */
+    function linkableEncounter(over: Partial<Encounter> = {}) {
+      return makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Hero', initiative: 18, isNpc: false, monsterId: undefined }),
+          makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+        ],
+        ...over,
+      });
+    }
+
+    async function linkHero(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /link monster for hero/i }));
+      const dialog = within(await screen.findByRole('dialog'));
+      await user.type(dialog.getByLabelText(/search monsters/i), 'goblin');
+      await user.click(await dialog.findByTestId('link-result'));
+    }
+
+    it('offers Link only on unlinked rows and Unlink only on linked rows', async () => {
+      mockApiFetch.mockResolvedValue(linkableEncounter());
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByRole('button', { name: /link monster for hero/i })).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /link monster for goblin a/i })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /unlink monster from goblin a/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /unlink monster from hero/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('hides both affordances from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(linkableEncounter({ createdBy: 'user-1' }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /link monster/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /unlink monster/i })).not.toBeInTheDocument();
+    });
+
+    it('links the picked monster to the right combatant without touching its other fields', async () => {
+      routeAddFlow({ encounter: linkableEncounter({ version: 7 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await linkHero(user);
+
+      let patchBody: { combatants: Combatant[]; expectedVersion: number } | undefined;
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(call).toBeDefined();
+        patchBody = JSON.parse((call![1] as { body: string }).body);
+      });
+
+      expect(patchBody!.expectedVersion).toBe(7);
+      const hero = patchBody!.combatants.find(c => c.name === 'Hero')!;
+      // Reference-only linking: monsterId is set, the DM's customized row survives.
+      expect(hero.monsterId).toBe('monster-1');
+      expect(hero).toMatchObject({ name: 'Hero', initiative: 18, hp: 7, maxHp: 7, ac: 13 });
+      const goblin = patchBody!.combatants.find(c => c.name === 'Goblin A')!;
+      expect(goblin.monsterId).toBe('monster-1');
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('links the exact row when unlinked combatants share a name', async () => {
+      routeAddFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Trap', initiative: 15, hp: 10, monsterId: undefined }),
+            makeCombatant({ name: 'Trap', initiative: 5, hp: 99, monsterId: undefined }),
+          ],
+        }),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      // Link the second sorted row (initiative 5, hp 99).
+      await user.click(screen.getAllByRole('button', { name: /link monster for trap/i })[1]);
+      const dialog = within(await screen.findByRole('dialog'));
+      await user.type(dialog.getByLabelText(/search monsters/i), 'goblin');
+      await user.click(await dialog.findByTestId('link-result'));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      const body = JSON.parse((call![1] as { body: string }).body);
+      const [first, second] = body.combatants as Combatant[];
+      expect(first).toMatchObject({ hp: 10 });
+      expect(first.monsterId).toBeUndefined();
+      expect(second).toMatchObject({ hp: 99, monsterId: 'monster-1' });
+    });
+
+    it('refetches and warns on a 409, keeping the picker open for a retry', async () => {
+      routeAddFlow({
+        encounter: linkableEncounter({ version: 7 }),
+        onPatch: () =>
+          Promise.reject(
+            new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+              currentVersion: 9,
+            })
+          ),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await linkHero(user);
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+      expect(String(mockToastError.mock.calls.at(-1)?.[0] ?? '')).toMatch(/chang|refresh|again/i);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('unlinks a mislinked combatant, removing only its monsterId', async () => {
+      routeAddFlow({ encounter: linkableEncounter({ version: 7 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /unlink monster from goblin a/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      const body = JSON.parse((call![1] as { body: string }).body);
+      expect(body.expectedVersion).toBe(7);
+      const goblin = (body.combatants as Combatant[]).find(c => c.name === 'Goblin A')!;
+      expect(goblin).not.toHaveProperty('monsterId');
+      expect(goblin).toMatchObject({ initiative: 12, hp: 7, maxHp: 7, ac: 13 });
+    });
+
+    it('hides the Reroll control on a looted row that lost its linkage', async () => {
+      mockApiFetch.mockResolvedValue(
+        makeEncounter({
+          combatants: [makeCombatant({ name: 'Orphan', monsterId: undefined, loot: makeLoot() })],
+        })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      // The drop stays readable (row drop + encounter total), but there's no
+      // monster to reroll from.
+      expect(screen.getAllByText(/dagger/i).length).toBeGreaterThanOrEqual(1);
+      expect(
+        screen.queryByRole('button', { name: /reroll loot for orphan/i })
+      ).not.toBeInTheDocument();
+    });
+  });
+
   // ── Encounter loot: roll triggers, drops, total (VEG-301) ────────────────────
 
   describe('encounter loot', () => {
