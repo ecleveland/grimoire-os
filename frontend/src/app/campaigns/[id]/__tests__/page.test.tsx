@@ -352,6 +352,86 @@ describe('CampaignDetailPage', () => {
     expect(screen.queryByText(/^session /i)).not.toBeInTheDocument();
   });
 
+  describe('encounter delete (VEG-291)', () => {
+    async function openEncountersTab(
+      user: ReturnType<typeof userEvent.setup>,
+      campaign = makeCampaign(),
+      encounters = [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })]
+    ) {
+      mockApiFetch.mockResolvedValueOnce(campaign);
+      mockApiFetch.mockResolvedValueOnce(makeListResponse(encounters));
+      render(<CampaignDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^encounters$/i }));
+      await waitFor(() => expect(screen.getByText('Goblin Ambush')).toBeInTheDocument());
+    }
+
+    it('shows a delete button per encounter for the campaign owner', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      expect(screen.getByRole('button', { name: /delete goblin ambush/i })).toBeInTheDocument();
+    });
+
+    it('hides the delete button for non-owners', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user, makeCampaign({ ownerId: 'someone-else' }));
+      expect(
+        screen.queryByRole('button', { name: /delete goblin ambush/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('confirming sends DELETE with the right id, removes the row, and toasts success', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockResolvedValueOnce(undefined);
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/delete encounter/i);
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(screen.queryByText('Goblin Ambush')).not.toBeInTheDocument());
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/encounters/enc-a',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(mockToastSuccess).toHaveBeenCalledWith('Encounter deleted');
+    });
+
+    it('cancelling closes the dialog without calling DELETE and keeps the row', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      const callsBefore = mockApiFetch.mock.calls.length;
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(mockApiFetch.mock.calls.length).toBe(callsBefore);
+      expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
+    });
+
+    it('toasts the error message when DELETE rejects with an Error and keeps the row', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockRejectedValueOnce(new Error('not yours'));
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('not yours'));
+      expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
+    });
+
+    it('toasts a generic message when DELETE rejects with a non-Error', async () => {
+      const user = userEvent.setup();
+      await openEncountersTab(user);
+      mockApiFetch.mockRejectedValueOnce('boom');
+      await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith('Failed to delete encounter')
+      );
+      expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
+    });
+  });
+
   it('uses singular "player" wording when there is exactly one player', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ playerIds: ['only-one'] }));
     render(<CampaignDetailPage />);

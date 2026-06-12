@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import type {
   Campaign,
   NoteListItem,
@@ -44,6 +45,7 @@ export default function CampaignDetailPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
 
   const isOwner = campaign && user && campaign.ownerId === user.userId;
 
@@ -126,6 +128,22 @@ export default function CampaignDetailPage() {
       toast.success('Invite code revoked');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to revoke invite code');
+    }
+  };
+
+  const performDeleteEncounter = async () => {
+    if (!encounterToDelete) return;
+    try {
+      await apiFetch(`/encounters/${encounterToDelete.id}`, { method: 'DELETE' });
+      setEncounters(prev => prev.filter(e => e.id !== encounterToDelete.id));
+      setEncountersTotal(t => t - 1);
+      // Deleting the last row of a later page leaves it empty; step back to refetch.
+      if (encounters.length === 1 && encountersPage > 1) {
+        setEncountersPage(p => p - 1);
+      }
+      toast.success('Encounter deleted');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete encounter');
     }
   };
 
@@ -384,22 +402,32 @@ export default function CampaignDetailPage() {
             <>
               <div className="space-y-3">
                 {encounters.map(enc => (
-                  <Link
-                    key={enc.id}
-                    href={`/campaigns/${id}/encounters/${enc.id}`}
-                    className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
-                      <Badge variant={enc.isActive ? 'success' : 'neutral'}>
-                        {enc.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
-                      &middot; Round {enc.round}
-                    </p>
-                  </Link>
+                  <div key={enc.id} className="flex items-stretch gap-2">
+                    <Link
+                      href={`/campaigns/${id}/encounters/${enc.id}`}
+                      className="flex-1 block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium text-gray-900 dark:text-white">{enc.name}</h3>
+                        <Badge variant={enc.isActive ? 'success' : 'neutral'}>
+                          {enc.isActive ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        {enc.combatants.length} combatant{enc.combatants.length !== 1 ? 's' : ''}{' '}
+                        &middot; Round {enc.round}
+                      </p>
+                    </Link>
+                    {isOwner && (
+                      <button
+                        onClick={() => setEncounterToDelete(enc)}
+                        aria-label={`Delete ${enc.name}`}
+                        className="px-3 text-sm text-red-600 hover:text-red-700 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-red-400 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
               <Pagination
@@ -413,6 +441,18 @@ export default function CampaignDetailPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={encounterToDelete !== null}
+        onOpenChange={open => {
+          if (!open) setEncounterToDelete(null);
+        }}
+        title="Delete encounter?"
+        description={`Delete "${encounterToDelete?.name ?? ''}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={performDeleteEncounter}
+      />
     </div>
   );
 }
