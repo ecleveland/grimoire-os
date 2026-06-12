@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
 import { ApiError } from '@/lib/api';
@@ -626,6 +626,185 @@ describe('InitiativeTrackerPage', () => {
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1'));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+  });
+
+  // ── Add a manual / ad-hoc combatant (VEG-282) ────────────────────────────────
+
+  describe('add manual combatant', () => {
+    /** Opens the add-combatant modal and returns the dialog scope for queries. */
+    async function openAddCombatant(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /add combatant/i }));
+      return within(screen.getByRole('dialog'));
+    }
+
+    it('appends a manual combatant via a version-guarded PATCH, toasts, and closes the modal', async () => {
+      routeAddFlow({ encounter: makeEncounter({ version: 3 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+
+      await user.type(dialog.getByLabelText(/^name$/i), 'Animated Armor');
+      await user.clear(dialog.getByLabelText(/^initiative$/i));
+      await user.type(dialog.getByLabelText(/^initiative$/i), '12');
+      await user.clear(dialog.getByLabelText(/^hp$/i));
+      await user.type(dialog.getByLabelText(/^hp$/i), '33');
+      await user.clear(dialog.getByLabelText(/^max hp$/i));
+      await user.type(dialog.getByLabelText(/^max hp$/i), '33');
+      await user.clear(dialog.getByLabelText(/^ac$/i));
+      await user.type(dialog.getByLabelText(/^ac$/i), '18');
+      await user.type(dialog.getByLabelText(/notes/i), 'lair guardian');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+
+      let patchBody: { combatants: Combatant[]; expectedVersion: number } | undefined;
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(call).toBeDefined();
+        patchBody = JSON.parse((call![1] as { body: string }).body);
+      });
+
+      expect(patchBody!.expectedVersion).toBe(3);
+      // Existing combatants preserved; the manual combatant is appended with
+      // no monsterId (so it gets no click-to-view affordance).
+      expect(patchBody!.combatants).toHaveLength(4);
+      expect(patchBody!.combatants[3]).toEqual({
+        name: 'Animated Armor',
+        initiative: 12,
+        hp: 33,
+        maxHp: 33,
+        ac: 18,
+        isNpc: true,
+        notes: 'lair guardian',
+      });
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('auto-numbers a colliding name and omits blank notes from the body', async () => {
+      routeAddFlow({ encounter: makeEncounter() });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+
+      await user.type(dialog.getByLabelText(/^name$/i), 'Goblin A');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      const body = JSON.parse((call![1] as { body: string }).body);
+      const added = body.combatants[body.combatants.length - 1];
+      // "Goblin A" is already in the encounter — the new one numbers from 2.
+      expect(added.name).toBe('Goblin A 2');
+      // Dialog defaults flow through; blank notes never hit the wire.
+      expect(added).toEqual({
+        name: 'Goblin A 2',
+        initiative: 10,
+        hp: 10,
+        maxHp: 10,
+        ac: 10,
+        isNpc: true,
+      });
+    });
+
+    it('does not offer the add-combatant control to non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /add combatant/i })).not.toBeInTheDocument();
+    });
+
+    it('refetches and warns on a 409, keeping the modal open so the entry is not lost', async () => {
+      routeAddFlow({
+        encounter: makeEncounter({ version: 3 }),
+        onPatch: () =>
+          Promise.reject(
+            new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+              currentVersion: 9,
+            })
+          ),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+
+      await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+      expect(String(mockToastError.mock.calls.at(-1)?.[0] ?? '')).toMatch(/chang|refresh|again/i);
+      // Re-fetched (GET after the failed PATCH) rather than trusting local state.
+      const getCalls = mockApiFetch.mock.calls.filter(
+        ([p, o]) => p === '/encounters/enc-1' && !(o as { method?: string } | undefined)?.method
+      );
+      expect(getCalls.length).toBeGreaterThanOrEqual(2);
+      // The form stays open with the typed values for a retry against fresh state.
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(
+        (within(screen.getByRole('dialog')).getByLabelText(/^name$/i) as HTMLInputElement).value
+      ).toBe('Trap');
+    });
+
+    it('toasts the message when the add PATCH fails with an Error', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        onPatch: () => Promise.reject(new Error('nope')),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+      await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('nope'));
+    });
+
+    it('toasts a generic message when the add PATCH rejection is not an Error', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        onPatch: () => Promise.reject('string rejection'),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+      await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to add combatant'));
+    });
+
+    it('sends a single PATCH when confirm is clicked again mid-write', async () => {
+      let resolvePatch: ((v: unknown) => void) | undefined;
+      const encounter = makeEncounter();
+      routeAddFlow({
+        encounter,
+        onPatch: () => new Promise(res => (resolvePatch = res)),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+      await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
+      const confirm = dialog.getByRole('button', { name: /add combatant/i });
+      await user.click(confirm);
+      // The write lock disables confirm while the PATCH is in flight.
+      expect(confirm).toBeDisabled();
+      await user.click(confirm);
+      const patches = mockApiFetch.mock.calls.filter(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      expect(patches).toHaveLength(1);
+      resolvePatch!({ ...encounter, version: 2 });
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+    });
   });
 
   // ── Encounter loot: roll triggers, drops, total (VEG-301) ────────────────────

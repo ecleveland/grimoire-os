@@ -5,6 +5,7 @@ import {
   rollInitiative,
   nextCombatantNames,
   buildMonsterCombatants,
+  buildManualCombatant,
 } from '@/lib/encounter-combatants';
 
 function makeMonster(over: Partial<SrdMonster> = {}): SrdMonster {
@@ -136,5 +137,52 @@ describe('buildMonsterCombatants', () => {
   it('throws when the initiatives length does not match the quantity', () => {
     const m = makeMonster();
     expect(() => buildMonsterCombatants(m, { quantity: 3, initiatives: [1, 2] }, [])).toThrow();
+  });
+});
+
+describe('buildManualCombatant', () => {
+  const input = {
+    name: 'Animated Armor',
+    initiative: 12,
+    hp: 33,
+    maxHp: 33,
+    ac: 18,
+    isNpc: true,
+  };
+
+  it('builds a combatant from the form values with no monsterId', () => {
+    expect(buildManualCombatant(input, [])).toEqual({
+      name: 'Animated Armor',
+      initiative: 12,
+      hp: 33,
+      maxHp: 33,
+      ac: 18,
+      isNpc: true,
+    });
+  });
+
+  it('auto-numbers the name against existing combatants', () => {
+    expect(buildManualCombatant(input, ['Animated Armor', 'Hero']).name).toBe('Animated Armor 2');
+  });
+
+  it('trims the name before numbering', () => {
+    expect(buildManualCombatant({ ...input, name: '  Animated Armor ' }, []).name).toBe(
+      'Animated Armor'
+    );
+  });
+
+  it('includes trimmed notes when provided', () => {
+    expect(buildManualCombatant({ ...input, notes: ' lair hazard ' }, []).notes).toBe(
+      'lair hazard'
+    );
+  });
+
+  it('omits the notes key entirely when blank', () => {
+    expect(buildManualCombatant({ ...input, notes: '   ' }, [])).not.toHaveProperty('notes');
+    expect(buildManualCombatant(input, [])).not.toHaveProperty('notes');
+  });
+
+  it('passes isNpc false through for player-side combatants', () => {
+    expect(buildManualCombatant({ ...input, isNpc: false }, []).isNpc).toBe(false);
   });
 });

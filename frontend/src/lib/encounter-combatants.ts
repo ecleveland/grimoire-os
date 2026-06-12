@@ -37,6 +37,40 @@ export function nextCombatantNames(existingNames: string[], base: string, count:
   return names;
 }
 
+/** Form values for a hand-entered combatant (VEG-282) — no SRD monster behind it. */
+export interface ManualCombatantInput {
+  name: string;
+  initiative: number;
+  hp: number;
+  maxHp: number;
+  ac: number;
+  isNpc: boolean;
+  notes?: string;
+}
+
+/**
+ * Build a single ad-hoc combatant from form input (VEG-282): the name is
+ * trimmed and auto-numbered against `existingNames`, blank notes are omitted
+ * entirely, and no `monsterId` is set — manual combatants have no source stat
+ * block to re-open.
+ */
+export function buildManualCombatant(
+  input: ManualCombatantInput,
+  existingNames: string[]
+): Combatant {
+  const [name] = nextCombatantNames(existingNames, input.name.trim(), 1);
+  const notes = input.notes?.trim();
+  return {
+    name,
+    initiative: input.initiative,
+    hp: input.hp,
+    maxHp: input.maxHp,
+    ac: input.ac,
+    isNpc: input.isNpc,
+    ...(notes ? { notes } : {}),
+  };
+}
+
 export interface BuildCombatantsOptions {
   quantity: number;
   /** One initiative value per combatant; length must equal `quantity`. */

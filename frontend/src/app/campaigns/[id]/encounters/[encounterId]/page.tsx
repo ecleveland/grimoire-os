@@ -10,7 +10,9 @@ import Badge from '@/components/Badge';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
-import { buildMonsterCombatants } from '@/lib/encounter-combatants';
+import AddCombatantDialog from '@/components/AddCombatantDialog';
+import { buildManualCombatant, buildMonsterCombatants } from '@/lib/encounter-combatants';
+import type { ManualCombatantInput } from '@/lib/encounter-combatants';
 import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { aggregateCombatantLoot } from '@grimoire-os/shared';
@@ -117,6 +119,8 @@ export default function InitiativeTrackerPage() {
   // Encounter-wide roll replaces existing drops (backend re-rolls every
   // monster combatant) — confirm before doing that destructively.
   const [confirmBulkRoll, setConfirmBulkRoll] = useState(false);
+  // Manual add-combatant form (VEG-282).
+  const [addCombatantOpen, setAddCombatantOpen] = useState(false);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -329,6 +333,35 @@ export default function InitiativeTrackerPage() {
     } catch (err) {
       if (handleEncounterConflict(err)) return;
       toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
+    } finally {
+      endWrite();
+    }
+  };
+
+  // Append a hand-entered combatant (VEG-282). Same version-guarded PATCH and
+  // 409 recovery as the add-monster path; on conflict the dialog stays open so
+  // the typed entry survives the refetch and can be retried.
+  const addManualCombatant = async (input: ManualCombatantInput) => {
+    if (!encounter) return;
+    const combatant = buildManualCombatant(
+      input,
+      encounter.combatants.map(c => c.name)
+    );
+    beginWrite();
+    try {
+      const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          combatants: [...encounter.combatants, combatant],
+          expectedVersion: encounter.version,
+        }),
+      });
+      setEncounter(updated);
+      setAddCombatantOpen(false);
+      toast.success(`Added ${combatant.name} to the encounter`);
+    } catch (err) {
+      if (handleEncounterConflict(err)) return;
+      toast.error(err instanceof Error ? err.message : 'Failed to add combatant');
     } finally {
       endWrite();
     }
@@ -585,6 +618,18 @@ export default function InitiativeTrackerPage() {
       </div>
 
       {isController && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={() => setAddCombatantOpen(true)}
+            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+          >
+            Add combatant
+          </button>
+        </div>
+      )}
+
+      {isController && (
         <div className="mt-6 p-4 rounded-lg border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Encounter loot</h2>
@@ -633,6 +678,18 @@ export default function InitiativeTrackerPage() {
         confirmLabel="Roll all"
         onConfirm={() => rollLoot(encounter, undefined, 'Rolled loot for the encounter')}
       />
+
+      <Modal
+        open={addCombatantOpen}
+        onClose={() => setAddCombatantOpen(false)}
+        label="Add combatant"
+      >
+        <AddCombatantDialog
+          onConfirm={addManualCombatant}
+          onCancel={() => setAddCombatantOpen(false)}
+          submitting={writePending}
+        />
+      </Modal>
 
       <MonsterLookupPanel canAdd={!!isController} onAdd={addMonsterToEncounter} />
 
