@@ -19,32 +19,9 @@ import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
 import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
+import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS } from '@/lib/spell-constants';
 
 const LIMIT = 20;
-
-const SRD_CLASSES = [
-  'Bard',
-  'Cleric',
-  'Druid',
-  'Paladin',
-  'Ranger',
-  'Sorcerer',
-  'Warlock',
-  'Wizard',
-];
-
-const SPELL_SCHOOLS = [
-  'Abjuration',
-  'Conjuration',
-  'Divination',
-  'Enchantment',
-  'Evocation',
-  'Illusion',
-  'Necromancy',
-  'Transmutation',
-];
-
-const SPELL_LEVELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 const FEAT_CATEGORIES = ['Origin', 'General', 'Fighting Style', 'Epic Boon'];
 
@@ -401,6 +378,11 @@ function ResultCard({
               {hit.kind === 'feat' && hit.data.repeatable && (
                 <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">
                   Repeatable
+                </span>
+              )}
+              {hit.kind === 'spell' && hit.data.contentSource === 'homebrew' && (
+                <span className="ml-2 inline-block rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium align-middle">
+                  Homebrew
                 </span>
               )}
             </h2>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SrdSearchPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -330,6 +330,36 @@ describe('SrdSearchPage', () => {
       await waitFor(() => expect(screen.getByText('Fireball')).toBeInTheDocument());
       expect(screen.queryByText('Concentration')).not.toBeInTheDocument();
       expect(screen.queryByText('Ritual')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('homebrew spell badge (VEG-294)', () => {
+    const homebrewSpell: UnifiedSearchHit = {
+      kind: 'spell',
+      data: {
+        ...fireballSpell,
+        id: 'sp-hb',
+        name: 'Soul Bonfire',
+        contentSource: 'homebrew',
+        createdById: 'u1',
+        source: 'Homebrew',
+      },
+    };
+
+    it('shows the Homebrew badge on a homebrew spell hit', async () => {
+      mockApiFetch.mockResolvedValue(paginated([homebrewSpell]));
+      renderPage();
+
+      const heading = await screen.findByText('Soul Bonfire');
+      expect(within(heading.closest('h2')!).getByText('Homebrew')).toBeInTheDocument();
+    });
+
+    it('does not show the Homebrew badge on an SRD spell hit', async () => {
+      mockApiFetch.mockResolvedValue(paginated([fireball]));
+      renderPage();
+
+      const heading = await screen.findByText('Fireball');
+      expect(within(heading.closest('h2')!).queryByText('Homebrew')).not.toBeInTheDocument();
     });
   });
 

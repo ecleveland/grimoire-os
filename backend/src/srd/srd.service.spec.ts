@@ -108,10 +108,14 @@ describe('SrdService', () => {
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.spell.findMany).toHaveBeenCalledWith({
         where: {
-          ...GLOBAL_WHERE,
-          OR: [
-            { name: { contains: 'a', mode: 'insensitive' } },
-            { description: { contains: 'a', mode: 'insensitive' } },
+          AND: [
+            { ...GLOBAL_WHERE },
+            {
+              OR: [
+                { name: { contains: 'a', mode: 'insensitive' } },
+                { description: { contains: 'a', mode: 'insensitive' } },
+              ],
+            },
           ],
         },
         orderBy: { name: 'asc' },
@@ -179,6 +183,67 @@ describe('SrdService', () => {
         skip: 0,
         take: 20,
       });
+    });
+
+    // ── Owner-aware reads (VEG-294): authenticated callers also see their own homebrew ──
+
+    it('widens the where to the caller’s own homebrew when a userId is passed', async () => {
+      prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
+
+      await service.searchSpells({}, 'u1');
+
+      expect(prisma.spell.findMany).toHaveBeenCalledWith({
+        where: { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('keeps visibility and substring search independent for authed single-char queries', async () => {
+      prisma.spell.findMany.mockResolvedValue([]);
+      prisma.spell.count.mockResolvedValue(0);
+
+      await service.searchSpells({ q: 'a' }, 'u1');
+
+      expect(prisma.spell.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+            {
+              OR: [
+                { name: { contains: 'a', mode: 'insensitive' } },
+                { description: { contains: 'a', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('includes the caller’s homebrew in the fuzzy SQL path', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchSpells({ q: 'fire' }, 'u1');
+
+      const { dataQuery, countQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"createdById" =');
+      expect(dataQuery?.values).toContain('u1');
+      expect(countQuery?.sql).toContain('"createdById" =');
+      expect(countQuery?.values).toContain('u1');
+    });
+
+    it('keeps the fuzzy SQL pinned to the global catalog for anonymous callers', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchSpells({ q: 'fire' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).not.toContain('"createdById"');
     });
   });
 
@@ -737,6 +802,18 @@ describe('SrdService', () => {
       expect(prisma.spell.findFirst).toHaveBeenCalledWith({ where: { id: '1', ...GLOBAL_WHERE } });
       expect(result).toEqual(spell);
     });
+
+    it('also resolves the caller’s own homebrew when a userId is passed (VEG-294)', async () => {
+      const spell = { id: 'hb1', name: 'Arcane Burst', contentSource: 'homebrew' };
+      prisma.spell.findFirst.mockResolvedValue(spell);
+
+      const result = await service.findSpell('hb1', 'u1');
+
+      expect(prisma.spell.findFirst).toHaveBeenCalledWith({
+        where: { id: 'hb1', OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+      });
+      expect(result).toEqual(spell);
+    });
   });
 
   describe('findMonster', () => {
@@ -1124,6 +1201,30 @@ describe('SrdService', () => {
       // Both content sources (spell + feat) contribute the srd/shared params.
       expect(idQuery?.values.filter(v => v === 'srd').length).toBe(2);
       expect(idQuery?.values.filter(v => v === 'shared').length).toBe(2);
+    });
+
+    // ── Owner-aware spells (VEG-294): the caller’s homebrew spells surface in unified search ──
+
+    it('widens the spell source to the caller’s homebrew when a userId is passed', async () => {
+      await service.search({ types: ['spell'] }, 'u1');
+      const { idQuery, countQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"createdById" =');
+      expect(idQuery?.values).toContain('u1');
+      expect(countQuery?.sql).toContain('"createdById" =');
+      expect(countQuery?.values).toContain('u1');
+    });
+
+    it('keeps the feat source pinned to the global catalog even with a userId', async () => {
+      await service.search({ types: ['feat'] }, 'u1');
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).not.toContain('"createdById"');
+      expect(idQuery?.values).not.toContain('u1');
+    });
+
+    it('keeps the spell source pinned to the global catalog for anonymous callers', async () => {
+      await service.search({ types: ['spell'] });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).not.toContain('"createdById"');
     });
 
     it('applies spell sub-filters (class via ANY, level, school)', async () => {

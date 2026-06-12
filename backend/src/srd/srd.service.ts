@@ -153,21 +153,32 @@ export class SrdService {
 
   // ── Spells ──────────────────────────────────────────
 
-  async searchSpells(dto: QuerySpellsDto) {
+  // Spell reads take an optional userId (VEG-294): authenticated callers see
+  // the global catalog plus their own homebrew; anonymous callers see only the
+  // catalog. The visibility fragment can itself be an OR, so a free-text query
+  // joins it under AND instead of clobbering it.
+  async searchSpells(dto: QuerySpellsDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
 
     if (shouldUseFuzzy(dto.q)) {
-      return this.fuzzySearchSpells(dto, dto.q, page, limit);
+      return this.fuzzySearchSpells(dto, dto.q, page, limit, userId);
     }
 
-    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
-    if (dto.q) {
-      where.OR = [
-        { name: { contains: dto.q, mode: 'insensitive' } },
-        { description: { contains: dto.q, mode: 'insensitive' } },
-      ];
-    }
+    const visible = this.contentAccess.visibleTo(userId);
+    const where: Record<string, unknown> = dto.q
+      ? {
+          AND: [
+            { ...visible },
+            {
+              OR: [
+                { name: { contains: dto.q, mode: 'insensitive' } },
+                { description: { contains: dto.q, mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }
+      : { ...visible };
     if (dto.class) where.classes = { has: dto.class };
     if (dto.level !== undefined) where.level = dto.level;
     if (dto.school) where.school = dto.school;
@@ -185,8 +196,17 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
-  private async fuzzySearchSpells(dto: QuerySpellsDto, q: string, page: number, limit: number) {
-    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL, buildFuzzyMatchSql(q, SPELL_FUZZY_THRESHOLD)];
+  private async fuzzySearchSpells(
+    dto: QuerySpellsDto,
+    q: string,
+    page: number,
+    limit: number,
+    userId?: string
+  ) {
+    const conds: Prisma.Sql[] = [
+      visibleSourceSql(userId),
+      buildFuzzyMatchSql(q, SPELL_FUZZY_THRESHOLD),
+    ];
     if (dto.class) conds.push(Prisma.sql`${dto.class} = ANY("classes")`);
     if (dto.level !== undefined) conds.push(Prisma.sql`"level" = ${dto.level}`);
     if (dto.school) conds.push(Prisma.sql`"school" = ${dto.school}`);
@@ -207,8 +227,10 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
-  async findSpell(id: string) {
-    return this.prisma.spell.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
+  async findSpell(id: string, userId?: string) {
+    return this.prisma.spell.findFirst({
+      where: { id, ...this.contentAccess.visibleTo(userId) },
+    });
   }
 
   // ── Monsters ────────────────────────────────────────
@@ -724,13 +746,16 @@ export class SrdService {
   //   3) Sum-of-counts query for the grand total.
   //   4) Hydrate full payloads by primary key per source.
 
-  async search(dto: QuerySearchDto) {
+  // Takes an optional userId (VEG-294): the spell source widens to the
+  // caller's own homebrew. Feats and features stay pinned to the global
+  // catalog until their own homebrew tickets land.
+  async search(dto: QuerySearchDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
     const offset = (page - 1) * limit;
     const types: SearchKind[] = dto.types?.length ? dto.types : ['spell', 'feat', 'feature'];
 
-    const sources = this.buildUnifiedSources(dto, types);
+    const sources = this.buildUnifiedSources(dto, types, userId);
     if (sources.length === 0) {
       return buildPaginatedResponse<UnifiedSearchHit>([], 0, page, limit);
     }
@@ -762,13 +787,17 @@ export class SrdService {
     return buildPaginatedResponse<UnifiedSearchHit>(data, total, page, limit);
   }
 
-  private buildUnifiedSources(dto: QuerySearchDto, types: SearchKind[]): UnifiedSource[] {
+  private buildUnifiedSources(
+    dto: QuerySearchDto,
+    types: SearchKind[],
+    userId?: string
+  ): UnifiedSource[] {
     const sources: UnifiedSource[] = [];
     if (types.includes('spell')) {
       sources.push({
         tag: 'spell',
         table: Prisma.sql`"spells"`,
-        whereSql: this.buildSpellWhereSql(dto),
+        whereSql: this.buildSpellWhereSql(dto, userId),
       });
     }
     if (types.includes('feat')) {
@@ -796,8 +825,8 @@ export class SrdService {
     return Prisma.sql`("name" ILIKE ${like} OR "description" ILIKE ${like})`;
   }
 
-  private buildSpellWhereSql(dto: QuerySearchDto): Prisma.Sql {
-    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL];
+  private buildSpellWhereSql(dto: QuerySearchDto, userId?: string): Prisma.Sql {
+    const conds: Prisma.Sql[] = [visibleSourceSql(userId)];
     if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
     if (dto.class) conds.push(Prisma.sql`${dto.class} = ANY("classes")`);
     if (dto.level !== undefined) conds.push(Prisma.sql`"level" = ${dto.level}`);

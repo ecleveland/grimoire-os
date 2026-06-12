@@ -11,8 +11,6 @@ describe('SrdController', () => {
 
   beforeEach(async () => {
     service = {
-      searchSpells: jest.fn(),
-      findSpell: jest.fn(),
       searchMonsters: jest.fn(),
       findMonster: jest.fn(),
       searchItems: jest.fn(),
@@ -38,7 +36,6 @@ describe('SrdController', () => {
       findAllRules: jest.fn(),
       findRulesByCategory: jest.fn(),
       searchFeatures: jest.fn(),
-      search: jest.fn(),
     };
 
     printableCardsService = { hydrate: jest.fn() };
@@ -55,32 +52,7 @@ describe('SrdController', () => {
     controller = module.get<SrdController>(SrdController);
   });
 
-  // ── Spells ──────────────────────────────────────────
-
-  describe('searchSpells', () => {
-    it('delegates to service with query', async () => {
-      const query = { q: 'fire' };
-      service.searchSpells.mockResolvedValue({ data: [], total: 0 });
-
-      const result = await controller.searchSpells(query as any);
-
-      expect(service.searchSpells).toHaveBeenCalledWith(query);
-      expect(result).toEqual({ data: [], total: 0 });
-    });
-  });
-
-  describe('findSpell', () => {
-    it('delegates to service with id', async () => {
-      const spell = { id: '1', name: 'Fireball' };
-      service.findSpell.mockResolvedValue(spell);
-
-      const result = await controller.findSpell('1');
-
-      expect(service.findSpell).toHaveBeenCalledWith('1');
-      expect(result).toEqual(spell);
-    });
-  });
-
+  // Spell routes moved to SpellsController (VEG-294) — see spells.controller.spec.ts.
   // Monster routes moved to MonstersController (VEG-293) — see monsters.controller.spec.ts.
 
   // ── Items ───────────────────────────────────────────
@@ -375,17 +347,7 @@ describe('SrdController', () => {
     });
   });
 
-  describe('search (unified)', () => {
-    it('delegates to service.search with query', async () => {
-      const query = { q: 'fire', types: ['spell', 'feature'] as ('spell' | 'feature')[] };
-      service.search.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
-
-      const result = await controller.search(query as any);
-
-      expect(service.search).toHaveBeenCalledWith(query);
-      expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
-    });
-  });
+  // The unified search route moved to SearchController (VEG-294) — see search.controller.spec.ts.
 
   describe('hydrateCards (POST /srd/cards)', () => {
     const body = {
