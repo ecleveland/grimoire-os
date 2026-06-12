@@ -112,6 +112,11 @@ test.describe('Custom monsters (VEG-293)', () => {
     // monster id in their print tray (shared device, stale tray).
     await registerAndLogin(page, 'brew-b', 'E2E Homebrew Stranger');
     await page.goto('/srd');
+    // Wait for PrintTrayProvider's mount cycle (hydrate then persist '[]') to
+    // settle before seeding the tray: a setItem inside that window is
+    // overwritten by the provider persisting its initial empty state, which
+    // made this test flaky under parallel load.
+    await page.waitForFunction(() => localStorage.getItem('print-tray') !== null);
     await page.evaluate(
       ([id]) => localStorage.setItem('print-tray', JSON.stringify([{ type: 'monster', id }])),
       [monsterId]

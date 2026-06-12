@@ -141,6 +141,50 @@ describe('MonsterListPage', () => {
     });
   });
 
+  describe('filter pagination reset', () => {
+    async function goToPage2(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByText('Goblin');
+      await user.click(screen.getByTestId('pagination'));
+      await waitFor(() => {
+        const last = String(mockApiFetch.mock.calls.at(-1)?.[0]);
+        expect(new URLSearchParams(last.split('?')[1]).get('page')).toBe('2');
+      });
+      mockApiFetch.mockClear();
+    }
+
+    it('issues exactly one fetch, with page=1, when a filter changes from page 2', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await goToPage2(user);
+
+      await user.selectOptions(screen.getByLabelText('Type'), 'Dragon');
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      // The page reset and the filter change must land in the same commit —
+      // the buggy effect-based reset issued a first fetch still on page=2.
+      const params = new URLSearchParams(String(mockApiFetch.mock.calls[0][0]).split('?')[1]);
+      expect(params.get('page')).toBe('1');
+      expect(params.get('type')).toBe('Dragon');
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('issues exactly one fetch, with page=1, when the debounced search commits from page 2', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await goToPage2(user);
+
+      fireEvent.change(screen.getByPlaceholderText('Search monsters...'), {
+        target: { value: 'gob' },
+      });
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      const params = new URLSearchParams(String(mockApiFetch.mock.calls[0][0]).split('?')[1]);
+      expect(params.get('page')).toBe('1');
+      expect(params.get('q')).toBe('gob');
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('focus preservation across debounced refetch', () => {
     afterEach(() => {
       vi.useRealTimers();

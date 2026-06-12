@@ -15,6 +15,11 @@ const categories = [
     description: 'Find monsters by type, challenge rating, and abilities.',
   },
   {
+    href: '/srd/spells',
+    title: 'Spells',
+    description: 'Browse spells by level, school, and class — including your homebrew.',
+  },
+  {
     href: '/srd/items',
     title: 'Items',
     description: 'Search weapons, armor, adventuring gear, and more.',

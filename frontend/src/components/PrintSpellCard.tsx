@@ -1,5 +1,6 @@
 import type { PrintableSpellCard as PrintableSpellCardModel } from '@grimoire-os/shared';
 import PrintCard from './PrintCard';
+import { levelLabel } from '@/lib/spell-constants';
 
 const CASTING_LINE = [
   { key: 'castingTime', label: 'Casting Time' },
@@ -14,10 +15,8 @@ const CASTING_LINE = [
  * long spell cannot overflow the fixed footprint.
  */
 export default function PrintSpellCard({ card }: { card: PrintableSpellCardModel }) {
-  const levelLabel = card.level === 0 ? 'Cantrip' : `Level ${card.level}`;
-
   return (
-    <PrintCard name={card.name} tag={`${levelLabel} · ${card.school}`}>
+    <PrintCard name={card.name} tag={`${levelLabel(card.level)} · ${card.school}`}>
       <div className="flex flex-col gap-1 text-[9px] leading-snug">
         <div className="grid grid-cols-4 gap-1">
           {CASTING_LINE.map(field => (

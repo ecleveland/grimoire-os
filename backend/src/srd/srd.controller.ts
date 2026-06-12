@@ -15,10 +15,8 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
-import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
 import { QueryFeaturesDto } from './dto/query-features.dto';
-import { QuerySearchDto } from './dto/query-search.dto';
 import { HydratePrintCardsDto } from './dto/hydrate-cards.dto';
 
 @ApiTags('SRD')
@@ -30,23 +28,10 @@ export class SrdController {
     private readonly printableCardsService: PrintableCardsService
   ) {}
 
-  // ── Spells ──────────────────────────────────────────
-
-  @Get('spells')
-  @ApiOperation({ summary: 'Search SRD spells' })
-  searchSpells(@Query() query: QuerySpellsDto) {
-    return this.srdService.searchSpells(query);
-  }
-
-  @Get('spells/:id')
-  @ApiOperation({ summary: 'Get spell by ID' })
-  findSpell(@Param('id') id: string) {
-    return this.srdService.findSpell(id);
-  }
-
-  // Monster routes live in MonstersController: their responses vary per user
-  // (caller's homebrew included, VEG-293), so they must stay off this
-  // controller's URL-keyed CacheInterceptor.
+  // Spell routes live in SpellsController (VEG-294) and monster routes in
+  // MonstersController (VEG-293): their responses vary per user (caller's
+  // homebrew included), so they must stay off this controller's URL-keyed
+  // CacheInterceptor.
 
   // ── Items ───────────────────────────────────────────
 
@@ -212,15 +197,9 @@ export class SrdController {
     return this.srdService.searchFeatures(query);
   }
 
-  // ── Unified search (spells + feats + features) ──────
-
-  @Get('search')
-  @ApiOperation({
-    summary: 'Unified search across spells, feats, and features',
-  })
-  search(@Query() query: QuerySearchDto) {
-    return this.srdService.search(query);
-  }
+  // The unified search route lives in SearchController (VEG-294): the caller's
+  // homebrew spells ride along, so it must stay off this controller's
+  // URL-keyed CacheInterceptor.
 
   // ── Printable cards batch hydrate (VEG-263) ─────────
 

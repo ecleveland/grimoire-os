@@ -1,13 +1,10 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { Monster, Prisma } from '@prisma/client';
-import type { ContentSource } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContentAccessService, ContentActor } from './content-access.service';
+import { HOMEBREW_SOURCE_LABEL, mapWriteError } from './homebrew-write.helpers';
 import { CreateMonsterDto } from './dto/create-monster.dto';
 import { UpdateMonsterDto } from './dto/update-monster.dto';
-
-/** Display label stored in the legacy `source` column for user-authored rows. */
-const HOMEBREW_SOURCE_LABEL = 'Homebrew';
 
 /** Monster columns stored as Json — plain null must become Prisma.DbNull. */
 const JSON_COLUMNS = [
@@ -18,31 +15,6 @@ const JSON_COLUMNS = [
   'reactions',
   'legendaryActions',
 ] as const;
-
-function isPrismaError(err: unknown, code: string): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
-}
-
-/**
- * Map the write-path Prisma errors to HTTP semantics: a duplicate name (P2002,
- * per-owner for homebrew / global for shared — see the partial unique indexes)
- * becomes 409 with tier-appropriate copy, and a row that vanished between
- * authorize and write (P2025 race) becomes the same 404 it would have been a
- * moment earlier. Everything else rethrows.
- */
-function mapWriteError(err: unknown, contentSource: ContentSource): never {
-  if (isPrismaError(err, 'P2002')) {
-    throw new ConflictException(
-      contentSource === 'shared'
-        ? 'A shared monster with this name already exists'
-        : 'You already have a monster with this name'
-    );
-  }
-  if (isPrismaError(err, 'P2025')) {
-    throw new NotFoundException('Monster not found');
-  }
-  throw err;
-}
 
 /**
  * CRUD for user-authored (homebrew) monsters — the first per-type consumer of
@@ -73,7 +45,7 @@ export class HomebrewMonstersService {
         } as Prisma.MonsterUncheckedCreateInput,
       });
     } catch (err) {
-      mapWriteError(err, 'homebrew');
+      mapWriteError(err, 'homebrew', 'monster');
     }
   }
 
@@ -86,7 +58,7 @@ export class HomebrewMonstersService {
         data: this.toColumnData(dto) as Prisma.MonsterUpdateInput,
       });
     } catch (err) {
-      mapWriteError(err, row.contentSource);
+      mapWriteError(err, row.contentSource, 'monster');
     }
   }
 
@@ -95,7 +67,7 @@ export class HomebrewMonstersService {
     try {
       await this.prisma.monster.delete({ where: { id } });
     } catch (err) {
-      mapWriteError(err, row.contentSource);
+      mapWriteError(err, row.contentSource, 'monster');
     }
   }
 
