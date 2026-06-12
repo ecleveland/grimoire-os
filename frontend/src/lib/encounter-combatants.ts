@@ -52,7 +52,9 @@ export interface ManualCombatantInput {
  * Build a single ad-hoc combatant from form input (VEG-282): the name is
  * trimmed and auto-numbered against `existingNames`, blank notes are omitted
  * entirely, and no `monsterId` is set — manual combatants have no source stat
- * block to re-open.
+ * block to re-open. HP is clamped to [0, maxHp] (the same invariant
+ * commitCombatantHp enforces on edits) so a combatant can't start above its
+ * maximum or below zero.
  */
 export function buildManualCombatant(
   input: ManualCombatantInput,
@@ -60,11 +62,12 @@ export function buildManualCombatant(
 ): Combatant {
   const [name] = nextCombatantNames(existingNames, input.name.trim(), 1);
   const notes = input.notes?.trim();
+  const maxHp = Math.max(0, input.maxHp);
   return {
     name,
     initiative: input.initiative,
-    hp: input.hp,
-    maxHp: input.maxHp,
+    hp: Math.max(0, Math.min(input.hp, maxHp)),
+    maxHp,
     ac: input.ac,
     isNpc: input.isNpc,
     ...(notes ? { notes } : {}),

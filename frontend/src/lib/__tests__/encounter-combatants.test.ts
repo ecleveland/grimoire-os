@@ -185,4 +185,20 @@ describe('buildManualCombatant', () => {
   it('passes isNpc false through for player-side combatants', () => {
     expect(buildManualCombatant({ ...input, isNpc: false }, []).isNpc).toBe(false);
   });
+
+  it('clamps hp to maxHp so a combatant can never start above its maximum', () => {
+    const c = buildManualCombatant({ ...input, hp: 50, maxHp: 10 }, []);
+    expect(c.hp).toBe(10);
+    expect(c.maxHp).toBe(10);
+  });
+
+  it('clamps negative hp to 0', () => {
+    expect(buildManualCombatant({ ...input, hp: -5, maxHp: 10 }, []).hp).toBe(0);
+  });
+
+  it('clamps negative maxHp to 0, dragging hp with it', () => {
+    const c = buildManualCombatant({ ...input, hp: 5, maxHp: -3 }, []);
+    expect(c.maxHp).toBe(0);
+    expect(c.hp).toBe(0);
+  });
 });
