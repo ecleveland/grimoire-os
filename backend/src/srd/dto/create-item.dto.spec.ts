@@ -75,6 +75,7 @@ describe('CreateItemDto (through the production ValidationPipe)', () => {
     ['non-integer strengthRequirement', { strengthRequirement: 13.5 }],
     ['non-string properties entry', { properties: [42] }],
     ['non-array properties', { properties: 'Finesse' }],
+    ['oversized properties array', { properties: Array.from({ length: 51 }, (_, i) => `P${i}`) }],
     ['non-boolean isMagic', { isMagic: 'yes' }],
   ])('rejects %s', async (_label, over) => {
     await expect(pipe.transform(validBody(over), createMeta)).rejects.toBeInstanceOf(

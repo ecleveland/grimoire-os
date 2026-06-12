@@ -109,10 +109,11 @@ test.describe('SRD print golden path (VEG-269)', () => {
     await expect(page.getByRole('link', { name: 'Print (1)' })).toBeVisible();
 
     // 2. Spell, from the unified search page narrowed to spells only. Disabling
-    // Feats and Features leaves every result a spell, so the first add-button
-    // is deterministically a spell regardless of seed ordering.
+    // Feats, Items, and Features leaves every result a spell, so the first
+    // add-button is deterministically a spell regardless of seed ordering.
     await page.goto('/srd/search');
     await page.getByRole('button', { name: 'Feats' }).click();
+    await page.getByRole('button', { name: 'Items' }).click();
     await page.getByRole('button', { name: 'Features' }).click();
     const addSpell = page.getByRole('button', { name: addToSetButton }).first();
     await expect(addSpell).toBeVisible({ timeout: 10_000 });

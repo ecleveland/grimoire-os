@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsInt,
@@ -88,6 +89,10 @@ export class CreateItemDto {
   @ApiPropertyOptional({ example: ['Finesse', 'Light'] })
   @IsOptional()
   @IsArray()
+  // Every scalar field is length-capped; cap the one collection too so the
+  // payload can't smuggle unbounded data past validation. SRD items top out
+  // at a handful of properties — 50 is generous.
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @MaxLength(200, { each: true })
   properties?: string[];

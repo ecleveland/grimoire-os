@@ -932,6 +932,10 @@ export class SrdService {
     return joinWhere(conds);
   }
 
+  // Ids that fail to hydrate (a row deleted between the id query and this
+  // hydrate query) are silently dropped; `total` is computed independently,
+  // so a page can briefly show one card fewer than the count. Accepted —
+  // the race self-heals on the next query.
   private async hydrateUnifiedHits(idRows: UnifiedIdRow[]): Promise<UnifiedSearchHit[]> {
     const idsBySource: Record<UnifiedSourceTag, string[]> = {
       spell: [],
