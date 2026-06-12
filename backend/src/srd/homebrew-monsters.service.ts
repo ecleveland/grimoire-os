@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Monster, Prisma } from '@prisma/client';
+import type { ContentSource } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContentAccessService, ContentActor } from './content-access.service';
 import { CreateMonsterDto } from './dto/create-monster.dto';
@@ -18,8 +19,29 @@ const JSON_COLUMNS = [
   'legendaryActions',
 ] as const;
 
-function isUniqueViolation(err: unknown): boolean {
-  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+function isPrismaError(err: unknown, code: string): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
+}
+
+/**
+ * Map the write-path Prisma errors to HTTP semantics: a duplicate name (P2002,
+ * per-owner for homebrew / global for shared — see the partial unique indexes)
+ * becomes 409 with tier-appropriate copy, and a row that vanished between
+ * authorize and write (P2025 race) becomes the same 404 it would have been a
+ * moment earlier. Everything else rethrows.
+ */
+function mapWriteError(err: unknown, contentSource: ContentSource): never {
+  if (isPrismaError(err, 'P2002')) {
+    throw new ConflictException(
+      contentSource === 'shared'
+        ? 'A shared monster with this name already exists'
+        : 'You already have a monster with this name'
+    );
+  }
+  if (isPrismaError(err, 'P2025')) {
+    throw new NotFoundException('Monster not found');
+  }
+  throw err;
 }
 
 /**
@@ -51,15 +73,12 @@ export class HomebrewMonstersService {
         } as Prisma.MonsterUncheckedCreateInput,
       });
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new ConflictException('You already have a monster with this name');
-      }
-      throw err;
+      mapWriteError(err, 'homebrew');
     }
   }
 
   async update(id: string, dto: UpdateMonsterDto, actor: ContentActor): Promise<Monster> {
-    await this.findWritableRow(id, actor);
+    const row = await this.findWritableRow(id, actor);
 
     try {
       return await this.prisma.monster.update({
@@ -67,16 +86,17 @@ export class HomebrewMonstersService {
         data: this.toColumnData(dto) as Prisma.MonsterUpdateInput,
       });
     } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new ConflictException('You already have a monster with this name');
-      }
-      throw err;
+      mapWriteError(err, row.contentSource);
     }
   }
 
   async remove(id: string, actor: ContentActor): Promise<void> {
-    await this.findWritableRow(id, actor);
-    await this.prisma.monster.delete({ where: { id } });
+    const row = await this.findWritableRow(id, actor);
+    try {
+      await this.prisma.monster.delete({ where: { id } });
+    } catch (err) {
+      mapWriteError(err, row.contentSource);
+    }
   }
 
   /**
@@ -112,6 +132,8 @@ export class HomebrewMonstersService {
     for (const key of JSON_COLUMNS) {
       if (key in data && data[key] === null) data[key] = Prisma.DbNull;
     }
+    // The read-side SrdMonster type requires `actions`; a null clear becomes [].
+    if ('actions' in data && data.actions === Prisma.DbNull) data.actions = [];
     return data;
   }
 }

@@ -32,7 +32,8 @@ export default function EditMonsterPage() {
         }
         setMonster(data);
       })
-      .catch(() => {
+      .catch(err => {
+        console.error('Failed to load monster:', err);
         setLoadError(true);
         toast.error('Failed to load monster');
       });
@@ -48,6 +49,7 @@ export default function EditMonsterPage() {
       toast.success('Monster updated');
       router.push('/srd/monsters');
     } catch (err) {
+      console.error('Failed to update monster:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to update monster');
       setSubmitting(false);
     }

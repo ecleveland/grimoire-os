@@ -11,3 +11,15 @@ export function abilityModifier(score: number): string {
   const mod = Math.floor((score - 10) / 2);
   return mod >= 0 ? `+${mod}` : `${mod}`;
 }
+
+/** Render a bonus with an explicit sign, e.g. 7 → "+7", -1 → "-1". */
+export function signed(n: number): string {
+  return n >= 0 ? `+${n}` : `${n}`;
+}
+
+/** Format a bonus map the way 5e stat blocks print it, e.g. "str +7, con +9". */
+export function formatBonuses(map: Record<string, number>): string {
+  return Object.entries(map)
+    .map(([k, v]) => `${k} ${signed(v)}`)
+    .join(', ');
+}

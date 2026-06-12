@@ -567,8 +567,18 @@ export default function InitiativeTrackerPage() {
     setViewMonster(null);
     setViewLoading(true);
     setViewOpen(true);
-    apiFetch<SrdMonster>(`/srd/monsters/${monsterId}`)
-      .then(setViewMonster)
+    apiFetch<SrdMonster | null>(`/srd/monsters/${monsterId}`)
+      .then(monster => {
+        // 200 null = outside the viewer's visibility (e.g. a player clicking
+        // the DM's homebrew-linked combatant, or a deleted monster) — close
+        // with a toast instead of sticking on "Loading monster…".
+        if (!monster) {
+          toast.error('This stat block is not available to you');
+          setViewOpen(false);
+          return;
+        }
+        setViewMonster(monster);
+      })
       .catch(() => {
         toast.error('Failed to load monster');
         setViewOpen(false);

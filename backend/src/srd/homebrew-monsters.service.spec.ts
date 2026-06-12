@@ -177,6 +177,41 @@ describe('HomebrewMonstersService', () => {
       expect(data.skills).toBe(Prisma.DbNull);
     });
 
+    it('coerces a null actions update to [] — the read-side type requires an array', async () => {
+      prisma.monster.findUnique.mockResolvedValue(homebrewRow);
+      prisma.monster.update.mockResolvedValue(homebrewRow);
+
+      await service.update('m1', { actions: null } as never, OWNER);
+
+      const data = prisma.monster.update.mock.calls[0][0].data;
+      expect(data.actions).toEqual([]);
+    });
+
+    it('maps a concurrent-delete P2025 on update to NotFound (not 500)', async () => {
+      prisma.monster.findUnique.mockResolvedValue(homebrewRow);
+      prisma.monster.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Record not found', {
+          code: 'P2025',
+          clientVersion: 'test',
+        })
+      );
+
+      await expect(service.update('m1', { name: 'X' }, OWNER)).rejects.toThrow(NotFoundException);
+    });
+
+    it('uses tier-aware conflict copy for shared-content collisions', async () => {
+      prisma.monster.findUnique.mockResolvedValue({
+        id: 'sh1',
+        contentSource: 'shared',
+        createdById: 'someone',
+      });
+      prisma.monster.update.mockRejectedValue(p2002());
+
+      await expect(service.update('sh1', { name: 'Dup' }, ADMIN)).rejects.toThrow(
+        'A shared monster with this name already exists'
+      );
+    });
+
     it('maps a duplicate-name P2002 on update to ConflictException', async () => {
       prisma.monster.findUnique.mockResolvedValue(homebrewRow);
       prisma.monster.update.mockRejectedValue(p2002());
@@ -218,6 +253,18 @@ describe('HomebrewMonstersService', () => {
       });
 
       await expect(service.remove('s1', OWNER)).rejects.toThrow(ForbiddenException);
+    });
+
+    it('maps a concurrent-delete P2025 to NotFound (not 500)', async () => {
+      prisma.monster.findUnique.mockResolvedValue(homebrewRow);
+      prisma.monster.delete.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('Record not found', {
+          code: 'P2025',
+          clientVersion: 'test',
+        })
+      );
+
+      await expect(service.remove('m1', OWNER)).rejects.toThrow(NotFoundException);
     });
   });
 });

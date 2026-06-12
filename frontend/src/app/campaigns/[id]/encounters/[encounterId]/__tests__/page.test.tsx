@@ -725,6 +725,31 @@ describe('InitiativeTrackerPage', () => {
       expect(within(statBlock).getByText('Homebrew')).toBeInTheDocument();
       expect(within(statBlock).getByText(/Regeneration/)).toBeInTheDocument();
     });
+
+    it('toasts and closes instead of sticking on "Loading monster…" when the monster is not visible to the viewer', async () => {
+      mockApiFetch.mockImplementation((path: string) => {
+        if (path === '/encounters/enc-1') {
+          return Promise.resolve(
+            makeEncounter({
+              combatants: [makeCombatant({ name: 'Cave Troll 1', monsterId: 'hb-1' })],
+            })
+          );
+        }
+        // A player clicking the DM's homebrew-linked combatant: the detail
+        // endpoint resolves 200 null because the row isn't theirs.
+        if (path === '/srd/monsters/hb-1') return Promise.resolve(null);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /^cave troll 1$/i }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+      expect(screen.queryByText(/loading monster/i)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('monster-stat-block')).not.toBeInTheDocument();
+    });
   });
 
   // ── Add party PCs as combatants (VEG-283) ────────────────────────────────────

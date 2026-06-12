@@ -25,6 +25,7 @@ export default function NewMonsterPage() {
       toast.success('Monster created');
       router.push('/srd/monsters');
     } catch (err) {
+      console.error('Failed to create monster:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to create monster');
       setSubmitting(false);
     }

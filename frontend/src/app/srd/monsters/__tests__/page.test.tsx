@@ -26,7 +26,11 @@ vi.mock('@/lib/auth-context', () => ({
 }));
 
 vi.mock('@/components/Pagination', () => ({
-  default: () => <div data-testid="pagination" />,
+  // Interactive stub: clicking it requests page 2, so tests can exercise the
+  // out-of-range page clamp without the real component.
+  default: ({ onPageChange }: { onPageChange: (p: number) => void }) => (
+    <button data-testid="pagination" onClick={() => onPageChange(2)} />
+  ),
 }));
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -611,6 +615,94 @@ describe('MonsterListPage', () => {
         expect(toast.error).toHaveBeenCalledWith('nope');
       });
       expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('offers no print toggle on homebrew monsters — the print pipeline only hydrates catalog content', async () => {
+      authAsOwner();
+      routeApi();
+      const user = userEvent.setup();
+      renderPage();
+
+      await screen.findByText('Cave Troll');
+      expect(
+        screen.queryByRole('button', { name: /add cave troll to print set/i })
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /add goblin to print set/i })).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /^Cave Troll/i }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).queryByRole('button', { name: /print set/i })).not.toBeInTheDocument();
+    });
+
+    it('toasts and closes instead of sticking on "Loading monster…" when the detail resolves to null', async () => {
+      authAsOwner();
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation((path: string) => {
+        // Deleted elsewhere / not visible: the endpoint resolves 200 null.
+        if (path.startsWith('/srd/monsters/')) return Promise.resolve(null);
+        return Promise.resolve(makeResponse([caveTroll]));
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Cave Troll/i }));
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalled();
+      });
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.queryByText(/loading monster/i)).not.toBeInTheDocument();
+    });
+
+    it('clamps back to an in-range page after deleting the last monster on the last page', async () => {
+      authAsOwner();
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation(
+        (path: string, options?: { method?: string }): Promise<unknown> => {
+          if (options?.method === 'DELETE') return Promise.resolve(undefined);
+          if (path.startsWith('/srd/monsters/hb-1')) return Promise.resolve(caveTroll);
+          const params = new URLSearchParams(String(path).split('?')[1]);
+          const page = Number(params.get('page'));
+          // Before delete: 21 rows, page 2 holds only the cave troll. After
+          // delete: 20 rows, lastPage shrinks to 1 and page 2 is empty.
+          const deleted = mockApiFetch.mock.calls.some(
+            ([, o]) => (o as { method?: string } | undefined)?.method === 'DELETE'
+          );
+          if (deleted) {
+            return Promise.resolve(
+              page > 1
+                ? { data: [], total: 20, page, lastPage: 1 }
+                : { data: [goblin], total: 20, page: 1, lastPage: 1 }
+            );
+          }
+          return Promise.resolve(
+            page > 1
+              ? { data: [caveTroll], total: 21, page, lastPage: 2 }
+              : { data: [goblin], total: 21, page: 1, lastPage: 2 }
+          );
+        }
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      // Navigate to page 2 (stubbed Pagination requests page 2 on click).
+      await user.click(await screen.findByTestId('pagination'));
+      await screen.findByText('Cave Troll');
+
+      await user.click(screen.getByRole('button', { name: /^Cave Troll/i }));
+      await user.click(await screen.findByRole('button', { name: /delete/i }));
+      await user.click(await screen.findByRole('button', { name: /^Delete monster$/i }));
+
+      // The list self-heals back to page 1 instead of stranding the user on an
+      // empty page 2.
+      await waitFor(() => {
+        const listCalls = mockApiFetch.mock.calls.filter(([p]) =>
+          String(p).startsWith('/srd/monsters?')
+        );
+        const lastList = String(listCalls.at(-1)?.[0]);
+        expect(new URLSearchParams(lastList.split('?')[1]).get('page')).toBe('1');
+      });
+      expect(await screen.findByText('Goblin')).toBeInTheDocument();
     });
   });
 });

@@ -1,4 +1,5 @@
 import type { MonsterAction, SrdMonster } from '@/lib/types';
+import { formatBonuses } from '@/lib/srd-format';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew monster form (VEG-293).
@@ -86,15 +87,8 @@ export type MonsterFormResult = { payload: MonsterPayload } | { error: string };
 
 const ABILITY_KEYS = ['str', 'dex', 'con', 'int', 'wis', 'cha'] as const;
 
-function signed(n: number): string {
-  return n >= 0 ? `+${n}` : `${n}`;
-}
-
 function formatBonusList(map: Record<string, number> | null | undefined): string {
-  if (!map) return '';
-  return Object.entries(map)
-    .map(([k, v]) => `${k} ${signed(v)}`)
-    .join(', ');
+  return map ? formatBonuses(map) : '';
 }
 
 /** "cold, fire" -> ['cold', 'fire']; blank entries dropped. */

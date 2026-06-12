@@ -14,26 +14,10 @@ import PrintToggle from '@/components/PrintToggle';
 import EncounterPicker from '@/components/EncounterPicker';
 import AddToEncounterDialog, { type AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { buildMonsterCombatants } from '@/lib/encounter-combatants';
+import { MONSTER_TYPES } from '@/lib/monster-constants';
 import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 20;
-
-const MONSTER_TYPES = [
-  'Aberration',
-  'Beast',
-  'Celestial',
-  'Construct',
-  'Dragon',
-  'Elemental',
-  'Fey',
-  'Fiend',
-  'Giant',
-  'Humanoid',
-  'Monstrosity',
-  'Ooze',
-  'Plant',
-  'Undead',
-];
 
 const CHALLENGE_RATINGS = [
   '0',
@@ -105,7 +89,10 @@ export default function MonsterListPage() {
       await apiFetch(`/srd/monsters/${detail.id}`, { method: 'DELETE' });
       toast.success(`Deleted ${detail.name}`);
       setDetailOpen(false);
-      // Refetch so the deleted monster drops out of the current page.
+      // Refetch so the deleted monster drops out of the current page, clamping
+      // in case the last row of the final page just went away.
+      const lastPageAfterDelete = Math.max(1, Math.ceil((total - 1) / LIMIT));
+      setPage(p => Math.min(p, lastPageAfterDelete));
       setRefreshKey(k => k + 1);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete monster');
@@ -118,8 +105,18 @@ export default function MonsterListPage() {
     setDetailOpen(true);
     setAddMode('none');
     setAddEncounterId('');
-    apiFetch<SrdMonster>(`/srd/monsters/${id}`)
-      .then(setDetail)
+    apiFetch<SrdMonster | null>(`/srd/monsters/${id}`)
+      .then(monster => {
+        // The endpoint resolves 200 null for ids outside the caller's
+        // visibility (deleted, or someone else's homebrew) — without this
+        // guard the modal sticks on "Loading monster…" forever.
+        if (!monster) {
+          toast.error('Monster not found', { id: 'load-monster' });
+          setDetailOpen(false);
+          return;
+        }
+        setDetail(monster);
+      })
       .catch(err => {
         console.error('Failed to load monster:', err);
         toast.error('Failed to load monster', { id: 'load-monster' });
@@ -200,6 +197,11 @@ export default function MonsterListPage() {
         setMonsters(res.data);
         setTotal(res.total);
         setLastPage(res.lastPage);
+        // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank
+        // the list, don't strand the user on an empty out-of-range page.
+        if (res.data.length === 0 && page > Math.max(1, res.lastPage)) {
+          setPage(Math.max(1, res.lastPage));
+        }
       })
       .catch(err => {
         console.error('Failed to load monsters:', err);
@@ -299,12 +301,17 @@ export default function MonsterListPage() {
                 </div>
               </div>
             </button>
-            <PrintToggle
-              type="monster"
-              id={m.id}
-              name={m.name}
-              className="absolute top-3 right-3"
-            />
+            {/* The print pipeline (POST /srd/cards) only hydrates catalog
+                content, so a homebrew toggle would silently drop from the
+                printed deck — hide it until printing is owner-aware. */}
+            {m.contentSource !== 'homebrew' && (
+              <PrintToggle
+                type="monster"
+                id={m.id}
+                name={m.name}
+                className="absolute top-3 right-3"
+              />
+            )}
           </div>
         ))}
       </div>
@@ -362,7 +369,9 @@ export default function MonsterListPage() {
                   Add to encounter
                 </button>
               )}
-              <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
+              {detail.contentSource !== 'homebrew' && (
+                <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
+              )}
             </div>
             <MonsterStatBlock monster={detail} />
           </div>

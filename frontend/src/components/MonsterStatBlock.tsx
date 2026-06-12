@@ -1,7 +1,7 @@
 'use client';
 
 import type { SrdMonster } from '@/lib/types';
-import { abilityModifier, formatCr } from '@/lib/srd-format';
+import { abilityModifier, formatBonuses, formatCr } from '@/lib/srd-format';
 
 interface Action {
   name: string;
@@ -16,16 +16,6 @@ const ABILITIES: Array<{ key: keyof SrdMonster; label: string }> = [
   { key: 'wis', label: 'WIS' },
   { key: 'cha', label: 'CHA' },
 ];
-
-function signed(n: number): string {
-  return n >= 0 ? `+${n}` : `${n}`;
-}
-
-function formatBonuses(map: Record<string, number>): string {
-  return Object.entries(map)
-    .map(([k, v]) => `${k} ${signed(v)}`)
-    .join(', ');
-}
 
 /** Renders a full SRD monster stat block as a modern app-styled card (VEG-257). */
 export default function MonsterStatBlock({ monster: m }: { monster: SrdMonster }) {

@@ -24,6 +24,7 @@ export class MonsterActionDto {
   @ApiProperty({ example: 'Melee Weapon Attack: +7 to hit, reach 5 ft., one target.' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(2000)
   description!: string;
 }
 
@@ -174,6 +175,7 @@ export class CreateMonsterDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(1_000_000)
   experiencePoints?: number;
 
   @ApiPropertyOptional({ type: [MonsterActionDto] })
@@ -207,5 +209,6 @@ export class CreateMonsterDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(10_000)
   description?: string;
 }

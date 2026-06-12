@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
+import { MONSTER_SIZES, MONSTER_TYPES } from '@/lib/monster-constants';
 import type { MonsterAction, SrdMonster } from '@/lib/types';
 import {
   emptyMonsterFormState,
@@ -11,25 +12,6 @@ import {
   type MonsterFormState,
   type MonsterPayload,
 } from '@/lib/monster-form';
-
-export const MONSTER_SIZES = ['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'];
-
-export const MONSTER_TYPES = [
-  'Aberration',
-  'Beast',
-  'Celestial',
-  'Construct',
-  'Dragon',
-  'Elemental',
-  'Fey',
-  'Fiend',
-  'Giant',
-  'Humanoid',
-  'Monstrosity',
-  'Ooze',
-  'Plant',
-  'Undead',
-];
 
 const ABILITY_FIELDS = [
   { key: 'str', label: 'STR' },
