@@ -28,10 +28,10 @@ export class SrdController {
     private readonly printableCardsService: PrintableCardsService
   ) {}
 
-  // Spell routes live in SpellsController (VEG-294) and monster routes in
-  // MonstersController (VEG-293): their responses vary per user (caller's
-  // homebrew included), so they must stay off this controller's URL-keyed
-  // CacheInterceptor.
+  // Spell routes live in SpellsController (VEG-294), monster routes in
+  // MonstersController (VEG-293), and feat routes in FeatsController
+  // (VEG-295): their responses vary per user (caller's homebrew included), so
+  // they must stay off this controller's URL-keyed CacheInterceptor.
 
   // ── Items ───────────────────────────────────────────
 
@@ -115,20 +115,6 @@ export class SrdController {
   @ApiOperation({ summary: 'Get background by ID' })
   findBackground(@Param('id') id: string) {
     return this.srdService.findBackground(id);
-  }
-
-  // ── Feats ───────────────────────────────────────────
-
-  @Get('feats')
-  @ApiOperation({ summary: 'List SRD feats' })
-  searchFeats(@Query('q') query?: string) {
-    return this.srdService.searchFeats(query);
-  }
-
-  @Get('feats/:id')
-  @ApiOperation({ summary: 'Get feat by ID' })
-  findFeat(@Param('id') id: string) {
-    return this.srdService.findFeat(id);
   }
 
   // ── Conditions ──────────────────────────────────────

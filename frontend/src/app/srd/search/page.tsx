@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
-import type { PaginatedResponse, SrdFeat } from '@/lib/types';
+import type { PaginatedResponse } from '@/lib/types';
 import {
   ALL_SEARCH_KINDS,
   KIND_LABEL,
@@ -19,12 +19,12 @@ import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
 import SpellDetail from '@/components/SpellDetail';
+import FeatDetail from '@/components/FeatDetail';
 import PrintToggle from '@/components/PrintToggle';
 import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
+import { FEAT_CATEGORIES } from '@/lib/feat-constants';
 
 const LIMIT = 20;
-
-const FEAT_CATEGORIES = ['Origin', 'General', 'Fighting Style', 'Epic Boon'];
 
 const FEATURE_PARENT_TYPES: {
   value: 'class' | 'subclass' | 'race' | 'background';
@@ -381,11 +381,12 @@ function ResultCard({
                   Repeatable
                 </span>
               )}
-              {hit.kind === 'spell' && hit.data.contentSource === 'homebrew' && (
-                <Badge variant="homebrew" className="ml-2 inline-block align-middle">
-                  Homebrew
-                </Badge>
-              )}
+              {(hit.kind === 'spell' || hit.kind === 'feat') &&
+                hit.data.contentSource === 'homebrew' && (
+                  <Badge variant="homebrew" className="ml-2 inline-block align-middle">
+                    Homebrew
+                  </Badge>
+                )}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
           </div>
@@ -427,28 +428,6 @@ function subtitleFor(hit: UnifiedSearchHit): string {
   // feature
   const lvl = hit.data.level !== undefined ? ` · Level ${hit.data.level}` : '';
   return `${capitalize(hit.data.parent.kind)}: ${hit.data.parent.name}${lvl}`;
-}
-
-function FeatDetail({ feat }: { feat: SrdFeat }) {
-  return (
-    <div className="space-y-3">
-      {feat.description && (
-        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
-          {feat.description}
-        </p>
-      )}
-      {feat.benefits && feat.benefits.length > 0 && (
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Benefits</h3>
-          <ul className="list-disc list-inside text-sm text-gray-600 dark:text-gray-400 mt-1 space-y-1">
-            {feat.benefits.map((b, i) => (
-              <li key={i}>{b}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
 }
 
 function FeatureDetail({ feature }: { feature: UnifiedFeatureData }) {

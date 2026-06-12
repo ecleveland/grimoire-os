@@ -25,8 +25,6 @@ describe('SrdController', () => {
       findSubrace: jest.fn(),
       searchBackgrounds: jest.fn(),
       findBackground: jest.fn(),
-      searchFeats: jest.fn(),
-      findFeat: jest.fn(),
       findAllConditions: jest.fn(),
       findCondition: jest.fn(),
       searchSkills: jest.fn(),
@@ -54,6 +52,7 @@ describe('SrdController', () => {
 
   // Spell routes moved to SpellsController (VEG-294) — see spells.controller.spec.ts.
   // Monster routes moved to MonstersController (VEG-293) — see monsters.controller.spec.ts.
+  // Feat routes moved to FeatsController (VEG-295) — see feats.controller.spec.ts.
 
   // ── Items ───────────────────────────────────────────
 
@@ -205,31 +204,6 @@ describe('SrdController', () => {
 
       expect(service.findBackground).toHaveBeenCalledWith('1');
       expect(result).toEqual(bg);
-    });
-  });
-
-  // ── Feats ───────────────────────────────────────────
-
-  describe('searchFeats', () => {
-    it('delegates to service with query', async () => {
-      service.searchFeats.mockResolvedValue([]);
-
-      const result = await controller.searchFeats('tough');
-
-      expect(service.searchFeats).toHaveBeenCalledWith('tough');
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('findFeat', () => {
-    it('delegates to service with id', async () => {
-      const feat = { id: '1', name: 'Tough' };
-      service.findFeat.mockResolvedValue(feat);
-
-      const result = await controller.findFeat('1');
-
-      expect(service.findFeat).toHaveBeenCalledWith('1');
-      expect(result).toEqual(feat);
     });
   });
 

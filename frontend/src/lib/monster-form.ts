@@ -1,5 +1,6 @@
 import type { MonsterAction, SrdMonster } from '@/lib/types';
 import { formatBonuses } from '@/lib/srd-format';
+import { optionalText } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew monster form (VEG-293).
@@ -200,10 +201,6 @@ function parseIntInRange(input: string, min: number, max: number): number | null
   const value = Number(input.trim());
   if (!Number.isInteger(value) || value < min || value > max) return null;
   return value;
-}
-
-function optionalText(input: string): string | null {
-  return input.trim() || null;
 }
 
 function validateActions(label: string, actions: MonsterAction[]): string | null {

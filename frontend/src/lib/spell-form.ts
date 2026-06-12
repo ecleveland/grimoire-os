@@ -1,4 +1,5 @@
 import type { SrdSpell } from '@/lib/types';
+import { optionalText } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew spell form (VEG-294).
@@ -55,10 +56,6 @@ export function parseCommaList(input: string): string[] {
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);
-}
-
-function optionalText(input: string): string | null {
-  return input.trim() || null;
 }
 
 export function emptySpellFormState(): SpellFormState {
