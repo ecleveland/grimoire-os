@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { PRINTABLE_CARD_BATCH_MAX } from '@grimoire-os/shared';
 import { PrintableCardsService } from './printable-cards.service';
 import { SrdService } from './srd.service';
+import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 
@@ -102,6 +103,7 @@ describe('PrintableCardsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PrintableCardsService,
+        ContentAccessService,
         prismaMockProvider(),
         { provide: SrdService, useValue: srdService },
       ],
@@ -501,8 +503,8 @@ describe('PrintableCardsService', () => {
     });
   });
 
-  describe('global-catalog scoping (VEG-311)', () => {
-    it('scopes monster/spell/item hydration to the global catalog (excludes homebrew)', async () => {
+  describe('visibility scoping (VEG-311 / VEG-331)', () => {
+    it('anonymous hydration stays pinned to the global catalog (excludes all homebrew)', async () => {
       await service.hydrate([
         { type: 'monster', ids: ['mon-1'] },
         { type: 'spell', ids: ['sp-1'] },
@@ -513,6 +515,27 @@ describe('PrintableCardsService', () => {
         expect(model.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
             where: expect.objectContaining({ contentSource: { in: ['srd', 'shared'] } }),
+          })
+        );
+      }
+    });
+
+    it('widens hydration to the caller’s own homebrew when a userId is passed', async () => {
+      await service.hydrate(
+        [
+          { type: 'monster', ids: ['mon-1'] },
+          { type: 'spell', ids: ['sp-1'] },
+          { type: 'item', ids: ['it-1'] },
+        ],
+        'u1'
+      );
+
+      for (const model of [prisma.monster, prisma.spell, prisma.item]) {
+        expect(model.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({
+              OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: 'u1' }],
+            }),
           })
         );
       }

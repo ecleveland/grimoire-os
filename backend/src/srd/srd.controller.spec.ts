@@ -388,20 +388,31 @@ describe('SrdController', () => {
   });
 
   describe('hydrateCards (POST /srd/cards)', () => {
-    it('delegates the selections to PrintableCardsService.hydrate', async () => {
-      const body = {
-        selections: [
-          { type: 'monster' as const, ids: ['mon-1'] },
-          { type: 'feature' as const, ids: ['feat-1'] },
-        ],
-      };
+    const body = {
+      selections: [
+        { type: 'monster' as const, ids: ['mon-1'] },
+        { type: 'feature' as const, ids: ['feat-1'] },
+      ],
+    };
+
+    it('passes the caller’s userId so their homebrew hydrates too (VEG-331)', async () => {
       const response = { groups: [] };
       printableCardsService.hydrate.mockResolvedValue(response);
 
-      const result = await controller.hydrateCards(body);
+      const result = await controller.hydrateCards(body, {
+        user: { userId: 'u1', username: 'dm', role: 'dungeon_master' },
+      } as never);
 
-      expect(printableCardsService.hydrate).toHaveBeenCalledWith(body.selections);
+      expect(printableCardsService.hydrate).toHaveBeenCalledWith(body.selections, 'u1');
       expect(result).toBe(response);
+    });
+
+    it('passes undefined userId for anonymous callers', async () => {
+      printableCardsService.hydrate.mockResolvedValue({ groups: [] });
+
+      await controller.hydrateCards(body, {} as never);
+
+      expect(printableCardsService.hydrate).toHaveBeenCalledWith(body.selections, undefined);
     });
   });
 });

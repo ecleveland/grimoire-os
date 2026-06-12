@@ -48,6 +48,13 @@ test.describe('Custom monsters (VEG-293)', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toBeHidden();
 
+    // ── Prints like catalog content (VEG-331) ──────────────────────────────
+    await page.getByRole('button', { name: `Add ${name} to print set` }).click();
+    await page.goto('/srd/print');
+    const printCard = page.getByTestId('print-card').filter({ hasText: name });
+    await expect(printCard.first()).toBeVisible({ timeout: 10_000 });
+    await expect(printCard.first().getByText('Shadow Bite')).toBeVisible();
+
     // ── Add it to an encounter from the tracker lookup ─────────────────────
     const { campaignId, encounterId } = await createEncounter(page, 'Brew Camp');
     await page.goto(`/campaigns/${campaignId}/encounters/${encounterId}`);
