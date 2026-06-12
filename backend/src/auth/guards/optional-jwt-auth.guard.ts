@@ -1,7 +1,7 @@
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
-import { cookieExtractor } from '../strategies/jwt.strategy';
+import { jwtTokenExtractor } from '../strategies/jwt.strategy';
 
 /**
  * JWT guard for routes that serve anonymous callers but widen to the caller's
@@ -23,9 +23,7 @@ export class OptionalJwtAuthGuard extends AuthGuard('jwt') {
   }
 }
 
-/** Mirrors the JwtStrategy extractors: auth cookie first, then bearer header. */
+/** Uses the strategy's own extractor chain, so presence detection can't drift from it. */
 function hasCredentials(req: Request): boolean {
-  if (cookieExtractor(req) !== null) return true;
-  const authorization = req.headers?.authorization;
-  return typeof authorization === 'string' && /^bearer /i.test(authorization);
+  return jwtTokenExtractor(req) !== null;
 }
