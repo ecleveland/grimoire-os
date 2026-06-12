@@ -7,8 +7,7 @@ import type { SrdMonster } from '@/lib/types';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import AddToEncounterDialog, { type AddToEncounterResult } from '@/components/AddToEncounterDialog';
-import { formatCr } from '@/lib/srd-format';
-import { useMonsterSearch } from '@/lib/use-monster-search';
+import MonsterSearchResults from '@/components/MonsterSearchResults';
 
 const LIMIT = 8;
 
@@ -27,7 +26,6 @@ interface Props {
  * unobtrusive below the tracker on mobile.
  */
 export default function MonsterLookupPanel({ canAdd = false, onAdd }: Props) {
-  const { searchInput, setSearchInput, query, results, total, loading } = useMonsterSearch(LIMIT);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<SrdMonster | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -70,59 +68,12 @@ export default function MonsterLookupPanel({ canAdd = false, onAdd }: Props) {
         Monster Lookup
       </summary>
 
-      <div className="px-4 pb-4 space-y-3">
-        <input
-          type="text"
-          placeholder="Search monsters..."
-          aria-label="Search monsters"
-          value={searchInput}
-          onChange={e => setSearchInput(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+      <div className="px-4 pb-4">
+        <MonsterSearchResults
+          limit={LIMIT}
+          onPick={m => openMonster(m.id)}
+          resultTestId="lookup-result"
         />
-
-        {!query ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Type to search the monster compendium.
-          </p>
-        ) : loading ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Searching…</p>
-        ) : results.length === 0 ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            No monsters found for &ldquo;{query}&rdquo;.
-          </p>
-        ) : (
-          <>
-            <ul className="space-y-1">
-              {results.map(m => (
-                <li key={m.id}>
-                  <button
-                    type="button"
-                    data-testid="lookup-result"
-                    onClick={() => openMonster(m.id)}
-                    className="w-full flex items-center justify-between gap-3 text-left px-3 py-2 rounded-md border border-gray-200 dark:border-gray-700 hover:border-indigo-300 dark:hover:border-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium text-gray-900 dark:text-white">
-                        {m.name}
-                      </span>
-                      <span className="block truncate text-xs text-gray-500 dark:text-gray-400">
-                        {m.size} {m.type}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs font-medium text-indigo-600 dark:text-indigo-400">
-                      CR {formatCr(m.challengeRating)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-            {total > results.length && (
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Showing {results.length} of {total}. Refine your search to narrow results.
-              </p>
-            )}
-          </>
-        )}
       </div>
 
       <Modal

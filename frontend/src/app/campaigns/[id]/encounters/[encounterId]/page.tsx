@@ -412,24 +412,40 @@ export default function InitiativeTrackerPage() {
     });
   };
 
-  // Link an unlinked row to a monster (VEG-328). Reference-only: just sets
-  // monsterId, never touching the DM's possibly-customized name/HP/AC. Row
-  // targeting goes through resolveCombatantRow so duplicate names can't link
-  // the wrong twin; a row removed while the picker was open bails out.
-  const linkMonsterToCombatant = async (monster: SrdMonster) => {
-    if (!encounter || !linkTarget || writePending) return;
+  // Apply `mutate` to one row, addressed by the shared name + sorted-row-index
+  // identity, and persist the result. The single home for the row-resolution
+  // rules of the link/unlink paths (VEG-328): 'missing' means the row is gone
+  // (duplicate-name ambiguity or removal), null means the write was skipped or
+  // failed (patchEncounter already toasted).
+  const mutateCombatantRow = async (
+    name: string,
+    rowIndex: number,
+    mutate: (c: Combatant) => Combatant
+  ): Promise<Encounter | 'missing' | null> => {
+    if (!encounter || writePending) return null;
     const sorted = sortByInitiative(encounter.combatants);
-    const index = resolveCombatantRow(sorted, linkTarget.name, linkTarget.index);
-    if (index === -1) {
+    const index = resolveCombatantRow(sorted, name, rowIndex);
+    if (index === -1) return 'missing';
+    sorted[index] = mutate(sorted[index]);
+    return patchEncounter({ combatants: sorted });
+  };
+
+  // Link an unlinked row to a monster (VEG-328). Reference-only: just sets
+  // monsterId, never touching the DM's possibly-customized name/HP/AC.
+  const linkMonsterToCombatant = async (monster: SrdMonster) => {
+    if (!linkTarget) return;
+    const result = await mutateCombatantRow(linkTarget.name, linkTarget.index, c => ({
+      ...c,
+      monsterId: monster.id,
+    }));
+    if (result === 'missing') {
       toast.error('That combatant is no longer in the encounter.');
       setLinkTarget(null);
       return;
     }
-    sorted[index] = { ...sorted[index], monsterId: monster.id };
-    const updated = await patchEncounter({ combatants: sorted });
     // On failure (incl. 409) the picker stays open so the DM can retry
     // against the refreshed encounter.
-    if (updated) {
+    if (result) {
       toast.success(`Linked ${linkTarget.name} to ${monster.name}`);
       setLinkTarget(null);
     }
@@ -439,15 +455,12 @@ export default function InitiativeTrackerPage() {
   // stays on the row (it already dropped); the Reroll control disappears with
   // the linkage.
   const unlinkCombatant = async (name: string, rowIndex: number) => {
-    if (!encounter || writePending) return;
-    const sorted = sortByInitiative(encounter.combatants);
-    const index = resolveCombatantRow(sorted, name, rowIndex);
-    if (index === -1) return;
-    const { monsterId: _unlinked, ...rest } = sorted[index];
-    void _unlinked;
-    sorted[index] = rest;
-    const updated = await patchEncounter({ combatants: sorted });
-    if (updated) toast.success(`Unlinked ${name}`);
+    const result = await mutateCombatantRow(name, rowIndex, c => {
+      const next = { ...c };
+      delete next.monsterId;
+      return next;
+    });
+    if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
   };
 
   const viewCombatantMonster = (monsterId: string) => {
