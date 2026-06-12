@@ -133,6 +133,11 @@ export default function InitiativeTrackerPage() {
   // Link-monster picker (VEG-328): which unlinked row is being linked. Keyed
   // by name + sorted-row index, the same identity scheme as the HP drafts.
   const [linkTarget, setLinkTarget] = useState<{ name: string; index: number } | null>(null);
+  // Remove-combatant confirm (VEG-284): which row is pending removal. Same
+  // name + sorted-row-index identity as the drafts and the link picker.
+  const [removeTarget, setRemoveTarget] = useState<{ name: string; index: number } | null>(null);
+  // Clear-all confirm (VEG-284).
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -463,6 +468,33 @@ export default function InitiativeTrackerPage() {
     if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
   };
 
+  // Remove one combatant (VEG-284). Persists the filtered array and, when the
+  // removal pushes currentTurn past the end of the list, re-clamps it in the
+  // same PATCH so the turn pointer can never address a missing row.
+  const removeCombatant = async (name: string, rowIndex: number) => {
+    if (!encounter || writePending) return;
+    const sorted = sortByInitiative(encounter.combatants);
+    const index = resolveCombatantRow(sorted, name, rowIndex);
+    if (index === -1) {
+      toast.error('That combatant is no longer in the encounter.');
+      return;
+    }
+    sorted.splice(index, 1);
+    const clampedTurn = Math.max(0, Math.min(encounter.currentTurn, sorted.length - 1));
+    const updated = await patchEncounter({
+      combatants: sorted,
+      ...(clampedTurn !== encounter.currentTurn && { currentTurn: clampedTurn }),
+    });
+    if (updated) toast.success(`Removed ${name}`);
+  };
+
+  // Reset the board (VEG-284): drop every combatant and rewind the tracker.
+  const clearAllCombatants = async () => {
+    if (!encounter || writePending) return;
+    const updated = await patchEncounter({ combatants: [], currentTurn: 0, round: 1 });
+    if (updated) toast.success('Cleared all combatants');
+  };
+
   const viewCombatantMonster = (monsterId: string) => {
     setViewMonster(null);
     setViewLoading(true);
@@ -584,40 +616,6 @@ export default function InitiativeTrackerPage() {
                     )}
                   </div>
                 </div>
-                {/* Link / unlink the stat-block reference (VEG-328). */}
-                {isController && !c.monsterId && (
-                  <button
-                    type="button"
-                    aria-label={`Link monster for ${c.name}`}
-                    onClick={() => setLinkTarget({ name: c.name, index: i })}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Link monster
-                  </button>
-                )}
-                {isController && c.monsterId && (
-                  <button
-                    type="button"
-                    aria-label={`Unlink monster from ${c.name}`}
-                    onClick={() => unlinkCombatant(c.name, i)}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Unlink
-                  </button>
-                )}
-                {isController && c.monsterId && !c.loot && (
-                  <button
-                    type="button"
-                    aria-label={`Roll loot for ${c.name}`}
-                    onClick={() => rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Roll loot
-                  </button>
-                )}
                 <div className="flex items-center gap-4 text-sm">
                   <div className="text-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">Init</div>
@@ -666,53 +664,104 @@ export default function InitiativeTrackerPage() {
                   )}
                 </div>
               </div>
-              {/* Damage / heal / temp HP controls (VEG-286). The raw HP input
-                  above stays as the advanced affordance for direct corrections;
-                  these are the table-friendly paths. */}
+              {/* Row management (left) + damage/heal/temp HP controls (right,
+                  VEG-286). The raw HP input above stays as the advanced
+                  affordance for direct corrections; these are the
+                  table-friendly paths. */}
               {isController &&
                 (() => {
                   const rowAmount = rowHoldsAmount(c, i) ? parseAmount(amountDraft!.value) : null;
                   const actionsDisabled = writePending || rowAmount === null;
                   return (
-                    <div className="mt-2 flex items-center justify-end gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="Amount"
-                        aria-label={`Damage or heal amount for ${c.name}`}
-                        value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
-                        onChange={e =>
-                          setAmountDraft({ name: c.name, index: i, value: e.target.value })
-                        }
-                        className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                      <button
-                        type="button"
-                        aria-label={`Damage ${c.name}`}
-                        onClick={() => applyHpAction('damage', c.name, i)}
-                        disabled={actionsDisabled}
-                        className={`${smallButtonBase} text-red-700 dark:text-red-400`}
-                      >
-                        Damage
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Heal ${c.name}`}
-                        onClick={() => applyHpAction('heal', c.name, i)}
-                        disabled={actionsDisabled}
-                        className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
-                      >
-                        Heal
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Grant temp HP to ${c.name}`}
-                        onClick={() => applyHpAction('temp', c.name, i)}
-                        disabled={actionsDisabled}
-                        className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
-                      >
-                        Temp HP
-                      </button>
+                    <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        {/* Link / unlink the stat-block reference (VEG-328). */}
+                        {!c.monsterId && (
+                          <button
+                            type="button"
+                            aria-label={`Link monster for ${c.name}`}
+                            onClick={() => setLinkTarget({ name: c.name, index: i })}
+                            disabled={writePending}
+                            className={lootButtonClass}
+                          >
+                            Link monster
+                          </button>
+                        )}
+                        {c.monsterId && (
+                          <button
+                            type="button"
+                            aria-label={`Unlink monster from ${c.name}`}
+                            onClick={() => unlinkCombatant(c.name, i)}
+                            disabled={writePending}
+                            className={lootButtonClass}
+                          >
+                            Unlink
+                          </button>
+                        )}
+                        {c.monsterId && !c.loot && (
+                          <button
+                            type="button"
+                            aria-label={`Roll loot for ${c.name}`}
+                            onClick={() =>
+                              rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)
+                            }
+                            disabled={writePending}
+                            className={lootButtonClass}
+                          >
+                            Roll loot
+                          </button>
+                        )}
+                        {/* Remove the row (VEG-284) — confirmed via dialog below. */}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${c.name}`}
+                          onClick={() => setRemoveTarget({ name: c.name, index: i })}
+                          disabled={writePending}
+                          className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Amount"
+                          aria-label={`Damage or heal amount for ${c.name}`}
+                          value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
+                          onChange={e =>
+                            setAmountDraft({ name: c.name, index: i, value: e.target.value })
+                          }
+                          className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Damage ${c.name}`}
+                          onClick={() => applyHpAction('damage', c.name, i)}
+                          disabled={actionsDisabled}
+                          className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                        >
+                          Damage
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Heal ${c.name}`}
+                          onClick={() => applyHpAction('heal', c.name, i)}
+                          disabled={actionsDisabled}
+                          className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
+                        >
+                          Heal
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Grant temp HP to ${c.name}`}
+                          onClick={() => applyHpAction('temp', c.name, i)}
+                          disabled={actionsDisabled}
+                          className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
+                        >
+                          Temp HP
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}
@@ -758,6 +807,16 @@ export default function InitiativeTrackerPage() {
           >
             Add party
           </button>
+          {encounter.combatants.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setConfirmClearAll(true)}
+              disabled={writePending}
+              className="ml-auto px-3 py-1.5 text-sm border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 
@@ -799,6 +858,28 @@ export default function InitiativeTrackerPage() {
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onOpenChange={open => {
+          if (!open) setRemoveTarget(null);
+        }}
+        title="Remove combatant?"
+        description={`Remove ${removeTarget?.name ?? ''} from the encounter? Their HP and any rolled loot are discarded.`}
+        confirmLabel="Remove"
+        onConfirm={() => {
+          if (removeTarget) removeCombatant(removeTarget.name, removeTarget.index);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmClearAll}
+        onOpenChange={setConfirmClearAll}
+        title="Clear all combatants?"
+        description="This removes every combatant from the tracker and resets it to round 1."
+        confirmLabel="Clear all"
+        onConfirm={clearAllCombatants}
+      />
 
       <ConfirmDialog
         open={confirmBulkRoll}
