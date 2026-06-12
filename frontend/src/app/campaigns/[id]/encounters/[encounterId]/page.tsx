@@ -616,52 +616,6 @@ export default function InitiativeTrackerPage() {
                     )}
                   </div>
                 </div>
-                {/* Link / unlink the stat-block reference (VEG-328). */}
-                {isController && !c.monsterId && (
-                  <button
-                    type="button"
-                    aria-label={`Link monster for ${c.name}`}
-                    onClick={() => setLinkTarget({ name: c.name, index: i })}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Link monster
-                  </button>
-                )}
-                {isController && c.monsterId && (
-                  <button
-                    type="button"
-                    aria-label={`Unlink monster from ${c.name}`}
-                    onClick={() => unlinkCombatant(c.name, i)}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Unlink
-                  </button>
-                )}
-                {isController && c.monsterId && !c.loot && (
-                  <button
-                    type="button"
-                    aria-label={`Roll loot for ${c.name}`}
-                    onClick={() => rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Roll loot
-                  </button>
-                )}
-                {/* Remove the row (VEG-284) — confirmed via dialog below. */}
-                {isController && (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${c.name}`}
-                    onClick={() => setRemoveTarget({ name: c.name, index: i })}
-                    disabled={writePending}
-                    className={`${smallButtonBase} text-red-700 dark:text-red-400`}
-                  >
-                    Remove
-                  </button>
-                )}
                 <div className="flex items-center gap-4 text-sm">
                   <div className="text-center">
                     <div className="text-xs text-gray-500 dark:text-gray-400">Init</div>
@@ -710,53 +664,104 @@ export default function InitiativeTrackerPage() {
                   )}
                 </div>
               </div>
-              {/* Damage / heal / temp HP controls (VEG-286). The raw HP input
-                  above stays as the advanced affordance for direct corrections;
-                  these are the table-friendly paths. */}
+              {/* Row management (left) + damage/heal/temp HP controls (right,
+                  VEG-286). The raw HP input above stays as the advanced
+                  affordance for direct corrections; these are the
+                  table-friendly paths. */}
               {isController &&
                 (() => {
                   const rowAmount = rowHoldsAmount(c, i) ? parseAmount(amountDraft!.value) : null;
                   const actionsDisabled = writePending || rowAmount === null;
                   return (
-                    <div className="mt-2 flex items-center justify-end gap-2">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="Amount"
-                        aria-label={`Damage or heal amount for ${c.name}`}
-                        value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
-                        onChange={e =>
-                          setAmountDraft({ name: c.name, index: i, value: e.target.value })
-                        }
-                        className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                      <button
-                        type="button"
-                        aria-label={`Damage ${c.name}`}
-                        onClick={() => applyHpAction('damage', c.name, i)}
-                        disabled={actionsDisabled}
-                        className={`${smallButtonBase} text-red-700 dark:text-red-400`}
-                      >
-                        Damage
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Heal ${c.name}`}
-                        onClick={() => applyHpAction('heal', c.name, i)}
-                        disabled={actionsDisabled}
-                        className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
-                      >
-                        Heal
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Grant temp HP to ${c.name}`}
-                        onClick={() => applyHpAction('temp', c.name, i)}
-                        disabled={actionsDisabled}
-                        className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
-                      >
-                        Temp HP
-                      </button>
+                    <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        {/* Link / unlink the stat-block reference (VEG-328). */}
+                        {!c.monsterId && (
+                          <button
+                            type="button"
+                            aria-label={`Link monster for ${c.name}`}
+                            onClick={() => setLinkTarget({ name: c.name, index: i })}
+                            disabled={writePending}
+                            className={lootButtonClass}
+                          >
+                            Link monster
+                          </button>
+                        )}
+                        {c.monsterId && (
+                          <button
+                            type="button"
+                            aria-label={`Unlink monster from ${c.name}`}
+                            onClick={() => unlinkCombatant(c.name, i)}
+                            disabled={writePending}
+                            className={lootButtonClass}
+                          >
+                            Unlink
+                          </button>
+                        )}
+                        {c.monsterId && !c.loot && (
+                          <button
+                            type="button"
+                            aria-label={`Roll loot for ${c.name}`}
+                            onClick={() =>
+                              rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)
+                            }
+                            disabled={writePending}
+                            className={lootButtonClass}
+                          >
+                            Roll loot
+                          </button>
+                        )}
+                        {/* Remove the row (VEG-284) — confirmed via dialog below. */}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${c.name}`}
+                          onClick={() => setRemoveTarget({ name: c.name, index: i })}
+                          disabled={writePending}
+                          className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Amount"
+                          aria-label={`Damage or heal amount for ${c.name}`}
+                          value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
+                          onChange={e =>
+                            setAmountDraft({ name: c.name, index: i, value: e.target.value })
+                          }
+                          className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                        <button
+                          type="button"
+                          aria-label={`Damage ${c.name}`}
+                          onClick={() => applyHpAction('damage', c.name, i)}
+                          disabled={actionsDisabled}
+                          className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                        >
+                          Damage
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Heal ${c.name}`}
+                          onClick={() => applyHpAction('heal', c.name, i)}
+                          disabled={actionsDisabled}
+                          className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
+                        >
+                          Heal
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Grant temp HP to ${c.name}`}
+                          onClick={() => applyHpAction('temp', c.name, i)}
+                          disabled={actionsDisabled}
+                          className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
+                        >
+                          Temp HP
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}
