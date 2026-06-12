@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createEncounter, registerAndLogin } from './helpers';
+import { BACKEND, createEncounter, csrfHeaders, registerAndLogin } from './helpers';
 
 // Golden path for homebrew monsters (VEG-293): create one via the form, see it
 // flagged in the compendium list, then add it to an encounter from the tracker
@@ -81,5 +81,47 @@ test.describe('Custom monsters (VEG-293)', () => {
     await combatant.click();
     await expect(page.getByTestId('monster-stat-block')).toBeVisible();
     await expect(page.getByRole('dialog').getByText('Shadow Bite.')).toBeVisible();
+  });
+
+  test("another user's homebrew never hydrates into a print set (VEG-331)", async ({ page }) => {
+    // User A creates a homebrew monster via the API.
+    await registerAndLogin(page, 'brew-a', 'E2E Homebrew Owner');
+    const name = `Duskmaw ${Date.now()}`;
+    const create = await page.request.post(`${BACKEND}/api/srd/monsters`, {
+      data: {
+        name,
+        size: 'Medium',
+        type: 'Monstrosity',
+        armorClass: 13,
+        hitPoints: 22,
+        speed: '30 ft.',
+        str: 14,
+        dex: 12,
+        con: 12,
+        int: 4,
+        wis: 10,
+        cha: 6,
+        challengeRating: 1,
+      },
+      headers: await csrfHeaders(page),
+    });
+    expect(create.ok(), `monster create failed: ${create.status()}`).toBeTruthy();
+    const monsterId = (await create.json()).id as string;
+
+    // User B logs in (replaces the session cookies) and somehow carries A's
+    // monster id in their print tray (shared device, stale tray).
+    await registerAndLogin(page, 'brew-b', 'E2E Homebrew Stranger');
+    await page.goto('/srd');
+    await page.evaluate(
+      ([id]) => localStorage.setItem('print-tray', JSON.stringify([{ type: 'monster', id }])),
+      [monsterId]
+    );
+
+    // Hydration excludes the foreign homebrew: nothing prints, and the page
+    // says so rather than rendering A's stat card to B.
+    await page.goto('/srd/print');
+    await expect(page.getByText(/could not be loaded/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('print-card')).toHaveCount(0);
+    await expect(page.getByText(name)).toHaveCount(0);
   });
 });

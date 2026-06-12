@@ -347,6 +347,10 @@ describe('SrdPrintPage', () => {
       expect(await screen.findByText('Goblin')).toBeInTheDocument();
       const warning = screen.getByTestId('missing-cards-warning');
       expect(warning).toHaveTextContent('1 of 3 selected cards could not be loaded');
+      // Hydration is identity-dependent (VEG-331): a drop can mean a removed
+      // entry OR content this account can't access — the copy must not assert
+      // "removed" as the only cause.
+      expect(warning).toHaveTextContent(/removed or isn't available to your account/i);
       expect(warning).toHaveTextContent('Only the 2 cards below will print');
       // The warning is screen-only — print output stays cards-only.
       expect(warning.className).toContain('print:hidden');

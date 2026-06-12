@@ -170,8 +170,8 @@ export default function SrdPrintPage() {
     return (
       <div className="text-center py-16">
         <p className="text-gray-600 dark:text-gray-400 mb-6">
-          The selected entries could not be loaded — they may have been removed. Clear the print set
-          and pick them again.
+          The selected entries could not be loaded — they may have been removed or aren&apos;t
+          available to your account. Clear the print set and pick them again.
         </p>
         <Link
           href="/srd"
@@ -245,8 +245,9 @@ export default function SrdPrintPage() {
           className="mb-4 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 px-4 py-2 text-sm text-amber-800 dark:text-amber-200 print:hidden"
         >
           {missingCount} of {count} selected card{count === 1 ? '' : 's'} could not be loaded — the
-          entr{missingCount === 1 ? 'y' : 'ies'} may have been removed. Only the {returnedCount}{' '}
-          card{returnedCount === 1 ? '' : 's'} below will print.
+          entr{missingCount === 1 ? 'y' : 'ies'} may have been removed or{' '}
+          {missingCount === 1 ? "isn't" : "aren't"} available to your account. Only the{' '}
+          {returnedCount} card{returnedCount === 1 ? '' : 's'} below will print.
         </p>
       )}
 
