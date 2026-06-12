@@ -12,6 +12,7 @@ import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import AddCombatantDialog from '@/components/AddCombatantDialog';
 import AddPartyDialog from '@/components/AddPartyDialog';
+import LinkMonsterDialog from '@/components/LinkMonsterDialog';
 import {
   buildManualCombatant,
   buildMonsterCombatants,
@@ -129,6 +130,9 @@ export default function InitiativeTrackerPage() {
   // Party picker (VEG-283). `partyRoster` is null while the fetch is in flight.
   const [addPartyOpen, setAddPartyOpen] = useState(false);
   const [partyRoster, setPartyRoster] = useState<PartyCharacter[] | null>(null);
+  // Link-monster picker (VEG-328): which unlinked row is being linked. Keyed
+  // by name + sorted-row index, the same identity scheme as the HP drafts.
+  const [linkTarget, setLinkTarget] = useState<{ name: string; index: number } | null>(null);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -408,6 +412,57 @@ export default function InitiativeTrackerPage() {
     });
   };
 
+  // Apply `mutate` to one row, addressed by the shared name + sorted-row-index
+  // identity, and persist the result. The single home for the row-resolution
+  // rules of the link/unlink paths (VEG-328): 'missing' means the row is gone
+  // (duplicate-name ambiguity or removal), null means the write was skipped or
+  // failed (patchEncounter already toasted).
+  const mutateCombatantRow = async (
+    name: string,
+    rowIndex: number,
+    mutate: (c: Combatant) => Combatant
+  ): Promise<Encounter | 'missing' | null> => {
+    if (!encounter || writePending) return null;
+    const sorted = sortByInitiative(encounter.combatants);
+    const index = resolveCombatantRow(sorted, name, rowIndex);
+    if (index === -1) return 'missing';
+    sorted[index] = mutate(sorted[index]);
+    return patchEncounter({ combatants: sorted });
+  };
+
+  // Link an unlinked row to a monster (VEG-328). Reference-only: just sets
+  // monsterId, never touching the DM's possibly-customized name/HP/AC.
+  const linkMonsterToCombatant = async (monster: SrdMonster) => {
+    if (!linkTarget) return;
+    const result = await mutateCombatantRow(linkTarget.name, linkTarget.index, c => ({
+      ...c,
+      monsterId: monster.id,
+    }));
+    if (result === 'missing') {
+      toast.error('That combatant is no longer in the encounter.');
+      setLinkTarget(null);
+      return;
+    }
+    // On failure (incl. 409) the picker stays open so the DM can retry
+    // against the refreshed encounter.
+    if (result) {
+      toast.success(`Linked ${linkTarget.name} to ${monster.name}`);
+      setLinkTarget(null);
+    }
+  };
+
+  // Remove a mislink (VEG-328): drops only the monsterId key. Any rolled loot
+  // stays on the row (it already dropped); the Reroll control disappears with
+  // the linkage.
+  const unlinkCombatant = async (name: string, rowIndex: number) => {
+    const result = await mutateCombatantRow(name, rowIndex, c => {
+      const next = { ...c };
+      delete next.monsterId;
+      return next;
+    });
+    if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
+  };
+
   const viewCombatantMonster = (monsterId: string) => {
     setViewMonster(null);
     setViewLoading(true);
@@ -529,6 +584,29 @@ export default function InitiativeTrackerPage() {
                     )}
                   </div>
                 </div>
+                {/* Link / unlink the stat-block reference (VEG-328). */}
+                {isController && !c.monsterId && (
+                  <button
+                    type="button"
+                    aria-label={`Link monster for ${c.name}`}
+                    onClick={() => setLinkTarget({ name: c.name, index: i })}
+                    disabled={writePending}
+                    className={lootButtonClass}
+                  >
+                    Link monster
+                  </button>
+                )}
+                {isController && c.monsterId && (
+                  <button
+                    type="button"
+                    aria-label={`Unlink monster from ${c.name}`}
+                    onClick={() => unlinkCombatant(c.name, i)}
+                    disabled={writePending}
+                    className={lootButtonClass}
+                  >
+                    Unlink
+                  </button>
+                )}
                 {isController && c.monsterId && !c.loot && (
                   <button
                     type="button"
@@ -642,15 +720,21 @@ export default function InitiativeTrackerPage() {
               {isController && c.loot && (
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex items-start justify-between gap-2 text-sm">
                   <LootDisplay coinage={c.loot.coinage} items={c.loot.items} />
-                  <button
-                    type="button"
-                    aria-label={`Reroll loot for ${c.name}`}
-                    onClick={() => rollLoot(encounter, arrayIndex, `Re-rolled loot for ${c.name}`)}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    Reroll
-                  </button>
+                  {/* Rerolling needs the monster reference; an unlinked row
+                      (VEG-328) keeps its drop readable but can't reroll. */}
+                  {c.monsterId && (
+                    <button
+                      type="button"
+                      aria-label={`Reroll loot for ${c.name}`}
+                      onClick={() =>
+                        rollLoot(encounter, arrayIndex, `Re-rolled loot for ${c.name}`)
+                      }
+                      disabled={writePending}
+                      className={lootButtonClass}
+                    >
+                      Reroll
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -737,6 +821,17 @@ export default function InitiativeTrackerPage() {
           onCancel={() => setAddCombatantOpen(false)}
           submitting={writePending}
         />
+      </Modal>
+
+      <Modal open={linkTarget !== null} onClose={() => setLinkTarget(null)} label="Link monster">
+        {linkTarget && (
+          <LinkMonsterDialog
+            combatantName={linkTarget.name}
+            onSelect={linkMonsterToCombatant}
+            onCancel={() => setLinkTarget(null)}
+            submitting={writePending}
+          />
+        )}
       </Modal>
 
       <Modal open={addPartyOpen} onClose={() => setAddPartyOpen(false)} label="Add party">
