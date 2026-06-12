@@ -80,7 +80,9 @@ export class HomebrewFeatsService {
    * non-nullable column, so a null clear (the client's way of resetting an
    * optional field, VEG-316) becomes its false default; `benefits` is a
    * nullable Json column, where Prisma requires an explicit DbNull instead of
-   * plain null.
+   * plain null. Blank `prerequisite`/`category` strings (reachable only via
+   * raw API writes — the form already clears to null) normalize to null so
+   * the hasPrerequisite/category filters cannot mis-bucket them.
    */
   private toColumnData(dto: CreateFeatDto | UpdateFeatDto): Record<string, unknown> {
     const {
@@ -93,6 +95,10 @@ export class HomebrewFeatsService {
     } = dto as Record<string, unknown>;
     if ('repeatable' in data && data.repeatable === null) data.repeatable = false;
     if ('benefits' in data && data.benefits === null) data.benefits = Prisma.DbNull;
+    if (typeof data.prerequisite === 'string' && !data.prerequisite.trim()) {
+      data.prerequisite = null;
+    }
+    if (typeof data.category === 'string' && !data.category.trim()) data.category = null;
     return data;
   }
 }

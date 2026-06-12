@@ -1,4 +1,5 @@
 import type { SrdFeat } from '@/lib/types';
+import { optionalText } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew feat form (VEG-295).
@@ -40,10 +41,6 @@ export function parseBenefitLines(input: string): string[] {
     .split('\n')
     .map(s => s.trim())
     .filter(Boolean);
-}
-
-function optionalText(input: string): string | null {
-  return input.trim() || null;
 }
 
 export function emptyFeatFormState(): FeatFormState {

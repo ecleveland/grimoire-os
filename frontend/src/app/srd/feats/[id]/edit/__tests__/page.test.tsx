@@ -146,4 +146,18 @@ describe('EditFeatPage', () => {
     });
     expect(mockPush).not.toHaveBeenCalled();
   });
+
+  it('falls back to a generic message for non-Error save rejections', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(ownFeat).mockRejectedValueOnce('boom');
+
+    render(<EditFeatPage />);
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Failed to update feat');
+    });
+    expect(mockPush).not.toHaveBeenCalled();
+  });
 });

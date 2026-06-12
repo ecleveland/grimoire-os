@@ -763,6 +763,16 @@ describe('SrdService', () => {
       expect(where.repeatable).toBe(false);
     });
 
+    it('keeps column filters alongside the AND-joined free-text query', async () => {
+      await service.searchFeats({ q: 'tough', category: 'Origin' });
+
+      const where = prisma.feat.findMany.mock.calls[0][0].where;
+      // The q branch builds { AND: [...] }; the column filters must survive as
+      // sibling keys (implicit Prisma AND), not be dropped by the q rewrite.
+      expect(where.AND).toHaveLength(2);
+      expect(where.category).toBe('Origin');
+    });
+
     it('widens the where to the caller’s own homebrew when a userId is passed (VEG-295)', async () => {
       await service.searchFeats({}, 'u1');
 

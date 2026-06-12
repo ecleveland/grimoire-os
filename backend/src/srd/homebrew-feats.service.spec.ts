@@ -147,6 +147,17 @@ describe('HomebrewFeatsService', () => {
       expect(data.repeatable).toBe(false);
     });
 
+    it('normalizes empty-string prerequisite and category to null so the hasPrerequisite filter cannot mis-bucket them', async () => {
+      prisma.feat.findUnique.mockResolvedValue(homebrewRow);
+      prisma.feat.update.mockResolvedValue(homebrewRow);
+
+      await service.update('f1', { prerequisite: '   ', category: '' } as never, OWNER);
+
+      const data = prisma.feat.update.mock.calls[0][0].data;
+      expect(data.prerequisite).toBeNull();
+      expect(data.category).toBeNull();
+    });
+
     it('maps null benefits to a DB NULL — Prisma rejects plain null on Json columns', async () => {
       prisma.feat.findUnique.mockResolvedValue(homebrewRow);
       prisma.feat.update.mockResolvedValue(homebrewRow);
