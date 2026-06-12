@@ -301,17 +301,12 @@ export default function MonsterListPage() {
                 </div>
               </div>
             </button>
-            {/* The print pipeline (POST /srd/cards) only hydrates catalog
-                content, so a homebrew toggle would silently drop from the
-                printed deck — hide it until printing is owner-aware. */}
-            {m.contentSource !== 'homebrew' && (
-              <PrintToggle
-                type="monster"
-                id={m.id}
-                name={m.name}
-                className="absolute top-3 right-3"
-              />
-            )}
+            <PrintToggle
+              type="monster"
+              id={m.id}
+              name={m.name}
+              className="absolute top-3 right-3"
+            />
           </div>
         ))}
       </div>
@@ -369,9 +364,7 @@ export default function MonsterListPage() {
                   Add to encounter
                 </button>
               )}
-              {detail.contentSource !== 'homebrew' && (
-                <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
-              )}
+              <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
             </div>
             <MonsterStatBlock monster={detail} />
           </div>

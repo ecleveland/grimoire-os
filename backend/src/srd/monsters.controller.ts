@@ -13,7 +13,6 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
 import { SrdService } from './srd.service';
 import { HomebrewMonstersService } from './homebrew-monsters.service';
 import { ContentActor } from './content-access.service';
@@ -22,11 +21,12 @@ import { CreateMonsterDto } from './dto/create-monster.dto';
 import { UpdateMonsterDto } from './dto/update-monster.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
-import type { AuthenticatedRequest, JwtUser } from '../auth/interfaces/jwt-payload.interface';
+import type {
+  AuthenticatedRequest,
+  JwtUser,
+  OptionallyAuthenticatedRequest,
+} from '../auth/interfaces/jwt-payload.interface';
 import { Role } from '../common/enums';
-
-/** Reads accept anonymous callers; `user` is set only when a valid JWT rode along. */
-type OptionallyAuthenticatedRequest = Request & { user?: JwtUser };
 
 function toActor(user: JwtUser): ContentActor {
   return { userId: user.userId, isAdmin: user.role === Role.ADMIN };

@@ -13,13 +13,14 @@ import type {
 } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { SrdService } from './srd.service';
-import { GLOBAL_CONTENT_SOURCES } from './content-access.service';
+import { ContentAccessService } from './content-access.service';
 import { PrintCardSelectionDto } from './dto/hydrate-cards.dto';
 
-// The public print endpoint hydrates by client-supplied id, so it must scope to
-// the global catalog (SRD + admin-published shared) rather than trusting the id
-// alone — otherwise an enumerated homebrew id could be printed (VEG-311).
-const GLOBAL_SOURCES = [...GLOBAL_CONTENT_SOURCES];
+// The print endpoint hydrates by client-supplied id, so it must scope to what
+// the caller may read rather than trusting the id alone — otherwise an
+// enumerated homebrew id could be printed (VEG-311). Authenticated callers see
+// the global catalog plus their own homebrew (VEG-331); anonymous callers see
+// the catalog only.
 
 // Batch hydration for the printable SRD cards feature (VEG-263). Takes the
 // grouped print selection the frontend tray holds and returns the curated
@@ -116,10 +117,14 @@ function inRequestOrder(ids: string[], cards: PrintableCard[]): PrintableCard[] 
 export class PrintableCardsService {
   constructor(
     private prisma: PrismaService,
-    private srdService: SrdService
+    private srdService: SrdService,
+    private contentAccess: ContentAccessService
   ) {}
 
-  async hydrate(selections: PrintCardSelectionDto[]): Promise<HydratePrintableCardsResponse> {
+  async hydrate(
+    selections: PrintCardSelectionDto[],
+    userId?: string
+  ): Promise<HydratePrintableCardsResponse> {
     const totalIds = selections.reduce((sum, s) => sum + s.ids.length, 0);
     if (totalIds > PRINTABLE_CARD_BATCH_MAX) {
       throw new BadRequestException(
@@ -140,21 +145,25 @@ export class PrintableCardsService {
     const groups = await Promise.all(
       Array.from(idsByType, async ([type, ids]) => ({
         type,
-        cards: inRequestOrder(ids, await this.hydrateType(type, ids)),
+        cards: inRequestOrder(ids, await this.hydrateType(type, ids, userId)),
       }))
     );
 
     return { groups };
   }
 
-  private hydrateType(type: PrintableCardType, ids: string[]): Promise<PrintableCard[]> {
+  private hydrateType(
+    type: PrintableCardType,
+    ids: string[],
+    userId?: string
+  ): Promise<PrintableCard[]> {
     switch (type) {
       case 'monster':
-        return this.hydrateMonsters(ids);
+        return this.hydrateMonsters(ids, userId);
       case 'spell':
-        return this.hydrateSpells(ids);
+        return this.hydrateSpells(ids, userId);
       case 'item':
-        return this.hydrateItems(ids);
+        return this.hydrateItems(ids, userId);
       // Species are seeded into the races table (loadSpeciesAsRacesFromJson),
       // so both card types hydrate from the same source, tagged differently.
       case 'race':
@@ -167,9 +176,9 @@ export class PrintableCardsService {
     }
   }
 
-  private async hydrateMonsters(ids: string[]): Promise<PrintableCard[]> {
+  private async hydrateMonsters(ids: string[], userId?: string): Promise<PrintableCard[]> {
     const rows = await this.prisma.monster.findMany({
-      where: { id: { in: ids }, contentSource: { in: GLOBAL_SOURCES } },
+      where: { id: { in: ids }, ...this.contentAccess.visibleTo(userId) },
       select: {
         id: true,
         name: true,
@@ -219,9 +228,9 @@ export class PrintableCardsService {
     });
   }
 
-  private async hydrateSpells(ids: string[]): Promise<PrintableCard[]> {
+  private async hydrateSpells(ids: string[], userId?: string): Promise<PrintableCard[]> {
     const rows = await this.prisma.spell.findMany({
-      where: { id: { in: ids }, contentSource: { in: GLOBAL_SOURCES } },
+      where: { id: { in: ids }, ...this.contentAccess.visibleTo(userId) },
       select: {
         id: true,
         name: true,
@@ -243,9 +252,9 @@ export class PrintableCardsService {
     }));
   }
 
-  private async hydrateItems(ids: string[]): Promise<PrintableCard[]> {
+  private async hydrateItems(ids: string[], userId?: string): Promise<PrintableCard[]> {
     const rows = await this.prisma.item.findMany({
-      where: { id: { in: ids }, contentSource: { in: GLOBAL_SOURCES } },
+      where: { id: { in: ids }, ...this.contentAccess.visibleTo(userId) },
       select: {
         id: true,
         name: true,

@@ -617,7 +617,7 @@ describe('MonsterListPage', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
-    it('offers no print toggle on homebrew monsters — the print pipeline only hydrates catalog content', async () => {
+    it('offers the print toggle on homebrew monsters — hydration is owner-aware (VEG-331)', async () => {
       authAsOwner();
       routeApi();
       const user = userEvent.setup();
@@ -625,13 +625,12 @@ describe('MonsterListPage', () => {
 
       await screen.findByText('Cave Troll');
       expect(
-        screen.queryByRole('button', { name: /add cave troll to print set/i })
-      ).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /add goblin to print set/i })).toBeInTheDocument();
+        screen.getByRole('button', { name: /add cave troll to print set/i })
+      ).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /^Cave Troll/i }));
       const dialog = await screen.findByRole('dialog');
-      expect(within(dialog).queryByRole('button', { name: /print set/i })).not.toBeInTheDocument();
+      expect(within(dialog).getByRole('button', { name: /print set/i })).toBeInTheDocument();
     });
 
     it('toasts and closes instead of sticking on "Loading monster…" when the detail resolves to null', async () => {

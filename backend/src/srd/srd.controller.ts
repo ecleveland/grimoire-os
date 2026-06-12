@@ -1,6 +1,18 @@
-import { Body, Controller, Get, Param, Post, Query, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
+import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
 import { QuerySpellsDto } from './dto/query-spells.dto';
@@ -212,14 +224,19 @@ export class SrdController {
 
   // ── Printable cards batch hydrate (VEG-263) ─────────
 
+  // Per-user response (the caller's homebrew hydrates too, VEG-331) — safe
+  // under this controller's URL-keyed CacheInterceptor only because Nest never
+  // caches non-GET requests. Keep it a POST.
   @Post('cards')
+  @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary: 'Batch-hydrate a mixed print selection into printable card view-models',
     description:
       'Read-only despite POST (the grouped selection exceeds query-string limits). ' +
+      'Resolves the global catalog plus the caller’s own homebrew. ' +
       'Unknown ids are silently dropped; batches above 100 total ids are rejected.',
   })
-  hydrateCards(@Body() body: HydratePrintCardsDto) {
-    return this.printableCardsService.hydrate(body.selections);
+  hydrateCards(@Body() body: HydratePrintCardsDto, @Req() req: OptionallyAuthenticatedRequest) {
+    return this.printableCardsService.hydrate(body.selections, req.user?.userId);
   }
 }
