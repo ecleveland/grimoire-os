@@ -44,8 +44,10 @@ For UI tickets, also draft a Playwright spec under `e2e/<feature>.spec.ts` cover
 ## Verification gate
 
 1. `./verify.sh` from the repo root — mirrors CI exactly (backend + frontend lint, unit tests with coverage thresholds, SRD extraction-lib tests, production builds). Do not substitute plain `npm test`/`npm run build`. (Backend's `prettier.spec.ts` runs `format:check` on the frontend — prettier-format new frontend files first.)
-2. **E2E (Playwright)** — `npm run e2e` from the repo root, as the last step.
-   - Requires dev servers and Postgres reachable. If `./dev.sh` is already running, use `E2E_NO_WEBSERVER=1 npm run e2e`.
+2. **E2E (Playwright)** — `cd e2e && npm run e2e -- <specs>`, as the last step (there is no root `package.json`).
+   - The suite provisions its own stack via `dev-e2e.sh`: dedicated ports 3010/3011 and a dedicated `grimoire_os_e2e` database. Only Postgres needs to be up beforehand.
+   - **`./dev.sh` must be stopped first.** Next 16 takes a `frontend/.next/dev/lock`, so the e2e stack's `next dev` can't start while the dev server runs — the webServer step times out after 120 s. Stop dev (`./stop.sh`), run e2e, restart dev.
+   - `E2E_NO_WEBSERVER=1` does **not** point the suite at the 3000/3001 dev servers — it assumes an already-running `dev-e2e.sh` stack on 3010/3011. Using it with only `./dev.sh` up fails every spec, including smoke.
    - Run only the spec(s) relevant to this ticket plus `smoke.spec.ts`. Full suite runs in CI.
    - Skip E2E only when the ticket touches no user-visible behavior (pure refactor, docs, backend-only internals with no API contract change) — state explicitly when skipping and why.
 
