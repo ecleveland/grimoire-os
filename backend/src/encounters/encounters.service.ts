@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { aggregateCombatantLoot, Combatant, EncounterLootTotal } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { SeededRng } from '../common/helpers/seeded-rng';
@@ -36,21 +37,23 @@ export class EncountersService {
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService,
-    private monsterLoot: MonsterLootService
+    private monsterLoot: MonsterLootService,
+    private contentAccess: ContentAccessService
   ) {}
 
   /**
-   * Loads the monsters for a set of (already deduplicated) ids, throwing 400
-   * listing any unknown references. Single source of truth for monsterId
-   * resolution: combatant-write validation (VEG-258) and loot rolls (VEG-300)
-   * must agree on what a dangling reference looks like.
+   * Loads the monsters for a set of (already deduplicated) ids for loot rolls
+   * (VEG-300). With `tolerateMissing` (roll-all), dangling references — e.g. a
+   * homebrew monster its owner deleted (VEG-293) — are simply absent from the
+   * result so their combatants are skipped; without it (an explicitly targeted
+   * combatant), a dangling reference throws 400.
    */
-  private async getReferencedMonsters(ids: string[]) {
+  private async getReferencedMonsters(ids: string[], opts: { tolerateMissing?: boolean } = {}) {
     const monsters = await this.prisma.monster.findMany({
       where: { id: { in: ids } },
       select: { id: true, type: true, challengeRating: true },
     });
-    if (monsters.length !== ids.length) {
+    if (!opts.tolerateMissing && monsters.length !== ids.length) {
       const foundIds = new Set(monsters.map(m => m.id));
       const missing = ids.filter(id => !foundIds.has(id));
       throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
@@ -59,24 +62,38 @@ export class EncountersService {
   }
 
   /**
-   * VEG-258: when combatants carry a `monsterId`, verify each one references an
-   * existing SRD monster. Combatants without a `monsterId` (manual entries) are
-   * left untouched. Throws 400 listing any unknown references.
+   * VEG-258/VEG-293: when combatants carry a `monsterId`, verify each one
+   * references a monster the writer can see — the global catalog plus their own
+   * homebrew. Without the visibility scope, an id probe could attach (and
+   * loot-roll stats off) another user's private homebrew. Ids in `knownIds`
+   * (already on the stored encounter) are grandfathered so deleting a homebrew
+   * monster never makes encounters referencing it un-saveable. Throws 400
+   * listing any unknown references.
    */
   private async assertMonsterReferences(
-    combatants: CreateEncounterDto['combatants']
+    combatants: CreateEncounterDto['combatants'],
+    userId: string,
+    knownIds: ReadonlySet<string> = new Set()
   ): Promise<void> {
     if (!combatants) return;
     const ids = [
       ...new Set(combatants.map(c => c.monsterId).filter((id): id is string => id !== undefined)),
-    ];
+    ].filter(id => !knownIds.has(id));
     if (ids.length === 0) return;
-    await this.getReferencedMonsters(ids);
+    const visible = await this.prisma.monster.findMany({
+      where: { id: { in: ids }, ...this.contentAccess.visibleTo(userId) },
+      select: { id: true },
+    });
+    if (visible.length !== ids.length) {
+      const foundIds = new Set(visible.map(m => m.id));
+      const missing = ids.filter(id => !foundIds.has(id));
+      throw new BadRequestException(`Unknown monsterId reference(s): ${missing.join(', ')}`);
+    }
   }
 
   async create(userId: string, dto: CreateEncounterDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
-    await this.assertMonsterReferences(dto.combatants);
+    await this.assertMonsterReferences(dto.combatants, userId);
     const { combatants, ...rest } = dto;
     const encounter = await this.prisma.encounter.create({
       data: {
@@ -126,6 +143,7 @@ export class EncountersService {
       where: { id },
       select: {
         id: true,
+        combatants: true,
         campaign: { select: campaignAuthSelect },
       },
     });
@@ -133,7 +151,11 @@ export class EncountersService {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
     this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
-    await this.assertMonsterReferences(dto.combatants);
+    const storedCombatants = (encounter.combatants as unknown as Combatant[] | null) ?? [];
+    const knownIds = new Set(
+      storedCombatants.map(c => c.monsterId).filter((mid): mid is string => mid !== undefined)
+    );
+    await this.assertMonsterReferences(dto.combatants, userId, knownIds);
     const { combatants, expectedVersion, ...rest } = dto;
     const data = {
       ...rest,
@@ -217,7 +239,11 @@ export class EncountersService {
     const targetIndexes = this.resolveLootTargets(combatants, dto.combatantIndex);
 
     const monsterIds = [...new Set(targetIndexes.map(i => combatants[i].monsterId as string))];
-    const monsters = await this.getReferencedMonsters(monsterIds);
+    // Roll-all tolerates dangling references (deleted monsters) by skipping
+    // those combatants; an explicitly targeted combatant still 400s.
+    const monsters = await this.getReferencedMonsters(monsterIds, {
+      tolerateMissing: dto.combatantIndex === undefined,
+    });
     const monstersById = new Map(monsters.map(m => [m.id, m]));
 
     const roller = await this.monsterLoot.loadRoller();
@@ -226,7 +252,8 @@ export class EncountersService {
     const targets = new Set(targetIndexes);
     const updatedCombatants = combatants.map((combatant, index) => {
       if (!targets.has(index)) return combatant;
-      const monster = monstersById.get(combatant.monsterId as string)!;
+      const monster = monstersById.get(combatant.monsterId as string);
+      if (!monster) return combatant; // dangling reference on a roll-all — skip
       const rolled = roller.rollForMonster(
         { type: monster.type, challengeRating: monster.challengeRating },
         new SeededRng(`${seed}:${index}`)

@@ -1,37 +1,23 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Link from 'next/link';
 import { apiFetch, ApiError } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 import type { SrdMonster, PaginatedResponse, Encounter } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
+import ConfirmDialog from '@/components/ConfirmDialog';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import PrintToggle from '@/components/PrintToggle';
 import EncounterPicker from '@/components/EncounterPicker';
 import AddToEncounterDialog, { type AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { buildMonsterCombatants } from '@/lib/encounter-combatants';
+import { MONSTER_TYPES } from '@/lib/monster-constants';
 import { formatCr } from '@/lib/srd-format';
 
 const LIMIT = 20;
-
-const MONSTER_TYPES = [
-  'Aberration',
-  'Beast',
-  'Celestial',
-  'Construct',
-  'Dragon',
-  'Elemental',
-  'Fey',
-  'Fiend',
-  'Giant',
-  'Humanoid',
-  'Monstrosity',
-  'Ooze',
-  'Plant',
-  'Undead',
-];
 
 const CHALLENGE_RATINGS = [
   '0',
@@ -71,7 +57,7 @@ const CHALLENGE_RATINGS = [
 ];
 
 export default function MonsterListPage() {
-  const { isDm } = useAuth();
+  const { isDm, isAdmin, isAuthenticated, user } = useAuth();
   const [monsters, setMonsters] = useState<SrdMonster[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -87,7 +73,31 @@ export default function MonsterListPage() {
   const [addMode, setAddMode] = useState<'none' | 'picker' | 'dialog'>('none');
   const [addEncounterId, setAddEncounterId] = useState('');
   const [addSubmitting, setAddSubmitting] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The owner may edit/delete their homebrew; admins curate shared content.
+  const canManageDetail =
+    !!detail &&
+    ((detail.contentSource === 'homebrew' && detail.createdById === user?.userId) ||
+      (detail.contentSource === 'shared' && isAdmin));
+
+  async function handleDeleteMonster() {
+    if (!detail) return;
+    try {
+      await apiFetch(`/srd/monsters/${detail.id}`, { method: 'DELETE' });
+      toast.success(`Deleted ${detail.name}`);
+      setDetailOpen(false);
+      // Refetch so the deleted monster drops out of the current page, clamping
+      // in case the last row of the final page just went away.
+      const lastPageAfterDelete = Math.max(1, Math.ceil((total - 1) / LIMIT));
+      setPage(p => Math.min(p, lastPageAfterDelete));
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete monster');
+    }
+  }
 
   function openMonster(id: string) {
     setDetail(null);
@@ -95,8 +105,18 @@ export default function MonsterListPage() {
     setDetailOpen(true);
     setAddMode('none');
     setAddEncounterId('');
-    apiFetch<SrdMonster>(`/srd/monsters/${id}`)
-      .then(setDetail)
+    apiFetch<SrdMonster | null>(`/srd/monsters/${id}`)
+      .then(monster => {
+        // The endpoint resolves 200 null for ids outside the caller's
+        // visibility (deleted, or someone else's homebrew) — without this
+        // guard the modal sticks on "Loading monster…" forever.
+        if (!monster) {
+          toast.error('Monster not found', { id: 'load-monster' });
+          setDetailOpen(false);
+          return;
+        }
+        setDetail(monster);
+      })
       .catch(err => {
         console.error('Failed to load monster:', err);
         toast.error('Failed to load monster', { id: 'load-monster' });
@@ -177,20 +197,35 @@ export default function MonsterListPage() {
         setMonsters(res.data);
         setTotal(res.total);
         setLastPage(res.lastPage);
+        // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank
+        // the list, don't strand the user on an empty out-of-range page.
+        if (res.data.length === 0 && page > Math.max(1, res.lastPage)) {
+          setPage(Math.max(1, res.lastPage));
+        }
       })
       .catch(err => {
         console.error('Failed to load monsters:', err);
         toast.error('Failed to load monsters', { id: 'load-monsters' });
       })
       .finally(() => setLoading(false));
-  }, [page, search, typeFilter, crFilter]);
+  }, [page, search, typeFilter, crFilter, refreshKey]);
 
   const inputClass =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Monsters</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Monsters</h1>
+        {isAuthenticated && (
+          <Link
+            href="/srd/monsters/new"
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+          >
+            Create monster
+          </Link>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <input
@@ -243,6 +278,11 @@ export default function MonsterListPage() {
               <h3 className="font-semibold text-gray-900 dark:text-white pr-8">{m.name}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                 {m.size} {m.type} &middot; {m.alignment}
+                {m.contentSource === 'homebrew' && (
+                  <span className="ml-2 inline-block rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-0.5 text-xs font-medium align-middle">
+                    Homebrew
+                  </span>
+                )}
               </p>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center text-sm">
                 <div>
@@ -261,12 +301,17 @@ export default function MonsterListPage() {
                 </div>
               </div>
             </button>
-            <PrintToggle
-              type="monster"
-              id={m.id}
-              name={m.name}
-              className="absolute top-3 right-3"
-            />
+            {/* The print pipeline (POST /srd/cards) only hydrates catalog
+                content, so a homebrew toggle would silently drop from the
+                printed deck — hide it until printing is owner-aware. */}
+            {m.contentSource !== 'homebrew' && (
+              <PrintToggle
+                type="monster"
+                id={m.id}
+                name={m.name}
+                className="absolute top-3 right-3"
+              />
+            )}
           </div>
         ))}
       </div>
@@ -298,6 +343,23 @@ export default function MonsterListPage() {
         ) : (
           <div className="space-y-3">
             <div className="flex justify-end gap-2">
+              {canManageDetail && (
+                <>
+                  <Link
+                    href={`/srd/monsters/${detail.id}/edit`}
+                    className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Edit
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteOpen(true)}
+                    className="px-3 py-1.5 text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </>
+              )}
               {isDm && (
                 <button
                   type="button"
@@ -307,12 +369,24 @@ export default function MonsterListPage() {
                   Add to encounter
                 </button>
               )}
-              <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
+              {detail.contentSource !== 'homebrew' && (
+                <PrintToggle type="monster" id={detail.id} name={detail.name} variant="button" />
+              )}
             </div>
             <MonsterStatBlock monster={detail} />
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete monster?"
+        description={`"${detail?.name ?? 'This monster'}" will be permanently deleted. Encounter combatants created from it keep their stats but lose the stat-block link. This cannot be undone.`}
+        confirmLabel="Delete monster"
+        variant="danger"
+        onConfirm={handleDeleteMonster}
+      />
 
       <Pagination
         page={page}

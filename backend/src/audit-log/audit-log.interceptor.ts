@@ -5,7 +5,10 @@ import { AuditAction } from '@prisma/client';
 import { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { AuditLogService } from './audit-log.service';
 
-const EXCLUDED_PREFIXES = ['/api/auth', '/api/srd', '/api/seed', '/api/docs'];
+// /api/srd is NOT blanket-excluded anymore: since VEG-293 it hosts genuine
+// user-content mutations (homebrew monsters). Only the read-only-despite-POST
+// print hydration stays excluded; SRD reads are GETs and never reach logging.
+const EXCLUDED_PREFIXES = ['/api/auth', '/api/srd/cards', '/api/seed', '/api/docs'];
 
 const METHOD_TO_ACTION: Record<string, AuditAction> = {
   POST: AuditAction.create,
@@ -20,6 +23,12 @@ const ENTITY_MAP: Record<string, string> = {
   notes: 'Note',
   encounters: 'Encounter',
   users: 'User',
+};
+
+// User-mutable content types living under /srd/* (homebrew, VEG-293). Extend as
+// VEG-294/295/296 add spells/feats/items CRUD.
+const SRD_CONTENT_ENTITY_MAP: Record<string, string> = {
+  monsters: 'Monster',
 };
 
 const SENSITIVE_KEYS = ['password', 'passwordHash', 'currentPassword', 'newPassword'];
@@ -82,6 +91,12 @@ function parseRoute(url: string): {
   // Handle /admin/{entity}/:id pattern
   if (segments[0] === 'admin' && segments[1]) {
     const entity = ENTITY_MAP[segments[1]] ?? null;
+    return { entity, entityId: segments[2] ?? null };
+  }
+
+  // Handle /srd/{contentType}/:id — homebrew content mutations (VEG-293)
+  if (segments[0] === 'srd' && segments[1]) {
+    const entity = SRD_CONTENT_ENTITY_MAP[segments[1]] ?? null;
     return { entity, entityId: segments[2] ?? null };
   }
 

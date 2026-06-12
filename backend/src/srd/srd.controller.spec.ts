@@ -81,31 +81,7 @@ describe('SrdController', () => {
     });
   });
 
-  // ── Monsters ────────────────────────────────────────
-
-  describe('searchMonsters', () => {
-    it('delegates to service with query', async () => {
-      const query = { cr: '5' };
-      service.searchMonsters.mockResolvedValue({ data: [], total: 0 });
-
-      const result = await controller.searchMonsters(query as any);
-
-      expect(service.searchMonsters).toHaveBeenCalledWith(query);
-      expect(result).toEqual({ data: [], total: 0 });
-    });
-  });
-
-  describe('findMonster', () => {
-    it('delegates to service with id', async () => {
-      const monster = { id: '1', name: 'Dragon' };
-      service.findMonster.mockResolvedValue(monster);
-
-      const result = await controller.findMonster('1');
-
-      expect(service.findMonster).toHaveBeenCalledWith('1');
-      expect(result).toEqual(monster);
-    });
-  });
+  // Monster routes moved to MonstersController (VEG-293) — see monsters.controller.spec.ts.
 
   // ── Items ───────────────────────────────────────────
 

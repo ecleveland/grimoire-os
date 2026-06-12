@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { EncountersService } from './encounters.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
@@ -87,6 +88,7 @@ describe('EncountersService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         EncountersService,
+        ContentAccessService,
         prismaMockProvider(),
         { provide: CampaignAuthService, useValue: campaignAuth },
         { provide: MonsterLootService, useValue: monsterLoot },
@@ -167,9 +169,14 @@ describe('EncountersService', () => {
 
       const result = await service.create(USER_ID, dtoWithMonster);
 
+      // Reference validation is scoped to what the writer can see (VEG-293):
+      // the global catalog plus their own homebrew.
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
-        where: { id: { in: [MONSTER_ID] } },
-        select: { id: true, type: true, challengeRating: true },
+        where: {
+          id: { in: [MONSTER_ID] },
+          OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }],
+        },
+        select: { id: true },
       });
       expect(prisma.encounter.create).toHaveBeenCalledWith({
         data: {
@@ -315,6 +322,7 @@ describe('EncountersService', () => {
         where: { id: ENCOUNTER_ID },
         select: {
           id: true,
+          combatants: true,
           campaign: { select: { id: true, ownerId: true, players: { select: { userId: true } } } },
         },
       });
@@ -374,14 +382,37 @@ describe('EncountersService', () => {
       } as never);
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
-        where: { id: { in: [MONSTER_ID] } },
-        select: { id: true, type: true, challengeRating: true },
+        where: {
+          id: { in: [MONSTER_ID] },
+          OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }],
+        },
+        select: { id: true },
       });
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
         data: { combatants: newCombatants },
       });
       expect(result).toEqual(asEncounterDto(updated));
+    });
+
+    it('grandfathers monsterIds already on the stored encounter (deleted homebrew must not block saves)', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        combatants: [{ name: 'Ghost Troll', monsterId: 'deleted-monster-id' }],
+        campaign: campaignAuthShape,
+      });
+      const combatants = [
+        { name: 'Ghost Troll', initiative: 9, monsterId: 'deleted-monster-id' },
+        { name: 'Bandit', initiative: 12, isNpc: true },
+      ];
+      prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
+
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+
+      // The dangling id was already present, so no validation query runs and
+      // the save succeeds.
+      expect(prisma.monster.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).toHaveBeenCalled();
     });
 
     it('rejects update when a combatant references an unknown monsterId', async () => {
@@ -691,11 +722,26 @@ describe('EncountersService', () => {
       );
     });
 
-    it('throws 400 when a referenced monster no longer exists', async () => {
+    it('roll-all skips combatants whose monster no longer exists instead of failing the whole roll', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf, dragon]));
+      // The wolf's monster was deleted (e.g. homebrew removed, VEG-293).
+      prisma.monster.findMany.mockResolvedValue([dragonRow]);
+
+      const result = await service.rollLoot(ENCOUNTER_ID, USER_ID, {});
+
+      expect(rollForMonster).toHaveBeenCalledTimes(1);
+      const [updatedWolf, updatedDragon] = result.encounter.combatants as Array<{
+        loot?: unknown;
+      }>;
+      expect(updatedWolf.loot).toBeUndefined();
+      expect(updatedDragon.loot).toBeDefined();
+    });
+
+    it('throws 400 when explicitly targeting a combatant whose monster no longer exists', async () => {
       prisma.encounter.findUnique.mockResolvedValue(mockEncounterRow([wolf]));
       prisma.monster.findMany.mockResolvedValue([]);
 
-      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, {})).rejects.toThrow(
+      await expect(service.rollLoot(ENCOUNTER_ID, USER_ID, { combatantIndex: 0 })).rejects.toThrow(
         BadRequestException
       );
     });

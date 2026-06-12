@@ -131,7 +131,7 @@ describe('AuditLogInterceptor', () => {
     });
   });
 
-  it('skips SRD routes', done => {
+  it('skips SRD routes without a content-entity mapping', done => {
     const { context, next } = createContext({
       method: 'POST',
       url: '/api/srd/spells',
@@ -139,6 +139,56 @@ describe('AuditLogInterceptor', () => {
 
     interceptor.intercept(context, next).subscribe(() => {
       expect(auditLogService.log).not.toHaveBeenCalled();
+      done();
+    });
+  });
+
+  it('skips the read-only print-cards POST', done => {
+    const { context, next } = createContext({
+      method: 'POST',
+      url: '/api/srd/cards',
+      body: { selections: [] },
+    });
+
+    interceptor.intercept(context, next).subscribe(() => {
+      expect(auditLogService.log).not.toHaveBeenCalled();
+      done();
+    });
+  });
+
+  it('logs homebrew monster creation (VEG-293)', done => {
+    const { context, next } = createContext({
+      method: 'POST',
+      url: '/api/srd/monsters',
+      body: { name: 'Cave Troll' },
+    });
+
+    interceptor.intercept(context, next).subscribe(() => {
+      expect(auditLogService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.CREATE,
+          entity: 'Monster',
+          entityId: 'new-entity-id',
+        })
+      );
+      done();
+    });
+  });
+
+  it('logs homebrew monster deletion with the id from the URL', done => {
+    const { context, next } = createContext({
+      method: 'DELETE',
+      url: '/api/srd/monsters/mon-1',
+    });
+
+    interceptor.intercept(context, next).subscribe(() => {
+      expect(auditLogService.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: AuditAction.DELETE,
+          entity: 'Monster',
+          entityId: 'mon-1',
+        })
+      );
       done();
     });
   });

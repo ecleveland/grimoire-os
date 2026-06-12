@@ -35,7 +35,16 @@ export default async function globalSetup(): Promise<void> {
   const tables = APP_DATA_TABLES.join(', ');
   // Truncate the app tables that reference users first (clears the children),
   // then DELETE users so its per-row ON DELETE CASCADE spares the SRD catalog.
-  const sql = `TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE; DELETE FROM users;`;
+  // Homebrew content rows must go before users: their createdById FK is
+  // ON DELETE SET NULL, and the homebrew-has-creator CHECK constraint rejects
+  // the nulled row (the app deletes homebrew in UsersService.remove for the
+  // same reason, VEG-317/VEG-293).
+  // The identifier quotes are backslash-escaped because the whole statement is
+  // interpolated into a double-quoted `psql -c "..."` shell argument below.
+  const homebrewCleanup = ['monsters', 'spells', 'items', 'feats']
+    .map(t => `DELETE FROM ${t} WHERE \\"contentSource\\" = 'homebrew';`)
+    .join(' ');
+  const sql = `TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE; ${homebrewCleanup} DELETE FROM users;`;
 
   // Run inside the postgres container — same path the dev scripts use, so we
   // do not need a host-side psql client or a new node dependency.

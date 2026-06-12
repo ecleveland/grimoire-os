@@ -1,7 +1,7 @@
 'use client';
 
 import type { SrdMonster } from '@/lib/types';
-import { abilityModifier, formatCr } from '@/lib/srd-format';
+import { abilityModifier, formatBonuses, formatCr } from '@/lib/srd-format';
 
 interface Action {
   name: string;
@@ -16,16 +16,6 @@ const ABILITIES: Array<{ key: keyof SrdMonster; label: string }> = [
   { key: 'wis', label: 'WIS' },
   { key: 'cha', label: 'CHA' },
 ];
-
-function signed(n: number): string {
-  return n >= 0 ? `+${n}` : `${n}`;
-}
-
-function formatBonuses(map: Record<string, number>): string {
-  return Object.entries(map)
-    .map(([k, v]) => `${k} ${signed(v)}`)
-    .join(', ');
-}
 
 /** Renders a full SRD monster stat block as a modern app-styled card (VEG-257). */
 export default function MonsterStatBlock({ monster: m }: { monster: SrdMonster }) {
@@ -50,10 +40,17 @@ export default function MonsterStatBlock({ monster: m }: { monster: SrdMonster }
           <h3 className="text-xl font-bold text-gray-900 dark:text-white">{m.name}</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">{subtitle}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 text-xs font-medium whitespace-nowrap">
-          CR {formatCr(m.challengeRating)}
-          {m.experiencePoints ? ` · ${m.experiencePoints} XP` : ''}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {m.contentSource === 'homebrew' && (
+            <span className="rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2.5 py-1 text-xs font-medium whitespace-nowrap">
+              Homebrew
+            </span>
+          )}
+          <span className="rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-2.5 py-1 text-xs font-medium whitespace-nowrap">
+            CR {formatCr(m.challengeRating)}
+            {m.experiencePoints ? ` · ${m.experiencePoints} XP` : ''}
+          </span>
+        </div>
       </header>
 
       <div className="grid grid-cols-3 gap-2 text-center">
