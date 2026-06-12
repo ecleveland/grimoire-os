@@ -20,6 +20,11 @@ const categories = [
     description: 'Browse spells by level, school, and class — including your homebrew.',
   },
   {
+    href: '/srd/feats',
+    title: 'Feats',
+    description: 'Browse feats by category and prerequisite — including your homebrew.',
+  },
+  {
     href: '/srd/items',
     title: 'Items',
     description: 'Search weapons, armor, adventuring gear, and more.',

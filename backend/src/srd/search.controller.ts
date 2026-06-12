@@ -8,9 +8,9 @@ import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payl
 /**
  * Unified search across spells, feats, and features (VEG-294). Lives apart
  * from {@link SrdController} because the response varies per user — the
- * caller's homebrew spells ride along with the catalog — so it must stay off
- * that controller's URL-keyed CacheInterceptor, which would leak one user's
- * homebrew to another.
+ * caller's homebrew spells and feats ride along with the catalog — so it must
+ * stay off that controller's URL-keyed CacheInterceptor, which would leak one
+ * user's homebrew to another.
  */
 @ApiTags('SRD')
 @Controller('srd')

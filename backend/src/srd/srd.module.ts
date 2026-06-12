@@ -2,21 +2,30 @@ import { Module } from '@nestjs/common';
 import { SrdController } from './srd.controller';
 import { MonstersController } from './monsters.controller';
 import { SpellsController } from './spells.controller';
+import { FeatsController } from './feats.controller';
 import { SearchController } from './search.controller';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
 import { ContentAccessService } from './content-access.service';
 import { HomebrewMonstersService } from './homebrew-monsters.service';
 import { HomebrewSpellsService } from './homebrew-spells.service';
+import { HomebrewFeatsService } from './homebrew-feats.service';
 
 @Module({
-  controllers: [SrdController, MonstersController, SpellsController, SearchController],
+  controllers: [
+    SrdController,
+    MonstersController,
+    SpellsController,
+    FeatsController,
+    SearchController,
+  ],
   providers: [
     SrdService,
     PrintableCardsService,
     ContentAccessService,
     HomebrewMonstersService,
     HomebrewSpellsService,
+    HomebrewFeatsService,
   ],
   exports: [SrdService, ContentAccessService],
 })

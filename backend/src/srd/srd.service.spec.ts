@@ -697,15 +697,100 @@ describe('SrdService', () => {
   // ── Feats ───────────────────────────────────────────
 
   describe('searchFeats', () => {
-    it('passes empty where when no query', async () => {
+    beforeEach(() => {
       prisma.feat.findMany.mockResolvedValue([]);
+      prisma.feat.count.mockResolvedValue(0);
+    });
 
-      await service.searchFeats();
+    it('returns a paginated global-catalog page when no filters provided', async () => {
+      const result = await service.searchFeats({});
 
       expect(prisma.feat.findMany).toHaveBeenCalledWith({
         where: { ...GLOBAL_WHERE },
         orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
       });
+      expect(result).toEqual(expect.objectContaining({ data: [], total: 0, page: 1 }));
+    });
+
+    it('paginates via skip/take', async () => {
+      await service.searchFeats({ page: 3, limit: 10 });
+
+      expect(prisma.feat.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 })
+      );
+    });
+
+    it('AND-joins visibility with the free-text query so neither clobbers the other', async () => {
+      await service.searchFeats({ q: 'tough' });
+
+      expect(prisma.feat.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { ...GLOBAL_WHERE },
+              {
+                OR: [
+                  { name: { contains: 'tough', mode: 'insensitive' } },
+                  { description: { contains: 'tough', mode: 'insensitive' } },
+                ],
+              },
+            ],
+          },
+        })
+      );
+    });
+
+    it('applies category, hasPrerequisite=true, and repeatable=true filters', async () => {
+      await service.searchFeats({
+        category: 'Origin',
+        hasPrerequisite: 'true',
+        repeatable: 'true',
+      });
+
+      const where = prisma.feat.findMany.mock.calls[0][0].where;
+      expect(where.category).toBe('Origin');
+      expect(where.prerequisite).toEqual({ not: null });
+      expect(where.repeatable).toBe(true);
+    });
+
+    it('applies hasPrerequisite=false and repeatable=false filters', async () => {
+      await service.searchFeats({ hasPrerequisite: 'false', repeatable: 'false' });
+
+      const where = prisma.feat.findMany.mock.calls[0][0].where;
+      expect(where.prerequisite).toBeNull();
+      expect(where.repeatable).toBe(false);
+    });
+
+    it('widens the where to the caller’s own homebrew when a userId is passed (VEG-295)', async () => {
+      await service.searchFeats({}, 'u1');
+
+      expect(prisma.feat.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        })
+      );
+    });
+
+    it('keeps visibility and substring search independent for authed callers', async () => {
+      await service.searchFeats({ q: 'tough' }, 'u1');
+
+      expect(prisma.feat.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+              {
+                OR: [
+                  { name: { contains: 'tough', mode: 'insensitive' } },
+                  { description: { contains: 'tough', mode: 'insensitive' } },
+                ],
+              },
+            ],
+          },
+        })
+      );
     });
   });
 
@@ -936,13 +1021,25 @@ describe('SrdService', () => {
   });
 
   describe('findFeat', () => {
-    it('returns feat by id, scoped to the global catalog', async () => {
+    it('returns feat by id, scoped to the global catalog for anonymous callers', async () => {
       const feat = { id: '1', name: 'Tough' };
       prisma.feat.findFirst.mockResolvedValue(feat);
 
       const result = await service.findFeat('1');
 
       expect(prisma.feat.findFirst).toHaveBeenCalledWith({ where: { id: '1', ...GLOBAL_WHERE } });
+      expect(result).toEqual(feat);
+    });
+
+    it('resolves the caller’s own homebrew when a userId is passed (VEG-295)', async () => {
+      const feat = { id: 'f1', name: 'Homebrew Feat', contentSource: 'homebrew' };
+      prisma.feat.findFirst.mockResolvedValue(feat);
+
+      const result = await service.findFeat('f1', 'u1');
+
+      expect(prisma.feat.findFirst).toHaveBeenCalledWith({
+        where: { id: 'f1', OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+      });
       expect(result).toEqual(feat);
     });
   });
@@ -1203,7 +1300,7 @@ describe('SrdService', () => {
       expect(idQuery?.values.filter(v => v === 'shared').length).toBe(2);
     });
 
-    // ── Owner-aware spells (VEG-294): the caller’s homebrew spells surface in unified search ──
+    // ── Owner-aware spells (VEG-294) and feats (VEG-295): the caller’s homebrew surfaces in unified search ──
 
     it('widens the spell source to the caller’s homebrew when a userId is passed', async () => {
       await service.search({ types: ['spell'] }, 'u1');
@@ -1214,15 +1311,17 @@ describe('SrdService', () => {
       expect(countQuery?.values).toContain('u1');
     });
 
-    it('keeps the feat source pinned to the global catalog even with a userId', async () => {
+    it('widens the feat source to the caller’s homebrew when a userId is passed', async () => {
       await service.search({ types: ['feat'] }, 'u1');
-      const { idQuery } = captureSql();
-      expect(idQuery?.sql).not.toContain('"createdById"');
-      expect(idQuery?.values).not.toContain('u1');
+      const { idQuery, countQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"createdById" =');
+      expect(idQuery?.values).toContain('u1');
+      expect(countQuery?.sql).toContain('"createdById" =');
+      expect(countQuery?.values).toContain('u1');
     });
 
-    it('keeps the spell source pinned to the global catalog for anonymous callers', async () => {
-      await service.search({ types: ['spell'] });
+    it('keeps the spell and feat sources pinned to the global catalog for anonymous callers', async () => {
+      await service.search({ types: ['spell', 'feat'] });
       const { idQuery } = captureSql();
       expect(idQuery?.sql).not.toContain('"createdById"');
     });

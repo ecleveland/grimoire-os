@@ -363,6 +363,36 @@ describe('SrdSearchPage', () => {
     });
   });
 
+  describe('homebrew feat badge (VEG-295)', () => {
+    const homebrewFeat: UnifiedSearchHit = {
+      kind: 'feat',
+      data: {
+        ...sharpshooterFeat,
+        id: 'feat-hb',
+        name: 'Lucky Dodge',
+        contentSource: 'homebrew',
+        createdById: 'u1',
+        source: 'Homebrew',
+      },
+    };
+
+    it('shows the Homebrew badge on a homebrew feat hit', async () => {
+      mockApiFetch.mockResolvedValue(paginated([homebrewFeat]));
+      renderPage();
+
+      const heading = await screen.findByText('Lucky Dodge');
+      expect(within(heading.closest('h2')!).getByText('Homebrew')).toBeInTheDocument();
+    });
+
+    it('does not show the Homebrew badge on an SRD feat hit', async () => {
+      mockApiFetch.mockResolvedValue(paginated([sharpshooter]));
+      renderPage();
+
+      const heading = await screen.findByText('Sharpshooter');
+      expect(within(heading.closest('h2')!).queryByText('Homebrew')).not.toBeInTheDocument();
+    });
+  });
+
   describe('conditional rendering — spell expanded fields', () => {
     it('does not render the Material section when spell.material is absent', async () => {
       const user = userEvent.setup();

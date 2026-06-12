@@ -7,6 +7,7 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto } from './dto/query-items.dto';
+import { QueryFeatsDto } from './dto/query-feats.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
 import { ContentAccessService, GLOBAL_CONTENT_SOURCES } from './content-access.service';
@@ -672,19 +673,51 @@ export class SrdService {
 
   // ── Feats ───────────────────────────────────────────
 
-  async searchFeats(query?: string) {
-    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
-    if (query) {
-      where.OR = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { description: { contains: query, mode: 'insensitive' } },
-      ];
-    }
-    return this.prisma.feat.findMany({ where, orderBy: { name: 'asc' } });
+  // Feat reads take an optional userId (VEG-295): authenticated callers see
+  // the global catalog plus their own homebrew; anonymous callers see only the
+  // catalog. The visibility fragment can itself be an OR, so a free-text query
+  // joins it under AND instead of clobbering it.
+  async searchFeats(dto: QueryFeatsDto, userId?: string) {
+    const page = dto.page ?? 1;
+    const limit = dto.limit ?? 20;
+
+    const visible = this.contentAccess.visibleTo(userId);
+    const where: Record<string, unknown> = dto.q
+      ? {
+          AND: [
+            { ...visible },
+            {
+              OR: [
+                { name: { contains: dto.q, mode: 'insensitive' } },
+                { description: { contains: dto.q, mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }
+      : { ...visible };
+    if (dto.category) where.category = dto.category;
+    if (dto.hasPrerequisite === 'true') where.prerequisite = { not: null };
+    else if (dto.hasPrerequisite === 'false') where.prerequisite = null;
+    if (dto.repeatable === 'true') where.repeatable = true;
+    else if (dto.repeatable === 'false') where.repeatable = false;
+
+    const [data, total] = await Promise.all([
+      this.prisma.feat.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.feat.count({ where }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
-  async findFeat(id: string) {
-    return this.prisma.feat.findFirst({ where: { id, ...this.contentAccess.globalWhere() } });
+  async findFeat(id: string, userId?: string) {
+    return this.prisma.feat.findFirst({
+      where: { id, ...this.contentAccess.visibleTo(userId) },
+    });
   }
 
   // ── Conditions ──────────────────────────────────────
@@ -746,9 +779,9 @@ export class SrdService {
   //   3) Sum-of-counts query for the grand total.
   //   4) Hydrate full payloads by primary key per source.
 
-  // Takes an optional userId (VEG-294): the spell source widens to the
-  // caller's own homebrew. Feats and features stay pinned to the global
-  // catalog until their own homebrew tickets land.
+  // Takes an optional userId (VEG-294/295): the spell and feat sources widen
+  // to the caller's own homebrew. Features stay pinned to the global catalog —
+  // they have no homebrew tier.
   async search(dto: QuerySearchDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
@@ -804,7 +837,7 @@ export class SrdService {
       sources.push({
         tag: 'feat',
         table: Prisma.sql`"feats"`,
-        whereSql: this.buildFeatWhereSql(dto),
+        whereSql: this.buildFeatWhereSql(dto, userId),
       });
     }
     if (types.includes('feature')) {
@@ -834,8 +867,8 @@ export class SrdService {
     return joinWhere(conds);
   }
 
-  private buildFeatWhereSql(dto: QuerySearchDto): Prisma.Sql {
-    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL];
+  private buildFeatWhereSql(dto: QuerySearchDto, userId?: string): Prisma.Sql {
+    const conds: Prisma.Sql[] = [visibleSourceSql(userId)];
     if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
     if (dto.hasPrerequisite === 'true') conds.push(Prisma.sql`"prerequisite" IS NOT NULL`);
     else if (dto.hasPrerequisite === 'false') conds.push(Prisma.sql`"prerequisite" IS NULL`);
