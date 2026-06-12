@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { SrdMonster } from '@/lib/types';
-import { dexModifier, rollInitiative } from '@/lib/encounter-combatants';
+import { dexModifier, parseIntField, rollInitiative } from '@/lib/encounter-combatants';
 
 export interface AddToEncounterResult {
   quantity: number;
@@ -21,11 +21,6 @@ interface Props {
 }
 
 const DEFAULT_INIT = '10';
-
-function parseInit(value: string): number {
-  const n = Number(value);
-  return Number.isFinite(n) ? Math.trunc(n) : 0;
-}
 
 function resize(values: string[], length: number): string[] {
   if (values.length === length) return values;
@@ -85,8 +80,8 @@ export default function AddToEncounterDialog({
   function handleConfirm() {
     const q = Math.max(1, quantity);
     const initiatives = effectiveShared
-      ? Array(q).fill(parseInit(sharedInit))
-      : resize(individualInits, q).map(parseInit);
+      ? Array(q).fill(parseIntField(sharedInit))
+      : resize(individualInits, q).map(parseIntField);
     onConfirm({ quantity: q, initiatives });
   }
 

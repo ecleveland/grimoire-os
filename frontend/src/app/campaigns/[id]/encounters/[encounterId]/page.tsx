@@ -5,14 +5,19 @@ import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
-import type { Combatant, Encounter, SrdMonster } from '@/lib/types';
+import type { Combatant, Encounter, PartyCharacter, SrdMonster } from '@/lib/types';
 import Badge from '@/components/Badge';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import AddCombatantDialog from '@/components/AddCombatantDialog';
-import { buildManualCombatant, buildMonsterCombatants } from '@/lib/encounter-combatants';
-import type { ManualCombatantInput } from '@/lib/encounter-combatants';
+import AddPartyDialog from '@/components/AddPartyDialog';
+import {
+  buildManualCombatant,
+  buildMonsterCombatants,
+  buildPartyCombatants,
+} from '@/lib/encounter-combatants';
+import type { ManualCombatantInput, PartyCombatantEntry } from '@/lib/encounter-combatants';
 import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { aggregateCombatantLoot } from '@grimoire-os/shared';
@@ -81,7 +86,7 @@ function LootDisplay({
 }
 
 export default function InitiativeTrackerPage() {
-  const { encounterId } = useParams<{ id: string; encounterId: string }>();
+  const { id: campaignId, encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
   const [encounter, setEncounter] = useState<Encounter | null>(null);
   const [loading, setLoading] = useState(true);
@@ -121,6 +126,9 @@ export default function InitiativeTrackerPage() {
   const [confirmBulkRoll, setConfirmBulkRoll] = useState(false);
   // Manual add-combatant form (VEG-282).
   const [addCombatantOpen, setAddCombatantOpen] = useState(false);
+  // Party picker (VEG-283). `partyRoster` is null while the fetch is in flight.
+  const [addPartyOpen, setAddPartyOpen] = useState(false);
+  const [partyRoster, setPartyRoster] = useState<PartyCharacter[] | null>(null);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -303,18 +311,17 @@ export default function InitiativeTrackerPage() {
     patchEncounter({ isActive: !encounter.isActive });
   };
 
-  // Append monster combatant(s) from the lookup panel. Kept separate from
-  // patchEncounter for its add-specific success/error toasts.
-  const addMonsterToEncounter = async (
-    monster: SrdMonster,
-    { quantity, initiatives }: AddToEncounterResult
+  // The one version-guarded append shared by all three add paths (monster
+  // lookup, manual form, party picker): PATCH with expectedVersion, the shared
+  // 409 recovery, per-path toasts. `onSuccess` closes the originating dialog —
+  // only on success, so a conflict keeps it open and the user's entry survives
+  // the refetch for a retry. Kept separate from patchEncounter for the
+  // add-specific toasts.
+  const appendCombatants = async (
+    additions: Combatant[],
+    opts: { successMsg: string; errorMsg: string; onSuccess?: () => void }
   ) => {
-    if (!encounter) return;
-    const additions = buildMonsterCombatants(
-      monster,
-      { quantity, initiatives },
-      encounter.combatants.map(c => c.name)
-    );
+    if (!encounter || additions.length === 0) return;
     beginWrite();
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
@@ -325,46 +332,80 @@ export default function InitiativeTrackerPage() {
         }),
       });
       setEncounter(updated);
-      toast.success(
-        quantity > 1
-          ? `Added ${quantity} ${monster.name}s to the encounter`
-          : `Added ${monster.name} to the encounter`
-      );
+      opts.onSuccess?.();
+      toast.success(opts.successMsg);
     } catch (err) {
       if (handleEncounterConflict(err)) return;
-      toast.error(err instanceof Error ? err.message : 'Failed to add to encounter');
+      toast.error(err instanceof Error ? err.message : opts.errorMsg);
     } finally {
       endWrite();
     }
   };
 
-  // Append a hand-entered combatant (VEG-282). Same version-guarded PATCH and
-  // 409 recovery as the add-monster path; on conflict the dialog stays open so
-  // the typed entry survives the refetch and can be retried.
+  // Append monster combatant(s) from the lookup panel (VEG-260).
+  const addMonsterToEncounter = async (
+    monster: SrdMonster,
+    { quantity, initiatives }: AddToEncounterResult
+  ) => {
+    if (!encounter) return;
+    const additions = buildMonsterCombatants(
+      monster,
+      { quantity, initiatives },
+      encounter.combatants.map(c => c.name)
+    );
+    await appendCombatants(additions, {
+      successMsg:
+        quantity > 1
+          ? `Added ${quantity} ${monster.name}s to the encounter`
+          : `Added ${monster.name} to the encounter`,
+      errorMsg: 'Failed to add to encounter',
+    });
+  };
+
+  // Append a hand-entered combatant (VEG-282).
   const addManualCombatant = async (input: ManualCombatantInput) => {
     if (!encounter) return;
     const combatant = buildManualCombatant(
       input,
       encounter.combatants.map(c => c.name)
     );
-    beginWrite();
-    try {
-      const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          combatants: [...encounter.combatants, combatant],
-          expectedVersion: encounter.version,
-        }),
+    await appendCombatants([combatant], {
+      successMsg: `Added ${combatant.name} to the encounter`,
+      errorMsg: 'Failed to add combatant',
+      onSuccess: () => setAddCombatantOpen(false),
+    });
+  };
+
+  // Open the party picker and fetch the campaign roster (VEG-283). Mirrors the
+  // stat-block viewer's open-then-load pattern: the modal opens immediately
+  // with a loading state, and a failed fetch toasts and closes it.
+  const openAddParty = () => {
+    setPartyRoster(null);
+    setAddPartyOpen(true);
+    apiFetch<PartyCharacter[]>(`/campaigns/${campaignId}/characters`)
+      .then(setPartyRoster)
+      .catch(() => {
+        toast.error('Failed to load party');
+        setAddPartyOpen(false);
       });
-      setEncounter(updated);
-      setAddCombatantOpen(false);
-      toast.success(`Added ${combatant.name} to the encounter`);
-    } catch (err) {
-      if (handleEncounterConflict(err)) return;
-      toast.error(err instanceof Error ? err.message : 'Failed to add combatant');
-    } finally {
-      endWrite();
-    }
+  };
+
+  // Append the selected PCs (VEG-283). The empty-entries guard backstops the
+  // dialog's disabled confirm — onConfirm is a public prop boundary.
+  const addPartyToEncounter = async (entries: PartyCombatantEntry[]) => {
+    if (!encounter || entries.length === 0) return;
+    const additions = buildPartyCombatants(
+      entries,
+      encounter.combatants.map(c => c.name)
+    );
+    await appendCombatants(additions, {
+      successMsg:
+        additions.length > 1
+          ? `Added ${additions.length} party members to the encounter`
+          : `Added ${additions[0].name} to the encounter`,
+      errorMsg: 'Failed to add party',
+      onSuccess: () => setAddPartyOpen(false),
+    });
   };
 
   const viewCombatantMonster = (monsterId: string) => {
@@ -618,13 +659,20 @@ export default function InitiativeTrackerPage() {
       </div>
 
       {isController && (
-        <div className="mt-4">
+        <div className="mt-4 flex gap-2">
           <button
             type="button"
             onClick={() => setAddCombatantOpen(true)}
             className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
           >
             Add combatant
+          </button>
+          <button
+            type="button"
+            onClick={openAddParty}
+            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+          >
+            Add party
           </button>
         </div>
       )}
@@ -689,6 +737,22 @@ export default function InitiativeTrackerPage() {
           onCancel={() => setAddCombatantOpen(false)}
           submitting={writePending}
         />
+      </Modal>
+
+      <Modal open={addPartyOpen} onClose={() => setAddPartyOpen(false)} label="Add party">
+        {partyRoster === null ? (
+          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+            Loading party…
+          </p>
+        ) : (
+          <AddPartyDialog
+            characters={partyRoster}
+            existingNames={encounter.combatants.map(c => c.name)}
+            onConfirm={addPartyToEncounter}
+            onCancel={() => setAddPartyOpen(false)}
+            submitting={writePending}
+          />
+        )}
       </Modal>
 
       <MonsterLookupPanel canAdd={!!isController} onAdd={addMonsterToEncounter} />

@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import type { SrdMonster } from '@/lib/types';
+import type { PartyCharacter, SrdMonster } from '@/lib/types';
 import {
   dexModifier,
   rollInitiative,
+  rollInitiativeMod,
   nextCombatantNames,
+  parseIntField,
   buildMonsterCombatants,
   buildManualCombatant,
+  buildPartyCombatants,
 } from '@/lib/encounter-combatants';
 
 function makeMonster(over: Partial<SrdMonster> = {}): SrdMonster {
@@ -200,5 +203,125 @@ describe('buildManualCombatant', () => {
     const c = buildManualCombatant({ ...input, hp: 5, maxHp: -3 }, []);
     expect(c.maxHp).toBe(0);
     expect(c.hp).toBe(0);
+  });
+});
+
+describe('rollInitiativeMod', () => {
+  it('adds a d20 roll to the given modifier', () => {
+    expect(rollInitiativeMod(2, () => 0)).toBe(1 + 2);
+    expect(rollInitiativeMod(2, () => 0.999)).toBe(20 + 2);
+    expect(rollInitiativeMod(-3, () => 0)).toBe(1 - 3);
+  });
+});
+
+describe('buildPartyCombatants', () => {
+  function makePartyCharacter(over: Partial<PartyCharacter> = {}): PartyCharacter {
+    return {
+      id: 'char-1',
+      userId: 'user-2',
+      name: 'Thia',
+      race: 'Elf',
+      class: 'Wizard',
+      level: 5,
+      armorClass: 12,
+      initiative: 2,
+      hitPoints: { max: 22, current: 17, temporary: 0 },
+      ...over,
+    };
+  }
+
+  it('snapshots name, AC, and current/max HP from the sheet with isNpc false', () => {
+    const result = buildPartyCombatants(
+      [{ character: makePartyCharacter(), initiative: 14 }],
+      ['Goblin']
+    );
+    expect(result).toEqual([
+      { name: 'Thia', initiative: 14, hp: 17, maxHp: 22, ac: 12, isNpc: false },
+    ]);
+  });
+
+  it('auto-numbers against existing combatants and within the batch', () => {
+    const result = buildPartyCombatants(
+      [
+        { character: makePartyCharacter({ id: 'c1', name: 'Thia' }), initiative: 14 },
+        { character: makePartyCharacter({ id: 'c2', name: 'Thia' }), initiative: 9 },
+      ],
+      ['Thia']
+    );
+    expect(result.map(c => c.name)).toEqual(['Thia 2', 'Thia 3']);
+  });
+
+  it('falls back to 10 AC / 10 HP when the sheet has no armorClass or hitPoints', () => {
+    const result = buildPartyCombatants(
+      [{ character: makePartyCharacter({ armorClass: null, hitPoints: null }), initiative: 10 }],
+      []
+    );
+    expect(result[0]).toMatchObject({ ac: 10, hp: 10, maxHp: 10 });
+  });
+
+  it('clamps a stale current HP above max down to max, and negative current to 0', () => {
+    const over = buildPartyCombatants(
+      [
+        {
+          character: makePartyCharacter({ hitPoints: { max: 20, current: 31, temporary: 0 } }),
+          initiative: 10,
+        },
+        {
+          character: makePartyCharacter({
+            id: 'c2',
+            name: 'Mort',
+            hitPoints: { max: 20, current: -4, temporary: 0 },
+          }),
+          initiative: 10,
+        },
+      ],
+      []
+    );
+    expect(over[0]).toMatchObject({ hp: 20, maxHp: 20 });
+    expect(over[1]).toMatchObject({ hp: 0, maxHp: 20 });
+  });
+
+  it('never sets monsterId on a party combatant', () => {
+    const [c] = buildPartyCombatants([{ character: makePartyCharacter(), initiative: 12 }], []);
+    expect(c).not.toHaveProperty('monsterId');
+  });
+
+  it('carries temporary HP from the sheet into tempHp', () => {
+    const [c] = buildPartyCombatants(
+      [
+        {
+          character: makePartyCharacter({ hitPoints: { max: 22, current: 17, temporary: 5 } }),
+          initiative: 10,
+        },
+      ],
+      []
+    );
+    expect(c).toMatchObject({ hp: 17, maxHp: 22, tempHp: 5 });
+  });
+
+  it('omits tempHp entirely when the sheet has none', () => {
+    const [zero] = buildPartyCombatants([{ character: makePartyCharacter(), initiative: 10 }], []);
+    expect(zero).not.toHaveProperty('tempHp');
+    const [noHp] = buildPartyCombatants(
+      [{ character: makePartyCharacter({ hitPoints: null }), initiative: 10 }],
+      []
+    );
+    expect(noHp).not.toHaveProperty('tempHp');
+  });
+});
+
+describe('parseIntField', () => {
+  it('truncates finite numeric strings to integers', () => {
+    expect(parseIntField('12')).toBe(12);
+    expect(parseIntField('12.7')).toBe(12);
+    expect(parseIntField('-3')).toBe(-3);
+    expect(parseIntField('0')).toBe(0);
+  });
+
+  it('falls back to 0 for blank or non-numeric input', () => {
+    expect(parseIntField('')).toBe(0);
+    expect(parseIntField('   ')).toBe(0);
+    expect(parseIntField('abc')).toBe(0);
+    expect(parseIntField('Infinity')).toBe(0);
   });
 });

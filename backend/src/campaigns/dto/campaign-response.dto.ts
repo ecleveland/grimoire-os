@@ -1,4 +1,5 @@
 import { Expose } from 'class-transformer';
+import type { HitPoints } from '@grimoire-os/shared';
 import { CampaignStatus } from '../../prisma/enums';
 
 /**
@@ -19,6 +20,25 @@ export class CampaignDto {
   @Expose() characterIds!: string[];
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;
+}
+
+/**
+ * Slim party-roster projection (VEG-283): just what the encounter tracker
+ * needs to add a PC as a combatant (AC/HP snapshot, initiative modifier for
+ * the auto-roll) plus display fields. Deliberately omits the rest of the
+ * sheet — members must not see each other's backstory, inventory, or currency
+ * through the roster. Wire shape mirrors the shared `PartyCharacter` type.
+ */
+export class PartyCharacterDto {
+  @Expose() id!: string;
+  @Expose() userId!: string;
+  @Expose() name!: string;
+  @Expose() race!: string | null;
+  @Expose() class!: string | null;
+  @Expose() level!: number;
+  @Expose() armorClass!: number | null;
+  @Expose() initiative!: number | null;
+  @Expose() hitPoints!: HitPoints | null;
 }
 
 /** Slim campaign shape for list views (VEG-125 projection, VEG-128 DTO). */

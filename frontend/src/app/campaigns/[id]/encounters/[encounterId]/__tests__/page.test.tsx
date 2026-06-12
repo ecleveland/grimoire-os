@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
 import { ApiError } from '@/lib/api';
-import type { Encounter, Combatant, SrdMonster } from '@/lib/types';
+import type { Encounter, Combatant, PartyCharacter, SrdMonster } from '@/lib/types';
 import type { CombatantLoot } from '@grimoire-os/shared';
 
 const mockApiFetch = vi.fn();
@@ -115,14 +115,18 @@ beforeEach(() => {
 function routeAddFlow(opts: {
   encounter: Encounter;
   onPatch?: (body: unknown) => Promise<unknown>;
+  characters?: PartyCharacter[] | (() => Promise<PartyCharacter[]>);
 }) {
-  const { encounter, onPatch } = opts;
+  const { encounter, onPatch, characters } = opts;
   mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
     if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
       const body = JSON.parse(init.body ?? '{}');
       return onPatch ? onPatch(body) : Promise.resolve({ ...encounter, ...body, version: 99 });
     }
     if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+    if (path === '/campaigns/camp-1/characters' && characters !== undefined) {
+      return typeof characters === 'function' ? characters() : Promise.resolve(characters);
+    }
     if (path.startsWith('/srd/monsters/')) return Promise.resolve(goblinMonster);
     if (path.startsWith('/srd/monsters?')) {
       return Promise.resolve({ data: [goblinMonster], total: 1, page: 1, lastPage: 1 });
@@ -626,6 +630,207 @@ describe('InitiativeTrackerPage', () => {
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1'));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+  });
+
+  // ── Add party PCs as combatants (VEG-283) ────────────────────────────────────
+
+  describe('add party PCs', () => {
+    const thia: PartyCharacter = {
+      id: 'char-1',
+      userId: 'user-2',
+      name: 'Thia',
+      race: 'Elf',
+      class: 'Wizard',
+      level: 5,
+      armorClass: 12,
+      initiative: 2,
+      hitPoints: { max: 22, current: 17, temporary: 0 },
+    };
+    const mort: PartyCharacter = {
+      id: 'char-2',
+      userId: 'user-3',
+      name: 'Mort',
+      race: 'Human',
+      class: 'Rogue',
+      level: 3,
+      armorClass: 14,
+      initiative: 3,
+      hitPoints: { max: 18, current: 18, temporary: 0 },
+    };
+
+    async function openAddParty(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /add party/i }));
+      return within(await screen.findByRole('dialog'));
+    }
+
+    it('fetches the campaign roster and appends selected PCs via a version-guarded PATCH', async () => {
+      routeAddFlow({ encounter: makeEncounter({ version: 5 }), characters: [thia, mort] });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+
+      // Roster fetched from the campaign-scoped endpoint.
+      expect(mockApiFetch).toHaveBeenCalledWith('/campaigns/camp-1/characters');
+
+      await dialog.findByText('Thia');
+      const mortInit = dialog.getByRole('spinbutton', { name: /initiative for mort/i });
+      await user.clear(mortInit);
+      await user.type(mortInit, '17');
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+
+      let patchBody: { combatants: Combatant[]; expectedVersion: number } | undefined;
+      await waitFor(() => {
+        const call = mockApiFetch.mock.calls.find(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        );
+        expect(call).toBeDefined();
+        patchBody = JSON.parse((call![1] as { body: string }).body);
+      });
+
+      expect(patchBody!.expectedVersion).toBe(5);
+      // Both PCs appended after the existing three combatants: sheet snapshot,
+      // isNpc false, no monsterId/characterId.
+      expect(patchBody!.combatants).toHaveLength(5);
+      expect(patchBody!.combatants[3]).toEqual({
+        name: 'Thia',
+        initiative: 10,
+        hp: 17,
+        maxHp: 22,
+        ac: 12,
+        isNpc: false,
+      });
+      expect(patchBody!.combatants[4]).toEqual({
+        name: 'Mort',
+        initiative: 17,
+        hp: 18,
+        maxHp: 18,
+        ac: 14,
+        isNpc: false,
+      });
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('does not offer the add-party control to non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /add party/i })).not.toBeInTheDocument();
+    });
+
+    it('toasts and closes the dialog when the roster fetch fails', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        characters: () => Promise.reject(new Error('boom')),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /add party/i }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load party'));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('refetches and warns on a 409, keeping the dialog open for a retry', async () => {
+      routeAddFlow({
+        encounter: makeEncounter({ version: 5 }),
+        characters: [thia],
+        onPatch: () =>
+          Promise.reject(
+            new ApiError(409, 'Encounter was modified by another request; re-fetch and retry.', {
+              currentVersion: 9,
+            })
+          ),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+      expect(String(mockToastError.mock.calls.at(-1)?.[0] ?? '')).toMatch(/chang|refresh|again/i);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it('passes the encounter combatant names so already-present PCs start deselected', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        characters: [thia, { ...mort, name: 'Goblin A' }],
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      // "Goblin A" is already a combatant — the picker starts it deselected.
+      expect(dialog.getByRole('checkbox', { name: /add thia/i })).toBeChecked();
+      expect(dialog.getByRole('checkbox', { name: /add goblin a/i })).not.toBeChecked();
+      expect(dialog.getByText(/already in encounter/i)).toBeInTheDocument();
+    });
+
+    it('retries after a 409 with the refreshed expectedVersion', async () => {
+      let currentEncounter = makeEncounter({ version: 5 });
+      let patchCount = 0;
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          patchCount += 1;
+          if (patchCount === 1) {
+            // Another writer won the race — the refetch must observe v9.
+            currentEncounter = makeEncounter({ version: 9 });
+            return Promise.reject(
+              new ApiError(409, 'Encounter was modified by another request.', {
+                currentVersion: 9,
+              })
+            );
+          }
+          const body = JSON.parse(init.body ?? '{}');
+          return Promise.resolve({ ...currentEncounter, ...body, version: 10 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(currentEncounter);
+        if (path === '/campaigns/camp-1/characters') return Promise.resolve([thia]);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+
+      // Retry from the still-open dialog: the second PATCH must carry the
+      // refetched version, not the stale v5 the dialog was opened against.
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const patches = mockApiFetch.mock.calls.filter(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      expect(patches).toHaveLength(2);
+      const retryBody = JSON.parse((patches[1][1] as { body: string }).body);
+      expect(retryBody.expectedVersion).toBe(9);
+    });
+
+    it('toasts a generic message when the add-party PATCH rejection is not an Error', async () => {
+      routeAddFlow({
+        encounter: makeEncounter(),
+        characters: [thia],
+        onPatch: () => Promise.reject('string rejection'),
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to add party'));
+    });
   });
 
   // ── Add a manual / ad-hoc combatant (VEG-282) ────────────────────────────────

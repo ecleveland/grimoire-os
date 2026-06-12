@@ -8,8 +8,8 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
-import { CampaignDto, CampaignListItemDto } from './dto/campaign-response.dto';
-import { toDto } from '../common/serialization/to-dto';
+import { CampaignDto, CampaignListItemDto, PartyCharacterDto } from './dto/campaign-response.dto';
+import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const campaignInclude = {
   players: true,
@@ -158,6 +158,33 @@ export class CampaignsService {
       where: { id },
       data: { inviteCode: null, inviteCodeExpiresAt: null },
     });
+  }
+
+  /**
+   * Party roster for the encounter tracker (VEG-283): every character attached
+   * to the campaign, projected down to the combatant-relevant fields. Member
+   * read — the full sheets stay owner-only via GET /characters/:id. The
+   * projection happens at the DB level (select), so private sheet fields and
+   * the large JSON blobs are never fetched; the DTO whitelist is the backstop.
+   */
+  async findCharactersForMember(campaignId: string, userId: string): Promise<PartyCharacterDto[]> {
+    await this.campaignAuth.assertCampaignMember(campaignId, userId);
+    const characters = await this.prisma.character.findMany({
+      where: { campaignId },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        userId: true,
+        name: true,
+        race: true,
+        class: true,
+        level: true,
+        armorClass: true,
+        initiative: true,
+        hitPoints: true,
+      },
+    });
+    return toDtoArray(PartyCharacterDto, characters);
   }
 
   async addCharacter(campaignId: string, characterId: string, userId: string) {

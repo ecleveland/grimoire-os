@@ -28,6 +28,7 @@ describe('CampaignsController', () => {
       addCharacter: jest.fn(),
       removeCharacter: jest.fn(),
       removePlayer: jest.fn(),
+      findCharactersForMember: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -125,6 +126,18 @@ describe('CampaignsController', () => {
 
       expect(service.joinByInviteCode).toHaveBeenCalledWith('abc123', USER_ID);
       expect(result).toEqual(mockCampaign);
+    });
+  });
+
+  describe('findCharacters', () => {
+    it('delegates to service with campaignId and userId', async () => {
+      const roster = [{ id: CHARACTER_ID, name: 'Thia' }];
+      service.findCharactersForMember.mockResolvedValue(roster);
+
+      const result = await controller.findCharacters(CAMPAIGN_ID, mockReq);
+
+      expect(service.findCharactersForMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(result).toEqual(roster);
     });
   });
 

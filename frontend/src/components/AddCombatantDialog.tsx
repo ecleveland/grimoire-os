@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { parseIntField } from '@/lib/encounter-combatants';
 import type { ManualCombatantInput } from '@/lib/encounter-combatants';
 
 interface Props {
@@ -11,11 +12,6 @@ interface Props {
 }
 
 const DEFAULT_STAT = '10';
-
-function parseStat(value: string): number {
-  const n = Number(value);
-  return Number.isFinite(n) && value.trim() !== '' ? Math.trunc(n) : 0;
-}
 
 /**
  * Collects the fields for an ad-hoc combatant (VEG-282): lairs, hazards,
@@ -35,10 +31,10 @@ export default function AddCombatantDialog({ onConfirm, onCancel, submitting = f
   function handleConfirm() {
     onConfirm({
       name,
-      initiative: parseStat(initiative),
-      hp: parseStat(hp),
-      maxHp: parseStat(maxHp),
-      ac: parseStat(ac),
+      initiative: parseIntField(initiative),
+      hp: parseIntField(hp),
+      maxHp: parseIntField(maxHp),
+      ac: parseIntField(ac),
       isNpc,
       notes,
     });

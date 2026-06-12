@@ -26,6 +26,7 @@ export type {
   Currency,
   Feature,
   Combatant,
+  PartyCharacter,
   // Entity types
   User,
   Campaign,

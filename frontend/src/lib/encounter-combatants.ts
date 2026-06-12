@@ -1,4 +1,4 @@
-import type { Combatant, SrdMonster } from '@/lib/types';
+import type { Combatant, PartyCharacter, SrdMonster } from '@/lib/types';
 
 /** Derive the 5e DEX modifier from a monster's raw DEX score: floor((dex - 10) / 2). */
 export function dexModifier(monster: SrdMonster): number {
@@ -6,12 +6,27 @@ export function dexModifier(monster: SrdMonster): number {
 }
 
 /**
- * Roll initiative for a monster: d20 + DEX modifier. `rng` is injectable so
- * tests can pin the roll; in the app it defaults to Math.random.
+ * Roll initiative for any flat modifier: d20 + mod (VEG-283). `rng` is
+ * injectable so tests can pin the roll; in the app it defaults to Math.random.
  */
-export function rollInitiative(monster: SrdMonster, rng: () => number = Math.random): number {
+export function rollInitiativeMod(mod: number, rng: () => number = Math.random): number {
   const d20 = Math.floor(rng() * 20) + 1;
-  return d20 + dexModifier(monster);
+  return d20 + mod;
+}
+
+/** Roll initiative for a monster: d20 + DEX modifier. */
+export function rollInitiative(monster: SrdMonster, rng: () => number = Math.random): number {
+  return rollInitiativeMod(dexModifier(monster), rng);
+}
+
+/**
+ * Parse a freeform integer form field: finite numbers truncate to whole
+ * values, blank or non-numeric input falls back to 0. The one parser shared
+ * by all the add-combatant dialogs so their semantics can't drift.
+ */
+export function parseIntField(value: string): number {
+  const n = Number(value);
+  return Number.isFinite(n) && value.trim() !== '' ? Math.trunc(n) : 0;
 }
 
 /**
@@ -72,6 +87,43 @@ export function buildManualCombatant(
     isNpc: input.isNpc,
     ...(notes ? { notes } : {}),
   };
+}
+
+/** One picker row: which PC to add and the initiative the DM settled on. */
+export interface PartyCombatantEntry {
+  character: PartyCharacter;
+  initiative: number;
+}
+
+/**
+ * Build PC combatants from the party roster (VEG-283). AC and current/max/temp
+ * HP are an add-time snapshot of the sheet (missing values fall back to 10,
+ * current HP clamps into [0, max] in case the sheet is stale, and zero temp HP
+ * is omitted like the rest of the tracker does), names auto-number against the
+ * encounter and within the batch, and `isNpc` is always false. No
+ * `characterId` linkage yet — gated on VEG-256.
+ */
+export function buildPartyCombatants(
+  entries: PartyCombatantEntry[],
+  existingNames: string[]
+): Combatant[] {
+  const taken = [...existingNames];
+  return entries.map(({ character, initiative }) => {
+    const [name] = nextCombatantNames(taken, character.name.trim(), 1);
+    taken.push(name);
+    const maxHp = character.hitPoints?.max ?? 10;
+    const current = character.hitPoints?.current ?? maxHp;
+    const tempHp = character.hitPoints?.temporary ?? 0;
+    return {
+      name,
+      initiative,
+      hp: Math.max(0, Math.min(current, maxHp)),
+      maxHp,
+      ...(tempHp > 0 ? { tempHp } : {}),
+      ac: character.armorClass ?? 10,
+      isNpc: false,
+    };
+  });
 }
 
 export interface BuildCombatantsOptions {
