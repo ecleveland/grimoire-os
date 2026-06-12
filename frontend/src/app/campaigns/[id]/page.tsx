@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
@@ -46,6 +46,9 @@ export default function CampaignDetailPage() {
   const [loading, setLoading] = useState(true);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
+  const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
+  const [encountersRefresh, setEncountersRefresh] = useState(0);
+  const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
   const isOwner = campaign && user && campaign.ownerId === user.userId;
 
@@ -99,7 +102,7 @@ export default function CampaignDetailPage() {
           toast.error('Failed to load NPCs', { id: 'load-npcs' });
         });
     }
-  }, [tab, id, notesPage, encountersPage]);
+  }, [tab, id, notesPage, encountersPage, encountersRefresh]);
 
   const handleTabChange = (newTab: Tab) => {
     if (newTab !== tab) {
@@ -132,18 +135,26 @@ export default function CampaignDetailPage() {
   };
 
   const performDeleteEncounter = async () => {
-    if (!encounterToDelete) return;
+    if (!encounterToDelete || deletingEncounterId) return;
+    setDeletingEncounterId(encounterToDelete.id);
     try {
       await apiFetch(`/encounters/${encounterToDelete.id}`, { method: 'DELETE' });
-      setEncounters(prev => prev.filter(e => e.id !== encounterToDelete.id));
-      setEncountersTotal(t => t - 1);
-      // Deleting the last row of a later page leaves it empty; step back to refetch.
-      if (encounters.length === 1 && encountersPage > 1) {
-        setEncountersPage(p => p - 1);
-      }
       toast.success('Encounter deleted');
+      // Re-sync from the server so the page contents, total, and lastPage stay
+      // consistent; clamp the page in case the last row of the final page went away.
+      const lastPageAfterDelete = Math.max(1, Math.ceil((encountersTotal - 1) / LIMIT));
+      const nextPage = Math.min(encountersPage, lastPageAfterDelete);
+      if (nextPage !== encountersPage) {
+        setEncountersPage(nextPage);
+      } else {
+        setEncountersRefresh(r => r + 1);
+      }
+      // The row that held focus is about to unmount; land focus somewhere stable.
+      encountersHeadingRef.current?.focus();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete encounter');
+    } finally {
+      setDeletingEncounterId(null);
     }
   };
 
@@ -388,7 +399,13 @@ export default function CampaignDetailPage() {
       {tab === 'encounters' && (
         <div>
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Encounters</h2>
+            <h2
+              ref={encountersHeadingRef}
+              tabIndex={-1}
+              className="text-lg font-semibold text-gray-900 dark:text-white focus:outline-none"
+            >
+              Encounters
+            </h2>
             <Link
               href={`/campaigns/${id}/encounters/new`}
               className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
@@ -421,8 +438,9 @@ export default function CampaignDetailPage() {
                     {isOwner && (
                       <button
                         onClick={() => setEncounterToDelete(enc)}
+                        disabled={deletingEncounterId !== null}
                         aria-label={`Delete ${enc.name}`}
-                        className="px-3 text-sm text-red-600 hover:text-red-700 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-red-400 transition-colors"
+                        className="px-3 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
                       >
                         Delete
                       </button>
