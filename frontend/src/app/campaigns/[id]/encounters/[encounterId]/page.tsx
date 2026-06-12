@@ -806,7 +806,8 @@ export default function InitiativeTrackerPage() {
             <button
               type="button"
               onClick={() => setConfirmClearAll(true)}
-              className="ml-auto px-3 py-1.5 text-sm border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 transition-colors"
+              disabled={writePending}
+              className="ml-auto px-3 py-1.5 text-sm border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Clear all
             </button>

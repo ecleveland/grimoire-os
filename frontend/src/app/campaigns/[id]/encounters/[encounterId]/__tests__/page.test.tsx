@@ -2251,11 +2251,15 @@ describe('InitiativeTrackerPage', () => {
   // ── Remove combatant + clear all (VEG-284) ──
 
   describe('remove combatant + clear all', () => {
+    // Same selection rule as the HP-controls helper above: the LAST PATCH,
+    // so a test that fires more than one write can't assert on the wrong call.
     const lastPatchBody = () => {
-      const call = mockApiFetch.mock.calls.find(
-        ([p, o]) =>
-          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
-      );
+      const call = mockApiFetch.mock.calls
+        .filter(
+          ([p, o]) =>
+            p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+        )
+        .at(-1);
       expect(call).toBeDefined();
       return JSON.parse((call![1] as { body: string }).body) as Record<string, unknown>;
     };
@@ -2364,6 +2368,32 @@ describe('InitiativeTrackerPage', () => {
           ([, o]) => (o as { method?: string } | undefined)?.method === 'PATCH'
         )
       ).toBeUndefined();
+    });
+
+    it('disables the Clear all button while a write is in flight', async () => {
+      // clearAllCombatants silently bails when a write is pending — the button
+      // must disable so a confirm can't dead-end into that silent no-op.
+      let resolvePatch!: (v: unknown) => void;
+      const enc = makeEncounter();
+      routeAddFlow({
+        encounter: enc,
+        onPatch: () =>
+          new Promise(res => {
+            resolvePatch = res;
+          }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      // Start a write via the HP input (blur commits the PATCH).
+      const hpInput = screen.getAllByRole('spinbutton')[0];
+      fireEvent.change(hpInput, { target: { value: '5' } });
+      fireEvent.blur(hpInput);
+      expect(screen.getByRole('button', { name: /clear all/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /remove hero/i })).toBeDisabled();
+
+      resolvePatch({ ...enc, version: 2 });
+      await waitFor(() => expect(screen.getByRole('button', { name: /clear all/i })).toBeEnabled());
     });
 
     it('hides the remove and clear-all controls from non-controllers', async () => {
