@@ -78,7 +78,14 @@ function subscribeCsrfCookie(onChange: () => void): () => void {
 
 function getCsrfCookieSnapshot(): boolean {
   if (typeof document === 'undefined') return false;
-  return document.cookie.split('; ').some(part => part.startsWith(`${CSRF_COOKIE_NAME}=`));
+  const prefix = `${CSRF_COOKIE_NAME}=`;
+  // Require a non-empty value, not just the cookie name: the backend always
+  // mints a real token and removes (not blanks) the cookie on logout, so an
+  // empty `csrf_token=` shouldn't occur — but treating it as "no session"
+  // keeps the hint honest if it ever does.
+  return document.cookie
+    .split('; ')
+    .some(part => part.startsWith(prefix) && part.length > prefix.length);
 }
 
 function getCsrfCookieServerSnapshot(): boolean {

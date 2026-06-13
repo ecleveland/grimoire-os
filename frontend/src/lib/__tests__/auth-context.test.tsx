@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider, useAuth } from '../auth-context';
 
@@ -78,6 +78,10 @@ describe('AuthProvider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // jsdom persists document.cookie across tests — clear the csrf hint cookie
+    // so a test that sets it can't leak into the next (which would silently make
+    // likelyAuthenticated-blind assertions start seeing a "probable session").
+    document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
 
   describe('auth gate (renders children immediately)', () => {
@@ -513,11 +517,6 @@ describe('AuthProvider', () => {
   });
 
   describe('likelyAuthenticated (csrf-cookie hint for pre-hydration chrome, VEG-339)', () => {
-    afterEach(() => {
-      // jsdom persists document.cookie across tests — clear our hint cookie.
-      document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    });
-
     it('is true on first render when the csrf_token cookie is present (before hydration settles)', () => {
       document.cookie = 'csrf_token=abc123';
       // A never-resolving /users/me keeps isLoading true — the pre-hydration window.
@@ -536,6 +535,78 @@ describe('AuthProvider', () => {
       renderWithProvider();
 
       expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+    });
+
+    it('treats an empty csrf_token= value as no session (not a false-positive hint)', () => {
+      document.cookie = 'csrf_token=';
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+    });
+
+    it('settles to non-stuck anonymous chrome when a stale cookie hydrates to 401', async () => {
+      // The real-world case VEG-339 guards: a leftover csrf cookie, but the
+      // session is dead. The skeleton (isLoading && likelyAuthenticated) must
+      // show during hydration, then collapse — isLoading flips false and the
+      // user stays unauthenticated, so the gate goes false and nothing sticks.
+      document.cookie = 'csrf_token=stale';
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access dead
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh — refresh dead
+
+      renderWithProvider();
+
+      // During hydration the gate is open (skeleton would render).
+      expect(screen.getByTestId('isLoading')).toHaveTextContent('true');
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+      });
+      // Settled: unauthenticated, so `isLoading && likelyAuthenticated` is now
+      // false — the chrome collapses to the anonymous state, never stuck.
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+    });
+
+    it('re-derives on a window focus event when the cookie changes in another tab', async () => {
+      document.cookie = 'csrf_token=abc123';
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+
+      // Signed out elsewhere: the cookie vanishes, and a focus event (the
+      // store's subscribe signal) must re-read the snapshot to false.
+      document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      fireEvent(window, new Event('focus'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+      });
+    });
+
+    it('flips to false on logout (cookie cleared, provider re-renders)', async () => {
+      document.cookie = 'csrf_token=abc123';
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration
+        .mockResolvedValue(mockFetchResponse(204)); // POST /auth/logout
+      const user = userEvent.setup();
+
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+
+      // Production clears the csrf cookie server-side on logout; mirror that, then
+      // the setUser(null) re-render must re-read the snapshot to false.
+      document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      await user.click(screen.getByText('Logout'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+        expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+      });
     });
   });
 
