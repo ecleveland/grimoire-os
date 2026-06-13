@@ -61,6 +61,9 @@ Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs l
 | JWT_EXPIRES_IN | No | 24h |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
+| INTERNAL_API_URL | No | falls back to NEXT_PUBLIC_API_URL |
+
+`INTERNAL_API_URL` is the server-side base URL for SSR data fetches (the SRD reference pages render as server components — VEG-320). In Docker it's `http://backend:3001/api` (the frontend container can't reach the backend via the host-published `localhost` URL); locally it's unset and falls back to `NEXT_PUBLIC_API_URL`.
 
 ## API Docs
 

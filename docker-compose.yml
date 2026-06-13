@@ -42,7 +42,12 @@ services:
     ports:
       - '3000:3000'
     environment:
+      # Browser-facing API URL (baked into the client bundle at build).
       - NEXT_PUBLIC_API_URL=http://localhost:3001/api
+      # Server-side API URL for SSR data fetches (VEG-320). The frontend
+      # container can't reach the backend via the host-published localhost URL —
+      # it uses the compose service name on the internal network instead.
+      - INTERNAL_API_URL=http://backend:3001/api
     depends_on:
       - backend
     restart: unless-stopped

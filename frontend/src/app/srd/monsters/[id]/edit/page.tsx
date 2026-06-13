@@ -13,7 +13,7 @@ import type { SrdMonster } from '@/lib/types';
 export default function EditMonsterPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, isLoading: authLoading } = useAuth();
   const [monster, setMonster] = useState<SrdMonster | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -68,7 +68,11 @@ export default function EditMonsterPage() {
         </button>
       </div>
     );
-  if (!monster) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  // Wait for both the monster load and session hydration before judging edit rights:
+  // the monster's GET can resolve before `user`/`isAdmin` hydrate, and evaluating
+  // canEdit then would falsely deny a legitimate owner/admin (VEG-320).
+  if (authLoading || !monster)
+    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
   const canEdit =
     (monster.contentSource === 'homebrew' && monster.createdById === user?.userId) ||

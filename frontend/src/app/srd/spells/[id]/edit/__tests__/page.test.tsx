@@ -57,6 +57,25 @@ describe('EditSpellPage', () => {
     });
   });
 
+  it('waits for auth hydration before judging edit rights (no false denial mid-hydration)', async () => {
+    // Pre-hydration the provider reports user:null / isAdmin:false / isLoading:true.
+    // The owner's spell can load before auth settles; canEdit must not be evaluated
+    // against the null user, or a legitimate owner gets the denial screen (VEG-320).
+    mockUseAuth.mockReturnValue({
+      isAuthenticated: false,
+      isAdmin: false,
+      user: null,
+      isLoading: true,
+    });
+    mockApiFetch.mockResolvedValue(ownSpell);
+
+    render(<EditSpellPage />);
+
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+    expect(screen.queryByText(/only edit your own homebrew/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+  });
+
   it('loads the spell and prefills the form', async () => {
     mockApiFetch.mockResolvedValue(ownSpell);
 

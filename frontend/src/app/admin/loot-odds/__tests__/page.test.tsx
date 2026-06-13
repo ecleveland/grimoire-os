@@ -55,6 +55,14 @@ describe('AdminLootOddsPage', () => {
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
   });
 
+  it('does not redirect or load data while auth is still hydrating', async () => {
+    mockUseAuth.mockReturnValue({ isAdmin: false, isLoading: true });
+    render(<AdminLootOddsPage />);
+    await Promise.resolve();
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockApiFetch).not.toHaveBeenCalled();
+  });
+
   it('loads current values as percentages', async () => {
     routeApi();
     render(<AdminLootOddsPage />);

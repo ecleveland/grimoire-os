@@ -64,6 +64,16 @@ describe('AdminUsersPage', () => {
     expect(mockApiFetch).not.toHaveBeenCalled();
   });
 
+  it('waits for auth hydration before redirecting (no bounce for an admin mid-hydration)', async () => {
+    // Pre-hydration the provider reports isAdmin:false / isLoading:true. Acting
+    // on that would bounce a legitimately-authed admin on every refresh.
+    mockUseAuth.mockReturnValue({ isAdmin: false, isLoading: true });
+    render(<AdminUsersPage />);
+    await Promise.resolve();
+    expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockApiFetch).not.toHaveBeenCalled();
+  });
+
   it('shows the loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
     render(<AdminUsersPage />);

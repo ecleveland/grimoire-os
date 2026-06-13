@@ -43,6 +43,40 @@ beforeEach(() => {
 });
 
 describe('ProfilePage', () => {
+  it('shows a loading state and does not mount the form while the session is hydrating', () => {
+    // Pre-hydration the provider reports user:null / isLoading:true. The form
+    // seeds its fields from `user` in useState initializers, so mounting it here
+    // would seed them empty and a save could blank the user's real values (VEG-320).
+    mockUseAuth.mockReturnValue({
+      user: null,
+      isLoading: true,
+      refreshProfile: mockRefreshProfile,
+    });
+    render(<ProfilePage />);
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
+  });
+
+  it('renders nothing when hydration settles with no authenticated user', () => {
+    // Middleware normally redirects an unauthed visitor away from /profile; if one
+    // slips through, never mount the form (it would seed blank from a null user).
+    mockUseAuth.mockReturnValue({
+      user: null,
+      isLoading: false,
+      refreshProfile: mockRefreshProfile,
+    });
+    const { container } = render(<ProfilePage />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
+  });
+
+  it('seeds the form from the user once hydration completes', () => {
+    // isLoading false (beforeEach default) with a populated user → fields prefilled.
+    render(<ProfilePage />);
+    expect(screen.getByLabelText(/display name/i)).toHaveValue('Gandalf the Grey');
+    expect(screen.getByLabelText(/^email$/i)).toHaveValue('gandalf@middleearth.com');
+  });
+
   it('renders account details pre-filled, with username disabled', () => {
     render(<ProfilePage />);
     const username = screen.getByLabelText(/username/i);

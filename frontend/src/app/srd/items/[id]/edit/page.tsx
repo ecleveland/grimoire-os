@@ -13,7 +13,7 @@ import type { SrdItem } from '@/lib/types';
 export default function EditItemPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, isLoading: authLoading } = useAuth();
   const [item, setItem] = useState<SrdItem | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -68,7 +68,11 @@ export default function EditItemPage() {
         </button>
       </div>
     );
-  if (!item) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  // Wait for both the item load and session hydration before judging edit rights:
+  // the item's GET can resolve before `user`/`isAdmin` hydrate, and evaluating
+  // canEdit then would falsely deny a legitimate owner/admin (VEG-320).
+  if (authLoading || !item)
+    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
   const canEdit =
     (item.contentSource === 'homebrew' && item.createdById === user?.userId) ||

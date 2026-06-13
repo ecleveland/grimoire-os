@@ -13,7 +13,7 @@ import type { SrdFeat } from '@/lib/types';
 export default function EditFeatPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, isLoading: authLoading } = useAuth();
   const [feat, setFeat] = useState<SrdFeat | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -68,7 +68,11 @@ export default function EditFeatPage() {
         </button>
       </div>
     );
-  if (!feat) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  // Wait for both the feat load and session hydration before judging edit rights:
+  // the feat's GET can resolve before `user`/`isAdmin` hydrate, and evaluating
+  // canEdit then would falsely deny a legitimate owner/admin (VEG-320).
+  if (authLoading || !feat)
+    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
   const canEdit =
     (feat.contentSource === 'homebrew' && feat.createdById === user?.userId) ||

@@ -12,7 +12,7 @@ import type { SrdFeat } from '@/lib/types';
 
 export default function NewFeatPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(payload: FeatPayload) {
@@ -29,6 +29,12 @@ export default function NewFeatPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to create feat');
       setSubmitting(false);
     }
+  }
+
+  // Hold the sign-in prompt until hydration settles so an already-authed user
+  // doesn't flash "Sign in to…" before the form appears. (VEG-320)
+  if (authLoading) {
+    return null;
   }
 
   if (!isAuthenticated) {
