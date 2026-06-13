@@ -17,7 +17,7 @@ export interface User {
   id: string;
   username: string;
   displayName?: string;
-  email?: string;
+  email?: string | null;
   avatarUrl?: string;
   role: Role;
   createdAt: string;
@@ -140,7 +140,7 @@ export interface Note {
   title: string;
   content: string;
   visibility: NoteVisibility;
-  sessionNumber?: number;
+  sessionNumber?: number | null;
   tags: string[];
   createdAt: string;
   updatedAt: string;

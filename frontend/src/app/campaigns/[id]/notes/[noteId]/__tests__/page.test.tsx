@@ -205,7 +205,7 @@ describe('NoteDetailPage', () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to update note'));
   });
 
-  it('omits sessionNumber from PATCH body when it is cleared', async () => {
+  it('sends sessionNumber: null in the PATCH body when it is cleared', async () => {
     mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: 3 }));
     mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: undefined }));
     const user = userEvent.setup();
@@ -217,7 +217,23 @@ describe('NoteDetailPage', () => {
     await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
     const [, init] = mockApiFetch.mock.calls[1];
     const body = JSON.parse((init as { body: string }).body);
-    expect(body.sessionNumber).toBeUndefined();
+    expect(body.sessionNumber).toBeNull();
+  });
+
+  it('treats a session number of 0 as cleared (sessions are 1-based)', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: 3 }));
+    mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: undefined }));
+    const user = userEvent.setup();
+    render(<NoteDetailPage />);
+    await user.click(await screen.findByRole('button', { name: /^edit$/i }));
+    await user.clear(screen.getByLabelText(/session number/i));
+    await user.type(screen.getByLabelText(/session number/i), '0');
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+    const [, init] = mockApiFetch.mock.calls[1];
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.sessionNumber).toBeNull();
   });
 
   it('navigates back to the campaign when the back link is clicked', async () => {

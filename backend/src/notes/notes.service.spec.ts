@@ -291,6 +291,20 @@ describe('NotesService', () => {
       expect(result).toEqual(updatedNote);
     });
 
+    it('passes an explicit null sessionNumber through to prisma so the column is cleared', async () => {
+      // VEG-316: null must reach prisma (sets NULL); undefined would silently
+      // skip the column and the "cleared" value would survive the save.
+      prisma.note.findUnique.mockResolvedValue({ id: NOTE_ID, authorId: USER_ID });
+      prisma.note.update.mockResolvedValue({ ...mockNote, sessionNumber: null });
+
+      await service.update(NOTE_ID, USER_ID, { sessionNumber: null });
+
+      expect(prisma.note.update).toHaveBeenCalledWith({
+        where: { id: NOTE_ID },
+        data: { sessionNumber: null },
+      });
+    });
+
     it('throws NotFoundException when note does not exist', async () => {
       prisma.note.findUnique.mockResolvedValue(null);
 

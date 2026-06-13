@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { optionalText } from '@/lib/form-helpers';
 import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
@@ -24,8 +25,8 @@ export default function ProfilePage() {
       await apiFetch('/users/me', {
         method: 'PATCH',
         body: JSON.stringify({
-          displayName: displayName || undefined,
-          email: email || undefined,
+          displayName,
+          email: optionalText(email),
         }),
       });
       await refreshProfile();
@@ -84,6 +85,7 @@ export default function ProfilePage() {
         <FormField
           label="Display Name"
           type="text"
+          required
           value={displayName}
           onChange={e => setDisplayName(e.target.value)}
         />

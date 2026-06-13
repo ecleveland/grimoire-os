@@ -215,6 +215,20 @@ describe('UsersService', () => {
       expect(result).toBeInstanceOf(UserDto);
     });
 
+    it('passes an explicit null email through to prisma so the column is cleared', async () => {
+      // VEG-316: null must reach prisma (sets NULL); undefined would silently
+      // skip the column and the "cleared" value would survive the save.
+      prisma.user.update.mockResolvedValue({ ...mockUserPublic, email: null });
+
+      await service.update(USER_ID, { email: null });
+
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { email: null },
+        omit: { passwordHash: true },
+      });
+    });
+
     it('revokes live refresh tokens when the update changes the role', async () => {
       const updated = { ...mockUserPublic, role: Role.DUNGEON_MASTER };
       prisma.user.update.mockResolvedValue(updated);

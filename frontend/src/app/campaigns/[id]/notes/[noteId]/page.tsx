@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { parseIntInRange } from '@/lib/form-helpers';
 import { toast } from 'sonner';
 import type { Note } from '@/lib/types';
 import FormField from '@/components/FormField';
@@ -54,7 +55,7 @@ export default function NoteDetailPage() {
           title,
           content,
           visibility,
-          sessionNumber: sessionNumber ? Number(sessionNumber) : undefined,
+          sessionNumber: parseIntInRange(sessionNumber, 1),
           tags: tags
             .split(',')
             .map(t => t.trim())
