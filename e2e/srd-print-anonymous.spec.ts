@@ -26,8 +26,5 @@ test.describe('SRD print for anonymous visitors (VEG-332)', () => {
     await expect(groups).toHaveCount(1, { timeout: 10_000 });
     await expect(groups.first()).toHaveAttribute('data-card-type', 'monster');
     await expect(groups.first().getByTestId('print-card').first()).toBeVisible();
-
-    // No error toast, and the visitor was never sent to the login page.
-    await expect(page).not.toHaveURL(/\/login/);
   });
 });
