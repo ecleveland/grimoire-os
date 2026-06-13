@@ -296,6 +296,173 @@ describe('NpcDetailPage', () => {
     });
   });
 
+  describe('generosity nudge', () => {
+    // Each preset fully defines the loot profile (incl. itemCountDie) so a
+    // stale saved die can't bleed through a per-knob merge on the backend.
+    const STINGY_BODY = JSON.stringify({
+      field: 'loot',
+      lootOverrides: {
+        coinageMultiplier: 0.5,
+        trinketChance: 0.02,
+        magicItemChance: 0,
+        itemCountDie: '1d2',
+      },
+    });
+    const GENEROUS_BODY = JSON.stringify({
+      field: 'loot',
+      lootOverrides: {
+        coinageMultiplier: 2,
+        trinketChance: 0.15,
+        magicItemChance: 0.1,
+        itemCountDie: '1d4',
+      },
+    });
+    const DEFAULT_BODY = JSON.stringify({ field: 'loot', lootOverrides: null });
+
+    async function renderWithNpc(npc: Npc) {
+      mockApiFetch.mockResolvedValueOnce(npc);
+      render(<NpcDetailPage />);
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
+      );
+    }
+
+    it('renders the three generosity chips next to Reroll Loot', async () => {
+      await renderWithNpc(makeNpc());
+      const group = screen.getByRole('group', { name: /loot generosity/i });
+      expect(within(group).getByRole('button', { name: /stingy/i })).toBeInTheDocument();
+      expect(within(group).getByRole('button', { name: /default/i })).toBeInTheDocument();
+      expect(within(group).getByRole('button', { name: /generous/i })).toBeInTheDocument();
+    });
+
+    it('hides the chips for users who cannot reroll loot', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'user-2', role: 'player' },
+        isDm: false,
+      });
+      await renderWithNpc(makeNpc({ createdById: 'user-1' }));
+      expect(screen.queryByRole('group', { name: /loot generosity/i })).not.toBeInTheDocument();
+    });
+
+    it('selecting Generous makes the reroll send the generous preset and updates the loot', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc({ loot: [{ name: 'Hemp Rope', quantity: 1 }] }));
+      mockApiFetch.mockResolvedValueOnce(
+        makeNpc({ loot: [{ name: 'Ruby Pendant', quantity: 2 }], goldPieces: 20 })
+      );
+      await user.click(screen.getByRole('button', { name: /generous/i }));
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(screen.getByText('2× Ruby Pendant')).toBeInTheDocument());
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({ method: 'POST', body: GENEROUS_BODY })
+      );
+    });
+
+    it('selecting Stingy sends the stingy preset', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc());
+      mockApiFetch.mockResolvedValueOnce(makeNpc({ goldPieces: 0 }));
+      await user.click(screen.getByRole('button', { name: /stingy/i }));
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({ body: STINGY_BODY })
+      );
+    });
+
+    it('selecting Default sends lootOverrides: null to clear saved odds', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc({ lootOverrides: { coinageMultiplier: 2 } }));
+      mockApiFetch.mockResolvedValueOnce(makeNpc({ lootOverrides: null }));
+      await user.click(screen.getByRole('button', { name: /default/i }));
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({ body: DEFAULT_BODY })
+      );
+    });
+
+    it('toggling a chip off reverts the reroll to the plain body', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc());
+      mockApiFetch.mockResolvedValueOnce(makeNpc());
+      const generous = screen.getByRole('button', { name: /generous/i });
+      await user.click(generous);
+      expect(generous).toHaveAttribute('aria-pressed', 'true');
+      await user.click(generous);
+      expect(generous).toHaveAttribute('aria-pressed', 'false');
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({ body: JSON.stringify({ field: 'loot' }) })
+      );
+    });
+
+    it('switching chips keeps only the last selection pressed', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc());
+      const stingy = screen.getByRole('button', { name: /stingy/i });
+      const generous = screen.getByRole('button', { name: /generous/i });
+      await user.click(stingy);
+      await user.click(generous);
+      expect(stingy).toHaveAttribute('aria-pressed', 'false');
+      expect(generous).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('clears the selection after a successful reroll', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc());
+      mockApiFetch.mockResolvedValueOnce(makeNpc());
+      const generous = screen.getByRole('button', { name: /generous/i });
+      await user.click(generous);
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      expect(generous).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('keeps the selection when the reroll fails, and toasts the error', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc());
+      mockApiFetch.mockRejectedValueOnce(new Error('Reroll failed badly'));
+      const generous = screen.getByRole('button', { name: /generous/i });
+      await user.click(generous);
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Reroll failed badly'));
+      expect(generous).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('disables the chips when the loot field is locked', async () => {
+      await renderWithNpc(makeNpc({ lockedFields: ['loot'] }));
+      const group = screen.getByRole('group', { name: /loot generosity/i });
+      expect(within(group).getByRole('button', { name: /stingy/i })).toBeDisabled();
+      expect(within(group).getByRole('button', { name: /default/i })).toBeDisabled();
+      expect(within(group).getByRole('button', { name: /generous/i })).toBeDisabled();
+    });
+
+    it('a Reroll All does not send the selected preset and clears the chip', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc({ lockedFields: [] }));
+      mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'Borin' }));
+      const generous = screen.getByRole('button', { name: /generous/i });
+      await user.click(generous);
+      expect(generous).toHaveAttribute('aria-pressed', 'true');
+      // No locked fields → reroll-all fires immediately, no confirm dialog.
+      await user.click(screen.getByRole('button', { name: /reroll all/i }));
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      // Reroll All never carries lootOverrides (the backend rejects them with
+      // field 'all'); the chip clears so the UI doesn't imply it was applied.
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({ body: JSON.stringify({ field: 'all' }) })
+      );
+      expect(generous).toHaveAttribute('aria-pressed', 'false');
+    });
+  });
+
   describe('stat block', () => {
     const SAMPLE_STAT_BLOCK = {
       baseMonster: 'Guard',

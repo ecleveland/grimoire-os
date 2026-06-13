@@ -52,7 +52,7 @@ export class NpcsController {
   @Post(':id/reroll')
   @ApiOperation({ summary: 'Re-roll a single field or all fields (honors lockedFields)' })
   reroll(@Param('id') id: string, @Req() req: AuthenticatedRequest, @Body() dto: RerollNpcDto) {
-    return this.generatorService.reroll(id, req.user.userId, dto.field);
+    return this.generatorService.reroll(id, req.user.userId, dto.field, dto.lootOverrides);
   }
 
   @Get()

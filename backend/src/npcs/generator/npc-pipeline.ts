@@ -12,13 +12,13 @@ import {
   NpcGenerationConstraints,
   NpcGenerationDecisions,
   NpcGenerationParams,
-  NpcLootOverrides,
   NpcStatBlock,
   RerollField,
   StatBlockAction,
 } from './npc-generator.types';
 import { SeededRng } from '../../common/helpers/seeded-rng';
 import { LootRoller } from '../../loot/loot-roller';
+import { normalizeLootOverrides } from '../../loot/loot-overrides';
 import { createFallbackTemplateSelector } from '../../loot/loot-template-selector';
 import { LootGameRules, LootItemRef, LootTemplateItem, LootTrinket } from '../../loot/loot.types';
 import {
@@ -640,19 +640,9 @@ export class NpcPipeline {
       silverPieces: loot?.coinage.sp ?? 0,
       copperPieces: loot?.coinage.cp ?? 0,
       loot: loot?.items ?? [],
-      lootOverrides: this.normalizeLootOverrides(constraints.lootOverrides),
+      lootOverrides: normalizeLootOverrides(constraints.lootOverrides),
       generationParams: params,
     };
-  }
-
-  private normalizeLootOverrides(o: NpcLootOverrides | undefined): NpcLootOverrides | null {
-    if (!o) return null;
-    const cleaned: NpcLootOverrides = {};
-    if (o.trinketChance !== undefined) cleaned.trinketChance = o.trinketChance;
-    if (o.magicItemChance !== undefined) cleaned.magicItemChance = o.magicItemChance;
-    if (o.itemCountDie !== undefined) cleaned.itemCountDie = o.itemCountDie;
-    if (o.coinageMultiplier !== undefined) cleaned.coinageMultiplier = o.coinageMultiplier;
-    return Object.keys(cleaned).length > 0 ? cleaned : null;
   }
 }
 
