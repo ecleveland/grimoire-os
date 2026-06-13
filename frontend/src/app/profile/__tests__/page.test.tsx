@@ -57,6 +57,19 @@ describe('ProfilePage', () => {
     expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
   });
 
+  it('renders nothing when hydration settles with no authenticated user', () => {
+    // Middleware normally redirects an unauthed visitor away from /profile; if one
+    // slips through, never mount the form (it would seed blank from a null user).
+    mockUseAuth.mockReturnValue({
+      user: null,
+      isLoading: false,
+      refreshProfile: mockRefreshProfile,
+    });
+    const { container } = render(<ProfilePage />);
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
+  });
+
   it('seeds the form from the user once hydration completes', () => {
     // isLoading false (beforeEach default) with a populated user → fields prefilled.
     render(<ProfilePage />);
