@@ -2,7 +2,7 @@
 // One pass per generate/reroll call — the dataset is small (a few thousand
 // rows total across reference tables), so caching is not required for v1.
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NpcRefData, MonsterRef } from './npc-pipeline';
 import { StatBlockAction } from './npc-generator.types';
@@ -13,6 +13,8 @@ import { GLOBAL_CONTENT_SOURCES } from '../../srd/content-access.service';
 
 @Injectable()
 export class NpcRefDataLoader {
+  private readonly logger = new Logger(NpcRefDataLoader.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async load(): Promise<NpcRefData> {
@@ -67,6 +69,16 @@ export class NpcRefDataLoader {
     ]);
 
     const { itemsByName, magicItems } = buildItemCatalogMaps(items);
+
+    // An empty pool is a legitimate per-NPC outcome (statBlock: null), but a
+    // globally empty catalog means every NPC silently generates statless —
+    // that's a seeding/migration fault (no srd/shared monster rows), never a
+    // valid production state, so make it operator-visible (VEG-335).
+    if (monsters.length === 0) {
+      this.logger.warn(
+        'Global monster catalog is empty (no srd/shared rows) — all generated NPCs will have null stat blocks. Run the backend seed.'
+      );
+    }
 
     return {
       species: species.map(s => ({ name: s.name, size: s.size })),
