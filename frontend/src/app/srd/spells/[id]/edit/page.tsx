@@ -13,7 +13,7 @@ import type { SrdSpell } from '@/lib/types';
 export default function EditSpellPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, isLoading: authLoading } = useAuth();
   const [spell, setSpell] = useState<SrdSpell | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -68,7 +68,11 @@ export default function EditSpellPage() {
         </button>
       </div>
     );
-  if (!spell) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  // Wait for both the spell load and session hydration before judging edit rights:
+  // the spell's GET can resolve before `user`/`isAdmin` hydrate, and evaluating
+  // canEdit then would falsely deny a legitimate owner/admin (VEG-320).
+  if (authLoading || !spell)
+    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
 
   const canEdit =
     (spell.contentSource === 'homebrew' && spell.createdById === user?.userId) ||

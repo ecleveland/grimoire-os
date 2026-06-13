@@ -9,6 +9,18 @@ import { toast } from 'sonner';
 import FormField from '@/components/FormField';
 
 export default function ProfilePage() {
+  const { isLoading } = useAuth();
+  // Don't mount the form until the session hydrates. Its fields seed from `user`
+  // in useState initializers (below), so rendering before hydration — now that
+  // AuthProvider no longer blocks the tree (VEG-320) — would seed them empty and
+  // a save would blank the user's real display name/email.
+  if (isLoading) {
+    return <div className="max-w-2xl mx-auto text-gray-500 dark:text-gray-400">Loading…</div>;
+  }
+  return <ProfileForms />;
+}
+
+function ProfileForms() {
   const { user, refreshProfile } = useAuth();
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [email, setEmail] = useState(user?.email || '');
