@@ -21,10 +21,11 @@ import {
 import type { ManualCombatantInput, PartyCombatantEntry } from '@/lib/encounter-combatants';
 import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
-import { aggregateCombatantLoot } from '@grimoire-os/shared';
+import { aggregateCombatantLoot, CONDITIONS } from '@grimoire-os/shared';
 import type {
   CombatantLootCoinage,
   CombatantLootItem,
+  Condition,
   EncounterLootTotal,
 } from '@grimoire-os/shared';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -44,6 +45,8 @@ const sortByInitiative = (combatants: Combatant[]) =>
 const smallButtonBase =
   'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
 const lootButtonClass = `${smallButtonBase} text-gray-700 dark:text-gray-300`;
+const statusSelectClass =
+  'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-indigo-500 disabled:opacity-50';
 
 // A damage/heal/temp amount must be a positive whole number; anything else
 // (empty, 0, decimals, text) keeps the action buttons disabled.
@@ -113,6 +116,11 @@ export default function InitiativeTrackerPage() {
   // In-progress initiative edit (VEG-285), committed on blur/Enter. Same
   // keying scheme as hpDraft.
   const [initDraft, setInitDraft] = useState<{ name: string; index: number; value: string } | null>(
+    null
+  );
+  // In-progress concentration-spell edit (VEG-287), committed on blur/Enter.
+  // Same keying scheme as hpDraft.
+  const [concDraft, setConcDraft] = useState<{ name: string; index: number; value: string } | null>(
     null
   );
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
@@ -536,6 +544,56 @@ export default function InitiativeTrackerPage() {
     if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
   };
 
+  // Toggle an SRD condition on a row (VEG-287). One handler serves both the
+  // add select and the chip's remove ×: present → drop it, absent → append.
+  // The key is deleted when the list empties so cleared rows stay minimal.
+  const toggleCondition = async (name: string, rowIndex: number, condition: Condition) => {
+    await mutateCombatantRow(name, rowIndex, c => {
+      const current = c.conditions ?? [];
+      const next = current.includes(condition)
+        ? current.filter(x => x !== condition)
+        : [...current, condition];
+      const updated = { ...c };
+      if (next.length > 0) updated.conditions = next;
+      else delete updated.conditions;
+      return updated;
+    });
+  };
+
+  // Toggle concentration (VEG-287): start with no spell named, or stop and
+  // drop the key (and any in-progress spell draft for the row).
+  const toggleConcentration = async (name: string, rowIndex: number) => {
+    await mutateCombatantRow(name, rowIndex, c => {
+      const updated = { ...c };
+      if (c.concentration) delete updated.concentration;
+      else updated.concentration = {};
+      return updated;
+    });
+    setConcDraft(null);
+  };
+
+  // Commit the concentration-spell draft (VEG-287). No-op unless the row is
+  // still concentrating; an empty spell drops the name but keeps concentration.
+  const commitConcentrationSpell = async (name: string) => {
+    if (!concDraft || concDraft.name !== name) return;
+    const spell = concDraft.value.trim();
+    setConcDraft(null);
+    await mutateCombatantRow(name, concDraft.index, c =>
+      c.concentration ? { ...c, concentration: spell ? { spell } : {} } : c
+    );
+  };
+
+  // Set or clear exhaustion (VEG-287). Levels 1–6 persist; 0 (or out of range)
+  // drops the key, mirroring "absent means none".
+  const setExhaustion = async (name: string, rowIndex: number, level: number) => {
+    await mutateCombatantRow(name, rowIndex, c => {
+      const updated = { ...c };
+      if (level >= 1 && level <= 6) updated.exhaustion = level;
+      else delete updated.exhaustion;
+      return updated;
+    });
+  };
+
   // Remove one combatant (VEG-284). Persists the filtered array and, when the
   // removal pushes currentTurn past the end of the list, re-clamps it in the
   // same PATCH so the turn pointer can never address a missing row.
@@ -611,6 +669,7 @@ export default function InitiativeTrackerPage() {
   const rowHoldsDraft = makeRowHoldsDraft(hpDraft);
   const rowHoldsAmount = makeRowHoldsDraft(amountDraft);
   const rowHoldsInit = makeRowHoldsDraft(initDraft);
+  const rowHoldsConc = makeRowHoldsDraft(concDraft);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -762,6 +821,45 @@ export default function InitiativeTrackerPage() {
                   )}
                 </div>
               </div>
+              {/* Status chips (VEG-287): conditions, concentration, and
+                  exhaustion — shown to everyone. Controllers get a remove ×
+                  on each condition; the add/toggle controls render below. */}
+              {((c.conditions?.length ?? 0) > 0 || c.concentration || (c.exhaustion ?? 0) > 0) && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {(c.conditions ?? []).map(cond => (
+                    <span
+                      key={cond}
+                      className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded"
+                    >
+                      {cond}
+                      {isController && (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${cond} from ${c.name}`}
+                          onClick={() => toggleCondition(c.name, i, cond)}
+                          disabled={writePending}
+                          className="hover:text-purple-900 dark:hover:text-purple-100 disabled:opacity-50"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                  {c.concentration && (
+                    <span
+                      className="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded"
+                      title="Concentration"
+                    >
+                      Concentrating{c.concentration.spell ? `: ${c.concentration.spell}` : ''}
+                    </span>
+                  )}
+                  {(c.exhaustion ?? 0) > 0 && (
+                    <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
+                      Exhaustion {c.exhaustion}
+                    </span>
+                  )}
+                </div>
+              )}
               {/* Row management (left) + damage/heal/temp HP controls (right,
                   VEG-286). The raw HP input above stays as the advanced
                   affordance for direct corrections; these are the
@@ -887,6 +985,69 @@ export default function InitiativeTrackerPage() {
                     </div>
                   );
                 })()}
+              {/* Status editing (VEG-287): add a condition, toggle/name a
+                  concentration spell, set exhaustion. Controller-only; the
+                  read-only chips above are shown to everyone. */}
+              {isController && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <select
+                    aria-label={`Add condition to ${c.name}`}
+                    value=""
+                    onChange={e => {
+                      if (e.target.value) toggleCondition(c.name, i, e.target.value as Condition);
+                    }}
+                    disabled={writePending}
+                    className={statusSelectClass}
+                  >
+                    <option value="">+ Condition</option>
+                    {CONDITIONS.filter(cond => !(c.conditions ?? []).includes(cond)).map(cond => (
+                      <option key={cond} value={cond}>
+                        {cond}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    aria-label={`Toggle concentration for ${c.name}`}
+                    onClick={() => toggleConcentration(c.name, i)}
+                    disabled={writePending}
+                    className={lootButtonClass}
+                  >
+                    {c.concentration ? 'Stop concentrating' : 'Concentrate'}
+                  </button>
+                  {c.concentration && (
+                    <input
+                      type="text"
+                      placeholder="Spell"
+                      aria-label={`Concentration spell for ${c.name}`}
+                      value={rowHoldsConc(c, i) ? concDraft!.value : (c.concentration.spell ?? '')}
+                      onChange={e =>
+                        setConcDraft({ name: c.name, index: i, value: e.target.value })
+                      }
+                      onBlur={() => commitConcentrationSpell(c.name)}
+                      onKeyDown={e => {
+                        // Enter commits via the blur handler — one commit path.
+                        if (e.key === 'Enter') e.currentTarget.blur();
+                      }}
+                      className="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
+                  )}
+                  <select
+                    aria-label={`Exhaustion for ${c.name}`}
+                    value={c.exhaustion ?? 0}
+                    onChange={e => setExhaustion(c.name, i, Number(e.target.value))}
+                    disabled={writePending}
+                    className={statusSelectClass}
+                  >
+                    <option value={0}>Exhaustion: none</option>
+                    {[1, 2, 3, 4, 5, 6].map(n => (
+                      <option key={n} value={n}>
+                        Exhaustion {n}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {/* DM-only drop view (VEG-301) — the player reveal is a separate ticket. */}
               {isController && c.loot && (
                 <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex items-start justify-between gap-2 text-sm">

@@ -81,6 +81,41 @@ export interface CombatantLoot {
   rolledAt?: string;
 }
 
+/**
+ * The SRD on/off conditions a combatant can carry (VEG-287). Names match the
+ * seeded `Condition` table so the tracker chips and the (future) rules-text
+ * lookup share one vocabulary. Exhaustion is intentionally excluded: it's a
+ * 1–6 level track (`Combatant.exhaustion`), not an on/off tag — modelling it as
+ * a chip here would let a combatant hold contradictory levels.
+ */
+export const CONDITIONS = [
+  'Blinded',
+  'Charmed',
+  'Deafened',
+  'Frightened',
+  'Grappled',
+  'Incapacitated',
+  'Invisible',
+  'Paralyzed',
+  'Petrified',
+  'Poisoned',
+  'Prone',
+  'Restrained',
+  'Stunned',
+  'Unconscious',
+] as const;
+
+export type Condition = (typeof CONDITIONS)[number];
+
+/**
+ * Concentration tracking (VEG-287). The object's presence means the combatant
+ * is concentrating; `spell` optionally names what, so the DM knows which spell
+ * a failed concentration save would drop. Absent means not concentrating.
+ */
+export interface CombatantConcentration {
+  spell?: string;
+}
+
 export interface Combatant {
   name: string;
   initiative: number;
@@ -102,6 +137,15 @@ export interface Combatant {
   monsterId?: string;
   /** Loot rolled from the source monster (VEG-300); absent until rolled. */
   loot?: CombatantLoot;
+  /** Active SRD conditions (VEG-287); absent or empty means none. */
+  conditions?: Condition[];
+  /** Concentration tracking (VEG-287); absent means not concentrating. */
+  concentration?: CombatantConcentration;
+  /**
+   * Exhaustion level 1–6 (VEG-287); absent (or 0) means none. A level track
+   * rather than an on/off condition, so it lives outside `conditions`.
+   */
+  exhaustion?: number;
 }
 
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
