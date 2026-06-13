@@ -171,3 +171,49 @@ describe('CombatantDto conditions / concentration / exhaustion (global validator
     expect(accepts({ concentration: { spell: 'Bless', rounds: 10 } })).not.toEqual([]);
   });
 });
+
+// Same write-contract concern (VEG-288): death saves are echoed back on every
+// PATCH, so the nested shape must be whitelisted on CombatantDto.
+describe('CombatantDto deathSaves (global validator strictness)', () => {
+  const accepts = (over: Record<string, unknown>) => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), ...over }],
+    });
+    return flatten(validateSync(instance, VALIDATOR_STRICTNESS));
+  };
+
+  it('accepts a valid death-save tally', () => {
+    expect(accepts({ deathSaves: { successes: 2, failures: 1 } })).toEqual([]);
+  });
+
+  it('accepts the boundary tallies 0/0 and 3/3', () => {
+    expect(accepts({ deathSaves: { successes: 0, failures: 0 } })).toEqual([]);
+    expect(accepts({ deathSaves: { successes: 3, failures: 3 } })).toEqual([]);
+  });
+
+  it('accepts deathSaves on CreateEncounterDto too', () => {
+    const instance = plainToInstance(CreateEncounterDto, {
+      campaignId: 'camp-1',
+      name: 'Ambush',
+      combatants: [{ ...lootCombatant(), deathSaves: { successes: 1, failures: 0 } }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
+  });
+
+  it('rejects counts outside 0–3', () => {
+    expect(accepts({ deathSaves: { successes: 4, failures: 0 } })).not.toEqual([]);
+    expect(accepts({ deathSaves: { successes: 0, failures: -1 } })).not.toEqual([]);
+  });
+
+  it('rejects non-integer counts', () => {
+    expect(accepts({ deathSaves: { successes: 1.5, failures: 0 } })).not.toEqual([]);
+  });
+
+  it('rejects a missing count (both required when present)', () => {
+    expect(accepts({ deathSaves: { successes: 2 } })).not.toEqual([]);
+  });
+
+  it('rejects non-whitelisted properties inside deathSaves', () => {
+    expect(accepts({ deathSaves: { successes: 1, failures: 1, rounds: 2 } })).not.toEqual([]);
+  });
+});
