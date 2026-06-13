@@ -20,6 +20,13 @@ import {
 } from '@/lib/encounter-combatants';
 import type { ManualCombatantInput, PartyCombatantEntry } from '@/lib/encounter-combatants';
 import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
+import {
+  clearDeathSavesIfRevived,
+  deathSaveStatus,
+  markDeathSave,
+  showsDeathSaves,
+  DEATH_SAVE_MAX,
+} from '@/lib/death-saves';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
 import { aggregateCombatantLoot, CONDITIONS } from '@grimoire-os/shared';
 import type {
@@ -285,7 +292,8 @@ export default function InitiativeTrackerPage() {
     const target = sorted[index];
     const clamped = Math.max(0, Math.min(Math.floor(parsed), target.maxHp));
     if (clamped === target.hp) return;
-    sorted[index] = { ...target, hp: clamped };
+    // Reviving above 0 clears any death saves (VEG-288).
+    sorted[index] = clearDeathSavesIfRevived({ ...target, hp: clamped });
     const updated = await patchEncounter({ combatants: sorted });
     // The PATCH persisted `sorted` verbatim, so `index` is also the
     // combatant's position in the updated combatants array.
@@ -381,7 +389,8 @@ export default function InitiativeTrackerPage() {
       setAmountDraft(null);
       return;
     }
-    sorted[index] = next;
+    // Healing a downed PC above 0 clears their death saves (VEG-288).
+    sorted[index] = clearDeathSavesIfRevived(next);
     const updated = await patchEncounter({ combatants: sorted });
     if (updated) {
       setAmountDraft(null);
@@ -591,6 +600,30 @@ export default function InitiativeTrackerPage() {
       if (level >= 1 && level <= 6) updated.exhaustion = level;
       else delete updated.exhaustion;
       return updated;
+    });
+  };
+
+  // Mark a death-saving throw on a downed PC (VEG-288); counts cap at 3 (the
+  // pure helper handles the absent-saves 0/0 start and the cap).
+  const markDeathSaveOnRow = async (
+    name: string,
+    rowIndex: number,
+    kind: 'success' | 'failure'
+  ) => {
+    await mutateCombatantRow(name, rowIndex, c => ({
+      ...c,
+      deathSaves: markDeathSave(c.deathSaves, kind),
+    }));
+  };
+
+  // Clear a PC's death saves (VEG-288) — e.g. after a misclick. Healing above
+  // 0 also clears them automatically, but a stabilized/dead tally needs a way
+  // back to a clean slate without a heal.
+  const resetDeathSaves = async (name: string, rowIndex: number) => {
+    await mutateCombatantRow(name, rowIndex, c => {
+      const next = { ...c };
+      delete next.deathSaves;
+      return next;
     });
   };
 
@@ -860,6 +893,86 @@ export default function InitiativeTrackerPage() {
                   )}
                 </div>
               )}
+              {/* Death saves (VEG-288): only for a downed PC. Pips + status are
+                  shown to everyone; the mark/reset controls are controller-only
+                  and lock once the tally resolves to stable or dead. */}
+              {showsDeathSaves(c) &&
+                (() => {
+                  const status = deathSaveStatus(c.deathSaves);
+                  const successes = c.deathSaves?.successes ?? 0;
+                  const failures = c.deathSaves?.failures ?? 0;
+                  const pips = (filled: number, tone: string) =>
+                    Array.from({ length: DEATH_SAVE_MAX }, (_, k) => (
+                      <span
+                        key={k}
+                        className={`inline-block w-2.5 h-2.5 rounded-full border ${
+                          k < filled ? tone : 'border-gray-300 dark:border-gray-600'
+                        }`}
+                      />
+                    ));
+                  return (
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                        Death Saves
+                      </span>
+                      <span
+                        className="inline-flex items-center gap-1"
+                        aria-label={`Death save successes for ${c.name}: ${successes} of ${DEATH_SAVE_MAX}`}
+                      >
+                        {pips(successes, 'bg-emerald-500 border-emerald-500')}
+                      </span>
+                      <span
+                        className="inline-flex items-center gap-1"
+                        aria-label={`Death save failures for ${c.name}: ${failures} of ${DEATH_SAVE_MAX}`}
+                      >
+                        {pips(failures, 'bg-red-500 border-red-500')}
+                      </span>
+                      {status === 'stable' && (
+                        <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded">
+                          Stable
+                        </span>
+                      )}
+                      {status === 'dead' && (
+                        <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
+                          Dead
+                        </span>
+                      )}
+                      {isController && (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            aria-label={`Mark death save success for ${c.name}`}
+                            onClick={() => markDeathSaveOnRow(c.name, i, 'success')}
+                            disabled={writePending || status !== 'dying'}
+                            className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
+                          >
+                            + Success
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Mark death save failure for ${c.name}`}
+                            onClick={() => markDeathSaveOnRow(c.name, i, 'failure')}
+                            disabled={writePending || status !== 'dying'}
+                            className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                          >
+                            + Failure
+                          </button>
+                          {c.deathSaves && (
+                            <button
+                              type="button"
+                              aria-label={`Reset death saves for ${c.name}`}
+                              onClick={() => resetDeathSaves(c.name, i)}
+                              disabled={writePending}
+                              className={lootButtonClass}
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               {/* Row management (left) + damage/heal/temp HP controls (right,
                   VEG-286). The raw HP input above stays as the advanced
                   affordance for direct corrections; these are the

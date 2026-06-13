@@ -98,6 +98,22 @@ class CombatantConcentrationDto {
   spell?: string;
 }
 
+// Death-saving throws for a downed PC (VEG-288); whitelisted for the same
+// echo-back reason as the loot/concentration shapes. Each count is 0–3.
+class CombatantDeathSavesDto {
+  @ApiProperty({ minimum: 0, maximum: 3 })
+  @IsInt()
+  @Min(0)
+  @Max(3)
+  successes!: number;
+
+  @ApiProperty({ minimum: 0, maximum: 3 })
+  @IsInt()
+  @Min(0)
+  @Max(3)
+  failures!: number;
+}
+
 class CombatantDto {
   @ApiProperty({ example: 'Goblin' })
   @IsString()
@@ -182,6 +198,14 @@ class CombatantDto {
   @Min(1)
   @Max(6)
   exhaustion?: number;
+
+  @ApiPropertyOptional({
+    description: 'Death-saving throws for a downed PC (VEG-288); absent until tracked.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CombatantDeathSavesDto)
+  deathSaves?: CombatantDeathSavesDto;
 }
 
 export class CreateEncounterDto {

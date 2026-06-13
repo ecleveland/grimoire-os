@@ -146,6 +146,11 @@ export interface Combatant {
    * rather than an on/off condition, so it lives outside `conditions`.
    */
   exhaustion?: number;
+  /**
+   * Death-saving throws for a downed PC (VEG-288); absent until tracked and
+   * cleared on revival above 0 HP. Only meaningful for `isNpc: false`.
+   */
+  deathSaves?: DeathSaves;
 }
 
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;

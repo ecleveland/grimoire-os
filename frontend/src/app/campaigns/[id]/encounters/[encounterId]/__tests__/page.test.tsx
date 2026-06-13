@@ -3031,4 +3031,150 @@ describe('InitiativeTrackerPage', () => {
       ).not.toBeInTheDocument();
     });
   });
+
+  // VEG-288: death saves for downed PCs.
+  describe('death saves (VEG-288)', () => {
+    const downedPc = (over: Partial<Combatant> = {}) =>
+      makeEncounter({
+        combatants: [makeCombatant({ name: 'Hero', isNpc: false, hp: 0, maxHp: 20, ...over })],
+        version: 4,
+      });
+
+    function route(encounter: Encounter) {
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          const body = JSON.parse(init.body ?? '{}');
+          return Promise.resolve({ ...encounter, ...body, version: encounter.version + 1 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+    }
+
+    const lastPatch = () => {
+      const calls = mockApiFetch.mock.calls.filter(
+        c => (c[1] as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      const last = calls[calls.length - 1];
+      return last ? JSON.parse((last[1] as { body: string }).body) : undefined;
+    };
+
+    it('shows the tracker only for a downed PC', async () => {
+      route(downedPc());
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('Death Saves')).toBeInTheDocument();
+    });
+
+    it('hides the tracker for an NPC at 0 HP', async () => {
+      route(
+        makeEncounter({
+          combatants: [makeCombatant({ name: 'Goblin', isNpc: true, hp: 0 })],
+          version: 4,
+        })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByText('Death Saves')).not.toBeInTheDocument();
+    });
+
+    it('hides the tracker for a PC above 0 HP', async () => {
+      route(downedPc({ hp: 5 }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByText('Death Saves')).not.toBeInTheDocument();
+    });
+
+    it('marks a success and persists it with expectedVersion', async () => {
+      route(downedPc());
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Mark death save success for Hero' }));
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      expect(lastPatch().combatants[0].deathSaves).toEqual({ successes: 1, failures: 0 });
+      expect(lastPatch().expectedVersion).toBe(4);
+    });
+
+    it('marks a failure', async () => {
+      route(downedPc({ deathSaves: { successes: 1, failures: 1 } }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Mark death save failure for Hero' }));
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      expect(lastPatch().combatants[0].deathSaves).toEqual({ successes: 1, failures: 2 });
+    });
+
+    it('shows Stable at three successes and locks the mark buttons', async () => {
+      route(downedPc({ deathSaves: { successes: 3, failures: 0 } }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('Stable')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Mark death save success for Hero' })
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Mark death save failure for Hero' })
+      ).toBeDisabled();
+    });
+
+    it('shows Dead at three failures', async () => {
+      route(downedPc({ deathSaves: { successes: 0, failures: 3 } }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('Dead')).toBeInTheDocument();
+    });
+
+    it('clears death saves when the PC is healed above 0', async () => {
+      route(downedPc({ deathSaves: { successes: 1, failures: 2 } }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      fireEvent.change(screen.getByLabelText('Damage or heal amount for Hero'), {
+        target: { value: '6' },
+      });
+      await user.click(screen.getByRole('button', { name: 'Heal Hero' }));
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      const combatant = lastPatch().combatants[0];
+      expect(combatant.hp).toBe(6);
+      expect(combatant).not.toHaveProperty('deathSaves');
+    });
+
+    it('resets death saves via the Reset button', async () => {
+      route(downedPc({ deathSaves: { successes: 2, failures: 1 } }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Reset death saves for Hero' }));
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      expect(lastPatch().combatants[0]).not.toHaveProperty('deathSaves');
+    });
+
+    it('shows pips read-only to non-controllers (no mark/reset controls)', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      route(downedPc({ deathSaves: { successes: 1, failures: 0 } }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      expect(screen.getByText('Death Saves')).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Mark death save success for Hero' })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Reset death saves for Hero' })
+      ).not.toBeInTheDocument();
+    });
+  });
 });
