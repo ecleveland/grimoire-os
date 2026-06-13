@@ -11,9 +11,11 @@ import {
   Query,
   Req,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
+import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
 import { HomebrewFeatsService } from './homebrew-feats.service';
 import { toActor } from './homebrew-write.helpers';
 import { QueryFeatsDto } from './dto/query-feats.dto';
@@ -28,13 +30,16 @@ import type {
 
 /**
  * Feat reads + homebrew CRUD (VEG-295). Lives apart from {@link SrdController}
- * because these routes are deliberately NOT behind the URL-keyed CacheInterceptor:
- * responses vary per user (the caller's homebrew rides along with the catalog),
- * so a shared cache entry would leak one user's homebrew to another — and a
- * 24h TTL would hide a user's own writes from them.
+ * because responses vary per user — the caller's homebrew rides along with the
+ * catalog — so they can't sit behind SrdController's blanket URL-keyed cache,
+ * which would leak one user's homebrew to another and hide a user's own writes.
+ * Instead it uses {@link AnonymousCacheInterceptor}: anonymous responses (the
+ * bare global catalog) are cached by URL, authenticated ones bypass the cache
+ * entirely (VEG-333).
  */
 @ApiTags('SRD')
 @Controller('srd/feats')
+@UseInterceptors(AnonymousCacheInterceptor)
 export class FeatsController {
   constructor(
     private readonly srdService: SrdService,

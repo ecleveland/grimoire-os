@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CacheModule } from '@nestjs/cache-manager';
 import { SpellsController } from './spells.controller';
 import { SrdService } from './srd.service';
 import { HomebrewSpellsService } from './homebrew-spells.service';
@@ -23,6 +24,7 @@ describe('SpellsController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SpellsController],
+      imports: [CacheModule.register()],
       providers: [
         { provide: SrdService, useValue: srdService },
         { provide: HomebrewSpellsService, useValue: homebrewService },

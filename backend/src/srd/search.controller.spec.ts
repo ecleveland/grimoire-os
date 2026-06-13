@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CacheModule } from '@nestjs/cache-manager';
 import { SearchController } from './search.controller';
 import { SrdService } from './srd.service';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
@@ -13,6 +14,7 @@ describe('SearchController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SearchController],
+      imports: [CacheModule.register()],
       providers: [{ provide: SrdService, useValue: srdService }],
     }).compile();
 
