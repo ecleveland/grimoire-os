@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SrdSearchPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
-import type { PaginatedResponse, SrdSpell, SrdFeat } from '@/lib/types';
+import type { PaginatedResponse, SrdSpell, SrdFeat, SrdItem } from '@/lib/types';
 import type { UnifiedFeatureData, UnifiedSearchHit } from '@/lib/srd-search';
 
 const mockApiFetch = vi.fn();
@@ -101,7 +101,21 @@ const toughFeat: SrdFeat = {
   source: 'SRD 5.2.1',
 };
 
+const bagOfTricksItem: SrdItem = {
+  id: 'item-1',
+  name: 'Bag of Tricks',
+  category: 'Wondrous Item',
+  rarity: 'Uncommon',
+  cost: '500 gp',
+  description: 'This bag appears empty.',
+  properties: ['Mysterious'],
+  requiresAttunement: true,
+  isMagic: true,
+  source: 'SRD 5.2.1',
+};
+
 const fireball: UnifiedSearchHit = { kind: 'spell', data: fireballSpell };
+const bagOfTricks: UnifiedSearchHit = { kind: 'item', data: bagOfTricksItem };
 const bless: UnifiedSearchHit = { kind: 'spell', data: blessSpell };
 const detectMagic: UnifiedSearchHit = { kind: 'spell', data: detectMagicSpell };
 const sharpshooter: UnifiedSearchHit = { kind: 'feat', data: sharpshooterFeat };
@@ -191,11 +205,12 @@ describe('SrdSearchPage', () => {
       });
     });
 
-    it('shows type-filter chips for Spells, Feats, and Features', async () => {
+    it('shows type-filter chips for Spells, Feats, Items, and Features', async () => {
       renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Spells' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Feats' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Items' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Features' })).toBeInTheDocument();
       });
     });
@@ -393,6 +408,88 @@ describe('SrdSearchPage', () => {
     });
   });
 
+  describe('item hits (VEG-296)', () => {
+    it('renders the item hit with category, rarity, and attunement badge', async () => {
+      mockApiFetch.mockResolvedValue(paginated([bagOfTricks]));
+      renderPage();
+
+      expect(await screen.findByText('Bag of Tricks')).toBeInTheDocument();
+      expect(screen.getByText(/Wondrous Item · Uncommon/)).toBeInTheDocument();
+      expect(screen.getByText('Requires Attunement')).toBeInTheDocument();
+    });
+
+    it('shows the item facts, properties, and description when expanded', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([bagOfTricks]));
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Bag of Tricks')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Bag of Tricks'));
+
+      expect(screen.getByText(/Cost: 500 gp/)).toBeInTheDocument();
+      expect(screen.getByText('Mysterious')).toBeInTheDocument();
+      expect(screen.getByText('This bag appears empty.')).toBeInTheDocument();
+    });
+
+    it('offers a print toggle on item hits (items are printable)', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([bagOfTricks]));
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Bag of Tricks')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: 'Add Bag of Tricks to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'item', id: 'item-1' }]);
+    });
+
+    it('shows the Homebrew badge on a homebrew item hit', async () => {
+      const homebrewItem: UnifiedSearchHit = {
+        kind: 'item',
+        data: {
+          ...bagOfTricksItem,
+          id: 'item-hb',
+          name: 'Cloak of Whispers',
+          contentSource: 'homebrew',
+          createdById: 'u1',
+          source: 'Homebrew',
+        },
+      };
+      mockApiFetch.mockResolvedValue(paginated([homebrewItem]));
+      renderPage();
+
+      const heading = await screen.findByText('Cloak of Whispers');
+      expect(within(heading.closest('h2')!).getByText('Homebrew')).toBeInTheDocument();
+    });
+
+    it('does not show the Homebrew badge on an SRD item hit', async () => {
+      mockApiFetch.mockResolvedValue(paginated([bagOfTricks]));
+      renderPage();
+
+      const heading = await screen.findByText('Bag of Tricks');
+      expect(within(heading.closest('h2')!).queryByText('Homebrew')).not.toBeInTheDocument();
+    });
+
+    it('passes item sub-filters to the API when only Items is enabled', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+
+      await user.click(screen.getByRole('button', { name: 'Spells' }));
+      await user.click(screen.getByRole('button', { name: 'Feats' }));
+      await user.click(screen.getByRole('button', { name: 'Features' }));
+
+      mockApiFetch.mockClear();
+      await user.selectOptions(screen.getByLabelText('Rarity'), 'Rare');
+      await user.selectOptions(screen.getByLabelText('Magic'), 'true');
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
+      expect(url).toContain('types=item');
+      expect(url).toContain('rarity=Rare');
+      expect(url).toContain('isMagic=true');
+    });
+  });
+
   describe('conditional rendering — spell expanded fields', () => {
     it('does not render the Material section when spell.material is absent', async () => {
       const user = userEvent.setup();
@@ -489,6 +586,7 @@ describe('SrdSearchPage', () => {
       });
 
       await user.click(screen.getByRole('button', { name: 'Feats' }));
+      await user.click(screen.getByRole('button', { name: 'Items' }));
       await user.click(screen.getByRole('button', { name: 'Features' }));
 
       expect(screen.getByLabelText('Spell Class')).toBeInTheDocument();
@@ -504,11 +602,28 @@ describe('SrdSearchPage', () => {
       });
 
       await user.click(screen.getByRole('button', { name: 'Spells' }));
+      await user.click(screen.getByRole('button', { name: 'Items' }));
       await user.click(screen.getByRole('button', { name: 'Features' }));
 
       expect(screen.getByLabelText('Feat Category')).toBeInTheDocument();
       expect(screen.getByLabelText('Prerequisite')).toBeInTheDocument();
       expect(screen.getByLabelText('Repeatable')).toBeInTheDocument();
+    });
+
+    it('shows item sub-filters (category, rarity, magic) when only Items is enabled', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Items' })).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Spells' }));
+      await user.click(screen.getByRole('button', { name: 'Feats' }));
+      await user.click(screen.getByRole('button', { name: 'Features' }));
+
+      expect(screen.getByLabelText('Item Category')).toBeInTheDocument();
+      expect(screen.getByLabelText('Rarity')).toBeInTheDocument();
+      expect(screen.getByLabelText('Magic')).toBeInTheDocument();
     });
 
     it('shows feature sub-filters when only Features is enabled', async () => {
@@ -520,6 +635,7 @@ describe('SrdSearchPage', () => {
 
       await user.click(screen.getByRole('button', { name: 'Spells' }));
       await user.click(screen.getByRole('button', { name: 'Feats' }));
+      await user.click(screen.getByRole('button', { name: 'Items' }));
 
       expect(screen.getByLabelText('Parent Type')).toBeInTheDocument();
     });

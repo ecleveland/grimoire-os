@@ -50,6 +50,7 @@ export type UnifiedFeatureData = {
 export type UnifiedSearchHit =
   | { kind: 'spell'; data: Spell }
   | { kind: 'feat'; data: Feat }
+  | { kind: 'item'; data: Item }
   | { kind: 'feature'; data: UnifiedFeatureData };
 
 const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
@@ -68,6 +69,7 @@ type FeatureSearchHit = {
 type UnifiedSourceTag =
   | 'spell'
   | 'feat'
+  | 'item'
   | 'feature:class'
   | 'feature:subclass'
   | 'feature:race'
@@ -326,21 +328,32 @@ export class SrdService {
 
   // ── Items ───────────────────────────────────────────
 
-  async searchItems(dto: QueryItemsDto) {
+  // Item reads take an optional userId (VEG-296): authenticated callers see
+  // the global catalog plus their own homebrew; anonymous callers see only the
+  // catalog. The visibility fragment can itself be an OR, so a free-text query
+  // joins it under AND instead of clobbering it.
+  async searchItems(dto: QueryItemsDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
 
     if (shouldUseFuzzy(dto.q)) {
-      return this.fuzzySearchItems(dto, dto.q, page, limit);
+      return this.fuzzySearchItems(dto, dto.q, page, limit, userId);
     }
 
-    const where: Record<string, unknown> = { ...this.contentAccess.globalWhere() };
-    if (dto.q) {
-      where.OR = [
-        { name: { contains: dto.q, mode: 'insensitive' } },
-        { description: { contains: dto.q, mode: 'insensitive' } },
-      ];
-    }
+    const visible = this.contentAccess.visibleTo(userId);
+    const where: Record<string, unknown> = dto.q
+      ? {
+          AND: [
+            { ...visible },
+            {
+              OR: [
+                { name: { contains: dto.q, mode: 'insensitive' } },
+                { description: { contains: dto.q, mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }
+      : { ...visible };
     if (dto.category) where.category = dto.category;
     if (dto.rarity) where.rarity = dto.rarity;
     if (dto.isMagic !== undefined) where.isMagic = dto.isMagic === 'true';
@@ -358,8 +371,17 @@ export class SrdService {
     return buildPaginatedResponse(data, total, page, limit);
   }
 
-  private async fuzzySearchItems(dto: QueryItemsDto, q: string, page: number, limit: number) {
-    const conds: Prisma.Sql[] = [GLOBAL_SOURCE_SQL, buildFuzzyMatchSql(q, ITEM_FUZZY_THRESHOLD)];
+  private async fuzzySearchItems(
+    dto: QueryItemsDto,
+    q: string,
+    page: number,
+    limit: number,
+    userId?: string
+  ) {
+    const conds: Prisma.Sql[] = [
+      visibleSourceSql(userId),
+      buildFuzzyMatchSql(q, ITEM_FUZZY_THRESHOLD),
+    ];
     if (dto.category) conds.push(Prisma.sql`"category" = ${dto.category}`);
     if (dto.rarity) conds.push(Prisma.sql`"rarity" = ${dto.rarity}`);
     if (dto.isMagic !== undefined) conds.push(Prisma.sql`"isMagic" = ${dto.isMagic === 'true'}`);
@@ -382,9 +404,9 @@ export class SrdService {
 
   // Equipment packs resolve their bundle contents to real catalog rows
   // (VEG-308); `contents` is present on the response only when non-empty.
-  async findItem(id: string) {
+  async findItem(id: string, userId?: string) {
     const item = await this.prisma.item.findFirst({
-      where: { id, ...this.contentAccess.globalWhere() },
+      where: { id, ...this.contentAccess.visibleTo(userId) },
       include: {
         bundleContents: {
           include: { component: { select: { id: true, name: true } } },
@@ -779,14 +801,16 @@ export class SrdService {
   //   3) Sum-of-counts query for the grand total.
   //   4) Hydrate full payloads by primary key per source.
 
-  // Takes an optional userId (VEG-294/295): the spell and feat sources widen
-  // to the caller's own homebrew. Features stay pinned to the global catalog —
-  // they have no homebrew tier.
+  // Takes an optional userId (VEG-294/295/296): the spell, feat, and item
+  // sources widen to the caller's own homebrew. Features stay pinned to the
+  // global catalog — they have no homebrew tier.
   async search(dto: QuerySearchDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
     const offset = (page - 1) * limit;
-    const types: SearchKind[] = dto.types?.length ? dto.types : ['spell', 'feat', 'feature'];
+    const types: SearchKind[] = dto.types?.length
+      ? dto.types
+      : ['spell', 'feat', 'item', 'feature'];
 
     const sources = this.buildUnifiedSources(dto, types, userId);
     if (sources.length === 0) {
@@ -840,6 +864,13 @@ export class SrdService {
         whereSql: this.buildFeatWhereSql(dto, userId),
       });
     }
+    if (types.includes('item')) {
+      sources.push({
+        tag: 'item',
+        table: Prisma.sql`"items"`,
+        whereSql: this.buildItemWhereSql(dto, userId),
+      });
+    }
     if (types.includes('feature')) {
       const parents = dto.parentType ? [dto.parentType] : ALL_FEATURE_PARENTS;
       for (const parent of parents) {
@@ -878,6 +909,20 @@ export class SrdService {
     return joinWhere(conds);
   }
 
+  // `category` is shared between the feat and item sources (the client only
+  // sends sub-filters when a single kind is selected); feat and item category
+  // vocabularies don't overlap, so a stray cross-kind filter just matches
+  // nothing rather than the wrong rows.
+  private buildItemWhereSql(dto: QuerySearchDto, userId?: string): Prisma.Sql {
+    const conds: Prisma.Sql[] = [visibleSourceSql(userId)];
+    if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
+    if (dto.category) conds.push(Prisma.sql`"category" = ${dto.category}`);
+    if (dto.rarity) conds.push(Prisma.sql`"rarity" = ${dto.rarity}`);
+    if (dto.isMagic === 'true') conds.push(Prisma.sql`"isMagic" = TRUE`);
+    else if (dto.isMagic === 'false') conds.push(Prisma.sql`"isMagic" = FALSE`);
+    return joinWhere(conds);
+  }
+
   private buildFeatureWhereSql(dto: QuerySearchDto, parent: FeatureParentType): Prisma.Sql {
     const conds: Prisma.Sql[] = [];
     if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
@@ -887,10 +932,15 @@ export class SrdService {
     return joinWhere(conds);
   }
 
+  // Ids that fail to hydrate (a row deleted between the id query and this
+  // hydrate query) are silently dropped; `total` is computed independently,
+  // so a page can briefly show one card fewer than the count. Accepted —
+  // the race self-heals on the next query.
   private async hydrateUnifiedHits(idRows: UnifiedIdRow[]): Promise<UnifiedSearchHit[]> {
     const idsBySource: Record<UnifiedSourceTag, string[]> = {
       spell: [],
       feat: [],
+      item: [],
       'feature:class': [],
       'feature:subclass': [],
       'feature:race': [],
@@ -898,7 +948,7 @@ export class SrdService {
     };
     for (const row of idRows) idsBySource[row.source].push(row.id);
 
-    const [spells, feats, classFeatures, subclassFeatures, raceTraits, backgroundFeatures] =
+    const [spells, feats, items, classFeatures, subclassFeatures, raceTraits, backgroundFeatures] =
       await Promise.all([
         idsBySource.spell.length
           ? this.prisma.spell.findMany({ where: { id: { in: idsBySource.spell } } })
@@ -906,6 +956,9 @@ export class SrdService {
         idsBySource.feat.length
           ? this.prisma.feat.findMany({ where: { id: { in: idsBySource.feat } } })
           : Promise.resolve([] as Feat[]),
+        idsBySource.item.length
+          ? this.prisma.item.findMany({ where: { id: { in: idsBySource.item } } })
+          : Promise.resolve([] as Item[]),
         idsBySource['feature:class'].length
           ? this.prisma.classFeature.findMany({
               where: { id: { in: idsBySource['feature:class'] } },
@@ -934,6 +987,7 @@ export class SrdService {
 
     const spellMap = new Map(spells.map(s => [s.id, s]));
     const featMap = new Map(feats.map(f => [f.id, f]));
+    const itemMap = new Map(items.map(i => [i.id, i]));
     const classFeatureMap = new Map(classFeatures.map(f => [f.id, f]));
     const subclassFeatureMap = new Map(subclassFeatures.map(f => [f.id, f]));
     const raceTraitMap = new Map(raceTraits.map(t => [t.id, t]));
@@ -950,6 +1004,11 @@ export class SrdService {
         case 'feat': {
           const data = featMap.get(row.id);
           if (data) result.push({ kind: 'feat', data });
+          break;
+        }
+        case 'item': {
+          const data = itemMap.get(row.id);
+          if (data) result.push({ kind: 'item', data });
           break;
         }
         case 'feature:class': {

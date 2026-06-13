@@ -1,5 +1,5 @@
 import type { SrdSpell } from '@/lib/types';
-import { optionalText } from '@/lib/form-helpers';
+import { optionalText, parseCommaList } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew spell form (VEG-294).
@@ -50,13 +50,9 @@ export interface SpellPayload {
 
 export type SpellFormResult = { payload: SpellPayload } | { error: string };
 
-/** "Bard, Cleric" -> ['Bard', 'Cleric']; blank entries dropped. */
-export function parseCommaList(input: string): string[] {
-  return input
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-}
+// Re-exported so existing imports keep working; the single implementation
+// lives in form-helpers (shared with monster/item-form).
+export { parseCommaList };
 
 export function emptySpellFormState(): SpellFormState {
   return {

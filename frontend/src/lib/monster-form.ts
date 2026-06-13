@@ -1,6 +1,6 @@
 import type { MonsterAction, SrdMonster } from '@/lib/types';
 import { formatBonuses } from '@/lib/srd-format';
-import { optionalText } from '@/lib/form-helpers';
+import { optionalText, parseCommaList, parseIntInRange } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew monster form (VEG-293).
@@ -92,13 +92,9 @@ function formatBonusList(map: Record<string, number> | null | undefined): string
   return map ? formatBonuses(map) : '';
 }
 
-/** "cold, fire" -> ['cold', 'fire']; blank entries dropped. */
-export function parseCommaList(input: string): string[] {
-  return input
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
-}
+// Re-exported so existing imports keep working; the single implementation
+// lives in form-helpers (shared with spell/item-form).
+export { parseCommaList };
 
 /** "str +7, con 9" -> { str: 7, con: 9 }; null when any entry lacks a numeric bonus. */
 export function parseBonusList(input: string): Record<string, number> | null {
@@ -195,12 +191,6 @@ export function monsterToFormState(m: SrdMonster): MonsterFormState {
     legendaryActions: m.legendaryActions ?? [],
     description: m.description ?? '',
   };
-}
-
-function parseIntInRange(input: string, min: number, max: number): number | null {
-  const value = Number(input.trim());
-  if (!Number.isInteger(value) || value < min || value > max) return null;
-  return value;
 }
 
 function validateActions(label: string, actions: MonsterAction[]): string | null {

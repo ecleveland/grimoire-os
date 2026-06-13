@@ -480,16 +480,81 @@ describe('SrdService', () => {
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: {
-          ...GLOBAL_WHERE,
-          OR: [
-            { name: { contains: 'a', mode: 'insensitive' } },
-            { description: { contains: 'a', mode: 'insensitive' } },
+          AND: [
+            { ...GLOBAL_WHERE },
+            {
+              OR: [
+                { name: { contains: 'a', mode: 'insensitive' } },
+                { description: { contains: 'a', mode: 'insensitive' } },
+              ],
+            },
           ],
         },
         orderBy: { name: 'asc' },
         skip: 0,
         take: 20,
       });
+    });
+
+    // ── Owner-aware reads (VEG-296): authenticated callers also see their own homebrew ──
+
+    it('widens the where to the caller’s own homebrew when a userId is passed', async () => {
+      prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
+
+      await service.searchItems({}, 'u1');
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('keeps visibility and substring search independent for authed single-char queries', async () => {
+      prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
+
+      await service.searchItems({ q: 'a' }, 'u1');
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+            {
+              OR: [
+                { name: { contains: 'a', mode: 'insensitive' } },
+                { description: { contains: 'a', mode: 'insensitive' } },
+              ],
+            },
+          ],
+        },
+        orderBy: { name: 'asc' },
+        skip: 0,
+        take: 20,
+      });
+    });
+
+    it('includes the caller’s homebrew in the fuzzy SQL path', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchItems({ q: 'ptn' }, 'u1');
+
+      const { dataQuery, countQuery } = captureSql();
+      expect(dataQuery?.sql).toContain('"createdById" =');
+      expect(dataQuery?.values).toContain('u1');
+      expect(countQuery?.sql).toContain('"createdById" =');
+      expect(countQuery?.values).toContain('u1');
+    });
+
+    it('keeps the fuzzy SQL pinned to the global catalog for anonymous callers', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchItems({ q: 'ptn' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.sql).not.toContain('"createdById"');
     });
 
     it('applies category/rarity/isMagic filters alongside fuzzy SQL', async () => {
@@ -986,6 +1051,27 @@ describe('SrdService', () => {
 
       expect(await service.findItem('missing')).toBeNull();
     });
+
+    it('widens visibility to the caller’s own homebrew when a userId is passed (VEG-296)', async () => {
+      prisma.item.findFirst.mockResolvedValue({
+        id: 'hb-1',
+        name: 'Cloak of Whispers',
+        bundleContents: [],
+      });
+
+      const result = await service.findItem('hb-1', 'u1');
+
+      expect(prisma.item.findFirst).toHaveBeenCalledWith({
+        where: { id: 'hb-1', OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        include: {
+          bundleContents: {
+            include: { component: { select: { id: true, name: true } } },
+            orderBy: { component: { name: 'asc' } },
+          },
+        },
+      });
+      expect(result).toEqual({ id: 'hb-1', name: 'Cloak of Whispers' });
+    });
   });
 
   describe('findSubclass', () => {
@@ -1216,6 +1302,7 @@ describe('SrdService', () => {
       prisma.$queryRaw.mockResolvedValue([]);
       prisma.spell.findMany.mockResolvedValue([]);
       prisma.feat.findMany.mockResolvedValue([]);
+      prisma.item.findMany.mockResolvedValue([]);
       prisma.classFeature.findMany.mockResolvedValue([]);
       prisma.subclassFeature.findMany.mockResolvedValue([]);
       prisma.raceTrait.findMany.mockResolvedValue([]);
@@ -1234,12 +1321,13 @@ describe('SrdService', () => {
       prisma.$queryRaw.mockResolvedValueOnce(idRows).mockResolvedValueOnce([{ total }]);
     }
 
-    it('runs UNION ALL across all six sources when types is unset', async () => {
+    it('runs UNION ALL across all seven sources when types is unset', async () => {
       await service.search({});
       const { idQuery, countQuery } = captureSql();
       for (const table of [
         '"spells"',
         '"feats"',
+        '"items"',
         '"class_features"',
         '"subclass_features"',
         '"race_traits"',
@@ -1266,10 +1354,20 @@ describe('SrdService', () => {
       const { idQuery } = captureSql();
       expect(idQuery?.sql).toContain('"spells"');
       expect(idQuery?.sql).not.toContain('"feats"');
+      expect(idQuery?.sql).not.toContain('"items"');
       expect(idQuery?.sql).not.toContain('"class_features"');
       expect(idQuery?.sql).not.toContain('"subclass_features"');
       expect(idQuery?.sql).not.toContain('"race_traits"');
       expect(idQuery?.sql).not.toContain('"background_features"');
+    });
+
+    it('only includes the item source when types=["item"]', async () => {
+      await service.search({ types: ['item'] });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"items"');
+      expect(idQuery?.sql).not.toContain('"spells"');
+      expect(idQuery?.sql).not.toContain('"feats"');
+      expect(idQuery?.sql).not.toContain('"class_features"');
     });
 
     it('only includes the feat source when types=["feat"]', async () => {
@@ -1296,8 +1394,8 @@ describe('SrdService', () => {
       const { idQuery } = captureSql();
       expect(idQuery?.sql).toContain('ILIKE');
       const wildcardMatches = idQuery?.values.filter(v => v === '%fire%') ?? [];
-      // 6 sources × 2 columns (name + description) per source.
-      expect(wildcardMatches.length).toBe(12);
+      // 7 sources × 2 columns (name + description) per source.
+      expect(wildcardMatches.length).toBe(14);
     });
 
     it('restricts the spell and feat sources to the global catalog (srd + shared)', async () => {
@@ -1310,7 +1408,8 @@ describe('SrdService', () => {
       expect(idQuery?.values.filter(v => v === 'shared').length).toBe(2);
     });
 
-    // ── Owner-aware spells (VEG-294) and feats (VEG-295): the caller’s homebrew surfaces in unified search ──
+    // ── Owner-aware spells (VEG-294), feats (VEG-295), and items (VEG-296):
+    // the caller’s homebrew surfaces in unified search ──
 
     it('widens the spell source to the caller’s homebrew when a userId is passed', async () => {
       await service.search({ types: ['spell'] }, 'u1');
@@ -1330,8 +1429,17 @@ describe('SrdService', () => {
       expect(countQuery?.values).toContain('u1');
     });
 
-    it('keeps the spell and feat sources pinned to the global catalog for anonymous callers', async () => {
-      await service.search({ types: ['spell', 'feat'] });
+    it('widens the item source to the caller’s homebrew when a userId is passed', async () => {
+      await service.search({ types: ['item'] }, 'u1');
+      const { idQuery, countQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"createdById" =');
+      expect(idQuery?.values).toContain('u1');
+      expect(countQuery?.sql).toContain('"createdById" =');
+      expect(countQuery?.values).toContain('u1');
+    });
+
+    it('keeps the spell, feat, and item sources pinned to the global catalog for anonymous callers', async () => {
+      await service.search({ types: ['spell', 'feat', 'item'] });
       const { idQuery } = captureSql();
       expect(idQuery?.sql).not.toContain('"createdById"');
     });
@@ -1379,6 +1487,22 @@ describe('SrdService', () => {
       await service.search({ types: ['feat'], repeatable: 'false' });
       const { idQuery } = captureSql();
       expect(idQuery?.sql).toContain('"repeatable" = FALSE');
+    });
+
+    it('applies item sub-filters (category, rarity, isMagic) as parameterized values', async () => {
+      await service.search({ types: ['item'], category: 'Ring', rarity: 'Rare', isMagic: 'true' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"category"');
+      expect(idQuery?.sql).toContain('"rarity"');
+      expect(idQuery?.sql).toContain('"isMagic" = TRUE');
+      expect(idQuery?.values).toContain('Ring');
+      expect(idQuery?.values).toContain('Rare');
+    });
+
+    it('applies isMagic=false as a FALSE filter on the item source', async () => {
+      await service.search({ types: ['item'], isMagic: 'false' });
+      const { idQuery } = captureSql();
+      expect(idQuery?.sql).toContain('"isMagic" = FALSE');
     });
 
     it('restricts feature sources to the requested parentType', async () => {
@@ -1443,6 +1567,28 @@ describe('SrdService', () => {
 
       expect(prisma.feat.findMany).toHaveBeenCalledWith({ where: { id: { in: ['feat-1'] } } });
       expect(result.data[0]).toEqual({ kind: 'feat', data: fullFeat });
+    });
+
+    it('hydrates item hits via findMany with id IN page IDs', async () => {
+      mockUnifiedQueryResults([{ source: 'item', id: 'item-1' }], 1);
+      const fullItem = {
+        id: 'item-1',
+        name: 'Cloak of Whispers',
+        category: 'Wondrous Item',
+        rarity: 'Rare',
+        requiresAttunement: true,
+        isMagic: true,
+        properties: [],
+        description: 'A cloak woven from twilight.',
+        source: 'SRD 5.2.1',
+        contentSource: 'srd',
+      };
+      prisma.item.findMany.mockResolvedValue([fullItem]);
+
+      const result = await service.search({ types: ['item'] });
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith({ where: { id: { in: ['item-1'] } } });
+      expect(result.data[0]).toEqual({ kind: 'item', data: fullItem });
     });
 
     it('hydrates class-feature hits with parent metadata', async () => {

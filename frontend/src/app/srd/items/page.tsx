@@ -1,55 +1,22 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import { useAuth } from '@/lib/auth-context';
 import type { SrdItem, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
+import Badge from '@/components/Badge';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import { ITEM_CATEGORIES } from '@/lib/item-constants';
 
 const LIMIT = 20;
 
-// The exact category values present in the seeded catalog: the basic-equipment
-// categories extracted by VEG-308 plus the magic-item categories (VEG-164).
-// The API filter matches equality, so these must mirror the data verbatim.
-const CATEGORIES = [
-  'Adventuring Gear',
-  'Airborne or Waterborne Vehicle',
-  'Ammunition',
-  'Arcane Focus',
-  'Armor',
-  "Artisan's Tools",
-  'Druidic Focus',
-  'Equipment Pack',
-  'Food, Drink, or Lodging',
-  'Gaming Set',
-  'Heavy Armor',
-  'Holy Symbol',
-  'Lifestyle Expense',
-  'Light Armor',
-  'Martial Melee Weapon',
-  'Martial Ranged Weapon',
-  'Medium Armor',
-  'Mount',
-  'Musical Instrument',
-  'Potion',
-  'Ring',
-  'Rod',
-  'Scroll',
-  'Service',
-  'Shield',
-  'Simple Melee Weapon',
-  'Simple Ranged Weapon',
-  'Staff',
-  'Tack, Harness, or Drawn Vehicle',
-  'Tool',
-  'Wand',
-  'Weapon',
-  'Wondrous Item',
-];
-
 export default function ItemListPage() {
+  const { isAdmin, isAuthenticated, user } = useAuth();
   const [items, setItems] = useState<SrdItem[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -58,7 +25,32 @@ export default function ItemListPage() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<SrdItem | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The owner may edit/delete their homebrew; admins curate shared content.
+  const canManage = (item: SrdItem) =>
+    (item.contentSource === 'homebrew' && item.createdById === user?.userId) ||
+    (item.contentSource === 'shared' && isAdmin);
+
+  async function handleDeleteItem() {
+    if (!pendingDelete) return;
+    try {
+      await apiFetch(`/srd/items/${pendingDelete.id}`, { method: 'DELETE' });
+      toast.success(`Deleted ${pendingDelete.name}`);
+      // Refetch so the deleted item drops out of the current page, clamping
+      // in case the last row of the final page just went away.
+      const lastPageAfterDelete = Math.max(1, Math.ceil((total - 1) / LIMIT));
+      setPage(p => Math.min(p, lastPageAfterDelete));
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete item');
+    } finally {
+      setPendingDelete(null);
+    }
+  }
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -84,13 +76,18 @@ export default function ItemListPage() {
         setItems(res.data);
         setTotal(res.total);
         setLastPage(res.lastPage);
+        // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank
+        // the list, don't strand the user on an empty out-of-range page.
+        if (res.data.length === 0 && page > Math.max(1, res.lastPage)) {
+          setPage(Math.max(1, res.lastPage));
+        }
       })
       .catch(err => {
         console.error('Failed to load items:', err);
         toast.error('Failed to load items', { id: 'load-items' });
       })
       .finally(() => setLoading(false));
-  }, [page, search, categoryFilter]);
+  }, [page, search, categoryFilter, refreshKey]);
 
   const handleCategoryChange = (value: string) => {
     setCategoryFilter(value);
@@ -102,7 +99,17 @@ export default function ItemListPage() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Items</h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Items</h1>
+        {isAuthenticated && (
+          <Link
+            href="/srd/items/new"
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
+          >
+            Create item
+          </Link>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <input
@@ -118,7 +125,7 @@ export default function ItemListPage() {
           className={inputClass}
         >
           <option value="">All Categories</option>
-          {CATEGORIES.map(c => (
+          {ITEM_CATEGORIES.map(c => (
             <option key={c} value={c}>
               {c}
             </option>
@@ -135,9 +142,27 @@ export default function ItemListPage() {
         aria-busy={loading}
       >
         {items.map(item => (
-          <ItemCard key={item.id} item={item} />
+          <ItemCard
+            key={item.id}
+            item={item}
+            canManage={canManage(item)}
+            onDelete={() => {
+              setPendingDelete(item);
+              setConfirmDeleteOpen(true);
+            }}
+          />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onOpenChange={setConfirmDeleteOpen}
+        title="Delete item?"
+        description={`"${pendingDelete?.name ?? 'This item'}" will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete item"
+        variant="danger"
+        onConfirm={handleDeleteItem}
+      />
 
       <Pagination
         page={page}
@@ -150,7 +175,15 @@ export default function ItemListPage() {
   );
 }
 
-function ItemCard({ item }: { item: SrdItem }) {
+function ItemCard({
+  item,
+  canManage,
+  onDelete,
+}: {
+  item: SrdItem;
+  canManage: boolean;
+  onDelete: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails = Boolean(item.description?.trim());
 
@@ -160,7 +193,14 @@ function ItemCard({ item }: { item: SrdItem }) {
       className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
     >
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold text-gray-900 dark:text-white">{item.name}</h3>
+        <h3 className="font-semibold text-gray-900 dark:text-white">
+          {item.name}
+          {item.contentSource === 'homebrew' && (
+            <Badge variant="homebrew" className="ml-2 inline-block align-middle">
+              Homebrew
+            </Badge>
+          )}
+        </h3>
         <PrintToggle type="item" id={item.id} name={item.name} className="shrink-0 -mt-0.5" />
       </div>
       <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{item.category}</p>
@@ -180,7 +220,7 @@ function ItemCard({ item }: { item: SrdItem }) {
       )}
       <div className="flex gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
         {item.cost && <span>Cost: {item.cost}</span>}
-        {item.weight && <span>Weight: {item.weight}</span>}
+        {item.weight != null && <span>Weight: {item.weight}</span>}
       </div>
       {item.damage && (
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Damage: {item.damage}</p>
@@ -213,6 +253,23 @@ function ItemCard({ item }: { item: SrdItem }) {
             </div>
           )}
         </>
+      )}
+      {canManage && (
+        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <Link
+            href={`/srd/items/${item.id}/edit`}
+            className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Edit
+          </Link>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="px-3 py-1.5 text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
       )}
     </div>
   );

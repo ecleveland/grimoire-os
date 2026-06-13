@@ -8,18 +8,26 @@ import type { SrdItem, PaginatedResponse } from '@/lib/types';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockApiFetch = vi.fn();
+const mockUseAuth = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
 vi.mock('sonner', () => ({
-  toast: { error: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn() },
+}));
+
+vi.mock('@/lib/auth-context', () => ({
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock('@/components/Pagination', () => ({
   default: () => <div data-testid="pagination" />,
 }));
+
+const ANON = { isAuthenticated: false, isAdmin: false, user: null };
+const OWNER = { isAuthenticated: true, isAdmin: false, user: { userId: 'u1' } };
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -28,7 +36,7 @@ const longsword: SrdItem = {
   name: 'Longsword',
   category: 'Martial Melee Weapon',
   cost: '15 GP',
-  weight: '3 lb.',
+  weight: 3,
   damage: '1d8 slashing',
   properties: ['Versatile (1d10)', 'Mastery: Sap'],
   source: 'SRD 5.2.1',
@@ -79,6 +87,7 @@ describe('ItemListPage', () => {
     localStorage.clear();
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(makeResponse([longsword]));
+    mockUseAuth.mockReturnValue(ANON);
   });
 
   describe('print set selection', () => {
@@ -201,6 +210,167 @@ describe('ItemListPage', () => {
 
       expect(await screen.findByText('Longsword')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /details/i })).not.toBeInTheDocument();
+    });
+
+    it('renders a zero weight rather than hiding it (falsy-zero guard)', async () => {
+      mockApiFetch.mockResolvedValue(
+        makeResponse([{ ...longsword, name: 'Soap Bubble', weight: 0 }])
+      );
+      renderPage();
+
+      expect(await screen.findByText('Soap Bubble')).toBeInTheDocument();
+      expect(screen.getByText('Weight: 0')).toBeInTheDocument();
+    });
+  });
+
+  describe('homebrew surfacing (VEG-296)', () => {
+    const ownItem: SrdItem = {
+      id: 'hb-1',
+      name: 'Cloak of Whispers',
+      category: 'Wondrous Item',
+      rarity: 'Rare',
+      properties: [],
+      source: 'Homebrew',
+      contentSource: 'homebrew',
+      createdById: 'u1',
+    };
+
+    it('shows the Create item link only to authenticated users', async () => {
+      mockUseAuth.mockReturnValue(OWNER);
+      renderPage();
+      expect(await screen.findByRole('link', { name: 'Create item' })).toHaveAttribute(
+        'href',
+        '/srd/items/new'
+      );
+    });
+
+    it('hides the Create item link from anonymous visitors', async () => {
+      renderPage();
+      await screen.findByText('Longsword');
+      expect(screen.queryByRole('link', { name: 'Create item' })).not.toBeInTheDocument();
+    });
+
+    it('flags homebrew items with a badge', async () => {
+      mockUseAuth.mockReturnValue(OWNER);
+      mockApiFetch.mockResolvedValue(makeResponse([longsword, ownItem]));
+      renderPage();
+
+      const card = (await screen.findByText('Cloak of Whispers')).closest(
+        '[data-testid="item-card"]'
+      ) as HTMLElement;
+      expect(within(card).getByText('Homebrew')).toBeInTheDocument();
+      const srdCard = screen
+        .getByText('Longsword')
+        .closest('[data-testid="item-card"]') as HTMLElement;
+      expect(within(srdCard).queryByText('Homebrew')).not.toBeInTheDocument();
+    });
+
+    it('offers Edit and Delete on the owner’s homebrew but not on SRD rows', async () => {
+      mockUseAuth.mockReturnValue(OWNER);
+      mockApiFetch.mockResolvedValue(makeResponse([longsword, ownItem]));
+      renderPage();
+
+      const card = (await screen.findByText('Cloak of Whispers')).closest(
+        '[data-testid="item-card"]'
+      ) as HTMLElement;
+      expect(within(card).getByRole('link', { name: 'Edit' })).toHaveAttribute(
+        'href',
+        '/srd/items/hb-1/edit'
+      );
+      expect(within(card).getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+
+      const srdCard = screen
+        .getByText('Longsword')
+        .closest('[data-testid="item-card"]') as HTMLElement;
+      expect(within(srdCard).queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(within(srdCard).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    });
+
+    it('hides Edit and Delete from non-owners of homebrew rows', async () => {
+      mockUseAuth.mockReturnValue({
+        isAuthenticated: true,
+        isAdmin: false,
+        user: { userId: 'someone-else' },
+      });
+      mockApiFetch.mockResolvedValue(makeResponse([ownItem]));
+      renderPage();
+
+      await screen.findByText('Cloak of Whispers');
+      expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    });
+
+    it('lets admins manage shared content', async () => {
+      mockUseAuth.mockReturnValue({
+        isAuthenticated: true,
+        isAdmin: true,
+        user: { userId: 'a1' },
+      });
+      mockApiFetch.mockResolvedValue(
+        makeResponse([{ ...ownItem, contentSource: 'shared', createdById: 'u1' }])
+      );
+      renderPage();
+
+      await screen.findByText('Cloak of Whispers');
+      expect(screen.getByRole('link', { name: 'Edit' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    });
+
+    it('deletes after confirmation and refetches the list', async () => {
+      const user = userEvent.setup();
+      mockUseAuth.mockReturnValue(OWNER);
+      mockApiFetch.mockResolvedValue(makeResponse([ownItem]));
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete item' }));
+
+      await waitFor(() => {
+        expect(mockApiFetch).toHaveBeenCalledWith('/srd/items/hb-1', { method: 'DELETE' });
+      });
+      const { toast } = await import('sonner');
+      expect(toast.success).toHaveBeenCalledWith('Deleted Cloak of Whispers');
+      // Initial load + post-delete refetch.
+      const listCalls = mockApiFetch.mock.calls.filter(
+        c => typeof c[0] === 'string' && c[0].startsWith('/srd/items?')
+      );
+      expect(listCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('toasts the API error when the delete fails', async () => {
+      const user = userEvent.setup();
+      mockUseAuth.mockReturnValue(OWNER);
+      mockApiFetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') return Promise.reject(new Error('Item not found'));
+        return Promise.resolve(makeResponse([ownItem]));
+      });
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete item' }));
+
+      const { toast } = await import('sonner');
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Item not found');
+      });
+    });
+
+    it('falls back to a generic message for non-Error delete rejections', async () => {
+      const user = userEvent.setup();
+      mockUseAuth.mockReturnValue(OWNER);
+      mockApiFetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') return Promise.reject('boom');
+        return Promise.resolve(makeResponse([ownItem]));
+      });
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete item' }));
+
+      const { toast } = await import('sonner');
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('Failed to delete item');
+      });
     });
   });
 

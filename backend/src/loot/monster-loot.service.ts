@@ -9,6 +9,7 @@ import { LootRoller } from './loot-roller';
 import { createMonsterLootTemplateSelector, monsterToLootSelection } from './monster-loot';
 import { LOOT_GAME_RULE_CATEGORY, resolveLootGameRules } from './loot-game-rules';
 import { buildItemCatalogMaps } from './item-catalog';
+import { GLOBAL_CONTENT_SOURCES } from '../srd/content-access.service';
 import { GeneratedLoot, LOOT_CR_BUCKETS, LootTemplate } from './loot.types';
 
 export type MonsterLootInput = { type: string; challengeRating: number };
@@ -57,7 +58,14 @@ export class MonsterLootService {
         orderBy: { id: 'asc' },
       }),
       this.prisma.trinket.findMany({ where: { isActive: true }, select: { description: true } }),
-      this.prisma.item.findMany({ select: { id: true, name: true, isMagic: true } }),
+      // Pinned to the global catalog (VEG-296): loot resolves template item
+      // names and draws magic items from this pool, so an owner-scoped
+      // homebrew row here would leak one user's private content into every
+      // user's drops (or hijack a template item name).
+      this.prisma.item.findMany({
+        where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
+        select: { id: true, name: true, isMagic: true },
+      }),
       this.prisma.gameRule.findMany({ where: { category: LOOT_GAME_RULE_CATEGORY } }),
     ]);
 

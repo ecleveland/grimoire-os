@@ -9,6 +9,7 @@ import { StatBlockAction } from './npc-generator.types';
 import { npcSettingBiases } from '../../seed/data/npc-setting-biases';
 import { LOOT_GAME_RULE_CATEGORY, resolveLootGameRules } from '../../loot/loot-game-rules';
 import { buildItemCatalogMaps } from '../../loot/item-catalog';
+import { GLOBAL_CONTENT_SOURCES } from '../../srd/content-access.service';
 
 @Injectable()
 export class NpcRefDataLoader {
@@ -47,7 +48,14 @@ export class NpcRefDataLoader {
         where: { isActive: true },
         select: { background: true, kind: true, value: true },
       }),
-      this.prisma.item.findMany({ select: { id: true, name: true, isMagic: true } }),
+      // Pinned to the global catalog (VEG-296): NPC loot resolves template
+      // item names and draws magic items from this pool, so an owner-scoped
+      // homebrew row here would leak one user's private content into every
+      // user's generated NPCs.
+      this.prisma.item.findMany({
+        where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
+        select: { id: true, name: true, isMagic: true },
+      }),
       this.prisma.monster.findMany(),
       this.prisma.gameRule.findMany({ where: { category: LOOT_GAME_RULE_CATEGORY } }),
     ]);

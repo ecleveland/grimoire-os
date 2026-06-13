@@ -36,10 +36,11 @@ function isPrismaError(err: unknown, code: string): boolean {
  */
 export function mapWriteError(err: unknown, contentSource: ContentSource, noun: string): never {
   if (isPrismaError(err, 'P2002')) {
+    const article = /^[aeiou]/i.test(noun) ? 'an' : 'a';
     throw new ConflictException(
       contentSource === 'shared'
         ? `A shared ${noun} with this name already exists`
-        : `You already have a ${noun} with this name`
+        : `You already have ${article} ${noun} with this name`
     );
   }
   if (isPrismaError(err, 'P2025')) {

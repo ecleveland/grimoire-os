@@ -20,9 +20,11 @@ import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
 import SpellDetail from '@/components/SpellDetail';
 import FeatDetail from '@/components/FeatDetail';
+import ItemDetail from '@/components/ItemDetail';
 import PrintToggle from '@/components/PrintToggle';
 import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
 import { FEAT_CATEGORIES } from '@/lib/feat-constants';
+import { ITEM_CATEGORIES, ITEM_RARITIES } from '@/lib/item-constants';
 
 const LIMIT = 20;
 
@@ -64,6 +66,11 @@ export default function SrdSearchPage() {
   const [featPrereq, setFeatPrereq] = useState('');
   const [featRepeatable, setFeatRepeatable] = useState('');
 
+  // Item sub-filters
+  const [itemCategory, setItemCategory] = useState('');
+  const [itemRarity, setItemRarity] = useState('');
+  const [itemMagic, setItemMagic] = useState('');
+
   // Feature sub-filters
   const [featureParent, setFeatureParent] = useState('');
 
@@ -86,6 +93,7 @@ export default function SrdSearchPage() {
     }
     const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
     const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
+    const onlyItems = enabledKinds.size === 1 && enabledKinds.has('item');
     const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
     if (onlySpells) {
       if (spellClass) params.set('class', spellClass);
@@ -96,6 +104,11 @@ export default function SrdSearchPage() {
       if (featCategory) params.set('category', featCategory);
       if (featPrereq) params.set('hasPrerequisite', featPrereq);
       if (featRepeatable) params.set('repeatable', featRepeatable);
+    }
+    if (onlyItems) {
+      if (itemCategory) params.set('category', itemCategory);
+      if (itemRarity) params.set('rarity', itemRarity);
+      if (itemMagic) params.set('isMagic', itemMagic);
     }
     if (onlyFeatures) {
       if (featureParent) params.set('parentType', featureParent);
@@ -128,6 +141,9 @@ export default function SrdSearchPage() {
     featCategory,
     featPrereq,
     featRepeatable,
+    itemCategory,
+    itemRarity,
+    itemMagic,
     featureParent,
   ]);
 
@@ -160,6 +176,7 @@ export default function SrdSearchPage() {
 
   const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
   const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
+  const onlyItems = enabledKinds.size === 1 && enabledKinds.has('item');
   const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
 
   const countLabel = useMemo(() => {
@@ -174,7 +191,7 @@ export default function SrdSearchPage() {
       <div className="mb-4">
         <SearchBox
           onDebouncedChange={handleDebouncedSearch}
-          placeholder="Search spells, feats, and features..."
+          placeholder="Search spells, feats, items, and features..."
         />
       </div>
 
@@ -197,7 +214,7 @@ export default function SrdSearchPage() {
         })}
       </div>
 
-      {(onlySpells || onlyFeats || onlyFeatures) && (
+      {(onlySpells || onlyFeats || onlyItems || onlyFeatures) && (
         <FilterBar>
           {onlySpells && (
             <>
@@ -297,6 +314,55 @@ export default function SrdSearchPage() {
               </label>
             </>
           )}
+          {onlyItems && (
+            <>
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Item Category</span>
+                <select
+                  aria-label="Item Category"
+                  value={itemCategory}
+                  onChange={e => resetPage(setItemCategory)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">All Categories</option>
+                  {ITEM_CATEGORIES.map(c => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Rarity</span>
+                <select
+                  aria-label="Rarity"
+                  value={itemRarity}
+                  onChange={e => resetPage(setItemRarity)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Any Rarity</option>
+                  {ITEM_RARITIES.map(r => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1 text-gray-600 dark:text-gray-400">Magic</span>
+                <select
+                  aria-label="Magic"
+                  value={itemMagic}
+                  onChange={e => resetPage(setItemMagic)(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="">Any</option>
+                  <option value="true">Magic items</option>
+                  <option value="false">Mundane items</option>
+                </select>
+              </label>
+            </>
+          )}
           {onlyFeatures && (
             <label className="block text-sm">
               <span className="block mb-1 text-gray-600 dark:text-gray-400">Parent Type</span>
@@ -350,9 +416,9 @@ function ResultCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  // Spells and features are printable card types; feats are not.
+  // Spells, items, and features are printable card types; feats are not.
   const printable =
-    hit.kind === 'spell' || hit.kind === 'feature'
+    hit.kind === 'spell' || hit.kind === 'item' || hit.kind === 'feature'
       ? { type: hit.kind, id: hit.data.id, name: hit.data.name }
       : null;
 
@@ -381,7 +447,12 @@ function ResultCard({
                   Repeatable
                 </span>
               )}
-              {(hit.kind === 'spell' || hit.kind === 'feat') &&
+              {hit.kind === 'item' && hit.data.requiresAttunement && (
+                <span className="ml-2 text-xs px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded">
+                  Requires Attunement
+                </span>
+              )}
+              {(hit.kind === 'spell' || hit.kind === 'feat' || hit.kind === 'item') &&
                 hit.data.contentSource === 'homebrew' && (
                   <Badge variant="homebrew" className="ml-2 inline-block align-middle">
                     Homebrew
@@ -410,6 +481,7 @@ function ResultCard({
         <div className="px-4 pb-4 border-t border-gray-100 dark:border-gray-700 pt-3">
           {hit.kind === 'spell' && <SpellDetail spell={hit.data} />}
           {hit.kind === 'feat' && <FeatDetail feat={hit.data} />}
+          {hit.kind === 'item' && <ItemDetail item={hit.data} />}
           {hit.kind === 'feature' && <FeatureDetail feature={hit.data} />}
         </div>
       )}
@@ -424,6 +496,10 @@ function subtitleFor(hit: UnifiedSearchHit): string {
   if (hit.kind === 'feat') {
     const parts = [hit.data.category, hit.data.prerequisite].filter(Boolean) as string[];
     return parts.length ? parts.join(' · ') : 'Feat';
+  }
+  if (hit.kind === 'item') {
+    const parts = [hit.data.category, hit.data.rarity].filter(Boolean) as string[];
+    return parts.length ? parts.join(' · ') : 'Item';
   }
   // feature
   const lvl = hit.data.level !== undefined ? ` · Level ${hit.data.level}` : '';

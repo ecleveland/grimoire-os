@@ -1,4 +1,4 @@
-import type { SrdSpell, SrdFeat } from '@/lib/types';
+import type { SrdSpell, SrdFeat, SrdItem } from '@/lib/types';
 
 export type FeatureParentKind = 'class' | 'subclass' | 'race' | 'background';
 
@@ -13,21 +13,24 @@ export type UnifiedFeatureData = {
 export type UnifiedSearchHit =
   | { kind: 'spell'; data: SrdSpell }
   | { kind: 'feat'; data: SrdFeat }
+  | { kind: 'item'; data: SrdItem }
   | { kind: 'feature'; data: UnifiedFeatureData };
 
-export type SearchKind = 'spell' | 'feat' | 'feature';
+export type SearchKind = 'spell' | 'feat' | 'item' | 'feature';
 
-export const ALL_SEARCH_KINDS: SearchKind[] = ['spell', 'feat', 'feature'];
+export const ALL_SEARCH_KINDS: SearchKind[] = ['spell', 'feat', 'item', 'feature'];
 
 export const KIND_LABEL: Record<SearchKind, string> = {
   spell: 'Spell',
   feat: 'Feat',
+  item: 'Item',
   feature: 'Feature',
 };
 
 export const KIND_LABEL_PLURAL: Record<SearchKind, string> = {
   spell: 'Spells',
   feat: 'Feats',
+  item: 'Items',
   feature: 'Features',
 };
 
