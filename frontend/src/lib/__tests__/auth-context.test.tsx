@@ -36,6 +36,7 @@ function TestConsumer() {
     <div>
       <span data-testid="authenticated">{String(auth.isAuthenticated)}</span>
       <span data-testid="isLoading">{String(auth.isLoading)}</span>
+      <span data-testid="likelyAuthenticated">{String(auth.likelyAuthenticated)}</span>
       <span data-testid="username">{auth.user?.username ?? 'none'}</span>
       <span data-testid="role">{auth.user?.role ?? 'none'}</span>
       <span data-testid="displayName">{auth.user?.displayName ?? 'none'}</span>
@@ -508,6 +509,33 @@ describe('AuthProvider', () => {
         expect(mockApiFetch).toHaveBeenCalledWith('/users/me');
       });
       expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+    });
+  });
+
+  describe('likelyAuthenticated (csrf-cookie hint for pre-hydration chrome, VEG-339)', () => {
+    afterEach(() => {
+      // jsdom persists document.cookie across tests — clear our hint cookie.
+      document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    });
+
+    it('is true on first render when the csrf_token cookie is present (before hydration settles)', () => {
+      document.cookie = 'csrf_token=abc123';
+      // A never-resolving /users/me keeps isLoading true — the pre-hydration window.
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('isLoading')).toHaveTextContent('true');
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+    });
+
+    it('is false when no csrf_token cookie is present (settled-anonymous stays clean)', () => {
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
     });
   });
 

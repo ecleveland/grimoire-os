@@ -7,6 +7,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
   ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
@@ -32,6 +33,16 @@ interface AuthContextType {
    * pre-hydration `user === null` and bounce a legitimately-authed user.
    */
   isLoading: boolean;
+  /**
+   * A client-readable proxy for "this browser has an active session", derived
+   * from the presence of the non-httpOnly `csrf_token` cookie (minted only on
+   * login/register/refresh). Available synchronously at hydration — before the
+   * `/users/me` round-trip settles `isAuthenticated` — so auth-gated *chrome*
+   * can reserve its layout space while `isLoading` instead of popping in and
+   * shifting content (VEG-339). It's a hint, not ground truth: trust
+   * `isAuthenticated` once `isLoading` is false.
+   */
+  likelyAuthenticated: boolean;
   user: UserInfo | null;
   isAdmin: boolean;
   isDm: boolean;
@@ -50,6 +61,30 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
+const CSRF_COOKIE_NAME = 'csrf_token';
+
+// `likelyAuthenticated` is read through useSyncExternalStore so the server
+// snapshot is a stable `false` — matching the anonymous-first HTML that the
+// static SRD pages prerender — while the client re-derives from the real cookie
+// after hydration, with no mismatch warning. The cookie only changes on
+// login/logout/refresh, all of which re-render this provider via `setUser`
+// (re-reading the snapshot), so `subscribe` only needs to cover the cross-tab
+// case (signed in/out in another tab) via the window `focus` event.
+function subscribeCsrfCookie(onChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  window.addEventListener('focus', onChange);
+  return () => window.removeEventListener('focus', onChange);
+}
+
+function getCsrfCookieSnapshot(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.cookie.split('; ').some(part => part.startsWith(`${CSRF_COOKIE_NAME}=`));
+}
+
+function getCsrfCookieServerSnapshot(): boolean {
+  return false;
+}
+
 function toUserInfo(profile: User & { id: string }): UserInfo {
   return {
     userId: profile.id,
@@ -64,6 +99,11 @@ function toUserInfo(profile: User & { id: string }): UserInfo {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const likelyAuthenticated = useSyncExternalStore(
+    subscribeCsrfCookie,
+    getCsrfCookieSnapshot,
+    getCsrfCookieServerSnapshot
+  );
   const router = useRouter();
 
   // Hydration: ask the backend whether the access cookie still represents a
@@ -168,6 +208,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       isAuthenticated: user !== null,
       isLoading: !hydrated,
+      likelyAuthenticated,
       user,
       isAdmin: user?.role === Role.ADMIN,
       isDm: user?.role === Role.DUNGEON_MASTER || user?.role === Role.ADMIN,
@@ -176,7 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshProfile,
     }),
-    [user, hydrated, login, register, logout, refreshProfile]
+    [user, hydrated, likelyAuthenticated, login, register, logout, refreshProfile]
   );
 
   // Render children immediately rather than blanking the tree until hydration

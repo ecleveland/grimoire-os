@@ -3,12 +3,21 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import Skeleton from './Skeleton';
 
 export default function Header() {
-  const { isAuthenticated, user, isAdmin, logout } = useAuth();
+  const { isAuthenticated, isLoading, likelyAuthenticated, user, isAdmin, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
 
-  if (!isAuthenticated) return null;
+  // Three states (VEG-339):
+  //  - authenticated (settled): the full nav.
+  //  - hydrating a probable session (csrf cookie present, /users/me not yet
+  //    settled): render the bar at its real h-16 height with a skeleton where
+  //    the username will land, so the nav doesn't pop in and shove content down.
+  //  - settled anonymous, or hydrating with no session cookie: render nothing,
+  //    keeping public pages free of the authed chrome.
+  const hydratingSession = isLoading && likelyAuthenticated;
+  if (!isAuthenticated && !hydratingSession) return null;
 
   return (
     <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
@@ -50,7 +59,11 @@ export default function Header() {
               href="/profile"
               className="text-sm text-gray-700 dark:text-gray-300 hover:text-indigo-600"
             >
-              {user?.displayName || user?.username}
+              {isAuthenticated ? (
+                user?.displayName || user?.username
+              ) : (
+                <Skeleton className="h-4 w-20 align-middle" />
+              )}
             </Link>
             <button onClick={logout} className="text-sm text-red-600 hover:text-red-700">
               Logout

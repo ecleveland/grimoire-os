@@ -2,14 +2,22 @@
 
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import Skeleton from '@/components/Skeleton';
 
 export default function HomePage() {
-  const { user } = useAuth();
+  const { user, isLoading, likelyAuthenticated } = useAuth();
 
   return (
     <div>
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">
-        Welcome, {user?.displayName || user?.username}
+        {/* Reserve the name while a probable session hydrates so the heading
+            doesn't reflow when it fills in (VEG-339). */}
+        Welcome,{' '}
+        {user ? (
+          user.displayName || user.username
+        ) : isLoading && likelyAuthenticated ? (
+          <Skeleton className="h-7 w-40 align-middle" />
+        ) : null}
       </h1>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
         <Link
