@@ -1,8 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import type { ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { CacheModule } from '@nestjs/cache-manager';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
+import { CsrfGuard } from '../auth/guards/csrf.guard';
 
 describe('SrdController', () => {
   let controller: SrdController;
@@ -322,6 +325,24 @@ describe('SrdController', () => {
       await controller.hydrateCards(body, {} as never);
 
       expect(printableCardsService.hydrate).toHaveBeenCalledWith(body.selections, undefined);
+    });
+
+    // The hydrate POST is read-only-despite-POST and auth-optional, so the
+    // global CsrfGuard would otherwise 403 anonymous /srd/print visitors who
+    // never get a csrf cookie minted (VEG-332). @SkipCsrf() exempts it. Assert
+    // the real guard's contract (a cookie-less POST to this handler is allowed)
+    // rather than just the decorator metadata — that's the behavior we rely on.
+    it('is exempt from the live CsrfGuard so an anonymous cookie-less POST is allowed', () => {
+      const guard = new CsrfGuard(new Reflector());
+      const context = {
+        switchToHttp: () => ({
+          getRequest: () => ({ method: 'POST', cookies: {}, headers: {} }),
+        }),
+        getHandler: () => SrdController.prototype.hydrateCards,
+        getClass: () => SrdController,
+      } as unknown as ExecutionContext;
+
+      expect(guard.canActivate(context)).toBe(true);
     });
   });
 });

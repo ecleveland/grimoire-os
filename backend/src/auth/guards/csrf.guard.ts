@@ -11,9 +11,15 @@ import { CSRF_COOKIE_NAME, CSRF_HEADER_NAME } from '../csrf-cookie.config';
 
 export const CSRF_SKIP_KEY = 'csrf:skip';
 
-// Decorate auth endpoints (login/register/refresh/logout) that mint or clear
-// the CSRF cookie themselves — they cannot require a token that has not been
-// issued yet.
+// Exempts a handler from CSRF protection. Two legitimate categories:
+//   1. Auth endpoints (login/register/refresh/logout) that mint or clear the
+//      CSRF cookie themselves — they cannot require a token not yet issued.
+//   2. Read-only, side-effect-free POSTs reachable by anonymous callers, who
+//      never get a csrf cookie minted (e.g. SrdController.hydrateCards / the
+//      /srd/print batch hydrate, VEG-332). CSRF guards state-changing requests;
+//      it buys nothing on a pure read.
+// Only apply to (2) when the handler genuinely performs no writes — confidentiality
+// of any authenticated response then rests on the CORS origin allow-list, not CSRF.
 export const SkipCsrf = (): MethodDecorator & ClassDecorator => SetMetadata(CSRF_SKIP_KEY, true);
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
