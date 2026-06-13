@@ -1,5 +1,6 @@
 import { buildNpcStatBlock, MonsterRef } from './generator/npc-pipeline';
 import { NpcStatBlock, StatBlockAction } from './generator/npc-generator.types';
+import { GLOBAL_CONTENT_SOURCES } from '../srd/content-access.service';
 
 // VEG-261: NPC stat blocks (Npc.statBlock JSONB) are frozen snapshots copied from a
 // monster at generation time, so re-seeding the corrected `monsters` table does NOT fix
@@ -48,7 +49,9 @@ interface NpcRow {
 }
 
 export interface BackfillPrisma {
-  monster: { findMany: () => Promise<MonsterRow[]> };
+  monster: {
+    findMany: (args: { where: { contentSource: { in: string[] } } }) => Promise<MonsterRow[]>;
+  };
   npc: {
     findMany: (args: { select: { id: true; statBlock: true } }) => Promise<NpcRow[]>;
     update: (args: { where: { id: string }; data: { statBlock: unknown } }) => Promise<unknown>;
@@ -97,8 +100,16 @@ function rowToMonsterRef(m: MonsterRow): MonsterRef {
 }
 
 export async function backfillNpcStatBlocks(prisma: BackfillPrisma): Promise<BackfillResult> {
+  // Pinned to the global catalog (VEG-335): the rebuild resolves baseMonster
+  // by NAME, and per-source unique indexes allow a homebrew monster to share
+  // an SRD name — unscoped, such a row could hijack the map and rewrite every
+  // matching NPC's stat block with one user's private homebrew stats.
   const byName = new Map<string, MonsterRef>(
-    (await prisma.monster.findMany()).map(m => [m.name, rowToMonsterRef(m)])
+    (
+      await prisma.monster.findMany({
+        where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
+      })
+    ).map(m => [m.name, rowToMonsterRef(m)])
   );
 
   const npcs = await prisma.npc.findMany({ select: { id: true, statBlock: true } });

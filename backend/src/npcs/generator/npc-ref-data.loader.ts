@@ -56,7 +56,13 @@ export class NpcRefDataLoader {
         where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
         select: { id: true, name: true, isMagic: true },
       }),
-      this.prisma.monster.findMany(),
+      // Pinned to the global catalog (VEG-335): the generator draws NPC base
+      // monsters from this pool (including a random any-monster fallback), so
+      // an owner-scoped homebrew row here would leak one user's private
+      // monster into every user's generated NPCs.
+      this.prisma.monster.findMany({
+        where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
+      }),
       this.prisma.gameRule.findMany({ where: { category: LOOT_GAME_RULE_CATEGORY } }),
     ]);
 

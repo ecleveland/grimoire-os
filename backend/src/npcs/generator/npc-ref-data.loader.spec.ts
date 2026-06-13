@@ -45,4 +45,14 @@ describe('NpcRefDataLoader', () => {
       })
     );
   });
+
+  it('pins the monster pool to the global tiers so user homebrew never enters NPC generation (VEG-335)', async () => {
+    await loader.load();
+
+    expect(prisma.monster.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { contentSource: { in: ['srd', 'shared'] } },
+      })
+    );
+  });
 });

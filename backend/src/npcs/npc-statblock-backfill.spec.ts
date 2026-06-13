@@ -54,6 +54,16 @@ function makePrisma(npcs: { id: string; statBlock: unknown }[]): BackfillPrisma 
 }
 
 describe('backfillNpcStatBlocks', () => {
+  it('pins the monster source to the global tiers so a same-named homebrew monster cannot hijack the rebuild (VEG-335)', async () => {
+    const prisma = makePrisma([]);
+
+    await backfillNpcStatBlocks(prisma);
+
+    expect(prisma.monster.findMany).toHaveBeenCalledWith({
+      where: { contentSource: { in: ['srd', 'shared'] } },
+    });
+  });
+
   it('rebuilds a corrupt NPC stat block from the clean monster, preserving NPC fields', async () => {
     // A snapshot frozen before the VEG-261 fix: leaked "Gear" tokens in conditionImmunities.
     const corruptStatBlock = {
