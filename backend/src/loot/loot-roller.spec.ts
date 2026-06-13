@@ -394,6 +394,47 @@ describe('LootRoller — duplicate prevention (VEG-321)', () => {
     expect(loot.items[0]).toMatchObject({ name: 'Dagger', quantity: 4 });
   });
 
+  it('accumulates a fixed qty across every repeat win, not just the first', () => {
+    // qty [2,2] removes roll variance: three wins must sum to 6, proving the
+    // merge adds each win's quantity rather than overwriting or keeping only
+    // the first draw.
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Dart', weight: 1, qty: [2, 2], allowDuplicate: true }] })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-fixed-range',
+      overrides: { ...noExtras, itemCountDie: '3d1' },
+    });
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Dart', quantity: 6 });
+  });
+
+  it('rolls an independent qty per repeat win when the entry has a quantity range', () => {
+    // qty [1,3] over four guaranteed wins: the merged quantity is the SUM of
+    // four independent range rolls, so it must fall in [4,12] and vary across
+    // seeds — a single roll reused for all wins could not do both.
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Dagger', weight: 1, qty: [1, 3], allowDuplicate: true }] })
+    );
+    const quantities = new Set<number>();
+    for (let i = 0; i < 20; i++) {
+      const loot = roller.rollLoot({
+        selectionKey: 'x',
+        crBucket: '0',
+        seed: `dedup-range-${i}`,
+        overrides: { ...noExtras, itemCountDie: '4d1' },
+      });
+      expect(loot.items).toHaveLength(1);
+      const { quantity } = loot.items[0];
+      expect(quantity).toBeGreaterThanOrEqual(4);
+      expect(quantity).toBeLessThanOrEqual(12);
+      quantities.add(quantity);
+    }
+    expect(quantities.size).toBeGreaterThan(1);
+  });
+
   it('mixes flagged and unflagged entries: unflagged capped at one row, flagged accumulates, no draw lost', () => {
     const roller = npcRoller(() =>
       template({

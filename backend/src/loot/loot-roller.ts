@@ -12,6 +12,7 @@ import {
   LootGameRules,
   LootItemRef,
   LootOverrides,
+  LootTemplateItem,
   LootTrinket,
 } from './loot.types';
 
@@ -79,15 +80,17 @@ export class LootRoller {
       // empties before `itemCount` draws, we stop early — a smaller drop is the
       // correct outcome, not an error.
       const pool = [...template.items];
-      const pickedByName = new Map<string, GeneratedLootItem>();
+      // Keyed by entry identity, not name: the only entries still in the pool
+      // after a first win are `allowDuplicate` ones, so a repeat hit here is
+      // always a sanctioned duplicate to merge. Identity keying also keeps two
+      // distinct entries that happen to share an `itemName` as separate rows.
+      const rowByEntry = new Map<LootTemplateItem, GeneratedLootItem>();
       for (let i = 0; i < itemCount; i++) {
         if (pool.length === 0) break;
         const pick = rng.weightedPick(pool.map(it => ({ value: it, weight: it.weight })));
         const qty = rng.intInRange(pick.qty[0], pick.qty[1]);
-        const existing = pickedByName.get(pick.itemName);
+        const existing = rowByEntry.get(pick);
         if (existing) {
-          // Only `allowDuplicate` entries remain in the pool after a first win,
-          // so any repeat here is a sanctioned duplicate: merge into its row.
           existing.quantity += qty;
           continue;
         }
@@ -99,7 +102,7 @@ export class LootRoller {
           source: this.data.templateItemSource ?? 'profession',
         };
         items.push(lootItem);
-        pickedByName.set(pick.itemName, lootItem);
+        rowByEntry.set(pick, lootItem);
         if (!pick.allowDuplicate) {
           pool.splice(pool.indexOf(pick), 1);
         }
