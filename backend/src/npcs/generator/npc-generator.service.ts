@@ -7,6 +7,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignAuthService } from '../../auth/campaign-auth.service';
 import { NpcPipeline } from './npc-pipeline';
 import { NpcRefDataLoader } from './npc-ref-data.loader';
+import { normalizeLootOverrides } from '../../loot/loot-overrides';
 import { SeededRng } from '../../common/helpers/seeded-rng';
 import {
   GeneratedNpc,
@@ -56,6 +57,13 @@ export class NpcGeneratorService {
     if (!existing) throw new NotFoundException(`Npc "${npcId}" not found`);
     await this.campaignAuth.assertCampaignOwner(existing.campaignId, userId);
 
+    // A locked loot field makes the reroll a no-op replay — accepting
+    // overrides anyway would mutate the saved odds through an endpoint that
+    // otherwise changes nothing.
+    if (lootOverrides !== undefined && existing.lockedFields.includes('loot')) {
+      throw new BadRequestException('Cannot change loot overrides while the loot field is locked');
+    }
+
     const params = existing.generationParams as unknown as NpcGenerationParams | null;
     if (!params) {
       throw new NotFoundException(
@@ -90,9 +98,13 @@ export class NpcGeneratorService {
     column: Prisma.JsonValue | null,
     requested: NpcLootOverrides | null | undefined
   ): NpcGenerationParams {
-    const saved = (column as NpcLootOverrides | null) ?? undefined;
-    const merged = requested === null ? undefined : { ...saved, ...(requested ?? {}) };
-    const effective = merged && Object.keys(merged).length > 0 ? merged : undefined;
+    const saved = column as NpcLootOverrides | null;
+    // An explicit null clears the saved odds; otherwise merge per-knob over the
+    // column. normalizeLootOverrides drops unknown keys (the PATCH column is
+    // loosely typed) and collapses an empty result to null, so the merge path
+    // and the persisted-column path agree on the override shape.
+    const merged = requested === null ? null : { ...saved, ...(requested ?? {}) };
+    const effective = normalizeLootOverrides(merged);
     const constraints = { ...params.constraints };
     if (effective) {
       constraints.lootOverrides = effective;

@@ -64,6 +64,7 @@ test.describe('NPC loot reroll', () => {
       coinageMultiplier: 2,
       trinketChance: 0.15,
       magicItemChance: 0.1,
+      itemCountDie: '1d4',
     });
   });
 

@@ -259,6 +259,32 @@ describe('NpcGeneratorService', () => {
       expect(data.generationParams.decisions.loot.effective.coinageMultiplier).toBe(1);
     });
 
+    it('rejects lootOverrides when the loot field is locked', async () => {
+      prisma.npc.findUnique.mockResolvedValue({
+        ...patchedNpc,
+        lockedFields: ['loot'],
+      });
+
+      await expect(service.reroll(NPC_ID, USER_ID, 'loot', { trinketChance: 1 })).rejects.toThrow(
+        BadRequestException
+      );
+      expect(prisma.npc.update).not.toHaveBeenCalled();
+    });
+
+    it('drops unknown keys from the saved column when merging into constraints', async () => {
+      prisma.npc.findUnique.mockResolvedValue({
+        ...patchedNpc,
+        // e.g. persisted via the loosely-typed PATCH path before validation tightened
+        lootOverrides: { coinageMultiplier: 2, junk: 99 },
+      });
+
+      await service.reroll(NPC_ID, USER_ID, 'loot');
+
+      const data = prisma.npc.update.mock.calls[0][0].data;
+      expect(data.generationParams.constraints.lootOverrides).toEqual({ coinageMultiplier: 2 });
+      expect(data.lootOverrides).toEqual({ coinageMultiplier: 2 });
+    });
+
     it('rejects lootOverrides on a non-loot reroll', async () => {
       prisma.npc.findUnique.mockResolvedValue(patchedNpc);
 

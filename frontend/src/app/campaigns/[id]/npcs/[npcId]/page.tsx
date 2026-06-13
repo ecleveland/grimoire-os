@@ -39,9 +39,14 @@ const GENEROSITY_PRESETS: Record<
   { overrides: NpcLootOverrides | null; label: string; hint: string }
 > = {
   stingy: {
-    overrides: { coinageMultiplier: 0.5, trinketChance: 0.02, magicItemChance: 0 },
+    overrides: {
+      coinageMultiplier: 0.5,
+      trinketChance: 0.02,
+      magicItemChance: 0,
+      itemCountDie: '1d2',
+    },
     label: 'Stingy',
-    hint: 'Next loot reroll: half coin, few trinkets, no magic items',
+    hint: 'Next loot reroll: 0.5× coin, 2% trinket / 0% magic chance, 1d2 items',
   },
   default: {
     overrides: null,
@@ -49,9 +54,14 @@ const GENEROSITY_PRESETS: Record<
     hint: 'Next loot reroll: reset saved loot odds to the base rules',
   },
   generous: {
-    overrides: { coinageMultiplier: 2, trinketChance: 0.15, magicItemChance: 0.1 },
+    overrides: {
+      coinageMultiplier: 2,
+      trinketChance: 0.15,
+      magicItemChance: 0.1,
+      itemCountDie: '1d4',
+    },
     label: 'Generous',
-    hint: 'Next loot reroll: double coin, more trinkets and magic items',
+    hint: 'Next loot reroll: 2× coin, 15% trinket / 10% magic chance, 1d4 items',
   },
 };
 
@@ -108,7 +118,9 @@ export default function NpcDetailPage() {
         body: JSON.stringify(body),
       });
       setNpc(updated);
-      if (field === 'loot') setGenerosity(null);
+      // Clear the preset on any reroll that consumed it (loot) or that could
+      // not (all/other) — leaving it pressed would imply it was applied.
+      if (field === 'loot' || field === 'all') setGenerosity(null);
       toast.success(field === 'all' ? 'NPC re-rolled' : `Re-rolled ${field}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to reroll');

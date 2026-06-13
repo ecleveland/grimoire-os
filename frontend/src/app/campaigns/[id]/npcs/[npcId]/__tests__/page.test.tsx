@@ -297,13 +297,25 @@ describe('NpcDetailPage', () => {
   });
 
   describe('generosity nudge', () => {
+    // Each preset fully defines the loot profile (incl. itemCountDie) so a
+    // stale saved die can't bleed through a per-knob merge on the backend.
     const STINGY_BODY = JSON.stringify({
       field: 'loot',
-      lootOverrides: { coinageMultiplier: 0.5, trinketChance: 0.02, magicItemChance: 0 },
+      lootOverrides: {
+        coinageMultiplier: 0.5,
+        trinketChance: 0.02,
+        magicItemChance: 0,
+        itemCountDie: '1d2',
+      },
     });
     const GENEROUS_BODY = JSON.stringify({
       field: 'loot',
-      lootOverrides: { coinageMultiplier: 2, trinketChance: 0.15, magicItemChance: 0.1 },
+      lootOverrides: {
+        coinageMultiplier: 2,
+        trinketChance: 0.15,
+        magicItemChance: 0.1,
+        itemCountDie: '1d4',
+      },
     });
     const DEFAULT_BODY = JSON.stringify({ field: 'loot', lootOverrides: null });
 
@@ -429,6 +441,25 @@ describe('NpcDetailPage', () => {
       expect(within(group).getByRole('button', { name: /stingy/i })).toBeDisabled();
       expect(within(group).getByRole('button', { name: /default/i })).toBeDisabled();
       expect(within(group).getByRole('button', { name: /generous/i })).toBeDisabled();
+    });
+
+    it('a Reroll All does not send the selected preset and clears the chip', async () => {
+      const user = userEvent.setup();
+      await renderWithNpc(makeNpc({ lockedFields: [] }));
+      mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'Borin' }));
+      const generous = screen.getByRole('button', { name: /generous/i });
+      await user.click(generous);
+      expect(generous).toHaveAttribute('aria-pressed', 'true');
+      // No locked fields → reroll-all fires immediately, no confirm dialog.
+      await user.click(screen.getByRole('button', { name: /reroll all/i }));
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+      // Reroll All never carries lootOverrides (the backend rejects them with
+      // field 'all'); the chip clears so the UI doesn't imply it was applied.
+      expect(mockApiFetch).toHaveBeenLastCalledWith(
+        '/npcs/npc-1/reroll',
+        expect.objectContaining({ body: JSON.stringify({ field: 'all' }) })
+      );
+      expect(generous).toHaveAttribute('aria-pressed', 'false');
     });
   });
 
