@@ -187,6 +187,12 @@ export class SrdController {
   // them to /login off a public page. CSRF protects state-changing requests;
   // this endpoint has no side effects, so skipping it is safe and honest.
   // (VEG-332)
+  //
+  // Invariant: this MUST stay read-only. If it ever performs a write, the CSRF
+  // exemption becomes a forgery vector — re-introduce protection then. With CSRF
+  // skipped, the confidentiality of an authenticated caller's homebrew in the
+  // response rests solely on the fixed-origin CORS allow-list (main.ts), since a
+  // forged cross-site POST would still carry the victim's cookie.
   @SkipCsrf()
   @ApiOperation({
     summary: 'Batch-hydrate a mixed print selection into printable card view-models',
