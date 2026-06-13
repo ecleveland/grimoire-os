@@ -1,7 +1,12 @@
-// Golden regression guard for VEG-297: snapshots of NpcPipeline.pickLoot output
-// recorded BEFORE the loot logic was extracted into the shared LootRoller.
-// These snapshots must never change as a side effect of the extraction — the
-// shared engine has to reproduce today's NPC loot byte-for-byte.
+// Golden regression guard for NpcPipeline.pickLoot output. Originally recorded
+// for VEG-297 to prove the extraction into the shared LootRoller reproduced NPC
+// loot byte-for-byte; the snapshots should only ever move on a *deliberate*
+// behavior change, never as an incidental side effect of a refactor.
+//
+// Updated for VEG-321: loot draws are now without-replacement by default, so
+// rolls that previously emitted several identical rows (e.g. five separate
+// Dagger lines) now collapse into one row with a summed quantity ("Dagger ×5").
+// The regenerated snapshots capture that merged shape.
 
 import { NpcPipeline } from '../npcs/generator/npc-pipeline';
 import { buildSeedRefData } from '../npcs/generator/npc-pipeline.fixture';

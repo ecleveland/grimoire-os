@@ -321,22 +321,30 @@ describe('NpcPipeline — pickLoot', () => {
     expect(loot.items.some(i => i.source === 'magic-item')).toBe(true);
   });
 
-  it('itemCountDie override changes the number of profession items rolled', () => {
+  it('a bigger itemCountDie yields more loot, but non-duplicate rows stay capped (VEG-321)', () => {
     let baseTotal = 0;
     let bumpedTotal = 0;
+    let maxRows = 0;
     const N = 200;
     const p = pipeline();
     for (let i = 0; i < N; i++) {
       baseTotal += p
         .pickLoot(newRng(`it-${i}`), baseConstraints(), { profession: 'mercenary' })
         .items.filter(it => it.source === 'profession').length;
-      bumpedTotal += p
+      const bumped = p
         .pickLoot(newRng(`it-${i}`), baseConstraints({ lootOverrides: { itemCountDie: '3d3' } }), {
           profession: 'mercenary',
         })
-        .items.filter(it => it.source === 'profession').length;
+        .items.filter(it => it.source === 'profession');
+      bumpedTotal += bumped.length;
+      maxRows = Math.max(maxRows, bumped.length);
     }
-    expect(bumpedTotal).toBeGreaterThan(baseTotal * 2);
+    // A bigger die still produces more rows on average...
+    expect(bumpedTotal).toBeGreaterThan(baseTotal);
+    // ...but mercenary templates carry no duplicate-allowed entries, so rows can
+    // never exceed the template's three distinct items no matter how high the
+    // die rolls — extra draws hit an exhausted pool and stop early.
+    expect(maxRows).toBeLessThanOrEqual(3);
   });
 
   it('reports effective values that reflect overrides', () => {

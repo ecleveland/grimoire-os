@@ -338,3 +338,83 @@ describe('LootRoller — overrides and effective values', () => {
     });
   });
 });
+
+describe('LootRoller — duplicate prevention (VEG-321)', () => {
+  const noExtras = { trinketChance: 0, magicItemChance: 0 };
+
+  it('caps a non-duplicate entry at one row and stops early once the pool empties', () => {
+    // One entry, five draws: with-replacement would push five Hammer rows.
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Hammer', weight: 1, qty: [1, 1] }] })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-early-stop',
+      overrides: { ...noExtras, itemCountDie: '5d1' },
+    });
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Hammer', quantity: 1 });
+  });
+
+  it('lets each distinct non-duplicate entry appear exactly once, then exhausts the pool', () => {
+    const roller = npcRoller(() =>
+      template({
+        items: [
+          { itemName: 'Longsword', weight: 1, qty: [1, 1] },
+          { itemName: 'Shortsword', weight: 1, qty: [1, 1] },
+        ],
+      })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-distinct',
+      overrides: { ...noExtras, itemCountDie: '10d1' },
+    });
+    // Two entries, ten draws: pool empties after both win, so exactly two rows,
+    // each quantity 1, and no name repeats.
+    expect(loot.items).toHaveLength(2);
+    expect(loot.items.map(i => i.quantity)).toEqual([1, 1]);
+    expect(new Set(loot.items.map(i => i.name)).size).toBe(2);
+  });
+
+  it('merges repeat wins of a duplicate-allowed entry into one row with summed quantity', () => {
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Dagger', weight: 1, qty: [1, 1], allowDuplicate: true }] })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-merge',
+      overrides: { ...noExtras, itemCountDie: '4d1' },
+    });
+    // Four draws all land on Dagger; one row, quantity 1+1+1+1.
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Dagger', quantity: 4 });
+  });
+
+  it('mixes flagged and unflagged entries: unflagged capped at one row, flagged accumulates, no draw lost', () => {
+    const roller = npcRoller(() =>
+      template({
+        items: [
+          { itemName: 'Hammer', weight: 1, qty: [1, 1] },
+          { itemName: 'Dagger', weight: 1, qty: [1, 1], allowDuplicate: true },
+        ],
+      })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-mixed',
+      overrides: { ...noExtras, itemCountDie: '12d1' },
+    });
+    // Each name appears in at most one row.
+    expect(new Set(loot.items.map(i => i.name)).size).toBe(loot.items.length);
+    // The unflagged Hammer can never stack.
+    const hammer = loot.items.find(i => i.name === 'Hammer');
+    if (hammer) expect(hammer.quantity).toBe(1);
+    // Dagger keeps the pool non-empty, so all twelve draws land somewhere.
+    expect(loot.items.reduce((sum, i) => sum + i.quantity, 0)).toBe(12);
+  });
+});

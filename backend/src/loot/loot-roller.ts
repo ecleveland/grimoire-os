@@ -72,16 +72,37 @@ export class LootRoller {
     const items: GeneratedLootItem[] = [];
     if (template && template.items.length > 0) {
       const itemCount = Math.max(0, rng.rollDie(effectiveDie));
+      // Draws are without-replacement by default (VEG-321): once a non-duplicate
+      // entry wins it leaves the pool, so a single roll never carries multiple
+      // copies of the same weapon. Entries flagged `allowDuplicate` stay in the
+      // pool and merge their repeat wins into one row's quantity. If the pool
+      // empties before `itemCount` draws, we stop early — a smaller drop is the
+      // correct outcome, not an error.
+      const pool = [...template.items];
+      const pickedByName = new Map<string, GeneratedLootItem>();
       for (let i = 0; i < itemCount; i++) {
-        const pick = rng.weightedPick(template.items.map(it => ({ value: it, weight: it.weight })));
+        if (pool.length === 0) break;
+        const pick = rng.weightedPick(pool.map(it => ({ value: it, weight: it.weight })));
         const qty = rng.intInRange(pick.qty[0], pick.qty[1]);
+        const existing = pickedByName.get(pick.itemName);
+        if (existing) {
+          // Only `allowDuplicate` entries remain in the pool after a first win,
+          // so any repeat here is a sanctioned duplicate: merge into its row.
+          existing.quantity += qty;
+          continue;
+        }
         const ref = this.data.itemsByName.get(pick.itemName);
-        items.push({
+        const lootItem: GeneratedLootItem = {
           itemId: ref?.id ?? null,
           name: pick.itemName,
           quantity: qty,
           source: this.data.templateItemSource ?? 'profession',
-        });
+        };
+        items.push(lootItem);
+        pickedByName.set(pick.itemName, lootItem);
+        if (!pick.allowDuplicate) {
+          pool.splice(pool.indexOf(pick), 1);
+        }
       }
     }
 
