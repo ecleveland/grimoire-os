@@ -3,6 +3,7 @@ import { BACKEND, csrfHeaders, registerAndLogin } from './helpers';
 
 // VEG-299: inline one-click loot reroll on the NPC detail view + bulk reroll
 // from the NPC list.
+// VEG-326: generosity presets shape the reroll and persist as saved loot odds.
 
 async function setupCampaignWithNpc(page: Page): Promise<{ campaignId: string; npcUrl: string }> {
   await registerAndLogin(page, 'loot-dm');
@@ -40,6 +41,30 @@ test.describe('NPC loot reroll', () => {
     // Success toast from the in-place update; no navigation to the edit page.
     await expect(page.getByText(/re-rolled loot/i)).toBeVisible({ timeout: 10_000 });
     await expect(page).toHaveURL(/\/npcs\/[a-f0-9-]+$/);
+  });
+
+  test('generosity preset shapes the reroll and persists as saved loot odds', async ({ page }) => {
+    const { npcUrl } = await setupCampaignWithNpc(page);
+    const npcId = npcUrl.split('/').pop()!;
+
+    // Pick Generous, then reroll: the preset rides along and persists.
+    const generous = page.getByRole('button', { name: /^generous$/i });
+    await generous.click();
+    await expect(generous).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: /^reroll loot$/i }).click();
+    await expect(page.getByText(/re-rolled loot/i)).toBeVisible({ timeout: 10_000 });
+    // Selection clears once the preset is saved server-side.
+    await expect(generous).toHaveAttribute('aria-pressed', 'false');
+
+    const headers = await csrfHeaders(page);
+    const res = await page.request.get(`${BACKEND}/api/npcs/${npcId}`, { headers });
+    expect(res.ok()).toBeTruthy();
+    const npc = await res.json();
+    expect(npc.lootOverrides).toMatchObject({
+      coinageMultiplier: 2,
+      trinketChance: 0.15,
+      magicItemChance: 0.1,
+    });
   });
 
   test('DM bulk-rerolls loot from the NPC list', async ({ page }) => {

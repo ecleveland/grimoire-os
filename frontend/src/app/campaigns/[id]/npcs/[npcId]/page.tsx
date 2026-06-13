@@ -10,7 +10,7 @@ import ConfirmDialog from '@/components/ConfirmDialog';
 import NpcFieldRow from '@/components/NpcFieldRow';
 import NpcRelationsPanel from '@/components/NpcRelationsPanel';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
-import type { Npc, NpcLootItem, NpcRerollField } from '@/lib/types';
+import type { Npc, NpcLootItem, NpcLootOverrides, NpcRerollField } from '@/lib/types';
 import { formatCoinage } from '@/lib/coinage';
 
 // Fields rendered as a labelled row with dice + lock controls. The stat block
@@ -27,6 +27,32 @@ const FIELD_LABELS: Record<RowField, string> = {
   appearance: 'Appearance',
   personality: 'Personality',
   loot: 'Loot',
+};
+
+// Quick generosity presets for the next loot reroll (VEG-326). The backend
+// merges these into the NPC's saved loot odds and persists them for future
+// rolls; `null` clears the saved odds back to the base game rules.
+type Generosity = 'stingy' | 'default' | 'generous';
+
+const GENEROSITY_PRESETS: Record<
+  Generosity,
+  { overrides: NpcLootOverrides | null; label: string; hint: string }
+> = {
+  stingy: {
+    overrides: { coinageMultiplier: 0.5, trinketChance: 0.02, magicItemChance: 0 },
+    label: 'Stingy',
+    hint: 'Next loot reroll: half coin, few trinkets, no magic items',
+  },
+  default: {
+    overrides: null,
+    label: 'Default',
+    hint: 'Next loot reroll: reset saved loot odds to the base rules',
+  },
+  generous: {
+    overrides: { coinageMultiplier: 2, trinketChance: 0.15, magicItemChance: 0.1 },
+    label: 'Generous',
+    hint: 'Next loot reroll: double coin, more trinkets and magic items',
+  },
 };
 
 function isLocked(npc: Npc, field: string): boolean {
@@ -54,6 +80,7 @@ export default function NpcDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmRerollAllOpen, setConfirmRerollAllOpen] = useState(false);
+  const [generosity, setGenerosity] = useState<Generosity | null>(null);
   const [confirmRemoveStatBlockOpen, setConfirmRemoveStatBlockOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -72,11 +99,16 @@ export default function NpcDetailPage() {
     if (!npc) return;
     setBusy(true);
     try {
+      const body: { field: NpcRerollField; lootOverrides?: NpcLootOverrides | null } = { field };
+      if (field === 'loot' && generosity) {
+        body.lootOverrides = GENEROSITY_PRESETS[generosity].overrides;
+      }
       const updated = await apiFetch<Npc>(`/npcs/${npcId}/reroll`, {
         method: 'POST',
-        body: JSON.stringify({ field }),
+        body: JSON.stringify(body),
       });
       setNpc(updated);
+      if (field === 'loot') setGenerosity(null);
       toast.success(field === 'all' ? 'NPC re-rolled' : `Re-rolled ${field}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to reroll');
@@ -269,16 +301,37 @@ export default function NpcDetailPage() {
         <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Loot</h2>
           {canRerollLoot && (
-            <button
-              type="button"
-              onClick={() => reroll('loot')}
-              disabled={busy || isLocked(npc, 'loot')}
-              aria-label="Reroll loot"
-              title={isLocked(npc, 'loot') ? 'Loot is locked' : 'Reroll loot'}
-              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              ↻ Reroll Loot
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <div role="group" aria-label="Loot generosity" className="flex items-center gap-1">
+                {(Object.keys(GENEROSITY_PRESETS) as Generosity[]).map(g => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGenerosity(prev => (prev === g ? null : g))}
+                    disabled={busy || isLocked(npc, 'loot')}
+                    aria-pressed={generosity === g}
+                    title={GENEROSITY_PRESETS[g].hint}
+                    className={`px-2 py-1 text-xs rounded-full border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                      generosity === g
+                        ? 'bg-indigo-600 border-indigo-600 text-white'
+                        : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    {GENEROSITY_PRESETS[g].label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => reroll('loot')}
+                disabled={busy || isLocked(npc, 'loot')}
+                aria-label="Reroll loot"
+                title={isLocked(npc, 'loot') ? 'Loot is locked' : 'Reroll loot'}
+                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                ↻ Reroll Loot
+              </button>
+            </div>
           )}
         </div>
         <div className="text-sm text-gray-700 dark:text-gray-300 mb-2">

@@ -1,7 +1,7 @@
 // NestJS service that orchestrates the NPC generator pipeline:
 // load reference data → run the pure pipeline → optionally persist.
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignAuthService } from '../../auth/campaign-auth.service';
@@ -12,6 +12,7 @@ import {
   GeneratedNpc,
   NpcGenerationConstraints,
   NpcGenerationParams,
+  NpcLootOverrides,
   RerollField,
 } from './npc-generator.types';
 
@@ -40,7 +41,15 @@ export class NpcGeneratorService {
    * honoring lockedFields, persists the new values to the NPC, and returns
    * the updated row.
    */
-  async reroll(npcId: string, userId: string, field: RerollField) {
+  async reroll(
+    npcId: string,
+    userId: string,
+    field: RerollField,
+    lootOverrides?: NpcLootOverrides | null
+  ) {
+    if (lootOverrides !== undefined && field !== 'loot') {
+      throw new BadRequestException('lootOverrides is only supported when field is "loot"');
+    }
     const existing = await this.prisma.npc.findUnique({
       where: { id: npcId },
     });
@@ -56,12 +65,41 @@ export class NpcGeneratorService {
 
     const refData = await this.refDataLoader.load();
     const pipeline = new NpcPipeline(refData);
-    const next = pipeline.reroll(field, params, existing.lockedFields);
+    const next = pipeline.reroll(
+      field,
+      this.withEffectiveLootOverrides(params, existing.lootOverrides, lootOverrides),
+      existing.lockedFields
+    );
 
     return this.prisma.npc.update({
       where: { id: npcId },
       data: this.toUpdatePayload(next),
     });
+  }
+
+  /**
+   * The PATCH-able `lootOverrides` column is the DM-facing source of truth for
+   * loot odds — generation-time `constraints.lootOverrides` goes stale the
+   * moment the edit page writes the column. Sync constraints from the column,
+   * then layer any per-request overrides on top (an explicit null clears the
+   * saved odds back to base rules). The pipeline persists the result back into
+   * both the column and generationParams, so future rerolls keep it.
+   */
+  private withEffectiveLootOverrides(
+    params: NpcGenerationParams,
+    column: Prisma.JsonValue | null,
+    requested: NpcLootOverrides | null | undefined
+  ): NpcGenerationParams {
+    const saved = (column as NpcLootOverrides | null) ?? undefined;
+    const merged = requested === null ? undefined : { ...saved, ...(requested ?? {}) };
+    const effective = merged && Object.keys(merged).length > 0 ? merged : undefined;
+    const constraints = { ...params.constraints };
+    if (effective) {
+      constraints.lootOverrides = effective;
+    } else {
+      delete constraints.lootOverrides;
+    }
+    return { ...params, constraints };
   }
 
   private toUpdatePayload(next: GeneratedNpc): Prisma.NpcUpdateInput {
