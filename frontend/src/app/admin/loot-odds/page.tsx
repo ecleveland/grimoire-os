@@ -44,7 +44,7 @@ function isValidDie(spec: string): boolean {
 type MagicForm = Record<string, string>;
 
 export default function AdminLootOddsPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,8 +54,11 @@ export default function AdminLootOddsPage() {
   const [coinageMultiplier, setCoinageMultiplier] = useState('');
 
   useEffect(() => {
+    // Hold the redirect until hydration settles, else a real admin gets bounced
+    // on the pre-hydration `isAdmin:false`.
+    if (authLoading) return;
     if (!isAdmin) router.replace('/');
-  }, [isAdmin, router]);
+  }, [authLoading, isAdmin, router]);
 
   const hydrate = (rules: LootGameRules) => {
     setTrinketPct(String(toPct(rules.trinketChance)));

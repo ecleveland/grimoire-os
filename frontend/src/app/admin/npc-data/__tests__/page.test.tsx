@@ -36,6 +36,13 @@ describe('AdminNpcDataPage', () => {
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
   });
 
+  it('does not redirect while auth is still hydrating', async () => {
+    mockUseAuth.mockReturnValue({ isAdmin: false, isLoading: true });
+    render(<AdminNpcDataPage />);
+    await Promise.resolve();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
   it('renders all six tabs', async () => {
     mockApiFetch.mockResolvedValue([]);
     render(<AdminNpcDataPage />);

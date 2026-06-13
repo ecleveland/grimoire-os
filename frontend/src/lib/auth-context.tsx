@@ -11,7 +11,6 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from './api';
-import { disconnectSocket } from './socket';
 import { Role } from './types';
 import type { User } from './types';
 
@@ -26,6 +25,13 @@ interface UserInfo {
 
 interface AuthContextType {
   isAuthenticated: boolean;
+  /**
+   * True until the initial session-hydration round-trip settles. Pages that
+   * gate on identity (redirect-on-not-admin, "sign in to…" prompts) must wait
+   * for this to be false before acting — otherwise they fire against the
+   * pre-hydration `user === null` and bounce a legitimately-authed user.
+   */
+  isLoading: boolean;
   user: UserInfo | null;
   isAdmin: boolean;
   isDm: boolean;
@@ -137,7 +143,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    disconnectSocket();
     try {
       await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
@@ -162,6 +167,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const contextValue = useMemo(
     () => ({
       isAuthenticated: user !== null,
+      isLoading: !hydrated,
       user,
       isAdmin: user?.role === Role.ADMIN,
       isDm: user?.role === Role.DUNGEON_MASTER || user?.role === Role.ADMIN,
@@ -170,13 +176,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refreshProfile,
     }),
-    [user, login, register, logout, refreshProfile]
+    [user, hydrated, login, register, logout, refreshProfile]
   );
 
-  if (!hydrated) {
-    return null;
-  }
-
+  // Render children immediately rather than blanking the tree until hydration
+  // resolves. Public pages (/srd, /login) paint without waiting on a network
+  // round-trip; identity-gated pages key off `isLoading` instead. (VEG-320)
   return <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>;
 }
 

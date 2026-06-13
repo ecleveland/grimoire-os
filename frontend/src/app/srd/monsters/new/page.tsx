@@ -12,7 +12,7 @@ import type { SrdMonster } from '@/lib/types';
 
 export default function NewMonsterPage() {
   const router = useRouter();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(payload: MonsterPayload) {
@@ -29,6 +29,12 @@ export default function NewMonsterPage() {
       toast.error(err instanceof Error ? err.message : 'Failed to create monster');
       setSubmitting(false);
     }
+  }
+
+  // Hold the sign-in prompt until hydration settles so an already-authed user
+  // doesn't flash "Sign in to…" before the form appears. (VEG-320)
+  if (authLoading) {
+    return null;
   }
 
   if (!isAuthenticated) {

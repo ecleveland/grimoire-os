@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ClassListPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -7,15 +7,12 @@ import type { SrdClass } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockApiFetch = vi.fn();
-
-vi.mock('@/lib/api', () => ({
-  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
-
-const mockToastError = vi.fn();
-vi.mock('sonner', () => ({
-  toast: { error: (...args: unknown[]) => mockToastError(...args) },
+// The page is now a server component fetching via the server-only helper; tests
+// mock that helper and render the resolved element tree.
+const mockFetchSrdList = vi.fn();
+vi.mock('@/lib/srd-server', () => ({
+  fetchSrdList: (...args: unknown[]) => mockFetchSrdList(...args),
+  SRD_REVALIDATE_SECONDS: 3600,
 }));
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -41,12 +38,8 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   };
 }
 
-function renderPage() {
-  return render(
-    <PrintTrayProvider>
-      <ClassListPage />
-    </PrintTrayProvider>
-  );
+async function renderPage() {
+  return render(<PrintTrayProvider>{await ClassListPage()}</PrintTrayProvider>);
 }
 
 /** The persisted tray contents, for asserting tray state after a toggle. */
@@ -59,42 +52,35 @@ function storedTray(): unknown {
 describe('ClassListPage', () => {
   beforeEach(() => {
     localStorage.clear();
-    mockApiFetch.mockReset();
-    mockToastError.mockReset();
-    mockApiFetch.mockResolvedValue([makeClass()]);
+    mockFetchSrdList.mockReset();
+    mockFetchSrdList.mockResolvedValue([makeClass()]);
   });
 
   describe('rendering', () => {
-    it('shows a loading state before the fetch resolves', () => {
-      mockApiFetch.mockReturnValue(new Promise(() => {}));
-      renderPage();
-      expect(screen.getByText('Loading classes...')).toBeInTheDocument();
-    });
-
-    it('renders classes from the API once loaded', async () => {
-      renderPage();
-      expect(await screen.findByText('Fighter')).toBeInTheDocument();
+    it('server-fetches /srd/classes and renders the list', async () => {
+      await renderPage();
+      expect(screen.getByText('Fighter')).toBeInTheDocument();
       expect(screen.getByText(/Hit Die: d10/)).toBeInTheDocument();
-      expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes');
+      expect(mockFetchSrdList).toHaveBeenCalledWith('/srd/classes');
     });
 
-    it('shows an error toast when the fetch rejects', async () => {
-      mockApiFetch.mockRejectedValue(new Error('boom'));
-      renderPage();
-      await waitFor(() =>
-        expect(mockToastError).toHaveBeenCalledWith('Failed to load classes', {
-          id: 'load-classes',
-        })
-      );
+    it('renders an error state when the fetch rejects', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetchSrdList.mockRejectedValue(new Error('boom'));
+
+      await renderPage();
+
+      expect(screen.getByText(/Failed to load classes/)).toBeInTheDocument();
+      errorSpy.mockRestore();
     });
   });
 
   describe('print set selection (feature chips)', () => {
     it('toggles an individual feature chip into the tray', async () => {
       const user = userEvent.setup();
-      renderPage();
+      await renderPage();
 
-      await user.click(await screen.findByRole('button', { name: /^Fighter/ }));
+      await user.click(screen.getByRole('button', { name: /^Fighter/ }));
       await user.click(screen.getByRole('button', { name: 'Add Action Surge to print set' }));
 
       expect(storedTray()).toEqual([{ type: 'feature', id: 'cf-action-surge' }]);
@@ -105,9 +91,9 @@ describe('ClassListPage', () => {
 
     it('removes the feature on second toggle', async () => {
       const user = userEvent.setup();
-      renderPage();
+      await renderPage();
 
-      await user.click(await screen.findByRole('button', { name: /^Fighter/ }));
+      await user.click(screen.getByRole('button', { name: /^Fighter/ }));
       await user.click(screen.getByRole('button', { name: 'Add Second Wind to print set' }));
       await user.click(screen.getByRole('button', { name: 'Remove Second Wind from print set' }));
 
@@ -115,13 +101,13 @@ describe('ClassListPage', () => {
     });
 
     it('renders a feature without an id as a plain non-interactive chip', async () => {
-      mockApiFetch.mockResolvedValue([
+      mockFetchSrdList.mockResolvedValue([
         makeClass({ features: [{ name: 'Legacy Feature', level: 1 }] }),
       ]);
       const user = userEvent.setup();
-      renderPage();
+      await renderPage();
 
-      await user.click(await screen.findByRole('button', { name: /^Fighter/ }));
+      await user.click(screen.getByRole('button', { name: /^Fighter/ }));
 
       expect(screen.getByText('Legacy Feature')).toBeInTheDocument();
       expect(
@@ -136,7 +122,7 @@ describe('ClassListPage', () => {
   describe('inert-chip invariant logging (VEG-274)', () => {
     it('logs a contract-violation error when a feature is rendered without an id', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      mockApiFetch.mockResolvedValue([
+      mockFetchSrdList.mockResolvedValue([
         makeClass({
           features: [
             { id: 'cf-second-wind', name: 'Second Wind', level: 1 },
@@ -144,23 +130,21 @@ describe('ClassListPage', () => {
           ],
         }),
       ]);
-      renderPage();
 
-      await screen.findByText('Fighter');
-      await waitFor(() =>
-        expect(errorSpy).toHaveBeenCalledWith(
-          expect.stringContaining('class features rendered without an id'),
-          ['Legacy Feature']
-        )
+      await renderPage();
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('class features rendered without an id'),
+        ['Legacy Feature']
       );
       errorSpy.mockRestore();
     });
 
     it('does not log the invariant when every feature carries an id', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      renderPage();
 
-      await screen.findByText('Fighter');
+      await renderPage();
+
       expect(errorSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('without an id'),
         expect.anything()

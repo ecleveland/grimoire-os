@@ -13,11 +13,6 @@ vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
-const mockDisconnectSocket = vi.fn();
-vi.mock('@/lib/socket', () => ({
-  disconnectSocket: () => mockDisconnectSocket(),
-}));
-
 const TEST_PROFILE = {
   id: 'user-1',
   username: 'testuser',
@@ -40,6 +35,7 @@ function TestConsumer() {
   return (
     <div>
       <span data-testid="authenticated">{String(auth.isAuthenticated)}</span>
+      <span data-testid="isLoading">{String(auth.isLoading)}</span>
       <span data-testid="username">{auth.user?.username ?? 'none'}</span>
       <span data-testid="role">{auth.user?.role ?? 'none'}</span>
       <span data-testid="displayName">{auth.user?.displayName ?? 'none'}</span>
@@ -76,12 +72,48 @@ describe('AuthProvider', () => {
     vi.stubGlobal('fetch', vi.fn());
     mockPush.mockReset();
     mockApiFetch.mockReset();
-    mockDisconnectSocket.mockReset();
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe('auth gate (renders children immediately)', () => {
+    it('renders children synchronously while hydration is still in flight', () => {
+      // A never-resolving hydration request models the window before /users/me
+      // answers. The old `if (!hydrated) return null` gate returned nothing here,
+      // blanking public pages; children must now render right away.
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('authenticated')).toBeInTheDocument();
+      expect(screen.getByTestId('isLoading')).toHaveTextContent('true');
+    });
+
+    it('flips isLoading to false once hydration settles unauthenticated (401)', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockFetchResponse(401));
+
+      renderWithProvider();
+      expect(screen.getByTestId('isLoading')).toHaveTextContent('true');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+    });
+
+    it('flips isLoading to false once hydration settles authenticated (200)', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockFetchResponse(200, TEST_PROFILE));
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+      });
+    });
   });
 
   describe('hydration', () => {
@@ -443,18 +475,6 @@ describe('AuthProvider', () => {
       await waitFor(() => {
         expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
         expect(mockPush).toHaveBeenCalledWith('/login');
-      });
-    });
-
-    it('tears down the WebSocket connection', async () => {
-      const user = userEvent.setup();
-      renderWithProvider();
-      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
-
-      await user.click(screen.getByText('Logout'));
-
-      await waitFor(() => {
-        expect(mockDisconnectSocket).toHaveBeenCalled();
       });
     });
   });

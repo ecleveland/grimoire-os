@@ -186,7 +186,7 @@ function isDeletable(tab: TabConfig, row: AnyRow): boolean {
 }
 
 export default function AdminNpcDataPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [activeSlug, setActiveSlug] = useState<TableSlug>('names');
   const tab = useMemo(() => TABS.find(t => t.slug === activeSlug) as TabConfig, [activeSlug]);
@@ -198,10 +198,13 @@ export default function AdminNpcDataPage() {
   const [pendingDelete, setPendingDelete] = useState<AnyRow | null>(null);
 
   useEffect(() => {
+    // Wait for hydration so a real admin isn't bounced on the pre-hydration
+    // `isAdmin:false`.
+    if (authLoading) return;
     if (!isAdmin) {
       router.replace('/');
     }
-  }, [isAdmin, router]);
+  }, [authLoading, isAdmin, router]);
 
   const loadSeq = useRef(0);
   const load = useCallback(async (slug: TableSlug) => {

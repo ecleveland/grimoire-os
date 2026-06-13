@@ -13,7 +13,7 @@ import type { User, PaginatedResponse } from '@/lib/types';
 const LIMIT = 20;
 
 export default function AdminUsersPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
   const [page, setPage] = useState(1);
@@ -23,6 +23,9 @@ export default function AdminUsersPage() {
   const [pendingDelete, setPendingDelete] = useState<{ id: string; username: string } | null>(null);
 
   useEffect(() => {
+    // Wait for session hydration before judging admin status — acting on the
+    // pre-hydration `isAdmin:false` would bounce a real admin on refresh.
+    if (authLoading) return;
     if (!isAdmin) {
       router.replace('/');
       return;
@@ -36,7 +39,7 @@ export default function AdminUsersPage() {
       })
       .catch(() => toast.error('Failed to load users'))
       .finally(() => setLoading(false));
-  }, [isAdmin, router, page]);
+  }, [authLoading, isAdmin, router, page]);
 
   const updateRole = async (userId: string, role: User['role']) => {
     try {

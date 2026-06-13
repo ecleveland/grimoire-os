@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BackgroundListPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -7,15 +7,12 @@ import type { SrdBackground } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-const mockApiFetch = vi.fn();
-
-vi.mock('@/lib/api', () => ({
-  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
-
-const mockToastError = vi.fn();
-vi.mock('sonner', () => ({
-  toast: { error: (...args: unknown[]) => mockToastError(...args) },
+// The page is now a server component fetching via the server-only helper; tests
+// mock that helper and render the resolved element tree.
+const mockFetchSrdList = vi.fn();
+vi.mock('@/lib/srd-server', () => ({
+  fetchSrdList: (...args: unknown[]) => mockFetchSrdList(...args),
+  SRD_REVALIDATE_SECONDS: 3600,
 }));
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -37,12 +34,8 @@ function makeBackground(over: Partial<SrdBackground> = {}): SrdBackground {
   };
 }
 
-function renderPage() {
-  return render(
-    <PrintTrayProvider>
-      <BackgroundListPage />
-    </PrintTrayProvider>
-  );
+async function renderPage() {
+  return render(<PrintTrayProvider>{await BackgroundListPage()}</PrintTrayProvider>);
 }
 
 /** The persisted tray contents, for asserting tray state after a toggle. */
@@ -55,42 +48,35 @@ function storedTray(): unknown {
 describe('BackgroundListPage', () => {
   beforeEach(() => {
     localStorage.clear();
-    mockApiFetch.mockReset();
-    mockToastError.mockReset();
-    mockApiFetch.mockResolvedValue([makeBackground()]);
+    mockFetchSrdList.mockReset();
+    mockFetchSrdList.mockResolvedValue([makeBackground()]);
   });
 
   describe('rendering', () => {
-    it('shows a loading state before the fetch resolves', () => {
-      mockApiFetch.mockReturnValue(new Promise(() => {}));
-      renderPage();
-      expect(screen.getByText('Loading backgrounds...')).toBeInTheDocument();
-    });
-
-    it('renders backgrounds from the API once loaded', async () => {
-      renderPage();
-      expect(await screen.findByText('Acolyte')).toBeInTheDocument();
+    it('server-fetches /srd/backgrounds and renders the list', async () => {
+      await renderPage();
+      expect(screen.getByText('Acolyte')).toBeInTheDocument();
       expect(screen.getByText(/Skills: Insight, Religion/)).toBeInTheDocument();
-      expect(mockApiFetch).toHaveBeenCalledWith('/srd/backgrounds');
+      expect(mockFetchSrdList).toHaveBeenCalledWith('/srd/backgrounds');
     });
 
-    it('shows an error toast when the fetch rejects', async () => {
-      mockApiFetch.mockRejectedValue(new Error('boom'));
-      renderPage();
-      await waitFor(() =>
-        expect(mockToastError).toHaveBeenCalledWith('Failed to load backgrounds', {
-          id: 'load-backgrounds',
-        })
-      );
+    it('renders an error state when the fetch rejects', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetchSrdList.mockRejectedValue(new Error('boom'));
+
+      await renderPage();
+
+      expect(screen.getByText(/Failed to load backgrounds/)).toBeInTheDocument();
+      errorSpy.mockRestore();
     });
   });
 
   describe('print set selection', () => {
     it('toggles a background into the tray from its list card', async () => {
       const user = userEvent.setup();
-      renderPage();
+      await renderPage();
 
-      await user.click(await screen.findByRole('button', { name: 'Add Acolyte to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Add Acolyte to print set' }));
 
       expect(storedTray()).toEqual([{ type: 'background', id: 'bg-1' }]);
       expect(screen.getByRole('button', { name: 'Remove Acolyte from print set' })).toHaveAttribute(
@@ -100,20 +86,21 @@ describe('BackgroundListPage', () => {
     });
 
     it('toggling the affordance does not expand the card', async () => {
-      mockApiFetch.mockResolvedValue([makeBackground({ description: 'Devoted servant.' })]);
+      mockFetchSrdList.mockResolvedValue([makeBackground({ description: 'Devoted servant.' })]);
       const user = userEvent.setup();
-      renderPage();
+      await renderPage();
 
-      await user.click(await screen.findByRole('button', { name: 'Add Acolyte to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Add Acolyte to print set' }));
 
-      expect(screen.queryByText('Devoted servant.')).not.toBeInTheDocument();
+      // The detail ships in the SSR HTML but stays hidden until the card is expanded.
+      expect(screen.getByText('Devoted servant.')).not.toBeVisible();
     });
 
     it('removes the background on second toggle', async () => {
       const user = userEvent.setup();
-      renderPage();
+      await renderPage();
 
-      await user.click(await screen.findByRole('button', { name: 'Add Acolyte to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Add Acolyte to print set' }));
       await user.click(screen.getByRole('button', { name: 'Remove Acolyte from print set' }));
 
       expect(storedTray()).toEqual([]);

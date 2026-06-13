@@ -42,6 +42,13 @@ describe('NewSpellPage', () => {
     mockUseAuth.mockReturnValue({ isAuthenticated: true, user: { userId: 'u1' } });
   });
 
+  it('renders nothing while auth is still hydrating (no sign-in flash)', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: false, user: null, isLoading: true });
+    const { container } = render(<NewSpellPage />);
+    expect(screen.queryByRole('link', { name: 'Sign in' })).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('prompts unauthenticated visitors to sign in instead of rendering the form', () => {
     mockUseAuth.mockReturnValue({ isAuthenticated: false, user: null });
 
