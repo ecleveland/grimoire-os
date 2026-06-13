@@ -3,6 +3,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
+import { CSRF_SKIP_KEY } from '../auth/guards/csrf.guard';
 
 describe('SrdController', () => {
   let controller: SrdController;
@@ -322,6 +323,14 @@ describe('SrdController', () => {
       await controller.hydrateCards(body, {} as never);
 
       expect(printableCardsService.hydrate).toHaveBeenCalledWith(body.selections, undefined);
+    });
+
+    // The hydrate POST is read-only-despite-POST and auth-optional, so the
+    // global CsrfGuard would otherwise 403 anonymous /srd/print visitors who
+    // never get a csrf cookie minted (VEG-332). @SkipCsrf() exempts it.
+    it('is decorated with @SkipCsrf() so anonymous visitors can hydrate without a csrf cookie', () => {
+      const skip = Reflect.getMetadata(CSRF_SKIP_KEY, SrdController.prototype.hydrateCards);
+      expect(skip).toBe(true);
     });
   });
 });
