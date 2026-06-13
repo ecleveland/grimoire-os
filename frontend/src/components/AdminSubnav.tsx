@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 const LINKS = [
   { href: '/admin/users', label: 'Users' },
   { href: '/admin/npc-data', label: 'NPC Data' },
+  { href: '/admin/loot-odds', label: 'Loot Odds' },
 ];
 
 export default function AdminSubnav() {
