@@ -193,9 +193,15 @@ export default function InitiativeTrackerPage() {
     if (!encounter) return null;
     beginWrite();
     try {
+      // Enforce the death-save invariant at the one write chokepoint (VEG-288):
+      // any combatant being persisted above 0 HP must not carry death saves, so
+      // no current or future HP path can leave a revived PC showing stale pips.
+      const normalized = updates.combatants
+        ? { ...updates, combatants: updates.combatants.map(clearDeathSavesIfRevived) }
+        : updates;
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
-        body: JSON.stringify({ ...updates, expectedVersion: encounter.version }),
+        body: JSON.stringify({ ...normalized, expectedVersion: encounter.version }),
       });
       setEncounter(updated);
       return updated;
@@ -292,8 +298,8 @@ export default function InitiativeTrackerPage() {
     const target = sorted[index];
     const clamped = Math.max(0, Math.min(Math.floor(parsed), target.maxHp));
     if (clamped === target.hp) return;
-    // Reviving above 0 clears any death saves (VEG-288).
-    sorted[index] = clearDeathSavesIfRevived({ ...target, hp: clamped });
+    // patchEncounter clears death saves when this lands above 0 HP (VEG-288).
+    sorted[index] = { ...target, hp: clamped };
     const updated = await patchEncounter({ combatants: sorted });
     // The PATCH persisted `sorted` verbatim, so `index` is also the
     // combatant's position in the updated combatants array.
@@ -389,8 +395,8 @@ export default function InitiativeTrackerPage() {
       setAmountDraft(null);
       return;
     }
-    // Healing a downed PC above 0 clears their death saves (VEG-288).
-    sorted[index] = clearDeathSavesIfRevived(next);
+    // patchEncounter clears death saves when this lands above 0 HP (VEG-288).
+    sorted[index] = next;
     const updated = await patchEncounter({ combatants: sorted });
     if (updated) {
       setAmountDraft(null);
@@ -943,7 +949,7 @@ export default function InitiativeTrackerPage() {
                             type="button"
                             aria-label={`Mark death save success for ${c.name}`}
                             onClick={() => markDeathSaveOnRow(c.name, i, 'success')}
-                            disabled={writePending || status !== 'dying'}
+                            disabled={writePending}
                             className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
                           >
                             + Success
@@ -952,7 +958,7 @@ export default function InitiativeTrackerPage() {
                             type="button"
                             aria-label={`Mark death save failure for ${c.name}`}
                             onClick={() => markDeathSaveOnRow(c.name, i, 'failure')}
-                            disabled={writePending || status !== 'dying'}
+                            disabled={writePending}
                             className={`${smallButtonBase} text-red-700 dark:text-red-400`}
                           >
                             + Failure

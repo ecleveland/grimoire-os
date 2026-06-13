@@ -3110,17 +3110,21 @@ describe('InitiativeTrackerPage', () => {
       expect(lastPatch().combatants[0].deathSaves).toEqual({ successes: 1, failures: 2 });
     });
 
-    it('shows Stable at three successes and locks the mark buttons', async () => {
+    it('shows Stable at three successes but keeps the mark buttons available', async () => {
+      // The DM keeps manual control: a stabilized PC that is hit again must
+      // still be markable (the counts stay capped at 3 by the pure helper).
       route(downedPc({ deathSaves: { successes: 3, failures: 0 } }));
+      const user = userEvent.setup();
       render(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('Stable')).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: 'Mark death save success for Hero' })
-      ).toBeDisabled();
-      expect(
         screen.getByRole('button', { name: 'Mark death save failure for Hero' })
-      ).toBeDisabled();
+      ).toBeEnabled();
+
+      await user.click(screen.getByRole('button', { name: 'Mark death save failure for Hero' }));
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      expect(lastPatch().combatants[0].deathSaves).toEqual({ successes: 3, failures: 1 });
     });
 
     it('shows Dead at three failures', async () => {
