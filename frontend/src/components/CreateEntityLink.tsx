@@ -6,8 +6,9 @@ import Skeleton from './Skeleton';
 
 /**
  * The "Create <entity>" affordance on SRD list pages — visible only to
- * authenticated users. While the session is still hydrating but a csrf cookie
- * suggests a logged-in browser (`isLoading && likelyAuthenticated`), it reserves
+ * authenticated users. While the session is still hydrating but the
+ * session_present cookie suggests a logged-in browser (`isLoading &&
+ * likelyAuthenticated`), it reserves
  * the button's footprint with a skeleton so the heading row doesn't reflow when
  * the real button appears. Settled-anonymous visitors see nothing, exactly as
  * before (VEG-339).

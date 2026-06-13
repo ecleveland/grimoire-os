@@ -11,8 +11,8 @@ export default function Header() {
 
   // Three states (VEG-339):
   //  - authenticated (settled): the full nav.
-  //  - hydrating a probable session (csrf cookie present, /users/me not yet
-  //    settled): render the bar at its real h-16 height with a skeleton where
+  //  - hydrating a probable session (session_present cookie set, /users/me not
+  //    yet settled): render the bar at its real h-16 height with a skeleton where
   //    the username will land, so the nav doesn't pop in and shove content down.
   //  - settled anonymous, or hydrating with no session cookie: render nothing,
   //    keeping public pages free of the authed chrome.
