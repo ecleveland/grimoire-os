@@ -338,3 +338,148 @@ describe('LootRoller — overrides and effective values', () => {
     });
   });
 });
+
+describe('LootRoller — duplicate prevention (VEG-321)', () => {
+  const noExtras = { trinketChance: 0, magicItemChance: 0 };
+
+  it('caps a non-duplicate entry at one row and stops early once the pool empties', () => {
+    // One entry, five draws: with-replacement would push five Hammer rows.
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Hammer', weight: 1, qty: [1, 1] }] })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-early-stop',
+      overrides: { ...noExtras, itemCountDie: '5d1' },
+    });
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Hammer', quantity: 1 });
+  });
+
+  it('lets each distinct non-duplicate entry appear exactly once, then exhausts the pool', () => {
+    const roller = npcRoller(() =>
+      template({
+        items: [
+          { itemName: 'Longsword', weight: 1, qty: [1, 1] },
+          { itemName: 'Shortsword', weight: 1, qty: [1, 1] },
+        ],
+      })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-distinct',
+      overrides: { ...noExtras, itemCountDie: '10d1' },
+    });
+    // Two entries, ten draws: pool empties after both win, so exactly two rows,
+    // each quantity 1, and no name repeats.
+    expect(loot.items).toHaveLength(2);
+    expect(loot.items.map(i => i.quantity)).toEqual([1, 1]);
+    expect(new Set(loot.items.map(i => i.name)).size).toBe(2);
+  });
+
+  it('merges repeat wins of a duplicate-allowed entry into one row with summed quantity', () => {
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Dagger', weight: 1, qty: [1, 1], allowDuplicate: true }] })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-merge',
+      overrides: { ...noExtras, itemCountDie: '4d1' },
+    });
+    // Four draws all land on Dagger; one row, quantity 1+1+1+1.
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Dagger', quantity: 4 });
+  });
+
+  it('accumulates a fixed qty across every repeat win, not just the first', () => {
+    // qty [2,2] removes roll variance: three wins must sum to 6, proving the
+    // merge adds each win's quantity rather than overwriting or keeping only
+    // the first draw.
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Dart', weight: 1, qty: [2, 2], allowDuplicate: true }] })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-fixed-range',
+      overrides: { ...noExtras, itemCountDie: '3d1' },
+    });
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Dart', quantity: 6 });
+  });
+
+  it('rolls an independent qty per repeat win when the entry has a quantity range', () => {
+    // qty [1,3] over four guaranteed wins: the merged quantity is the SUM of
+    // four independent range rolls, so it must fall in [4,12] and vary across
+    // seeds — a single roll reused for all wins could not do both.
+    const roller = npcRoller(() =>
+      template({ items: [{ itemName: 'Dagger', weight: 1, qty: [1, 3], allowDuplicate: true }] })
+    );
+    const quantities = new Set<number>();
+    for (let i = 0; i < 20; i++) {
+      const loot = roller.rollLoot({
+        selectionKey: 'x',
+        crBucket: '0',
+        seed: `dedup-range-${i}`,
+        overrides: { ...noExtras, itemCountDie: '4d1' },
+      });
+      expect(loot.items).toHaveLength(1);
+      const { quantity } = loot.items[0];
+      expect(quantity).toBeGreaterThanOrEqual(4);
+      expect(quantity).toBeLessThanOrEqual(12);
+      quantities.add(quantity);
+    }
+    expect(quantities.size).toBeGreaterThan(1);
+  });
+
+  it('does not throw when a zero-weight entry would strand the pool after the positive entries are drawn', () => {
+    // Admin templates allow per-entry weight 0 as long as one entry is
+    // positive. After the positive non-duplicate entry leaves the pool, a naive
+    // pool would still hold the zero-weight entry and weightedPick would throw.
+    const roller = npcRoller(() =>
+      template({
+        items: [
+          { itemName: 'Sword', weight: 5, qty: [1, 1] },
+          { itemName: 'Junk', weight: 0, qty: [1, 1] },
+        ],
+      })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-zero-weight',
+      overrides: { ...noExtras, itemCountDie: '5d1' },
+    });
+    // Only the positive-weight entry can be picked; the zero-weight one never
+    // appears, and the roll stops early instead of throwing.
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Sword', quantity: 1 });
+  });
+
+  it('mixes flagged and unflagged entries: unflagged capped at one row, flagged accumulates, no draw lost', () => {
+    const roller = npcRoller(() =>
+      template({
+        items: [
+          { itemName: 'Hammer', weight: 1, qty: [1, 1] },
+          { itemName: 'Dagger', weight: 1, qty: [1, 1], allowDuplicate: true },
+        ],
+      })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-mixed',
+      overrides: { ...noExtras, itemCountDie: '12d1' },
+    });
+    // Each name appears in at most one row.
+    expect(new Set(loot.items.map(i => i.name)).size).toBe(loot.items.length);
+    // The unflagged Hammer can never stack.
+    const hammer = loot.items.find(i => i.name === 'Hammer');
+    if (hammer) expect(hammer.quantity).toBe(1);
+    // Dagger keeps the pool non-empty, so all twelve draws land somewhere.
+    expect(loot.items.reduce((sum, i) => sum + i.quantity, 0)).toBe(12);
+  });
+});

@@ -32,6 +32,11 @@ export type NpcLootItemEntry = {
   itemName: string;
   weight: number;
   qty: [number, number];
+  // Allow this entry to be drawn more than once in a single roll (repeats merge
+  // into one row with a summed quantity). Defaults to false: non-flagged entries
+  // are removed from the pool after their first win, so a roll never produces
+  // duplicate copies. Set true only where multiples are believable (daggers).
+  allowDuplicate?: boolean;
 };
 
 export type NpcLootTemplate = {
@@ -48,7 +53,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     crBucket: '0',
     coinage: { gp: [0, 0], sp: [0, 1], cp: [2, 12] },
     items: [
-      { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true },
       { itemName: 'Quarterstaff', weight: 80, qty: [1, 1] },
       { itemName: 'Sling', weight: 30, qty: [1, 1] },
     ],
@@ -58,7 +63,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     crBucket: '0–1',
     coinage: { gp: [0, 1], sp: [1, 4], cp: [4, 16] },
     items: [
-      { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true },
       { itemName: 'Quarterstaff', weight: 80, qty: [1, 1] },
       { itemName: 'Club', weight: 50, qty: [1, 1] },
     ],
@@ -71,7 +76,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [0, 1], sp: [2, 6], cp: [4, 16] },
     items: [
       { itemName: 'Hammer', weight: 100, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true },
     ],
   },
   {
@@ -80,7 +85,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [0, 2], sp: [2, 8], cp: [4, 20] },
     items: [
       { itemName: 'Hammer', weight: 100, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true },
       { itemName: 'Warhammer', weight: 40, qty: [1, 1] },
     ],
   },
@@ -134,7 +139,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [1, 4], sp: [2, 12], cp: [2, 12] },
     items: [
       { itemName: 'Quarterstaff', weight: 60, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 40, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 40, qty: [1, 1], allowDuplicate: true },
     ],
   },
   {
@@ -143,7 +148,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [2, 12], sp: [2, 12], cp: [0, 10] },
     items: [
       { itemName: 'Quarterstaff', weight: 60, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 40, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 40, qty: [1, 1], allowDuplicate: true },
     ],
   },
   {
@@ -152,21 +157,21 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [5, 30], sp: [4, 24], cp: [0, 12] },
     items: [
       { itemName: 'Quarterstaff', weight: 60, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 40, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 40, qty: [1, 1], allowDuplicate: true },
     ],
   },
   {
     profession: 'scholar',
     crBucket: '0',
     coinage: { gp: [0, 4], sp: [2, 12], cp: [2, 12] },
-    items: [{ itemName: 'Dagger', weight: 50, qty: [1, 1] }],
+    items: [{ itemName: 'Dagger', weight: 50, qty: [1, 1], allowDuplicate: true }],
   },
   {
     profession: 'scholar',
     crBucket: '0–1',
     coinage: { gp: [1, 8], sp: [2, 16], cp: [2, 16] },
     items: [
-      { itemName: 'Dagger', weight: 50, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 50, qty: [1, 1], allowDuplicate: true },
       { itemName: 'Quarterstaff', weight: 50, qty: [1, 1] },
     ],
   },
@@ -176,14 +181,14 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     profession: 'merchant',
     crBucket: '0',
     coinage: { gp: [1, 6], sp: [3, 12], cp: [0, 6] },
-    items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1] }],
+    items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true }],
   },
   {
     profession: 'merchant',
     crBucket: '0–1',
     coinage: { gp: [2, 12], sp: [5, 20], cp: [0, 10] },
     items: [
-      { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true },
       { itemName: 'Shortsword', weight: 30, qty: [1, 1] },
     ],
   },
@@ -204,7 +209,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [10, 50], sp: [0, 20], cp: [0, 0] },
     items: [
       { itemName: 'Rapier', weight: 70, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 40, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 40, qty: [1, 1], allowDuplicate: true },
     ],
   },
   {
@@ -318,7 +323,7 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     coinage: { gp: [2, 12], sp: [4, 16], cp: [2, 12] },
     items: [
       { itemName: 'Club', weight: 60, qty: [1, 1] },
-      { itemName: 'Dagger', weight: 40, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 40, qty: [1, 1], allowDuplicate: true },
     ],
   },
 
@@ -327,14 +332,14 @@ export const npcLootTemplates: NpcLootTemplate[] = [
     profession: NPC_LOOT_GENERIC_PROFESSION,
     crBucket: '0',
     coinage: { gp: [0, 1], sp: [1, 6], cp: [2, 12] },
-    items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1] }],
+    items: [{ itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true }],
   },
   {
     profession: NPC_LOOT_GENERIC_PROFESSION,
     crBucket: '0–1',
     coinage: { gp: [0, 4], sp: [2, 12], cp: [2, 12] },
     items: [
-      { itemName: 'Dagger', weight: 60, qty: [1, 1] },
+      { itemName: 'Dagger', weight: 60, qty: [1, 1], allowDuplicate: true },
       { itemName: 'Shortsword', weight: 40, qty: [1, 1] },
     ],
   },

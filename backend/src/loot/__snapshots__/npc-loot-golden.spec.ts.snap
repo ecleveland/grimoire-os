@@ -17,31 +17,7 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) hon
     {
       "itemId": "item-0",
       "name": "Dagger",
-      "quantity": 1,
-      "source": "profession",
-    },
-    {
-      "itemId": "item-0",
-      "name": "Dagger",
-      "quantity": 1,
-      "source": "profession",
-    },
-    {
-      "itemId": "item-0",
-      "name": "Dagger",
-      "quantity": 1,
-      "source": "profession",
-    },
-    {
-      "itemId": "item-0",
-      "name": "Dagger",
-      "quantity": 1,
-      "source": "profession",
-    },
-    {
-      "itemId": "item-0",
-      "name": "Dagger",
-      "quantity": 1,
+      "quantity": 5,
       "source": "profession",
     },
     {
@@ -81,19 +57,7 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) mis
     {
       "itemId": "item-0",
       "name": "Dagger",
-      "quantity": 1,
-      "source": "profession",
-    },
-    {
-      "itemId": "item-0",
-      "name": "Dagger",
-      "quantity": 1,
-      "source": "profession",
-    },
-    {
-      "itemId": "item-0",
-      "name": "Dagger",
-      "quantity": 1,
+      "quantity": 3,
       "source": "profession",
     },
   ],
@@ -172,13 +136,7 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
       {
         "itemId": "item-0",
         "name": "Dagger",
-        "quantity": 1,
-        "source": "profession",
-      },
-      {
-        "itemId": "item-4",
-        "name": "Hammer",
-        "quantity": 1,
+        "quantity": 2,
         "source": "profession",
       },
       {
@@ -243,8 +201,8 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
         "source": "profession",
       },
       {
-        "itemId": "item-7",
-        "name": "Shortsword",
+        "itemId": "item-8",
+        "name": "Longsword",
         "quantity": 1,
         "source": "profession",
       },
@@ -310,15 +268,9 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
         "source": "profession",
       },
       {
-        "itemId": "item-14",
-        "name": "Rapier",
-        "quantity": 1,
-        "source": "profession",
-      },
-      {
-        "itemId": "item-14",
-        "name": "Rapier",
-        "quantity": 1,
+        "itemId": "item-0",
+        "name": "Dagger",
+        "quantity": 2,
         "source": "profession",
       },
     ],
@@ -368,13 +320,7 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
       {
         "itemId": "item-0",
         "name": "Dagger",
-        "quantity": 1,
-        "source": "profession",
-      },
-      {
-        "itemId": "item-0",
-        "name": "Dagger",
-        "quantity": 1,
+        "quantity": 2,
         "source": "profession",
       },
     ],
@@ -408,8 +354,8 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
         "source": "profession",
       },
       {
-        "itemId": "item-1",
-        "name": "Quarterstaff",
+        "itemId": "item-0",
+        "name": "Dagger",
         "quantity": 1,
         "source": "profession",
       },
@@ -445,8 +391,8 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
         "source": "profession",
       },
       {
-        "itemId": "item-1",
-        "name": "Quarterstaff",
+        "itemId": "item-0",
+        "name": "Dagger",
         "quantity": 1,
         "source": "profession",
       },
@@ -530,18 +476,6 @@ exports[`NpcPipeline.pickLoot — golden snapshots (pre-extraction behavior) pro
       "trinketChance": 0.05,
     },
     "items": [
-      {
-        "itemId": "item-1",
-        "name": "Quarterstaff",
-        "quantity": 1,
-        "source": "profession",
-      },
-      {
-        "itemId": "item-1",
-        "name": "Quarterstaff",
-        "quantity": 1,
-        "source": "profession",
-      },
       {
         "itemId": "item-1",
         "name": "Quarterstaff",

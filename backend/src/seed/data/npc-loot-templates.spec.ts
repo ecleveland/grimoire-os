@@ -64,4 +64,18 @@ describe('NPC loot templates seed data', () => {
   it('exports __generic__ as the documented sentinel', () => {
     expect(NPC_LOOT_GENERIC_PROFESSION).toBe('__generic__');
   });
+
+  it('flags daggers as duplicate-allowed and nothing else (VEG-321)', () => {
+    const entries = npcLootTemplates.flatMap(t => t.items);
+    const daggers = entries.filter(i => i.itemName === 'Dagger');
+    // Sanity: the seed data actually contains daggers to flag.
+    expect(daggers.length).toBeGreaterThan(0);
+    for (const item of entries) {
+      if (item.itemName === 'Dagger') {
+        expect(item.allowDuplicate).toBe(true);
+      } else {
+        expect(item.allowDuplicate).toBeUndefined();
+      }
+    }
+  });
 });

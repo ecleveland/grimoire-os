@@ -74,6 +74,14 @@ export interface LootTemplateItemEntry {
   itemName: string;
   weight: number;
   qty: LootRange;
+  /**
+   * When `true`, the loot roller may draw this entry more than once in a single
+   * roll, merging the repeats into one row with a summed quantity (e.g. "Dagger
+   * ×3"). When `false`/omitted (the default), the entry is removed from the pool
+   * after its first win so a roll never carries duplicate copies of it. Set on
+   * entries where multiples are believable — daggers, throwing weapons.
+   */
+  allowDuplicate?: boolean;
 }
 
 export interface EncounterLootTotal {
