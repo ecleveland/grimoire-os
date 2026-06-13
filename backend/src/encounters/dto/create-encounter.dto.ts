@@ -6,15 +6,22 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  Max,
   Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { LootItemSource } from '@grimoire-os/shared';
+import { CONDITIONS } from '@grimoire-os/shared';
+import type { Condition, LootItemSource } from '@grimoire-os/shared';
 
 const LOOT_ITEM_SOURCES: LootItemSource[] = ['profession', 'trinket', 'magic-item', 'monster'];
+
+// Spread to a mutable array: class-validator's @IsIn types its allowed-values
+// param as readonly unknown[], but the `as const` CONDITIONS is a narrower
+// readonly tuple — copying keeps the shared const the single source of truth.
+const CONDITION_VALUES: Condition[] = [...CONDITIONS];
 
 // The loot shapes below mirror shared CombatantLoot (VEG-300). They must stay
 // whitelisted here: the global ValidationPipe runs with forbidNonWhitelisted,
@@ -81,6 +88,16 @@ class CombatantLootDto {
   rolledAt?: string;
 }
 
+// Concentration tracking (VEG-287). Like the loot shapes, it must stay
+// whitelisted here: the tracker echoes whole combatants back on every PATCH,
+// so an undeclared property the server persisted would 400 those writes.
+class CombatantConcentrationDto {
+  @ApiPropertyOptional({ description: 'The spell being concentrated on, if named.' })
+  @IsOptional()
+  @IsString()
+  spell?: string;
+}
+
 class CombatantDto {
   @ApiProperty({ example: 'Goblin' })
   @IsString()
@@ -140,6 +157,31 @@ class CombatantDto {
   @ValidateNested()
   @Type(() => CombatantLootDto)
   loot?: CombatantLootDto;
+
+  @ApiPropertyOptional({
+    description: 'Active SRD conditions (VEG-287).',
+    enum: CONDITION_VALUES,
+    isArray: true,
+  })
+  @IsOptional()
+  @IsArray()
+  @IsIn(CONDITION_VALUES, { each: true })
+  conditions?: Condition[];
+
+  @ApiPropertyOptional({
+    description: 'Concentration tracking (VEG-287); absent means not concentrating.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CombatantConcentrationDto)
+  concentration?: CombatantConcentrationDto;
+
+  @ApiPropertyOptional({ description: 'Exhaustion level 1–6 (VEG-287); absent means none.' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(6)
+  exhaustion?: number;
 }
 
 export class CreateEncounterDto {

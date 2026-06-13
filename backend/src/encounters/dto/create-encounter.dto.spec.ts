@@ -120,3 +120,54 @@ describe('CombatantDto tempHp (global validator strictness)', () => {
     expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).not.toEqual([]);
   });
 });
+
+// Same write-contract concern (VEG-287): conditions, concentration, and
+// exhaustion are echoed back on every PATCH, so they must be whitelisted on
+// CombatantDto or the first status edit bricks all subsequent writes.
+describe('CombatantDto conditions / concentration / exhaustion (global validator strictness)', () => {
+  const accepts = (over: Record<string, unknown>) => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), ...over }],
+    });
+    return flatten(validateSync(instance, VALIDATOR_STRICTNESS));
+  };
+
+  it('accepts valid conditions, concentration, and exhaustion together', () => {
+    expect(
+      accepts({
+        conditions: ['Poisoned', 'Prone'],
+        concentration: { spell: 'Bless' },
+        exhaustion: 3,
+      })
+    ).toEqual([]);
+  });
+
+  it('accepts these fields on CreateEncounterDto too', () => {
+    const instance = plainToInstance(CreateEncounterDto, {
+      campaignId: 'camp-1',
+      name: 'Ambush',
+      combatants: [
+        { ...lootCombatant(), conditions: ['Stunned'], concentration: {}, exhaustion: 1 },
+      ],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
+  });
+
+  it('accepts an empty conditions array and a spell-less concentration', () => {
+    expect(accepts({ conditions: [], concentration: {} })).toEqual([]);
+  });
+
+  it('rejects an unknown condition name', () => {
+    expect(accepts({ conditions: ['Hasted'] })).not.toEqual([]);
+  });
+
+  it('rejects exhaustion outside 1–6', () => {
+    expect(accepts({ exhaustion: 0 })).not.toEqual([]);
+    expect(accepts({ exhaustion: 7 })).not.toEqual([]);
+    expect(accepts({ exhaustion: 2.5 })).not.toEqual([]);
+  });
+
+  it('rejects non-whitelisted properties inside concentration', () => {
+    expect(accepts({ concentration: { spell: 'Bless', rounds: 10 } })).not.toEqual([]);
+  });
+});

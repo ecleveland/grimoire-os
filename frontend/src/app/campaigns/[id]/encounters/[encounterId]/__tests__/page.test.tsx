@@ -2905,4 +2905,130 @@ describe('InitiativeTrackerPage', () => {
       expect(mockToastSuccess).not.toHaveBeenCalled();
     });
   });
+
+  // VEG-287: per-combatant conditions, concentration, and exhaustion. A
+  // single-combatant encounter keeps row resolution unambiguous.
+  describe('conditions / concentration / exhaustion (VEG-287)', () => {
+    const soloEncounter = (over: Partial<Combatant> = {}) =>
+      makeEncounter({
+        combatants: [makeCombatant({ name: 'Goblin', ...over })],
+        version: 4,
+      });
+
+    // GET returns the encounter; PATCH echoes the new combatants back.
+    function route(encounter: Encounter) {
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          const body = JSON.parse(init.body ?? '{}');
+          return Promise.resolve({ ...encounter, ...body, version: encounter.version + 1 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+        return Promise.reject(new Error(`unexpected path ${path}`));
+      });
+    }
+
+    const lastPatch = () => {
+      const calls = mockApiFetch.mock.calls.filter(
+        c => (c[1] as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      const last = calls[calls.length - 1];
+      return last ? JSON.parse((last[1] as { body: string }).body) : undefined;
+    };
+
+    it('adds a condition and persists it with expectedVersion', async () => {
+      route(soloEncounter());
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.selectOptions(screen.getByLabelText('Add condition to Goblin'), 'Poisoned');
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      const body = lastPatch();
+      expect(body.combatants[0].conditions).toEqual(['Poisoned']);
+      expect(body.expectedVersion).toBe(4);
+    });
+
+    it('removes a condition via the chip ×, keeping the others', async () => {
+      route(soloEncounter({ conditions: ['Poisoned', 'Prone'] }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Remove Poisoned from Goblin' }));
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      expect(lastPatch().combatants[0].conditions).toEqual(['Prone']);
+    });
+
+    it('drops the conditions key when the last condition is removed', async () => {
+      route(soloEncounter({ conditions: ['Stunned'] }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Remove Stunned from Goblin' }));
+
+      await waitFor(() => expect(lastPatch()).toBeDefined());
+      expect(lastPatch().combatants[0]).not.toHaveProperty('conditions');
+    });
+
+    it('toggles concentration on, then names the spell', async () => {
+      route(soloEncounter());
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: 'Toggle concentration for Goblin' }));
+      await waitFor(() => expect(lastPatch()?.combatants[0].concentration).toEqual({}));
+
+      // The spell input appears once concentrating; commit on blur.
+      const spell = await screen.findByLabelText('Concentration spell for Goblin');
+      fireEvent.change(spell, { target: { value: 'Bless' } });
+      fireEvent.blur(spell);
+
+      await waitFor(() =>
+        expect(lastPatch().combatants[0].concentration).toEqual({ spell: 'Bless' })
+      );
+    });
+
+    it('renders a concentration chip with the spell name', async () => {
+      route(soloEncounter({ concentration: { spell: 'Bless' } }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText('Concentrating: Bless')).toBeInTheDocument();
+    });
+
+    it('sets an exhaustion level, then clears it back to none', async () => {
+      route(soloEncounter({ exhaustion: 2 }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      // Scope to the chip span — the <option> labels collide with the chip text.
+      expect(screen.getByText('Exhaustion 2', { selector: 'span' })).toBeInTheDocument();
+
+      await user.selectOptions(screen.getByLabelText('Exhaustion for Goblin'), 'Exhaustion 5');
+      await waitFor(() => expect(lastPatch()?.combatants[0].exhaustion).toBe(5));
+
+      await user.selectOptions(screen.getByLabelText('Exhaustion for Goblin'), 'Exhaustion: none');
+      await waitFor(() => expect(lastPatch().combatants[0]).not.toHaveProperty('exhaustion'));
+    });
+
+    it('shows condition chips read-only to non-controllers (no edit controls)', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      route(soloEncounter({ conditions: ['Poisoned'], concentration: { spell: 'Bless' } }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      expect(screen.getByText('Poisoned')).toBeInTheDocument();
+      expect(screen.getByText('Concentrating: Bless')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Add condition to Goblin')).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: 'Remove Poisoned from Goblin' })
+      ).not.toBeInTheDocument();
+    });
+  });
 });
