@@ -54,7 +54,9 @@ export default function NoteDetailPage() {
           title,
           content,
           visibility,
-          sessionNumber: sessionNumber ? Number(sessionNumber) : undefined,
+          // null (not undefined) so clearing the field persists — JSON.stringify
+          // drops undefined keys and the backend would keep the old value.
+          sessionNumber: sessionNumber ? Number(sessionNumber) : null,
           tags: tags
             .split(',')
             .map(t => t.trim())

@@ -24,8 +24,10 @@ export default function ProfilePage() {
       await apiFetch('/users/me', {
         method: 'PATCH',
         body: JSON.stringify({
-          displayName: displayName || undefined,
-          email: email || undefined,
+          displayName,
+          // null (not undefined) so clearing the field persists — JSON.stringify
+          // drops undefined keys and the backend would keep the old value.
+          email: email || null,
         }),
       });
       await refreshProfile();
@@ -84,6 +86,7 @@ export default function ProfilePage() {
         <FormField
           label="Display Name"
           type="text"
+          required
           value={displayName}
           onChange={e => setDisplayName(e.target.value)}
         />
