@@ -46,14 +46,19 @@ test.describe('Refresh token flow', () => {
     // a logged-in state.
     await page.goto('/');
 
-    // The Logout button only appears once hydration has completed and the
-    // user has been re-authenticated via the refresh flow.
-    await expect(page.getByRole('button', { name: 'Logout' })).toBeVisible({ timeout: 10_000 });
+    // Assert the *settled* logged-in state: the real display name resolves only
+    // after /auth/refresh succeeds and the retried /users/me returns 200. (The
+    // Logout button is no longer a proxy for "refresh completed" — it now appears
+    // during hydration from the session_present chrome hint, VEG-339.)
+    await expect(page.getByRole('link', { name: 'Refresh User' })).toBeVisible({ timeout: 10_000 });
 
-    // After hydration, a fresh access_token cookie must have been re-issued.
-    const after = await page.context().cookies();
-    const newAccess = after.find(c => c.name === 'access_token');
-    expect(newAccess, 'access_token cookie not re-issued after refresh').toBeDefined();
+    // A fresh access_token cookie must have been re-issued by the refresh. Poll
+    // rather than reading once — the cookie lands when /auth/refresh resolves.
+    await expect
+      .poll(async () => (await page.context().cookies()).some(c => c.name === 'access_token'), {
+        timeout: 10_000,
+      })
+      .toBe(true);
   });
 
   test('refresh endpoint rotates the refresh token (old one is invalid after use)', async ({

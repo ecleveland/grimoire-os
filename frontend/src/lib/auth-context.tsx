@@ -35,12 +35,13 @@ interface AuthContextType {
   isLoading: boolean;
   /**
    * A client-readable proxy for "this browser has an active session", derived
-   * from the presence of the non-httpOnly `csrf_token` cookie (minted only on
-   * login/register/refresh). Available synchronously at hydration — before the
-   * `/users/me` round-trip settles `isAuthenticated` — so auth-gated *chrome*
-   * can reserve its layout space while `isLoading` instead of popping in and
-   * shifting content (VEG-339). It's a hint, not ground truth: trust
-   * `isAuthenticated` once `isLoading` is false.
+   * from the presence of the non-httpOnly `session_present` cookie (set on
+   * login/register/refresh, cleared on logout, lifetime = the 7-day refresh
+   * window). Available synchronously at hydration — before the `/users/me`
+   * round-trip settles `isAuthenticated` — so auth-gated *chrome* can reserve
+   * its layout space while `isLoading` instead of popping in and shifting
+   * content (VEG-339). It's a hint, not ground truth: trust `isAuthenticated`
+   * once `isLoading` is false.
    */
   likelyAuthenticated: boolean;
   user: UserInfo | null;
@@ -61,7 +62,8 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
-const CSRF_COOKIE_NAME = 'csrf_token';
+// Must match SESSION_PRESENT_COOKIE_NAME in backend/src/auth/auth-cookie.config.ts.
+const SESSION_PRESENT_COOKIE_NAME = 'session_present';
 
 // `likelyAuthenticated` is read through useSyncExternalStore so the server
 // snapshot is a stable `false` — matching the anonymous-first HTML that the
@@ -70,25 +72,25 @@ const CSRF_COOKIE_NAME = 'csrf_token';
 // login/logout/refresh, all of which re-render this provider via `setUser`
 // (re-reading the snapshot), so `subscribe` only needs to cover the cross-tab
 // case (signed in/out in another tab) via the window `focus` event.
-function subscribeCsrfCookie(onChange: () => void): () => void {
+function subscribeSessionCookie(onChange: () => void): () => void {
   if (typeof window === 'undefined') return () => {};
   window.addEventListener('focus', onChange);
   return () => window.removeEventListener('focus', onChange);
 }
 
-function getCsrfCookieSnapshot(): boolean {
+function getSessionCookieSnapshot(): boolean {
   if (typeof document === 'undefined') return false;
-  const prefix = `${CSRF_COOKIE_NAME}=`;
+  const prefix = `${SESSION_PRESENT_COOKIE_NAME}=`;
   // Require a non-empty value, not just the cookie name: the backend always
-  // mints a real token and removes (not blanks) the cookie on logout, so an
-  // empty `csrf_token=` shouldn't occur — but treating it as "no session"
-  // keeps the hint honest if it ever does.
+  // sets a "1" value and removes (not blanks) the cookie on logout, so an empty
+  // `session_present=` shouldn't occur — but treating it as "no session" keeps
+  // the hint honest if it ever does.
   return document.cookie
     .split('; ')
     .some(part => part.startsWith(prefix) && part.length > prefix.length);
 }
 
-function getCsrfCookieServerSnapshot(): boolean {
+function getSessionCookieServerSnapshot(): boolean {
   return false;
 }
 
@@ -107,9 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const likelyAuthenticated = useSyncExternalStore(
-    subscribeCsrfCookie,
-    getCsrfCookieSnapshot,
-    getCsrfCookieServerSnapshot
+    subscribeSessionCookie,
+    getSessionCookieSnapshot,
+    getSessionCookieServerSnapshot
   );
   const router = useRouter();
 

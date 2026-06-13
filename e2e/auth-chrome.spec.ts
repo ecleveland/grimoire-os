@@ -30,6 +30,18 @@ test.describe('auth-gated chrome — settled state (VEG-339)', () => {
     await expect(page.getByRole('link', { name: 'Create monster' })).toBeVisible();
   });
 
+  test('register delivers a JS-readable session_present cookie (the hint source)', async ({
+    page,
+  }) => {
+    await registerPlayer(page);
+    const cookies = await page.context().cookies();
+    const hint = cookies.find(c => c.name === 'session_present');
+    expect(hint, 'session_present cookie missing after register').toBeDefined();
+    // Non-httpOnly so the chrome hint can read it; lives the full refresh window
+    // (much longer than the 15-min csrf cookie) so it survives returning visits.
+    expect(hint?.httpOnly).toBe(false);
+  });
+
   test('anonymous visitor sees the SRD content but no authed chrome', async ({ page }) => {
     // No registration — fully anonymous.
     await page.goto('/srd/monsters');

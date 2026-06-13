@@ -78,10 +78,10 @@ describe('AuthProvider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    // jsdom persists document.cookie across tests — clear the csrf hint cookie
+    // jsdom persists document.cookie across tests — clear the session-present hint cookie
     // so a test that sets it can't leak into the next (which would silently make
     // likelyAuthenticated-blind assertions start seeing a "probable session").
-    document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
 
   describe('auth gate (renders children immediately)', () => {
@@ -516,9 +516,9 @@ describe('AuthProvider', () => {
     });
   });
 
-  describe('likelyAuthenticated (csrf-cookie hint for pre-hydration chrome, VEG-339)', () => {
-    it('is true on first render when the csrf_token cookie is present (before hydration settles)', () => {
-      document.cookie = 'csrf_token=abc123';
+  describe('likelyAuthenticated (session-present cookie hint for pre-hydration chrome, VEG-339)', () => {
+    it('is true on first render when the session_present cookie is present (before hydration settles)', () => {
+      document.cookie = 'session_present=1';
       // A never-resolving /users/me keeps isLoading true — the pre-hydration window.
       vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
@@ -529,7 +529,7 @@ describe('AuthProvider', () => {
       expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
     });
 
-    it('is false when no csrf_token cookie is present (settled-anonymous stays clean)', () => {
+    it('is false when no session_present cookie is present (settled-anonymous stays clean)', () => {
       vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
       renderWithProvider();
@@ -537,8 +537,8 @@ describe('AuthProvider', () => {
       expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
     });
 
-    it('treats an empty csrf_token= value as no session (not a false-positive hint)', () => {
-      document.cookie = 'csrf_token=';
+    it('treats an empty session_present= value as no session (not a false-positive hint)', () => {
+      document.cookie = 'session_present=';
       vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
       renderWithProvider();
@@ -547,11 +547,11 @@ describe('AuthProvider', () => {
     });
 
     it('settles to non-stuck anonymous chrome when a stale cookie hydrates to 401', async () => {
-      // The real-world case VEG-339 guards: a leftover csrf cookie, but the
+      // The real-world case VEG-339 guards: a leftover session_present cookie, but the
       // session is dead. The skeleton (isLoading && likelyAuthenticated) must
       // show during hydration, then collapse — isLoading flips false and the
       // user stays unauthenticated, so the gate goes false and nothing sticks.
-      document.cookie = 'csrf_token=stale';
+      document.cookie = 'session_present=1';
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access dead
         .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh — refresh dead
@@ -571,7 +571,7 @@ describe('AuthProvider', () => {
     });
 
     it('re-derives on a window focus event when the cookie changes in another tab', async () => {
-      document.cookie = 'csrf_token=abc123';
+      document.cookie = 'session_present=1';
       vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
 
       renderWithProvider();
@@ -579,7 +579,7 @@ describe('AuthProvider', () => {
 
       // Signed out elsewhere: the cookie vanishes, and a focus event (the
       // store's subscribe signal) must re-read the snapshot to false.
-      document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
       fireEvent(window, new Event('focus'));
 
       await waitFor(() => {
@@ -588,7 +588,7 @@ describe('AuthProvider', () => {
     });
 
     it('flips to false on logout (cookie cleared, provider re-renders)', async () => {
-      document.cookie = 'csrf_token=abc123';
+      document.cookie = 'session_present=1';
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration
         .mockResolvedValue(mockFetchResponse(204)); // POST /auth/logout
@@ -598,9 +598,9 @@ describe('AuthProvider', () => {
       await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
       expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
 
-      // Production clears the csrf cookie server-side on logout; mirror that, then
+      // Production clears the session_present cookie server-side on logout; mirror that, then
       // the setUser(null) re-render must re-read the snapshot to false.
-      document.cookie = 'csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
       await user.click(screen.getByText('Logout'));
 
       await waitFor(() => {
