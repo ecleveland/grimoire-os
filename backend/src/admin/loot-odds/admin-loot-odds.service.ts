@@ -29,10 +29,10 @@ export class AdminLootOddsService {
     return resolveLootGameRules(rows);
   }
 
-  // Upserts only the knobs present in the payload. The seed writes these rows
-  // with skipDuplicates, so they already exist after a first seed — upsert
-  // covers both the seeded and the never-seeded environment. No cache to bust:
-  // the NPC generator and monster/encounter loot reload these rows per request.
+  // Upserts only the knobs present in the payload. A row may already exist (a
+  // seeded environment) or not (never seeded), so upsert handles both. No cache
+  // to bust: the NPC generator and monster/encounter loot reload these rows per
+  // request.
   async update(dto: UpdateLootOddsDto): Promise<LootGameRules> {
     const writes: Prisma.PrismaPromise<unknown>[] = [];
     for (const knob of Object.keys(KEY_BY_KNOB) as (keyof UpdateLootOddsDto)[]) {

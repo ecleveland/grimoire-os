@@ -92,6 +92,10 @@ export default function AdminLootOddsPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // All bounds are validated here in JS rather than via native min/max on the
+    // inputs: native constraint validation blocks form submission with a terse
+    // browser tooltip, whereas these toasts match the rest of the admin UI and
+    // are testable. The numeric inputs deliberately omit min/max for this reason.
     const trinket = Number(trinketPct);
     if (trinketPct.trim() === '' || !Number.isFinite(trinket) || trinket < 0 || trinket > 100) {
       toast.error('Trinket chance must be between 0 and 100%');
@@ -99,8 +103,13 @@ export default function AdminLootOddsPage() {
     }
 
     const multiplier = Number(coinageMultiplier);
-    if (coinageMultiplier.trim() === '' || !Number.isFinite(multiplier) || multiplier < 0) {
-      toast.error('Coinage multiplier must be 0 or greater');
+    if (
+      coinageMultiplier.trim() === '' ||
+      !Number.isFinite(multiplier) ||
+      multiplier < 0 ||
+      multiplier > 100
+    ) {
+      toast.error('Coinage multiplier must be between 0 and 100');
       return;
     }
 
@@ -111,8 +120,9 @@ export default function AdminLootOddsPage() {
 
     const magicItemChanceByCr: Record<string, number> = {};
     for (const cr of LOOT_CR_BUCKETS) {
-      const pct = Number(magicPct[cr]);
-      if (magicPct[cr]?.trim() === '' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
+      const raw = magicPct[cr] ?? '';
+      const pct = Number(raw);
+      if (raw.trim() === '' || !Number.isFinite(pct) || pct < 0 || pct > 100) {
         toast.error(`Magic item chance for CR ${cr} must be between 0 and 100%`);
         return;
       }
@@ -225,7 +235,7 @@ export default function AdminLootOddsPage() {
               onChange={e => setCoinageMultiplier(e.target.value)}
               className={inputClass}
             />
-            <p className={helperClass}>Scales all rolled coinage (1 = unchanged).</p>
+            <p className={helperClass}>Scales all rolled coinage (1 = unchanged, max 100).</p>
           </div>
 
           <button

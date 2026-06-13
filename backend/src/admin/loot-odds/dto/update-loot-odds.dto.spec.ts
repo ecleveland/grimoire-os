@@ -57,6 +57,11 @@ describe('UpdateLootOddsDto', () => {
       expect(validate({ coinageMultiplier: -1 }).length).toBeGreaterThan(0);
       expect(validate({ coinageMultiplier: 3 })).toHaveLength(0);
     });
+
+    it('rejects implausibly large values (fat-fingered extra zero)', () => {
+      expect(validate({ coinageMultiplier: 150 }).length).toBeGreaterThan(0);
+      expect(validate({ coinageMultiplier: 100 })).toHaveLength(0);
+    });
   });
 
   describe('itemCountDie', () => {
@@ -78,21 +83,36 @@ describe('UpdateLootOddsDto', () => {
       expect(validate({ magicItemChanceByCr: {} }).length).toBeGreaterThan(0);
     });
 
-    it('rejects unknown CR-bucket keys (e.g. an ASCII hyphen)', () => {
-      expect(validate({ magicItemChanceByCr: { '0-1': 0.005 } }).length).toBeGreaterThan(0);
-      expect(validate({ magicItemChanceByCr: { '99+': 0.1 } }).length).toBeGreaterThan(0);
+    it('rejects a partial map even when every present key is valid', () => {
+      // The engine stores the map wholesale, so an omitted bucket would
+      // silently resolve to a 0% drop rate — require the complete set.
+      expect(validate({ magicItemChanceByCr: { '0': 0, '11+': 1 } }).length).toBeGreaterThan(0);
     });
 
-    it('rejects out-of-range or non-numeric chances', () => {
-      expect(validate({ magicItemChanceByCr: { '0': -0.1 } }).length).toBeGreaterThan(0);
-      expect(validate({ magicItemChanceByCr: { '0': 1.5 } }).length).toBeGreaterThan(0);
+    it('rejects unknown CR-bucket keys (e.g. an ASCII hyphen)', () => {
+      // Full-size map, but one key is an ASCII hyphen instead of the en-dash.
+      const asciiHyphen = { ...VALID_MAP, '0-1': 0.005 } as Record<string, number>;
+      delete asciiHyphen['0–1'];
+      expect(validate({ magicItemChanceByCr: asciiHyphen }).length).toBeGreaterThan(0);
+    });
+
+    it('rejects out-of-range or non-numeric chances (in an otherwise complete map)', () => {
+      expect(validate({ magicItemChanceByCr: { ...VALID_MAP, '0': -0.1 } }).length).toBeGreaterThan(
+        0
+      );
+      expect(validate({ magicItemChanceByCr: { ...VALID_MAP, '0': 1.5 } }).length).toBeGreaterThan(
+        0
+      );
       expect(
-        validate({ magicItemChanceByCr: { '0': 'lots' as unknown as number } }).length
+        validate({ magicItemChanceByCr: { ...VALID_MAP, '0': 'lots' as unknown as number } }).length
       ).toBeGreaterThan(0);
     });
 
-    it('accepts a partial map of valid buckets', () => {
-      expect(validate({ magicItemChanceByCr: { '0': 0, '11+': 1 } })).toHaveLength(0);
+    it('accepts a complete map at the chance boundaries', () => {
+      const allZero = Object.fromEntries(Object.keys(VALID_MAP).map(k => [k, 0]));
+      const allOne = Object.fromEntries(Object.keys(VALID_MAP).map(k => [k, 1]));
+      expect(validate({ magicItemChanceByCr: allZero })).toHaveLength(0);
+      expect(validate({ magicItemChanceByCr: allOne })).toHaveLength(0);
     });
   });
 });

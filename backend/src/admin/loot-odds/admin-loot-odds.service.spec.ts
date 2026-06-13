@@ -49,11 +49,17 @@ describe('AdminLootOddsService', () => {
       prisma.gameRule.findMany.mockResolvedValue([]);
       expect(await service.get()).toEqual(DEFAULT_LOOT_GAME_RULES);
     });
+
+    it('round-trips a stored chance map, preserving the en-dash bucket keys', async () => {
+      const map = { '0': 0.002, '0–1': 0.006, '2–4': 0.03, '5–10': 0.06, '11+': 0.2 };
+      prisma.gameRule.findMany.mockResolvedValue([{ key: 'magic-item-chance-by-cr', value: map }]);
+      expect((await service.get()).magicItemChanceByCr).toEqual(map);
+    });
   });
 
   describe('update', () => {
     it('upserts each provided knob under its kebab-case key', async () => {
-      const map = { '0': 0.001, '11+': 0.2 };
+      const map = { '0': 0.001, '0–1': 0.005, '2–4': 0.02, '5–10': 0.05, '11+': 0.2 };
       await service.update({
         trinketChance: 0.1,
         magicItemChanceByCr: map,

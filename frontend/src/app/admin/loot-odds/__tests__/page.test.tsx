@@ -103,6 +103,53 @@ describe('AdminLootOddsPage', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Loot odds saved'));
   });
 
+  it('round-trips chances through percent↔fraction without float noise', async () => {
+    // 0.07 → 7% cleanly, but 7 / 100 and 0.07 * 100 both produce float noise
+    // (0.0699…/7.000…1) without the round() helper.
+    routeApi({ ...RULES, trinketChance: 0.07 });
+    render(<AdminLootOddsPage />);
+    await screen.findByDisplayValue('1d3');
+
+    expect(screen.getByLabelText(/Trinket Chance/)).toHaveValue(7);
+
+    fireEvent.change(screen.getByLabelText('CR 2–4'), { target: { value: '2.9' } });
+    await userEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+    await waitFor(() => expect(lastPatchBody()).toBeDefined());
+    const body = lastPatchBody();
+    expect(body.trinketChance).toBe(0.07);
+    // Exact, not 0.028999999999999998.
+    expect(body.magicItemChanceByCr['2–4']).toBe(0.029);
+  });
+
+  it('rejects an out-of-range magic chance for a specific CR bucket', async () => {
+    routeApi();
+    const { toast } = await import('sonner');
+    render(<AdminLootOddsPage />);
+    await screen.findByDisplayValue('1d3');
+
+    fireEvent.change(screen.getByLabelText('CR 0'), { target: { value: '150' } });
+    await userEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      'Magic item chance for CR 0 must be between 0 and 100%'
+    );
+    expect(lastPatchBody()).toBeUndefined();
+  });
+
+  it('rejects an implausibly large coinage multiplier before calling the API', async () => {
+    routeApi();
+    const { toast } = await import('sonner');
+    render(<AdminLootOddsPage />);
+    await screen.findByDisplayValue('1d3');
+
+    fireEvent.change(screen.getByLabelText('Coinage Multiplier'), { target: { value: '150' } });
+    await userEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+    expect(toast.error).toHaveBeenCalledWith('Coinage multiplier must be between 0 and 100');
+    expect(lastPatchBody()).toBeUndefined();
+  });
+
   it('rejects a malformed die spec before calling the API', async () => {
     routeApi();
     const { toast } = await import('sonner');
