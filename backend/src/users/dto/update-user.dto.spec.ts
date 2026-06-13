@@ -29,4 +29,13 @@ describe('UpdateUserDto', () => {
   it('rejects a malformed email', () => {
     expect(validate({ email: 'not-an-email' }).length).toBeGreaterThan(0);
   });
+
+  it('rejects an empty or whitespace-only displayName (non-nullable column)', () => {
+    expect(validate({ displayName: '' }).length).toBeGreaterThan(0);
+    expect(validate({ displayName: '   ' }).length).toBeGreaterThan(0);
+  });
+
+  it('accepts a normal displayName', () => {
+    expect(validate({ displayName: 'Gandalf the Grey' })).toHaveLength(0);
+  });
 });

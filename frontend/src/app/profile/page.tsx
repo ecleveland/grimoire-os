@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/api';
+import { optionalText } from '@/lib/form-helpers';
 import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
@@ -25,9 +26,7 @@ export default function ProfilePage() {
         method: 'PATCH',
         body: JSON.stringify({
           displayName,
-          // null (not undefined) so clearing the field persists — JSON.stringify
-          // drops undefined keys and the backend would keep the old value.
-          email: email || null,
+          email: optionalText(email),
         }),
       });
       await refreshProfile();

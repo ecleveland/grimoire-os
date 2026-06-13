@@ -99,6 +99,21 @@ describe('ProfilePage', () => {
     expect(body.displayName).toBe('Gandalf the Grey');
   });
 
+  it('sends email: null when the email field contains only whitespace', async () => {
+    mockApiFetch.mockResolvedValue({});
+    const user = userEvent.setup();
+    render(<ProfilePage />);
+
+    await user.clear(screen.getByLabelText(/^email$/i));
+    await user.type(screen.getByLabelText(/^email$/i), '   ');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Profile updated'));
+    const [, init] = mockApiFetch.mock.calls[0];
+    const body = JSON.parse((init as { body: string }).body);
+    expect(body.email).toBeNull();
+  });
+
   it('shows the saving label while the update is in flight and toasts on Error rejection', async () => {
     let reject: (err: unknown) => void = () => {};
     mockApiFetch.mockReturnValueOnce(
