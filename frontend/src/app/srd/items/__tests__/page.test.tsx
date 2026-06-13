@@ -36,7 +36,7 @@ const longsword: SrdItem = {
   name: 'Longsword',
   category: 'Martial Melee Weapon',
   cost: '15 GP',
-  weight: '3 lb.',
+  weight: 3,
   damage: '1d8 slashing',
   properties: ['Versatile (1d10)', 'Mastery: Sap'],
   source: 'SRD 5.2.1',
@@ -210,6 +210,16 @@ describe('ItemListPage', () => {
 
       expect(await screen.findByText('Longsword')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /details/i })).not.toBeInTheDocument();
+    });
+
+    it('renders a zero weight rather than hiding it (falsy-zero guard)', async () => {
+      mockApiFetch.mockResolvedValue(
+        makeResponse([{ ...longsword, name: 'Soap Bubble', weight: 0 }])
+      );
+      renderPage();
+
+      expect(await screen.findByText('Soap Bubble')).toBeInTheDocument();
+      expect(screen.getByText('Weight: 0')).toBeInTheDocument();
     });
   });
 

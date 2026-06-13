@@ -14,7 +14,7 @@ const cloak: SrdItem = {
   name: 'Cloak of Whispers',
   category: 'Wondrous Item',
   cost: '500 gp',
-  weight: 2.5 as unknown as string,
+  weight: 2.5,
   description: 'A cloak woven from twilight that muffles every footstep.',
   properties: ['Finesse', 'Light'],
   rarity: 'Rare',

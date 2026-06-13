@@ -69,6 +69,15 @@ describe('MonsterLootService', () => {
     );
   });
 
+  it('pins the item catalog to the global tiers so user homebrew never enters loot pools (VEG-296)', async () => {
+    await service.loadRoller();
+    expect(prisma.item.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { contentSource: { in: ['srd', 'shared'] } },
+      })
+    );
+  });
+
   it('throws 422 when no active monster templates exist (unseeded database)', async () => {
     prisma.npcLootTemplate.findMany.mockResolvedValue([]);
     await expect(service.loadRoller()).rejects.toMatchObject({

@@ -1,5 +1,5 @@
 import type { SrdItem } from '@/lib/types';
-import { optionalText, parseCommaList } from '@/lib/form-helpers';
+import { optionalText, parseCommaList, parseIntInRange } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew item form (VEG-296).
@@ -107,8 +107,8 @@ export function formStateToPayload(s: ItemFormState): ItemFormResult {
 
   let strengthRequirement: number | null = null;
   if (s.strengthRequirement.trim()) {
-    strengthRequirement = Number(s.strengthRequirement);
-    if (!Number.isInteger(strengthRequirement) || strengthRequirement < 0) {
+    strengthRequirement = parseIntInRange(s.strengthRequirement, 0);
+    if (strengthRequirement === null) {
       return { error: 'Strength requirement must be a non-negative whole number' };
     }
   }

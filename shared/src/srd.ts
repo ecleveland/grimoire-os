@@ -164,7 +164,8 @@ export interface SrdItem extends ContentOwnership {
   name: string;
   category: string;
   cost?: string;
-  weight?: string;
+  /** Weight in pounds — a Float column server-side, so always a number. */
+  weight?: number;
   description?: string;
   damage?: string;
   damageType?: string;

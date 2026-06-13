@@ -35,4 +35,14 @@ describe('NpcRefDataLoader', () => {
       where: { isActive: true, category: 'npc' },
     });
   });
+
+  it('pins the item catalog to the global tiers so user homebrew never enters loot pools (VEG-296)', async () => {
+    await loader.load();
+
+    expect(prisma.item.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { contentSource: { in: ['srd', 'shared'] } },
+      })
+    );
+  });
 });

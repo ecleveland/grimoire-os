@@ -220,7 +220,7 @@ function ItemCard({
       )}
       <div className="flex gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
         {item.cost && <span>Cost: {item.cost}</span>}
-        {item.weight && <span>Weight: {item.weight}</span>}
+        {item.weight != null && <span>Weight: {item.weight}</span>}
       </div>
       {item.damage && (
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Damage: {item.damage}</p>
