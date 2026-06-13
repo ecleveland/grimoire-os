@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import CreateEntityLink from '@/components/CreateEntityLink';
 import type { SrdItem, PaginatedResponse } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Markdown from '@/components/Markdown';
@@ -16,7 +17,7 @@ import { ITEM_CATEGORIES } from '@/lib/item-constants';
 const LIMIT = 20;
 
 export default function ItemListPage() {
-  const { isAdmin, isAuthenticated, user } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [items, setItems] = useState<SrdItem[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -101,14 +102,7 @@ export default function ItemListPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Items</h1>
-        {isAuthenticated && (
-          <Link
-            href="/srd/items/new"
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
-          >
-            Create item
-          </Link>
-        )}
+        <CreateEntityLink href="/srd/items/new" label="Create item" />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">

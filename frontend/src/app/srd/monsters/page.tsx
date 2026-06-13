@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch, ApiError } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import CreateEntityLink from '@/components/CreateEntityLink';
 import type { SrdMonster, PaginatedResponse, Encounter } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
@@ -58,7 +59,7 @@ const CHALLENGE_RATINGS = [
 ];
 
 export default function MonsterListPage() {
-  const { isDm, isAdmin, isAuthenticated, user } = useAuth();
+  const { isDm, isAdmin, user } = useAuth();
   const [monsters, setMonsters] = useState<SrdMonster[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -222,14 +223,7 @@ export default function MonsterListPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Monsters</h1>
-        {isAuthenticated && (
-          <Link
-            href="/srd/monsters/new"
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium"
-          >
-            Create monster
-          </Link>
-        )}
+        <CreateEntityLink href="/srd/monsters/new" label="Create monster" />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">

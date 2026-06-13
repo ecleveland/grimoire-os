@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider, useAuth } from '../auth-context';
 
@@ -36,6 +36,7 @@ function TestConsumer() {
     <div>
       <span data-testid="authenticated">{String(auth.isAuthenticated)}</span>
       <span data-testid="isLoading">{String(auth.isLoading)}</span>
+      <span data-testid="likelyAuthenticated">{String(auth.likelyAuthenticated)}</span>
       <span data-testid="username">{auth.user?.username ?? 'none'}</span>
       <span data-testid="role">{auth.user?.role ?? 'none'}</span>
       <span data-testid="displayName">{auth.user?.displayName ?? 'none'}</span>
@@ -77,6 +78,10 @@ describe('AuthProvider', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    // jsdom persists document.cookie across tests — clear the session-present hint cookie
+    // so a test that sets it can't leak into the next (which would silently make
+    // likelyAuthenticated-blind assertions start seeing a "probable session").
+    document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
   });
 
   describe('auth gate (renders children immediately)', () => {
@@ -508,6 +513,100 @@ describe('AuthProvider', () => {
         expect(mockApiFetch).toHaveBeenCalledWith('/users/me');
       });
       expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+    });
+  });
+
+  describe('likelyAuthenticated (session-present cookie hint for pre-hydration chrome, VEG-339)', () => {
+    it('is true on first render when the session_present cookie is present (before hydration settles)', () => {
+      document.cookie = 'session_present=1';
+      // A never-resolving /users/me keeps isLoading true — the pre-hydration window.
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('isLoading')).toHaveTextContent('true');
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+    });
+
+    it('is false when no session_present cookie is present (settled-anonymous stays clean)', () => {
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+    });
+
+    it('treats an empty session_present= value as no session (not a false-positive hint)', () => {
+      document.cookie = 'session_present=';
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+    });
+
+    it('settles to non-stuck anonymous chrome when a stale cookie hydrates to 401', async () => {
+      // The real-world case VEG-339 guards: a leftover session_present cookie, but the
+      // session is dead. The skeleton (isLoading && likelyAuthenticated) must
+      // show during hydration, then collapse — isLoading flips false and the
+      // user stays unauthenticated, so the gate goes false and nothing sticks.
+      document.cookie = 'session_present=1';
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access dead
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh — refresh dead
+
+      renderWithProvider();
+
+      // During hydration the gate is open (skeleton would render).
+      expect(screen.getByTestId('isLoading')).toHaveTextContent('true');
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+      });
+      // Settled: unauthenticated, so `isLoading && likelyAuthenticated` is now
+      // false — the chrome collapses to the anonymous state, never stuck.
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+    });
+
+    it('re-derives on a window focus event when the cookie changes in another tab', async () => {
+      document.cookie = 'session_present=1';
+      vi.mocked(fetch).mockReturnValue(new Promise<Response>(() => {}));
+
+      renderWithProvider();
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+
+      // Signed out elsewhere: the cookie vanishes, and a focus event (the
+      // store's subscribe signal) must re-read the snapshot to false.
+      document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      fireEvent(window, new Event('focus'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+      });
+    });
+
+    it('flips to false on logout (cookie cleared, provider re-renders)', async () => {
+      document.cookie = 'session_present=1';
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration
+        .mockResolvedValue(mockFetchResponse(204)); // POST /auth/logout
+      const user = userEvent.setup();
+
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
+
+      // Production clears the session_present cookie server-side on logout; mirror that, then
+      // the setUser(null) re-render must re-read the snapshot to false.
+      document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+      await user.click(screen.getByText('Logout'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+        expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
+      });
     });
   });
 

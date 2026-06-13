@@ -13,7 +13,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { mockUser, USER_ID } from '../test/fixtures';
-import { AUTH_COOKIE_NAME, REFRESH_COOKIE_NAME } from './auth-cookie.config';
+import {
+  AUTH_COOKIE_NAME,
+  REFRESH_COOKIE_NAME,
+  SESSION_PRESENT_COOKIE_NAME,
+} from './auth-cookie.config';
 import { CSRF_COOKIE_NAME } from './csrf-cookie.config';
 
 function createMockResponse(): Response {
@@ -190,12 +194,13 @@ describe('Auth Integration', () => {
 
       expect(result).not.toHaveProperty('access_token');
       expect(result.user.id).toBe(USER_ID);
-      expect(res.cookie).toHaveBeenCalledTimes(3);
+      expect(res.cookie).toHaveBeenCalledTimes(4);
       const calls = (res.cookie as jest.Mock).mock.calls;
       const names = calls.map(c => c[0]);
       expect(names).toContain(AUTH_COOKIE_NAME);
       expect(names).toContain(REFRESH_COOKIE_NAME);
       expect(names).toContain(CSRF_COOKIE_NAME);
+      expect(names).toContain(SESSION_PRESENT_COOKIE_NAME);
     });
 
     it('should throw UnauthorizedException for unknown user', async () => {

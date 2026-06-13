@@ -20,10 +20,14 @@ import { RegisterDto } from './dto/register.dto';
 import {
   AUTH_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
+  SESSION_PRESENT_COOKIE_NAME,
+  SESSION_PRESENT_COOKIE_VALUE,
   authCookieOptions,
   clearAuthCookieOptions,
   clearRefreshCookieOptions,
+  clearSessionPresentCookieOptions,
   refreshCookieOptions,
+  sessionPresentCookieOptions,
 } from './auth-cookie.config';
 import {
   CSRF_COOKIE_NAME,
@@ -85,6 +89,11 @@ export class AuthController {
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, refresh_token, refreshCookieOptions());
     res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
+    res.cookie(
+      SESSION_PRESENT_COOKIE_NAME,
+      SESSION_PRESENT_COOKIE_VALUE,
+      sessionPresentCookieOptions()
+    );
     return { user };
   }
 
@@ -112,6 +121,11 @@ export class AuthController {
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, refresh_token, refreshCookieOptions());
     res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
+    res.cookie(
+      SESSION_PRESENT_COOKIE_NAME,
+      SESSION_PRESENT_COOKIE_VALUE,
+      sessionPresentCookieOptions()
+    );
     return { user };
   }
 
@@ -135,6 +149,11 @@ export class AuthController {
     res.cookie(AUTH_COOKIE_NAME, access_token, authCookieOptions());
     res.cookie(REFRESH_COOKIE_NAME, newRefresh, refreshCookieOptions());
     res.cookie(CSRF_COOKIE_NAME, generateCsrfToken(), csrfCookieOptions());
+    res.cookie(
+      SESSION_PRESENT_COOKIE_NAME,
+      SESSION_PRESENT_COOKIE_VALUE,
+      sessionPresentCookieOptions()
+    );
     return { user };
   }
 
@@ -156,5 +175,6 @@ export class AuthController {
     res.clearCookie(AUTH_COOKIE_NAME, clearAuthCookieOptions());
     res.clearCookie(REFRESH_COOKIE_NAME, clearRefreshCookieOptions());
     res.clearCookie(CSRF_COOKIE_NAME, clearCsrfCookieOptions());
+    res.clearCookie(SESSION_PRESENT_COOKIE_NAME, clearSessionPresentCookieOptions());
   }
 }

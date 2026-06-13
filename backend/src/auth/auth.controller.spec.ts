@@ -12,6 +12,8 @@ import {
   REFRESH_COOKIE_MAX_AGE_MS,
   REFRESH_COOKIE_NAME,
   REFRESH_COOKIE_PATH,
+  SESSION_PRESENT_COOKIE_NAME,
+  SESSION_PRESENT_COOKIE_VALUE,
 } from './auth-cookie.config';
 import { CSRF_COOKIE_NAME, CSRF_TOKEN_HEX_LENGTH } from './csrf-cookie.config';
 import { mockUserPublic } from '../test/fixtures';
@@ -140,6 +142,25 @@ describe('AuthController', () => {
       expect(csrf[2]).toEqual(expect.objectContaining({ httpOnly: false }));
     });
 
+    it('issues a JS-readable session_present hint cookie scoped to the 7-day refresh window (VEG-339)', async () => {
+      authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
+      refreshTokenService.issue.mockResolvedValue({ token: 'r', id: 'r1' });
+      const res = createMockResponse();
+
+      await controller.login({ username: 'u', password: 'p' }, res);
+
+      const hint = (res.cookie as jest.Mock).mock.calls.find(
+        c => c[0] === SESSION_PRESENT_COOKIE_NAME
+      );
+      expect(hint).toBeDefined();
+      expect(hint[1]).toBe(SESSION_PRESENT_COOKIE_VALUE);
+      // Readable by JS (the chrome hint reads it) and lives as long as the
+      // refresh token, not the 15-minute access/csrf rotation.
+      expect(hint[2]).toEqual(
+        expect.objectContaining({ httpOnly: false, maxAge: REFRESH_COOKIE_MAX_AGE_MS })
+      );
+    });
+
     it('marks both cookies secure when NODE_ENV=production', async () => {
       process.env.NODE_ENV = 'production';
       authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
@@ -190,6 +211,7 @@ describe('AuthController', () => {
       expect(calls.some(c => c[0] === AUTH_COOKIE_NAME && c[1] === 'new-jwt')).toBe(true);
       expect(calls.some(c => c[0] === REFRESH_COOKIE_NAME && c[1] === 'refresh-xyz')).toBe(true);
       expect(calls.some(c => c[0] === CSRF_COOKIE_NAME)).toBe(true);
+      expect(calls.some(c => c[0] === SESSION_PRESENT_COOKIE_NAME)).toBe(true);
       expect(result).toEqual({ user: mockUserPublic });
     });
 
@@ -232,6 +254,9 @@ describe('AuthController', () => {
       // CSRF token is rotated on refresh so a leaked token can't be replayed
       // after the access token has been rotated.
       expect(calls.some(c => c[0] === CSRF_COOKIE_NAME)).toBe(true);
+      // The session-present hint is re-issued so it tracks the rotated 7-day
+      // refresh window (VEG-339).
+      expect(calls.some(c => c[0] === SESSION_PRESENT_COOKIE_NAME)).toBe(true);
       expect(result).toEqual({ user: mockUserPublic });
     });
 
@@ -266,6 +291,7 @@ describe('AuthController', () => {
       expect(calls.some(c => c[0] === AUTH_COOKIE_NAME)).toBe(true);
       expect(calls.some(c => c[0] === REFRESH_COOKIE_NAME)).toBe(true);
       expect(calls.some(c => c[0] === CSRF_COOKIE_NAME)).toBe(true);
+      expect(calls.some(c => c[0] === SESSION_PRESENT_COOKIE_NAME)).toBe(true);
     });
 
     it('revokes the refresh token then clears both cookies when refresh cookie present', async () => {
