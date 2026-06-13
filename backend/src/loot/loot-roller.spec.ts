@@ -435,6 +435,30 @@ describe('LootRoller — duplicate prevention (VEG-321)', () => {
     expect(quantities.size).toBeGreaterThan(1);
   });
 
+  it('does not throw when a zero-weight entry would strand the pool after the positive entries are drawn', () => {
+    // Admin templates allow per-entry weight 0 as long as one entry is
+    // positive. After the positive non-duplicate entry leaves the pool, a naive
+    // pool would still hold the zero-weight entry and weightedPick would throw.
+    const roller = npcRoller(() =>
+      template({
+        items: [
+          { itemName: 'Sword', weight: 5, qty: [1, 1] },
+          { itemName: 'Junk', weight: 0, qty: [1, 1] },
+        ],
+      })
+    );
+    const loot = roller.rollLoot({
+      selectionKey: 'x',
+      crBucket: '0',
+      seed: 'dedup-zero-weight',
+      overrides: { ...noExtras, itemCountDie: '5d1' },
+    });
+    // Only the positive-weight entry can be picked; the zero-weight one never
+    // appears, and the roll stops early instead of throwing.
+    expect(loot.items).toHaveLength(1);
+    expect(loot.items[0]).toMatchObject({ name: 'Sword', quantity: 1 });
+  });
+
   it('mixes flagged and unflagged entries: unflagged capped at one row, flagged accumulates, no draw lost', () => {
     const roller = npcRoller(() =>
       template({

@@ -79,7 +79,14 @@ export class LootRoller {
       // pool and merge their repeat wins into one row's quantity. If the pool
       // empties before `itemCount` draws, we stop early — a smaller drop is the
       // correct outcome, not an error.
-      const pool = [...template.items];
+      //
+      // Seed only the pickable (weight > 0) entries: `weightedPick` already
+      // ignores non-positive weights, so excluding them up front leaves the draw
+      // stream identical while preventing a stranded zero-weight entry from
+      // keeping the pool non-empty after every positive entry has been drawn
+      // (which would make the next `weightedPick` throw on a zero-weight pool —
+      // reachable via admin templates, which permit per-entry weight 0).
+      const pool = template.items.filter(it => it.weight > 0);
       // Keyed by entry identity, not name: the only entries still in the pool
       // after a first win are `allowDuplicate` ones, so a repeat hit here is
       // always a sanctioned duplicate to merge. Identity keying also keeps two
