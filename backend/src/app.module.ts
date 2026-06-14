@@ -4,6 +4,7 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import configuration from './config/configuration';
+import { CACHE_TTL_MS, createAppCacheStore } from './config/cache.config';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -42,12 +43,18 @@ const RUNTIME_DEFAULT_LIMIT = parseInt(process.env.THROTTLE_AUTHED_LIMIT ?? '120
       ],
     }),
     // SRD data is static between seeds, so a 24h in-memory cache covers
-    // realistic refresh windows. Cross-process invalidation isn't possible
-    // with the default Map store; the TTL is the backstop. Swap in a Keyv
-    // adapter (Redis, etc.) here if SRD reads ever fan out across replicas.
+    // realistic refresh windows. The store is an LRU-bounded CacheableMemory
+    // (VEG-340) so high-cardinality anonymous traffic (e.g. /srd/search?q=...)
+    // can't accrete unbounded 24h entries and OOM a small self-host. The
+    // module-level TTL is passed by the CacheInterceptor on every write; the
+    // store carries the same TTL as a backstop. Cross-process invalidation
+    // isn't possible with an in-memory store; the TTL is the staleness backstop.
+    // Swap in a Keyv adapter (Redis, etc.) here if SRD reads ever fan out across
+    // replicas.
     CacheModule.register({
       isGlobal: true,
-      ttl: 24 * 60 * 60 * 1000,
+      ttl: CACHE_TTL_MS,
+      stores: [createAppCacheStore()],
     }),
     PrismaModule,
     AuthModule,

@@ -37,6 +37,7 @@
     "@prisma/client": "^6.5.0",
     "bcryptjs": "^3.0.3",
     "cache-manager": "^6.4.3",
+    "cacheable": "^2.3.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.3",
     "cookie-parser": "^1.4.7",
