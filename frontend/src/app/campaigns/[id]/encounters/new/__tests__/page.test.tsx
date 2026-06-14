@@ -33,7 +33,15 @@ vi.mock('@/components/MonsterLookupPanel', () => ({
       type="button"
       onClick={() =>
         onAdd?.(
-          { id: 'mon-goblin', name: 'Goblin', armorClass: 15, hitPoints: 7, dex: 14 },
+          {
+            id: 'mon-goblin',
+            name: 'Goblin',
+            armorClass: 15,
+            hitPoints: 7,
+            dex: 14,
+            challengeRating: 0.25,
+            experiencePoints: 50,
+          },
           { quantity: 2, initiatives: [12, 8] }
         )
       }
@@ -326,8 +334,8 @@ describe('NewEncounterPage', () => {
       expect(body.name).toBe('Big Fight');
       expect(body.combatants).toEqual([
         { name: 'Bandit', initiative: 5, hp: 11, maxHp: 11, ac: 12, isNpc: true },
-        { name: 'Aragorn', initiative: 10, hp: 40, maxHp: 45, ac: 16, isNpc: false },
-        { name: 'Legolas', initiative: 10, hp: 38, maxHp: 38, ac: 15, isNpc: false },
+        { name: 'Aragorn', initiative: 10, hp: 40, maxHp: 45, ac: 16, isNpc: false, level: 5 },
+        { name: 'Legolas', initiative: 10, hp: 38, maxHp: 38, ac: 15, isNpc: false, level: 5 },
         {
           name: 'Goblin',
           initiative: 12,
@@ -336,6 +344,8 @@ describe('NewEncounterPage', () => {
           ac: 15,
           isNpc: true,
           monsterId: 'mon-goblin',
+          cr: 0.25,
+          xp: 50,
         },
         {
           name: 'Goblin 2',
@@ -345,6 +355,8 @@ describe('NewEncounterPage', () => {
           ac: 15,
           isNpc: true,
           monsterId: 'mon-goblin',
+          cr: 0.25,
+          xp: 50,
         },
       ]);
       expect(mockRouterPush).toHaveBeenCalledWith('/campaigns/camp-1/encounters/enc-1');
@@ -370,8 +382,30 @@ describe('NewEncounterPage', () => {
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Encounter created!'));
       const body = getPostBody();
       expect(body.combatants).toEqual([
-        { name: 'Aragorn', initiative: 10, hp: 40, maxHp: 45, ac: 16, isNpc: false },
+        { name: 'Aragorn', initiative: 10, hp: 40, maxHp: 45, ac: 16, isNpc: false, level: 5 },
       ]);
+    });
+
+    it('shows a live difficulty readout that reacts to picks', async () => {
+      mockHappyPath();
+      const user = userEvent.setup();
+      render(<NewEncounterPage />);
+
+      // No monsters yet.
+      expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent(/no monsters yet/i);
+
+      // Add the party (levels) then the monsters (XP/CR) → band appears.
+      await user.click(screen.getByRole('button', { name: /add party/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /add selected/i })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /add selected/i }));
+      await user.click(screen.getByRole('button', { name: /mock-add-monster/i }));
+
+      const readout = screen.getByTestId('encounter-difficulty');
+      expect(readout).toHaveTextContent('2 monsters');
+      expect(readout).toHaveTextContent('100 XP'); // 2 × CR 1/4 (50) = 100
+      expect(within(readout).getByTestId('difficulty-band')).toBeInTheDocument();
     });
   });
 });

@@ -1,4 +1,5 @@
 import type { Combatant, PartyCharacter, SrdMonster } from '@/lib/types';
+import { xpForCr } from '@grimoire-os/shared';
 
 /** Derive the 5e DEX modifier from a monster's raw DEX score: floor((dex - 10) / 2). */
 export function dexModifier(monster: SrdMonster): number {
@@ -122,6 +123,9 @@ export function buildPartyCombatants(
       ...(tempHp > 0 ? { tempHp } : {}),
       ac: character.armorClass ?? 10,
       isNpc: false,
+      // Snapshot the sheet level (VEG-362) so the difficulty budget can be
+      // computed from the encounter's own PCs without re-fetching the roster.
+      level: character.level,
     };
   });
 }
@@ -154,5 +158,10 @@ export function buildMonsterCombatants(
     ac: monster.armorClass,
     isNpc: true,
     monsterId: monster.id,
+    // Snapshot CR + XP (VEG-362) so the difficulty readout can sum them without
+    // re-fetching the stat block; prefer the monster's own XP (homebrew can
+    // override) and fall back to the canonical CR→XP value.
+    cr: monster.challengeRating,
+    xp: monster.experiencePoints ?? xpForCr(monster.challengeRating),
   }));
 }

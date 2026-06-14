@@ -9,6 +9,7 @@ import FormField from '@/components/FormField';
 import Modal from '@/components/Modal';
 import AddPartyDialog from '@/components/AddPartyDialog';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
+import EncounterDifficulty from '@/components/EncounterDifficulty';
 import { buildMonsterCombatants, buildPartyCombatants } from '@/lib/encounter-combatants';
 import type { PartyCombatantEntry } from '@/lib/encounter-combatants';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
@@ -263,6 +264,10 @@ export default function NewEncounterPage() {
               ))}
             </ul>
           )}
+
+          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <EncounterDifficulty combatants={[...combatants, ...picked]} />
+          </div>
         </div>
 
         <div className="flex gap-3">

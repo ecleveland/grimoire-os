@@ -217,3 +217,44 @@ describe('CombatantDto deathSaves (global validator strictness)', () => {
     expect(accepts({ deathSaves: { successes: 1, failures: 1, rounds: 2 } })).not.toEqual([]);
   });
 });
+
+// Same write-contract concern (VEG-362): the cr/xp/level snapshots are echoed
+// back on every PATCH, so they must be whitelisted on CombatantDto — otherwise
+// the first difficulty-bearing write bricks all subsequent combatant PATCHes.
+describe('CombatantDto cr / xp / level snapshots (global validator strictness)', () => {
+  const accepts = (over: Record<string, unknown>) => {
+    const instance = plainToInstance(UpdateEncounterDto, {
+      combatants: [{ ...lootCombatant(), ...over }],
+    });
+    return flatten(validateSync(instance, VALIDATOR_STRICTNESS));
+  };
+
+  it('accepts a monster carrying cr and xp', () => {
+    expect(accepts({ cr: 0.25, xp: 50 })).toEqual([]);
+  });
+
+  it('accepts cr 0 and a PC level snapshot', () => {
+    expect(accepts({ cr: 0, xp: 10 })).toEqual([]);
+    expect(accepts({ isNpc: false, level: 5 })).toEqual([]);
+  });
+
+  it('accepts these fields on CreateEncounterDto too', () => {
+    const instance = plainToInstance(CreateEncounterDto, {
+      campaignId: 'camp-1',
+      name: 'Ambush',
+      combatants: [{ ...lootCombatant(), cr: 2, xp: 450 }],
+    });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
+  });
+
+  it('rejects a negative cr or xp', () => {
+    expect(accepts({ cr: -1 })).not.toEqual([]);
+    expect(accepts({ xp: -50 })).not.toEqual([]);
+  });
+
+  it('rejects a level outside 1–20 or non-integer', () => {
+    expect(accepts({ level: 0 })).not.toEqual([]);
+    expect(accepts({ level: 21 })).not.toEqual([]);
+    expect(accepts({ level: 3.5 })).not.toEqual([]);
+  });
+});
