@@ -153,6 +153,23 @@ describe('CampaignMembership', () => {
     expect(await screen.findByText(/join a campaign/i)).toBeInTheDocument();
   });
 
+  it('does not show the empty prompt when the campaigns fetch fails (only on success)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/campaigns?')) return Promise.reject(new Error('boom'));
+      return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
+    });
+    renderControl(<CampaignMembership character={makeCharacter()} isOwner={true} />);
+
+    // The fetch error is surfaced (errorToast), and the empty state — gated on
+    // isSuccess — must NOT render, so an owner with campaigns isn't misdirected.
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith('Failed to load your campaigns')
+    );
+    expect(screen.queryByText(/join a campaign/i)).toBeNull();
+    consoleError.mockRestore();
+  });
+
   it('renders a campaign picker for the owner when unattached', async () => {
     routeApiFetch([
       makeCampaign({ id: 'camp-1', name: 'The Lost Mines' }),
