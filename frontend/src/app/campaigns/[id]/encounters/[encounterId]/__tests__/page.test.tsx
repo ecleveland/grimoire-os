@@ -1132,6 +1132,83 @@ describe('InitiativeTrackerPage', () => {
     });
   });
 
+  // ── Turn marker re-anchors on append (VEG-329) ───────────────────────────────
+  // currentTurn indexes the initiative-sorted rows. Appending a combatant that
+  // sorts above the active row must move currentTurn to the active combatant's
+  // new index so the highlight follows the same combatant, not whoever sorted
+  // into the old slot. The fix lives in the shared appendCombatants, so all add
+  // paths (manual form + monster lookup) are covered.
+  describe('turn re-anchoring on append (VEG-329)', () => {
+    async function openAddCombatant(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /add combatant/i }));
+      return within(screen.getByRole('dialog'));
+    }
+
+    function lastPatchBody(): Record<string, unknown> {
+      const call = mockApiFetch.mock.calls.findLast(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      return JSON.parse((call![1] as { body: string }).body);
+    }
+
+    it('re-anchors currentTurn when a manual combatant sorts above the active row', async () => {
+      // Default order Hero(18) > Goblin A(12) > Goblin B(8); active is Goblin A.
+      routeAddFlow({ encounter: makeEncounter({ version: 3, currentTurn: 1 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+
+      await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
+      await user.clear(dialog.getByLabelText(/^initiative$/i));
+      await user.type(dialog.getByLabelText(/^initiative$/i), '20');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const body = lastPatchBody();
+      // Trap(20) inserts at index 0, pushing Goblin A from index 1 to index 2.
+      expect(body.currentTurn).toBe(2);
+      expect(body.expectedVersion).toBe(3);
+
+      // The » marker follows Goblin A, not the new top row.
+      expect(screen.getByText('»').closest('[class*="rounded-lg"]')).toHaveTextContent('Goblin A');
+    });
+
+    it('leaves currentTurn untouched when the new combatant sorts below the active row', async () => {
+      // Active is Goblin B(8) at index 2; a lower-initiative add sorts beneath it.
+      routeAddFlow({ encounter: makeEncounter({ version: 3, currentTurn: 2 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+
+      await user.type(dialog.getByLabelText(/^name$/i), 'Kobold');
+      await user.clear(dialog.getByLabelText(/^initiative$/i));
+      await user.type(dialog.getByLabelText(/^initiative$/i), '5');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const body = lastPatchBody();
+      // Goblin B stays at index 2 — no currentTurn write (matches the
+      // conditional-include pattern of the other re-anchoring paths).
+      expect(body).not.toHaveProperty('currentTurn');
+      expect(screen.getByText('»').closest('[class*="rounded-lg"]')).toHaveTextContent('Goblin B');
+    });
+
+    it('re-anchors currentTurn when a monster from the lookup sorts above the active row', async () => {
+      // Active is Goblin B(8) at index 2; the looked-up Goblin rolls init 10.
+      routeAddFlow({ encounter: makeEncounter({ version: 3, currentTurn: 2 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await addGoblinFromLookup(user);
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const body = lastPatchBody();
+      // Goblin(10) inserts at index 2, pushing Goblin B from index 2 to index 3.
+      expect(body.currentTurn).toBe(3);
+    });
+  });
+
   // ── Link / unlink a combatant to a monster stat block (VEG-328) ──────────────
 
   describe('link monster to combatant', () => {
