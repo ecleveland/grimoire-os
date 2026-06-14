@@ -422,12 +422,20 @@ export default function InitiativeTrackerPage() {
     opts: { successMsg: string; errorMsg: string; onSuccess?: () => void }
   ) => {
     if (!encounter || additions.length === 0) return;
+    // currentTurn indexes the sorted rows, so an addition that sorts above the
+    // active row would otherwise shift the highlight to a different combatant.
+    // Re-anchor by the active combatant's identity (same pattern as the
+    // initiative-edit / reorder / remove paths). Omit currentTurn when unchanged.
+    const combatants = [...encounter.combatants, ...additions];
+    const active = sortByInitiative(encounter.combatants)[encounter.currentTurn];
+    const newTurn = active ? sortByInitiative(combatants).indexOf(active) : encounter.currentTurn;
     beginWrite();
     try {
       const updated = await apiFetch<Encounter>(`/encounters/${encounterId}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          combatants: [...encounter.combatants, ...additions],
+          combatants,
+          ...(newTurn !== encounter.currentTurn && { currentTurn: newTurn }),
           expectedVersion: encounter.version,
         }),
       });
