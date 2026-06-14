@@ -3,9 +3,14 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
+import { useApiQuery } from '@/lib/query';
 import { toast } from 'sonner';
-import type { Character, AbilityScores } from '@/lib/types';
+import type { Character, AbilityScores, CampaignListItem, PaginatedResponse } from '@/lib/types';
 import FormField from '@/components/FormField';
+
+// The backend rejects `limit` > 100 (PaginationDto `@Max(100)`); one page is
+// plenty to populate this optional single-select picker.
+const CAMPAIGN_PICKER_LIMIT = 100;
 
 const abilityKeys: (keyof AbilityScores)[] = [
   'strength',
@@ -44,7 +49,17 @@ export default function NewCharacterPage() {
   const [currentHp, setCurrentHp] = useState(10);
   const [armorClass, setArmorClass] = useState(10);
   const [speed, setSpeed] = useState(30);
+  const [campaignId, setCampaignId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const campaignsQuery = useApiQuery<PaginatedResponse<CampaignListItem>>(
+    `/campaigns?page=1&limit=${CAMPAIGN_PICKER_LIMIT}`,
+    {
+      errorToast:
+        'Could not load your campaigns — you can add this character to one later from its sheet.',
+    }
+  );
+  const campaigns = campaignsQuery.data?.data ?? [];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +78,7 @@ export default function NewCharacterPage() {
           hitPoints: { max: maxHp, current: currentHp, temporary: 0 },
           armorClass,
           speed,
+          ...(campaignId ? { campaignId } : {}),
         }),
       });
       toast.success('Character created!');
@@ -122,6 +138,22 @@ export default function NewCharacterPage() {
               onChange={e => setAlignment(e.target.value)}
             />
           </div>
+          {campaigns.length > 0 && (
+            <FormField
+              as="select"
+              label="Campaign"
+              helperText="Optionally add this character to one of your campaigns."
+              value={campaignId}
+              onChange={e => setCampaignId(e.target.value)}
+            >
+              <option value="">None</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </FormField>
+          )}
         </div>
 
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
