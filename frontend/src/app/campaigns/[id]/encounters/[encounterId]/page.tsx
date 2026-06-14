@@ -11,6 +11,7 @@ import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import AddCombatantDialog from '@/components/AddCombatantDialog';
+import DropdownMenu from '@/components/DropdownMenu';
 import EncounterDifficulty from '@/components/EncounterDifficulty';
 import AddPartyDialog from '@/components/AddPartyDialog';
 import LinkMonsterDialog from '@/components/LinkMonsterDialog';
@@ -1279,30 +1280,32 @@ export default function InitiativeTrackerPage() {
           >
             Add party
           </button>
-          {/* Roll initiative for every NPC at once (VEG-370): "Each" rolls per-NPC
-              d20 + DEX mod; "Shared" rolls one d20 for the whole group. */}
+          {/* Roll initiative for every NPC at once (VEG-370), as a single menu:
+              "Each" rolls per-NPC d20 + DEX mod; "One shared roll" gives the
+              whole group one d20. */}
           {encounter.combatants.some(c => c.isNpc) && (
-            <div className="flex items-center gap-1">
-              <span className="text-sm text-gray-500 dark:text-gray-400">Roll NPC init:</span>
-              <button
-                type="button"
-                aria-label="Roll initiative for each NPC"
-                onClick={() => rollNpcInitiatives('each')}
-                disabled={writePending}
-                className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Each
-              </button>
-              <button
-                type="button"
-                aria-label="Roll one shared initiative for all NPCs"
-                onClick={() => rollNpcInitiatives('shared')}
-                disabled={writePending}
-                className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Shared
-              </button>
-            </div>
+            <DropdownMenu
+              testId="roll-initiative-menu"
+              label={
+                <>
+                  <span aria-hidden="true">🎲</span> Roll initiative
+                </>
+              }
+              disabled={writePending}
+              buttonClassName="inline-flex items-center px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              items={[
+                {
+                  label: 'Each NPC separately',
+                  description: "d20 + each NPC's DEX modifier",
+                  onSelect: () => rollNpcInitiatives('each'),
+                },
+                {
+                  label: 'One shared roll',
+                  description: 'one d20 for the whole group',
+                  onSelect: () => rollNpcInitiatives('shared'),
+                },
+              ]}
+            />
           )}
           {encounter.combatants.length > 0 && (
             <button

@@ -1475,6 +1475,16 @@ describe('InitiativeTrackerPage', () => {
     const initByName = (combatants: Combatant[]) =>
       Object.fromEntries(combatants.map(c => [c.name, c.initiative]));
 
+    // Open the "Roll initiative" dropdown and pick a mode.
+    async function rollNpc(user: ReturnType<typeof userEvent.setup>, mode: 'each' | 'shared') {
+      await user.click(screen.getByRole('button', { name: /roll initiative/i }));
+      await user.click(
+        screen.getByRole('menuitem', {
+          name: mode === 'each' ? 'Each NPC separately' : 'One shared roll',
+        })
+      );
+    }
+
     it('rolls d20 + each NPC modifier in "each" mode and leaves PCs untouched', async () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.5); // d20 face = 11
       routeAddFlow({ encounter: rollableEncounter({ version: 3 }) });
@@ -1482,7 +1492,7 @@ describe('InitiativeTrackerPage', () => {
       render(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
-      await user.click(screen.getByRole('button', { name: /roll initiative for each npc/i }));
+      await rollNpc(user, 'each');
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
 
       const body = patchBody()!;
@@ -1501,9 +1511,7 @@ describe('InitiativeTrackerPage', () => {
       render(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
-      await user.click(
-        screen.getByRole('button', { name: /roll one shared initiative for all npcs/i })
-      );
+      await rollNpc(user, 'shared');
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
 
       const init = initByName(patchBody()!.combatants);
@@ -1521,7 +1529,7 @@ describe('InitiativeTrackerPage', () => {
       render(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
-      await user.click(screen.getByRole('button', { name: /roll initiative for each npc/i }));
+      await rollNpc(user, 'each');
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
 
       // After rolling, NPCs sit at 13/11/10; Aragorn at 18 still sorts first, so
@@ -1536,9 +1544,7 @@ describe('InitiativeTrackerPage', () => {
       );
       render(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
-      expect(
-        screen.queryByRole('button', { name: /roll initiative for each npc/i })
-      ).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /roll initiative/i })).not.toBeInTheDocument();
     });
 
     it('hides the controls from non-controllers', async () => {
@@ -1549,9 +1555,21 @@ describe('InitiativeTrackerPage', () => {
       mockApiFetch.mockResolvedValue(rollableEncounter({ createdBy: 'user-1' }));
       render(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /roll initiative/i })).not.toBeInTheDocument();
+    });
+
+    it('opens a menu rather than showing the actions inline', async () => {
+      routeAddFlow({ encounter: rollableEncounter() });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      // Actions are hidden until the menu is opened (no longer inline).
       expect(
-        screen.queryByRole('button', { name: /roll initiative for each npc/i })
+        screen.queryByRole('menuitem', { name: 'Each NPC separately' })
       ).not.toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /roll initiative/i }));
+      expect(screen.getByRole('menuitem', { name: 'Each NPC separately' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'One shared roll' })).toBeInTheDocument();
     });
   });
 

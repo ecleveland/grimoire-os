@@ -10,10 +10,8 @@ test.describe('Roll all NPC initiatives (VEG-370)', () => {
     await page.goto(`/campaigns/${campaignId}/encounters/${encounterId}`);
     await expect(page.getByRole('heading', { name: /goblin ambush/i })).toBeVisible();
 
-    // No NPCs yet → the roll controls are hidden.
-    await expect(page.getByRole('button', { name: /roll initiative for each npc/i })).toHaveCount(
-      0
-    );
+    // No NPCs yet → the roll control is hidden.
+    await expect(page.getByRole('button', { name: /roll initiative/i })).toHaveCount(0);
 
     // Add two of a monster from the lookup panel.
     await page.getByPlaceholder(/search monsters/i).fill('goblin');
@@ -31,8 +29,10 @@ test.describe('Roll all NPC initiatives (VEG-370)', () => {
     const heroInit = page.getByLabel('Initiative for Hero', { exact: true });
     await expect(heroInit).toHaveValue('18');
 
-    // Shared: one d20 applied to both NPCs → their initiatives match; PC untouched.
-    await page.getByRole('button', { name: /roll one shared initiative for all npcs/i }).click();
+    // Shared: open the dropdown → one d20 applied to both NPCs → their
+    // initiatives match; PC untouched.
+    await page.getByRole('button', { name: /roll initiative/i }).click();
+    await page.getByRole('menuitem', { name: 'One shared roll' }).click();
     await expect(page.getByText(/rolled one initiative for all npcs/i)).toBeVisible();
     await expect(heroInit).toHaveValue('18');
     const a = await page.getByLabel(`Initiative for ${monsterName}`, { exact: true }).inputValue();
@@ -42,7 +42,8 @@ test.describe('Roll all NPC initiatives (VEG-370)', () => {
     expect(a).toBe(b);
 
     // Each: independent rolls; we only assert it runs and leaves the PC alone.
-    await page.getByRole('button', { name: /roll initiative for each npc/i }).click();
+    await page.getByRole('button', { name: /roll initiative/i }).click();
+    await page.getByRole('menuitem', { name: 'Each NPC separately' }).click();
     await expect(page.getByText(/rolled npc initiatives/i)).toBeVisible();
     await expect(heroInit).toHaveValue('18');
   });
