@@ -145,8 +145,8 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       expect(errors.filter(e => e.property === 'spells')).toHaveLength(0);
     });
 
-    it('accepts a name-only cantrip entry (level 0)', async () => {
-      const dto = toDto({ ...baseDto, spells: [{ level: 0, name: 'Fire Bolt' }] });
+    it.each([0, 9])('accepts the boundary level %s', async level => {
+      const dto = toDto({ ...baseDto, spells: [{ level, name: 'Boundary' }] });
       const errors = await validate(dto);
       expect(errors.filter(e => e.property === 'spells')).toHaveLength(0);
     });

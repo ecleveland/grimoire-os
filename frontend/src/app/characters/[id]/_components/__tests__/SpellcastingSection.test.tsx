@@ -174,6 +174,58 @@ describe('SpellcastingSection', () => {
       expect(within(fireball).getByText('3')).toBeInTheDocument();
     });
 
+    it('sorts spells by level, then alphabetically within a level', () => {
+      const char = {
+        ...baseCharacter,
+        spells: [
+          { level: 3, name: 'Fireball' },
+          { level: 0, name: 'Mage Hand' },
+          { level: 1, name: 'Shield' },
+          { level: 0, name: 'Fire Bolt' },
+          { level: 1, name: 'Bless' },
+        ],
+      };
+      render(<SpellcastingSection character={char} />);
+      const order = screen
+        .getAllByTestId(/^spell-(?!slots-)/)
+        .map(r => r.getAttribute('data-testid'));
+      expect(order).toEqual([
+        'spell-Fire Bolt', // level 0 (Fire < Mage)
+        'spell-Mage Hand', // level 0
+        'spell-Bless', // level 1 (Bless < Shield)
+        'spell-Shield', // level 1
+        'spell-Fireball', // level 3
+      ]);
+    });
+
+    it('treats a leveled spell with no prepared flag as not prepared', () => {
+      const char = { ...baseCharacter, spells: [{ level: 1, name: 'Bless' }] };
+      render(<SpellcastingSection character={char} />);
+      const row = screen.getByTestId('spell-Bless');
+      expect(within(row).getByTestId('prepared-no')).toBeInTheDocument();
+      expect(within(row).queryByTestId('prepared-yes')).not.toBeInTheDocument();
+    });
+
+    it('renders em-dash fallbacks for a spell missing casting time and range', () => {
+      const char = { ...baseCharacter, spells: [{ level: 1, name: 'Bless' }] };
+      render(<SpellcastingSection character={char} />);
+      const cells = within(screen.getByTestId('spell-Bless')).getAllByRole('cell');
+      // columns: [prep, level, name, casting time, range, C·R·M, notes]
+      expect(cells[3].textContent).toBe('—');
+      expect(cells[4].textContent).toBe('—');
+    });
+
+    it('renders a spell note when present', () => {
+      const char = {
+        ...baseCharacter,
+        spells: [{ level: 1, name: 'Bless', notes: 'pinch of holy water' }],
+      };
+      render(<SpellcastingSection character={char} />);
+      expect(
+        within(screen.getByTestId('spell-Bless')).getByText('pinch of holy water')
+      ).toBeInTheDocument();
+    });
+
     it('shows the C·R·M flags for a spell that has them', () => {
       render(<SpellcastingSection character={baseCharacter} />);
       // Detect Magic: Concentration + Ritual.

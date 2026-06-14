@@ -66,10 +66,12 @@ export interface Character {
   spellcastingAbility?: string;
   spellSaveDC?: number;
   spellAttackBonus?: number;
-  spells: SpellEntry[];
+  // Optional: the backing JSONB columns are nullable, so a character with no
+  // spells/attunement deserializes these as absent (consumers guard with `?? []`).
+  spells?: SpellEntry[];
   spellSlots: SpellSlot[];
   inventory: InventoryItem[];
-  attunedItems: AttunedItem[];
+  attunedItems?: AttunedItem[];
   currency: Currency;
   features: Feature[];
   personalityTraits?: string;
