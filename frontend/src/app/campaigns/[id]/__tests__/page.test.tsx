@@ -4,7 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import CampaignDetailPage from '../page';
-import type { Campaign, Note, Encounter, Npc, PaginatedResponse } from '@/lib/types';
+import type {
+  Campaign,
+  Note,
+  Encounter,
+  Npc,
+  PartyCharacter,
+  PaginatedResponse,
+} from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -664,5 +671,138 @@ describe('CampaignDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
     expect(screen.getByText('1 player')).toBeInTheDocument();
+  });
+
+  describe('roster (VEG-345)', () => {
+    function makeParty(over: Partial<PartyCharacter> = {}): PartyCharacter {
+      return {
+        id: 'char-1',
+        userId: 'user-2',
+        name: 'Aria',
+        race: 'Elf',
+        class: 'Wizard',
+        level: 3,
+        armorClass: 12,
+        initiative: 2,
+        hitPoints: { current: 18, max: 18, temporary: 0 },
+        ...over,
+      };
+    }
+
+    // Path-routing mock: the roster is read from a mutable closure so a DELETE
+    // followed by react-query invalidation re-reads the shrunken list.
+    function routeRoster(opts: {
+      campaign?: Campaign;
+      characters: PartyCharacter[];
+      onDetach?: (id: string) => Promise<unknown>;
+    }) {
+      const campaign = opts.campaign ?? makeCampaign();
+      let rows = opts.characters;
+      mockApiFetch.mockImplementation(
+        (path: string, init?: { method?: string }): Promise<unknown> => {
+          if (path.startsWith('/campaigns/camp-1/characters/') && init?.method === 'DELETE') {
+            const cid = path.split('/')[4];
+            if (opts.onDetach) return opts.onDetach(cid);
+            rows = rows.filter(c => c.id !== cid);
+            return Promise.resolve(undefined);
+          }
+          if (path === '/campaigns/camp-1/characters') {
+            return Promise.resolve(rows);
+          }
+          if (path.startsWith('/campaigns/camp-1') && init?.method === undefined) {
+            return Promise.resolve(campaign);
+          }
+          return Promise.resolve(makeListResponse([]));
+        }
+      );
+    }
+
+    async function openRosterTab(user: ReturnType<typeof userEvent.setup>) {
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^roster$/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: /party roster/i })).toBeInTheDocument()
+      );
+    }
+
+    it('lists attached characters with a link to each sheet', async () => {
+      const user = userEvent.setup();
+      routeRoster({ characters: [makeParty({ id: 'char-1', name: 'Aria' })] });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Aria')).toBeInTheDocument());
+      expect(screen.getByRole('link', { name: /aria/i })).toHaveAttribute(
+        'href',
+        '/characters/char-1'
+      );
+      expect(screen.getByText(/Elf · Wizard/)).toBeInTheDocument();
+    });
+
+    it('shows the empty state when no characters are attached', async () => {
+      const user = userEvent.setup();
+      routeRoster({ characters: [] });
+      await openRosterTab(user);
+      expect(screen.getByText(/no characters in this campaign yet/i)).toBeInTheDocument();
+    });
+
+    it('shows a Remove button per character for the owner', async () => {
+      const user = userEvent.setup();
+      routeRoster({ characters: [makeParty({ id: 'char-1', name: 'Aria' })] });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Aria')).toBeInTheDocument());
+      expect(screen.getByRole('button', { name: /remove aria/i })).toBeInTheDocument();
+    });
+
+    it('hides the Remove button for non-owners (read-only roster)', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        campaign: makeCampaign({ ownerId: 'someone-else' }),
+        characters: [makeParty({ id: 'char-1', name: 'Aria' })],
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Aria')).toBeInTheDocument());
+      expect(screen.queryByRole('button', { name: /remove aria/i })).not.toBeInTheDocument();
+    });
+
+    it('confirming detach sends DELETE with the right id, re-syncs, and toasts', async () => {
+      const user = userEvent.setup();
+      routeRoster({ characters: [makeParty({ id: 'char-1', name: 'Aria' })] });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Aria')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove aria/i }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/remove character/i);
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(screen.queryByText('Aria')).not.toBeInTheDocument());
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/campaigns/camp-1/characters/char-1',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      const rosterCalls = mockApiFetch.mock.calls.filter(
+        c => c[0] === '/campaigns/camp-1/characters'
+      );
+      expect(rosterCalls.length).toBeGreaterThanOrEqual(2);
+      expect(mockToastSuccess).toHaveBeenCalledWith('Character removed from campaign');
+    });
+
+    it('keeps the row and toasts an error when detach fails', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        characters: [makeParty({ id: 'char-1', name: 'Aria' })],
+        onDetach: () => Promise.reject(new Error('not allowed')),
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Aria')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove aria/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('not allowed'));
+      expect(screen.getByText('Aria')).toBeInTheDocument();
+    });
   });
 });

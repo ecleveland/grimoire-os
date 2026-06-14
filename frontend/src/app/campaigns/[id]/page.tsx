@@ -16,6 +16,7 @@ import type {
   NoteListItem,
   EncounterListItem,
   NpcListItem,
+  PartyCharacter,
   PaginatedResponse,
   InviteCodeResponse,
 } from '@/lib/types';
@@ -26,7 +27,7 @@ const statusColors: Record<string, string> = {
   completed: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
 };
 
-type Tab = 'overview' | 'notes' | 'encounters' | 'npcs';
+type Tab = 'overview' | 'roster' | 'notes' | 'encounters' | 'npcs';
 
 const LIMIT = 20;
 
@@ -39,7 +40,9 @@ export default function CampaignDetailPage() {
   const [notesPage, setNotesPage] = useState(1);
   const [encountersPage, setEncountersPage] = useState(1);
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
+  const [characterToDetach, setCharacterToDetach] = useState<PartyCharacter | null>(null);
   const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const rosterHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
   const campaignQuery = useApiQuery<Campaign>(`/campaigns/${id}`, {
     errorToast: { message: 'Failed to load campaign', id: 'load-campaign' },
@@ -69,6 +72,11 @@ export default function CampaignDetailPage() {
     `/npcs?campaignId=${id}&page=1&limit=3`,
     { enabled: tab === 'npcs', errorToast: { message: 'Failed to load NPCs', id: 'load-npcs' } }
   );
+  const rosterQuery = useApiQuery<PartyCharacter[]>(`/campaigns/${id}/characters`, {
+    enabled: tab === 'roster',
+    errorToast: { message: 'Failed to load roster', id: 'load-roster' },
+  });
+  const roster = rosterQuery.data ?? [];
 
   const notes = notesQuery.data?.data ?? [];
   const notesTotal = notesQuery.data?.total ?? 0;
@@ -155,12 +163,34 @@ export default function CampaignDetailPage() {
     }
   );
 
+  const detachCharacter = useApiMutation(
+    (c: PartyCharacter) => apiFetch(`/campaigns/${id}/characters/${c.id}`, { method: 'DELETE' }),
+    {
+      onSuccess: async () => {
+        toast.success('Character removed from campaign');
+        // Re-sync the roster and the campaign (its characterIds count changes).
+        await queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/characters`),
+        });
+        queryClient.invalidateQueries({ queryKey: apiQueryKey(`/campaigns/${id}`) });
+        // The removed row is unmounting; if focus dropped to <body>, land it on
+        // the roster heading rather than leaving it stranded.
+        if (document.activeElement === document.body) {
+          rosterHeadingRef.current?.focus();
+        }
+      },
+      onError: err =>
+        toast.error(err instanceof Error ? err.message : 'Failed to remove character'),
+    }
+  );
+
   if (campaignQuery.isPending)
     return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   if (!campaign) return <div className="text-gray-500 dark:text-gray-400">Campaign not found.</div>;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'overview', label: 'Overview' },
+    { key: 'roster', label: 'Roster' },
     { key: 'notes', label: 'Notes' },
     { key: 'encounters', label: 'Encounters' },
     { key: 'npcs', label: 'NPCs' },
@@ -288,6 +318,67 @@ export default function CampaignDetailPage() {
               </div>
             )}
           </dl>
+        </div>
+      )}
+
+      {tab === 'roster' && (
+        <div>
+          <h2
+            ref={rosterHeadingRef}
+            tabIndex={-1}
+            className="text-lg font-semibold text-gray-900 dark:text-white mb-1 focus:outline-none"
+          >
+            Party Roster
+          </h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Characters attached to this campaign.{' '}
+            {isOwner
+              ? 'Remove a character to detach it from the campaign.'
+              : 'Add your own characters from their character sheet.'}
+          </p>
+          {rosterQuery.isLoading ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading roster…</p>
+          ) : roster.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400">No characters in this campaign yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {roster.map(c => (
+                <div key={c.id} className="flex items-stretch gap-2">
+                  <Link
+                    href={`/characters/${c.id}`}
+                    className="flex-1 block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-indigo-500 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-medium text-gray-900 dark:text-white">{c.name}</h3>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        Level {c.level}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      {[c.race, c.class].filter(Boolean).join(' · ') || '—'}
+                      {c.armorClass != null && <> &middot; AC {c.armorClass}</>}
+                      {c.hitPoints && (
+                        <>
+                          {' '}
+                          &middot; HP {c.hitPoints.current}/{c.hitPoints.max}
+                        </>
+                      )}
+                    </p>
+                  </Link>
+                  {isOwner && (
+                    <button
+                      onClick={() => setCharacterToDetach(c)}
+                      disabled={detachCharacter.isPending}
+                      aria-label={`Remove ${c.name}`}
+                      className="px-3 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -477,6 +568,20 @@ export default function CampaignDetailPage() {
         variant="danger"
         onConfirm={() => {
           if (encounterToDelete) deleteEncounter.mutate(encounterToDelete);
+        }}
+      />
+
+      <ConfirmDialog
+        open={characterToDetach !== null}
+        onOpenChange={open => {
+          if (!open) setCharacterToDetach(null);
+        }}
+        title="Remove character?"
+        description={`Remove "${characterToDetach?.name ?? ''}" from this campaign? The character itself is kept — it's just detached.`}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (characterToDetach) detachCharacter.mutate(characterToDetach);
         }}
       />
     </div>
