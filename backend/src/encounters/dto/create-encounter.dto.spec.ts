@@ -257,4 +257,13 @@ describe('CombatantDto cr / xp / level snapshots (global validator strictness)',
     expect(accepts({ level: 21 })).not.toEqual([]);
     expect(accepts({ level: 3.5 })).not.toEqual([]);
   });
+
+  it('accepts an initiativeMod, including a negative one', () => {
+    expect(accepts({ initiativeMod: 2 })).toEqual([]);
+    expect(accepts({ initiativeMod: -1 })).toEqual([]);
+  });
+
+  it('rejects a non-integer initiativeMod', () => {
+    expect(accepts({ initiativeMod: 1.5 })).not.toEqual([]);
+  });
 });

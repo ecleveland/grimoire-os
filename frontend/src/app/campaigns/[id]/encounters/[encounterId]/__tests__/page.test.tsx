@@ -1283,6 +1283,7 @@ describe('InitiativeTrackerPage', () => {
             monsterId: 'monster-1',
             cr: 0.25,
             xp: 50,
+            initiativeMod: 2,
           }),
         ],
         ...over,
@@ -1347,7 +1348,7 @@ describe('InitiativeTrackerPage', () => {
       // for the difficulty readout, while leaving the DM's customized row alone.
       expect(hero.monsterId).toBe('monster-1');
       expect(hero).toMatchObject({ name: 'Hero', initiative: 18, hp: 7, maxHp: 7, ac: 13 });
-      expect(hero).toMatchObject({ cr: 0.25, xp: 50 });
+      expect(hero).toMatchObject({ cr: 0.25, xp: 50, initiativeMod: 2 }); // dex 14 → +2
       const goblin = patchBody!.combatants.find(c => c.name === 'Goblin A')!;
       expect(goblin.monsterId).toBe('monster-1');
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
@@ -1420,10 +1421,11 @@ describe('InitiativeTrackerPage', () => {
       expect(body.expectedVersion).toBe(7);
       const goblin = (body.combatants as Combatant[]).find(c => c.name === 'Goblin A')!;
       expect(goblin).not.toHaveProperty('monsterId');
-      // The stat-block snapshot goes with the linkage (VEG-362), so the row
-      // stops counting toward difficulty.
+      // The stat-block snapshot goes with the linkage (VEG-362/363), so the row
+      // stops counting toward difficulty and reverts to a flat d20 init roll.
       expect(goblin).not.toHaveProperty('cr');
       expect(goblin).not.toHaveProperty('xp');
+      expect(goblin).not.toHaveProperty('initiativeMod');
       expect(goblin).toMatchObject({ initiative: 12, hp: 7, maxHp: 7, ac: 13 });
     });
 
@@ -1440,6 +1442,115 @@ describe('InitiativeTrackerPage', () => {
       expect(screen.getAllByText(/dagger/i).length).toBeGreaterThanOrEqual(1);
       expect(
         screen.queryByRole('button', { name: /reroll loot for orphan/i })
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Roll NPC initiatives (VEG-370) ───────────────────────────────────────────
+
+  describe('roll NPC initiatives', () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    function rollableEncounter(over: Partial<Encounter> = {}) {
+      return makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Aragorn', isNpc: false, initiative: 18, level: 10 }),
+          makeCombatant({ name: 'Goblin', isNpc: true, initiative: 5, initiativeMod: 2 }),
+          makeCombatant({ name: 'Wolf', isNpc: true, initiative: 4, initiativeMod: -1 }),
+          // Hand-typed NPC: no initiativeMod → flat d20.
+          makeCombatant({ name: 'Bandit', isNpc: true, initiative: 3 }),
+        ],
+        ...over,
+      });
+    }
+
+    function patchBody() {
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      return call ? JSON.parse((call[1] as { body: string }).body) : undefined;
+    }
+
+    const initByName = (combatants: Combatant[]) =>
+      Object.fromEntries(combatants.map(c => [c.name, c.initiative]));
+
+    it('rolls d20 + each NPC modifier in "each" mode and leaves PCs untouched', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0.5); // d20 face = 11
+      routeAddFlow({ encounter: rollableEncounter({ version: 3 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /roll initiative for each npc/i }));
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+
+      const body = patchBody()!;
+      const init = initByName(body.combatants);
+      expect(init.Goblin).toBe(13); // 11 + 2
+      expect(init.Wolf).toBe(10); // 11 - 1
+      expect(init.Bandit).toBe(11); // flat d20 (no modifier)
+      expect(init.Aragorn).toBe(18); // PC untouched
+      expect(body.expectedVersion).toBe(3);
+    });
+
+    it('rolls one shared d20 for all NPCs in "shared" mode', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0.5); // 11
+      routeAddFlow({ encounter: rollableEncounter() });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(
+        screen.getByRole('button', { name: /roll one shared initiative for all npcs/i })
+      );
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+
+      const init = initByName(patchBody()!.combatants);
+      expect(init.Goblin).toBe(11);
+      expect(init.Wolf).toBe(11);
+      expect(init.Bandit).toBe(11);
+      expect(init.Aragorn).toBe(18); // PC untouched
+    });
+
+    it('keeps the turn marker on the active combatant across the re-roll', async () => {
+      vi.spyOn(Math, 'random').mockReturnValue(0.5);
+      // Aragorn (PC) holds the turn; sorted by init he is row 0 (18 > 5 > 4 > 3).
+      routeAddFlow({ encounter: rollableEncounter({ currentTurn: 0 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+
+      await user.click(screen.getByRole('button', { name: /roll initiative for each npc/i }));
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+
+      // After rolling, NPCs sit at 13/11/10; Aragorn at 18 still sorts first, so
+      // currentTurn stays 0 and the PATCH omits it (unchanged).
+      const body = patchBody()!;
+      expect(body.currentTurn).toBeUndefined();
+    });
+
+    it('hides the controls when there are no NPCs', async () => {
+      mockApiFetch.mockResolvedValue(
+        makeEncounter({ combatants: [makeCombatant({ name: 'Aragorn', isNpc: false })] })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(
+        screen.queryByRole('button', { name: /roll initiative for each npc/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('hides the controls from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(rollableEncounter({ createdBy: 'user-1' }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(
+        screen.queryByRole('button', { name: /roll initiative for each npc/i })
       ).not.toBeInTheDocument();
     });
   });

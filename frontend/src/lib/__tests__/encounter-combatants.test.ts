@@ -119,6 +119,7 @@ describe('buildMonsterCombatants', () => {
         monsterId: 'mon-goblin',
         cr: 0.25,
         xp: 50,
+        initiativeMod: 2, // dex 14 → +2
       },
       {
         name: 'Goblin 2',
@@ -130,8 +131,20 @@ describe('buildMonsterCombatants', () => {
         monsterId: 'mon-goblin',
         cr: 0.25,
         xp: 50,
+        initiativeMod: 2,
       },
     ]);
+  });
+
+  it('snapshots the DEX-based initiative modifier (VEG-370)', () => {
+    expect(
+      buildMonsterCombatants(makeMonster({ dex: 18 }), { quantity: 1, initiatives: [10] }, [])[0]
+        .initiativeMod
+    ).toBe(4);
+    expect(
+      buildMonsterCombatants(makeMonster({ dex: 7 }), { quantity: 1, initiatives: [10] }, [])[0]
+        .initiativeMod
+    ).toBe(-2);
   });
 
   it('snapshots cr and the CR→XP value (VEG-362), preferring the monster own xp', () => {

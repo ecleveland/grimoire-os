@@ -234,6 +234,14 @@ class CombatantDto {
   @Min(1)
   @Max(20)
   level?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Initiative modifier snapshotted from the source monster's DEX (VEG-370); used by the tracker's Roll NPC initiative. May be negative.",
+  })
+  @IsOptional()
+  @IsInt()
+  initiativeMod?: number;
 }
 
 export class CreateEncounterDto {

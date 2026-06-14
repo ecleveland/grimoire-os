@@ -18,6 +18,8 @@ import {
   buildManualCombatant,
   buildMonsterCombatants,
   buildPartyCombatants,
+  dexModifier,
+  rollInitiativeMod,
 } from '@/lib/encounter-combatants';
 import type { ManualCombatantInput, PartyCombatantEntry } from '@/lib/encounter-combatants';
 import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
@@ -545,6 +547,7 @@ export default function InitiativeTrackerPage() {
       monsterId: monster.id,
       cr: monster.challengeRating,
       xp: monster.experiencePoints ?? xpForCr(monster.challengeRating),
+      initiativeMod: dexModifier(monster),
     }));
     if (result === 'missing') {
       toast.error('That combatant is no longer in the encounter.');
@@ -566,10 +569,12 @@ export default function InitiativeTrackerPage() {
     const result = await mutateCombatantRow(name, rowIndex, c => {
       const next = { ...c };
       delete next.monsterId;
-      // Drop the snapshotted stat-block numbers too (VEG-362), so an unlinked
-      // row stops counting toward difficulty — matching how it loses Reroll.
+      // Drop the snapshotted stat-block numbers too, so an unlinked row stops
+      // counting toward difficulty (VEG-362) and reverts to a flat d20 on the
+      // NPC initiative roll (VEG-370) — matching how it loses Reroll.
       delete next.cr;
       delete next.xp;
+      delete next.initiativeMod;
       return next;
     });
     if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
@@ -674,6 +679,44 @@ export default function InitiativeTrackerPage() {
     if (!encounter || writePending) return;
     const updated = await patchEncounter({ combatants: [], currentTurn: 0, round: 1 });
     if (updated) toast.success('Cleared all combatants');
+  };
+
+  // Roll initiative for every NPC at once (VEG-370), overwriting their current
+  // values; PCs roll their own and are left untouched. 'each' rolls an
+  // independent d20 + the snapshotted DEX modifier per NPC (flat d20 when a row
+  // has no modifier — hand-typed NPCs and pre-VEG-370 rows); 'shared' rolls a
+  // single flat d20 and applies it to all NPCs (group initiative). One
+  // version-guarded PATCH; currentTurn re-anchors to the active combatant's
+  // identity so the turn marker can't jump (same rule as the per-row edit).
+  const rollNpcInitiatives = async (mode: 'each' | 'shared') => {
+    if (!encounter || writePending) return;
+    if (!encounter.combatants.some(c => c.isNpc)) return;
+    const shared = mode === 'shared' ? rollInitiativeMod(0) : 0;
+    const combatants = encounter.combatants.map(c =>
+      c.isNpc
+        ? { ...c, initiative: mode === 'shared' ? shared : rollInitiativeMod(c.initiativeMod ?? 0) }
+        : c
+    );
+    // Follow the active combatant across the re-sort: a PC keeps its object
+    // reference; an NPC was replaced, so map to its new object by stored index.
+    const active = sortByInitiative(encounter.combatants)[encounter.currentTurn];
+    const activeNext = active
+      ? active.isNpc
+        ? combatants[encounter.combatants.indexOf(active)]
+        : active
+      : undefined;
+    const newTurn = activeNext
+      ? sortByInitiative(combatants).indexOf(activeNext)
+      : encounter.currentTurn;
+    const updated = await patchEncounter({
+      combatants,
+      ...(newTurn !== encounter.currentTurn && { currentTurn: newTurn }),
+    });
+    if (updated) {
+      toast.success(
+        mode === 'shared' ? 'Rolled one initiative for all NPCs' : 'Rolled NPC initiatives'
+      );
+    }
   };
 
   const viewCombatantMonster = (monsterId: string) => {
@@ -1219,7 +1262,7 @@ export default function InitiativeTrackerPage() {
       </div>
 
       {isController && (
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setAddCombatantOpen(true)}
@@ -1234,6 +1277,31 @@ export default function InitiativeTrackerPage() {
           >
             Add party
           </button>
+          {/* Roll initiative for every NPC at once (VEG-370): "Each" rolls per-NPC
+              d20 + DEX mod; "Shared" rolls one d20 for the whole group. */}
+          {encounter.combatants.some(c => c.isNpc) && (
+            <div className="flex items-center gap-1">
+              <span className="text-sm text-gray-500 dark:text-gray-400">Roll NPC init:</span>
+              <button
+                type="button"
+                aria-label="Roll initiative for each NPC"
+                onClick={() => rollNpcInitiatives('each')}
+                disabled={writePending}
+                className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Each
+              </button>
+              <button
+                type="button"
+                aria-label="Roll one shared initiative for all NPCs"
+                onClick={() => rollNpcInitiatives('shared')}
+                disabled={writePending}
+                className="px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Shared
+              </button>
+            </div>
+          )}
           {encounter.combatants.length > 0 && (
             <button
               type="button"
