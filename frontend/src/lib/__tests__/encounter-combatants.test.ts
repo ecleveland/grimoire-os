@@ -268,6 +268,39 @@ describe('buildPartyCombatants', () => {
     expect(c.level).toBe(8);
   });
 
+  it('clamps the snapshotted level to a whole 1–20 so the combatant write stays valid', () => {
+    // The character layer does not bound level, but CombatantDto does
+    // (@IsInt @Min(1) @Max(20)) — an out-of-range snapshot would 400 the write.
+    const low = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 0 }), initiative: 10 }],
+      []
+    );
+    expect(low[0].level).toBe(1);
+    const high = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 25 }), initiative: 10 }],
+      []
+    );
+    expect(high[0].level).toBe(20);
+    const fractional = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 5.9 }), initiative: 10 }],
+      []
+    );
+    expect(fractional[0].level).toBe(5);
+  });
+
+  it('omits level when the sheet value is not a finite number', () => {
+    const [c] = buildPartyCombatants(
+      [
+        {
+          character: makePartyCharacter({ level: undefined as unknown as number }),
+          initiative: 10,
+        },
+      ],
+      []
+    );
+    expect(c).not.toHaveProperty('level');
+  });
+
   it('auto-numbers against existing combatants and within the batch', () => {
     const result = buildPartyCombatants(
       [
