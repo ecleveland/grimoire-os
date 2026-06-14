@@ -71,6 +71,8 @@ describe('CampaignsPage', () => {
     );
     const newLink = screen.getByRole('link', { name: /new campaign/i });
     expect(newLink).toHaveAttribute('href', '/campaigns/new');
+    const joinLink = screen.getByRole('link', { name: /join campaign/i });
+    expect(joinLink).toHaveAttribute('href', '/campaigns/join');
   });
 
   it('renders a card per campaign with name, description, status, and player count', async () => {
