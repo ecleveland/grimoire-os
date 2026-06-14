@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiError } from '@/lib/api';
 
 /**
  * Default query behaviour for the whole app.
@@ -10,9 +11,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
  *   back-and-forth navigation instead of refetching on every mount. Mutations
  *   invalidate explicitly (see `invalidateApiPath`), so this only suppresses
  *   redundant refetches, never correctness-critical ones.
- * - `retry: 1`: one transient-failure retry. `apiFetch` already redirects to
- *   /login on a 401 it can't refresh, so auth failures don't get retried into a
- *   loop — this is for flaky network blips.
+ * - `retry`: one retry, but only for network blips / 5xx. A deterministic 4xx
+ *   (404 not-found, 403, 400, 409) won't change on retry, so it surfaces
+ *   immediately instead of waiting out a pointless backoff. (`apiFetch` already
+ *   redirects on an unrecoverable 401 before throwing, so that path is moot.)
  * - `refetchOnWindowFocus: false`: a self-hosted DM tool doesn't need
  *   tab-focus refetch churn.
  */
@@ -21,7 +23,8 @@ export function makeQueryClient(): QueryClient {
     defaultOptions: {
       queries: {
         staleTime: 60_000,
-        retry: 1,
+        retry: (failureCount, error) =>
+          failureCount < 1 && !(error instanceof ApiError && error.status < 500),
         refetchOnWindowFocus: false,
       },
     },

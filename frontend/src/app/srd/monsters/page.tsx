@@ -86,9 +86,10 @@ export default function MonsterListPage() {
   const listPath = `/srd/monsters?${listParams.toString()}`;
 
   const listQuery = useApiQuery<PaginatedResponse<SrdMonster>>(listPath, {
-    // keepPreviousData holds the current page visible while the next page/filter
-    // loads, so paging is race-free (no flash of the wrong page) and the search
-    // input never unmounts mid-debounce.
+    // keepPreviousData holds the previous page's rows on screen while the next
+    // page/filter request resolves (listQuery.data keeps the last successful
+    // result until the new key settles), so paging and filtering are race-free
+    // with no flash of an empty or wrong-page list.
     placeholderData: keepPreviousData,
     errorToast: { message: 'Failed to load monsters', id: 'load-monsters' },
   });

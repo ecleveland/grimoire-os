@@ -76,6 +76,40 @@ describe('useApiQuery', () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Nope', { id: 'load-thing' }));
   });
 
+  it('omits the toast options when an object errorToast has no id', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+    renderHook(() => useApiQuery('/oops', { errorToast: { message: 'Nope' } }), {
+      wrapper: wrapperFor(makeClient()),
+    });
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Nope', undefined));
+  });
+
+  it('toasts once per failure, not on every re-render while the error persists', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+    const { result, rerender } = renderHook(
+      () => useApiQuery('/oops', { errorToast: { message: 'Nope', id: 'x' } }),
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(mockToastError).toHaveBeenCalledTimes(1);
+    // A re-render recreates the inline object errorToast; the ref guard must
+    // keep this from re-firing the toast/log for the same failure.
+    rerender();
+    rerender();
+    expect(mockToastError).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-fires the toast when a later refetch fails again', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+    const { result } = renderHook(
+      () => useApiQuery('/oops', { errorToast: { message: 'Nope', id: 'x' } }),
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
+    await result.current.refetch();
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(2));
+  });
+
   it('does not toast on success', async () => {
     mockApiFetch.mockResolvedValue({});
     const { result } = renderHook(() => useApiQuery('/ok', { errorToast: 'x' }), {

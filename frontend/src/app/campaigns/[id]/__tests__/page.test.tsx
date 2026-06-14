@@ -27,12 +27,21 @@ vi.mock('@/lib/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
-// Fresh QueryClient per render with retries off so error states resolve
-// immediately instead of waiting on react-query's retry/backoff.
-function renderPage() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+function makeTestClient(staleTime = 0) {
+  // Retries off so error states resolve immediately. staleTime defaults to 0 so
+  // page/filter changes refetch as the suite expects; the cached-remount test
+  // opts into a long staleTime to mirror the app's caching.
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, staleTime },
+      mutations: { retry: false },
+    },
   });
+}
+
+// Fresh QueryClient per render by default; pass a shared client to simulate a
+// cached remount.
+function renderPage(client: QueryClient = makeTestClient()) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
@@ -135,7 +144,16 @@ describe('CampaignDetailPage', () => {
     mockApiFetch.mockRejectedValue(new Error('404'));
     renderPage();
     await waitFor(() => expect(screen.getByText(/campaign not found/i)).toBeInTheDocument());
-    expect(mockToastError).toHaveBeenCalledWith('Failed to load campaign');
+    expect(mockToastError).toHaveBeenCalledWith(
+      'Failed to load campaign',
+      expect.objectContaining({ id: 'load-campaign' })
+    );
+  });
+
+  it('shows a not-found message when the campaign resolves to null', async () => {
+    mockApiFetch.mockResolvedValue(null);
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/campaign not found/i)).toBeInTheDocument());
   });
 
   it('renders campaign name, status, players, session, description, and setting', async () => {
@@ -352,6 +370,29 @@ describe('CampaignDetailPage', () => {
         expect.objectContaining({ method: 'DELETE' })
       );
       expect(mockToastSuccess).toHaveBeenCalledWith('Invite code revoked');
+    });
+
+    it('does not resurface a revoked code on a cached remount', async () => {
+      // Regression: revoke must write the campaign cache, not just local state,
+      // or a remount within staleTime re-seeds the stale (revoked) code.
+      const client = makeTestClient(60_000);
+      mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: 'ABCD-1234' }));
+      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
+      const user = userEvent.setup();
+      const { unmount } = renderPage(client);
+      await waitFor(() => expect(screen.getByText('ABCD-1234')).toBeInTheDocument());
+      await user.click(screen.getByRole('button', { name: /revoke/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /generate invite code/i })).toBeInTheDocument()
+      );
+      unmount();
+
+      // Remount against the same (fresh, cached) client — no refetch happens.
+      renderPage(client);
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /generate invite code/i })).toBeInTheDocument()
+      );
+      expect(screen.queryByText('ABCD-1234')).not.toBeInTheDocument();
     });
 
     it('toasts an error if revoke fails and keeps the existing code visible', async () => {

@@ -193,6 +193,35 @@ describe('MonsterListPage', () => {
     });
   });
 
+  describe('keep-previous-data paging', () => {
+    it('keeps the previous page rows visible (no flash) while the next page loads', async () => {
+      let resolvePage2!: (v: PaginatedResponse<SrdMonster>) => void;
+      mockApiFetch.mockReset();
+      mockApiFetch.mockResolvedValueOnce(makeResponse([goblin, dragon]));
+      mockApiFetch.mockImplementationOnce(
+        () =>
+          new Promise<PaginatedResponse<SrdMonster>>(resolve => {
+            resolvePage2 = resolve;
+          })
+      );
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByText('Goblin');
+
+      // Page to 2; that fetch is left pending.
+      await user.click(screen.getByTestId('pagination'));
+
+      // The prior page's rows stay rendered (keepPreviousData) and the grid marks
+      // itself busy — this is exactly what regresses if keepPreviousData is dropped.
+      await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument());
+      expect(screen.getByText('Goblin')).toBeInTheDocument();
+      expect(screen.getByText('Ancient Red Dragon')).toBeInTheDocument();
+
+      resolvePage2(makeResponse([goblin]));
+      await waitFor(() => expect(screen.queryByText('Ancient Red Dragon')).not.toBeInTheDocument());
+    });
+  });
+
   describe('focus preservation across debounced refetch', () => {
     afterEach(() => {
       vi.useRealTimers();

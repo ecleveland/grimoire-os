@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
-import { useApiQuery, useApiMutation, invalidateApiPath } from '@/lib/query';
+import { useApiQuery, useApiMutation, invalidateApiPath, apiQueryKey } from '@/lib/query';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
@@ -38,22 +38,18 @@ export default function CampaignDetailPage() {
   const [tab, setTab] = useState<Tab>('overview');
   const [notesPage, setNotesPage] = useState(1);
   const [encountersPage, setEncountersPage] = useState(1);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
   const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
   const campaignQuery = useApiQuery<Campaign>(`/campaigns/${id}`, {
-    errorToast: 'Failed to load campaign',
+    errorToast: { message: 'Failed to load campaign', id: 'load-campaign' },
   });
   const campaign = campaignQuery.data ?? null;
   const isOwner = campaign && user && campaign.ownerId === user.userId;
-
-  // Seed the invite code from the loaded campaign. Keyed on the campaign object,
-  // which is stable across renders (react-query returns the cached reference),
-  // so a local revoke/generate isn't clobbered by a re-run.
-  useEffect(() => {
-    if (campaign?.inviteCode) setInviteCode(campaign.inviteCode);
-  }, [campaign]);
+  // The campaign cache is the single source of truth for the invite code;
+  // generate/revoke write it back via setQueryData (below) so it can't go stale
+  // and resurface a revoked code on a cached remount.
+  const inviteCode = campaign?.inviteCode ?? null;
 
   // Tab list reads. Each is gated on its tab being active (no fetch until the
   // user opens it) and carries `isLoading`, so the empty state no longer flashes
@@ -105,11 +101,16 @@ export default function CampaignDetailPage() {
     }
   };
 
+  const setCachedInviteCode = (code: string | undefined) =>
+    queryClient.setQueryData<Campaign>(apiQueryKey(`/campaigns/${id}`), prev =>
+      prev ? { ...prev, inviteCode: code } : prev
+    );
+
   const generateInvite = useApiMutation(
     () => apiFetch<InviteCodeResponse>(`/campaigns/${id}/invite-code`, { method: 'POST' }),
     {
       onSuccess: res => {
-        setInviteCode(res.inviteCode);
+        setCachedInviteCode(res.inviteCode);
         toast.success('Invite code generated!');
       },
       onError: err =>
@@ -121,7 +122,7 @@ export default function CampaignDetailPage() {
     () => apiFetch(`/campaigns/${id}/invite-code`, { method: 'DELETE' }),
     {
       onSuccess: () => {
-        setInviteCode(null);
+        setCachedInviteCode(undefined);
         toast.success('Invite code revoked');
       },
       onError: err =>
@@ -139,7 +140,9 @@ export default function CampaignDetailPage() {
         // patched locally (keeps contents, total, and lastPage consistent).
         const lastPageAfterDelete = Math.max(1, Math.ceil((encountersTotal - 1) / LIMIT));
         setEncountersPage(p => Math.min(p, lastPageAfterDelete));
-        await invalidateApiPath(queryClient, `/encounters?campaignId=${id}`);
+        // Trailing `&` bounds the prefix to this campaign's list keys
+        // (`…campaignId=<id>&page=…`) so a sibling id can't be caught.
+        await invalidateApiPath(queryClient, `/encounters?campaignId=${id}&`);
         // The row that held focus is about to unmount; if focus dropped to
         // <body>, land it somewhere stable — but never steal it from an element
         // the user has since moved to.
