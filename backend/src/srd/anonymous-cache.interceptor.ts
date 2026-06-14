@@ -24,6 +24,12 @@ import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payl
  * reaches anonymous viewers only after the entry's 24h TTL expires. That's the
  * accepted pre-VEG-293 behavior this ticket restores; authenticated callers
  * bypass the cache and see shared edits immediately.
+ *
+ * Memory: entries are keyed by full URL, so the free-text `?q=` search surface
+ * is unbounded in cardinality, and the module's default in-memory store has no
+ * size cap (only the 24h lazy TTL). High-cardinality anonymous traffic (e.g. a
+ * crawler) can therefore accrete entries until they expire. A follow-up could
+ * bound the global store with an LRU cap; today the TTL is the only backstop.
  */
 @Injectable()
 export class AnonymousCacheInterceptor extends CacheInterceptor {
