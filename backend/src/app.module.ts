@@ -46,11 +46,11 @@ const RUNTIME_DEFAULT_LIMIT = parseInt(process.env.THROTTLE_AUTHED_LIMIT ?? '120
     // realistic refresh windows. The store is an LRU-bounded CacheableMemory
     // (VEG-340) so high-cardinality anonymous traffic (e.g. /srd/search?q=...)
     // can't accrete unbounded 24h entries and OOM a small self-host. The
-    // module-level TTL is passed by the CacheInterceptor on every write; the
-    // store carries the same TTL as a backstop. Cross-process invalidation
-    // isn't possible with an in-memory store; the TTL is the staleness backstop.
-    // Swap in a Keyv adapter (Redis, etc.) here if SRD reads ever fan out across
-    // replicas.
+    // CacheInterceptor writes without an explicit TTL, so cache-manager falls
+    // back to this module-level `ttl`; the store carries the same value as a
+    // backstop for any direct writes. Cross-process invalidation isn't possible
+    // with an in-memory store; the TTL is the staleness backstop. Swap in a Keyv
+    // adapter (Redis, etc.) here if SRD reads ever fan out across replicas.
     CacheModule.register({
       isGlobal: true,
       ttl: CACHE_TTL_MS,

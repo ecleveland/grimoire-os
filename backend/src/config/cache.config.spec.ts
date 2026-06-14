@@ -11,15 +11,34 @@ describe('cache.config', () => {
     expect(Number.isInteger(CACHE_LRU_SIZE)).toBe(true);
   });
 
-  it('builds a Keyv store wired with the default TTL and LRU cap', () => {
+  it('builds a Keyv store with JSON serialization disabled (matches the v6 default store)', () => {
     const store = createAppCacheStore();
     expect(store).toBeInstanceOf(Keyv);
-    // CacheableMemory exposes the live config it was constructed with; assert the
-    // default factory threads the module constants through so the bound can't
-    // silently regress to an unbounded store.
-    const backing = store.opts.store as unknown as { ttl: number; lruSize: number };
-    expect(backing.lruSize).toBe(CACHE_LRU_SIZE);
-    expect(backing.ttl).toBe(CACHE_TTL_MS);
+    // createKeyv disables Keyv-side (de)serialization so values aren't needlessly
+    // JSON round-tripped — same as cache-manager v6's default store. Guards
+    // against regressing back to a hand-rolled `new Keyv({ store })` wiring.
+    expect(store.serialize).toBeUndefined();
+    expect(store.deserialize).toBeUndefined();
+  });
+
+  it('enforces the default CACHE_LRU_SIZE cap on the no-arg factory', async () => {
+    const store = createAppCacheStore();
+
+    // Insert past the cap; the earliest entries must be evicted so the live set
+    // never exceeds CACHE_LRU_SIZE. Proves the default factory threads the
+    // constant through, without reaching into Keyv/cacheable internals.
+    for (let i = 0; i < CACHE_LRU_SIZE + 5; i++) {
+      await store.set(`k${i}`, i);
+    }
+
+    let survivors = 0;
+    for (let i = 0; i < CACHE_LRU_SIZE + 5; i++) {
+      if ((await store.get(`k${i}`)) !== undefined) survivors++;
+    }
+    expect(survivors).toBe(CACHE_LRU_SIZE);
+    // The very first inserts are the ones evicted.
+    expect(await store.get('k0')).toBeUndefined();
+    expect(await store.get(`k${CACHE_LRU_SIZE + 4}`)).toBe(CACHE_LRU_SIZE + 4);
   });
 
   it('evicts the least-recently-used entry once the cap is exceeded', async () => {

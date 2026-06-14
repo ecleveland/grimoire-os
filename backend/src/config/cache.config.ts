@@ -1,12 +1,14 @@
-import { CacheableMemory } from 'cacheable';
+import { createKeyv } from 'cacheable';
 import { Keyv } from 'keyv';
 
 /**
- * SRD data is static between seeds, so a 24h in-memory cache covers realistic
- * refresh windows. Shared by the global CacheModule, SrdController's blanket
- * CacheInterceptor, and the VEG-333 AnonymousCacheInterceptor.
+ * TTL for the global in-memory cache. SRD data is static between seeds, so 24h
+ * covers realistic refresh windows. The CacheInterceptor writes without an
+ * explicit TTL, so cache-manager falls back to the module-level `ttl` (see
+ * AppModule); the store carries the same value for any direct writes. Tunable
+ * via CACHE_TTL_MS for operators who want a shorter staleness window.
  */
-export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+export const CACHE_TTL_MS = parseInt(process.env.CACHE_TTL_MS ?? `${24 * 60 * 60 * 1000}`, 10);
 
 /**
  * Hard cap on the number of live entries in the global in-memory cache (VEG-340).
@@ -18,19 +20,24 @@ export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
  * never-re-requested 24h entry per distinct URL, risking slow heap growth and
  * OOM on small self-hosted instances. The LRU evicts the least-recently-used
  * entry once the cap is hit, so the working set of genuinely popular pages stays
- * cached while one-off queries fall out. Sized for a small self-host.
+ * cached while one-off queries fall out. Defaults to a small-self-host size;
+ * tunable via CACHE_LRU_SIZE to match an instance's heap budget.
  */
-export const CACHE_LRU_SIZE = 1000;
+export const CACHE_LRU_SIZE = parseInt(process.env.CACHE_LRU_SIZE ?? '1000', 10);
 
 /**
- * Builds the bounded, LRU-backed Keyv store for the global CacheModule. The TTL
- * is set on the store as a backstop; at runtime the CacheInterceptor passes the
- * module-level TTL on every write, so both agree at 24h. Parameterized for tests
- * — production callers rely on the exported defaults.
+ * Builds the bounded, LRU-backed Keyv store for the global CacheModule.
+ *
+ * `createKeyv` is cacheable's canonical adapter: it wires an LRU-bounded
+ * `CacheableMemory` and disables Keyv's JSON serialization — matching
+ * cache-manager v6's default in-memory store (which also disables it), so values
+ * aren't needlessly round-tripped through JSON and a single CacheableMemory
+ * envelope tracks each entry's TTL. Parameterized for tests; production callers
+ * rely on the exported defaults.
  */
 export function createAppCacheStore({
   ttl = CACHE_TTL_MS,
   lruSize = CACHE_LRU_SIZE,
 }: { ttl?: number; lruSize?: number } = {}): Keyv {
-  return new Keyv({ store: new CacheableMemory({ ttl, lruSize }) });
+  return createKeyv({ ttl, lruSize });
 }
