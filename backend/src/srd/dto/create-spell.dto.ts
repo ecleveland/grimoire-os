@@ -1,8 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
   IsArray,
-  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -11,6 +9,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 /**
  * Body for creating a homebrew spell (VEG-294). Mirrors the SRD spell shape;
@@ -75,18 +74,12 @@ export class CreateSpellDto {
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
-  // Restore the raw body value: without this, the global pipe's
-  // enableImplicitConversion coerces any non-empty string (including 'false')
-  // to true before @IsBoolean runs. The transform's `value` is already
-  // coerced; only `obj` still holds the original. (Same fix as VEG-314.)
-  @Transform(({ obj }: { obj: Record<string, unknown> }) => obj.ritual)
-  @IsBoolean()
+  @IsStrictBoolean()
   ritual?: boolean;
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
-  @Transform(({ obj }: { obj: Record<string, unknown> }) => obj.concentration)
-  @IsBoolean()
+  @IsStrictBoolean()
   concentration?: boolean;
 
   @ApiPropertyOptional({ example: 'a pinch of soot' })

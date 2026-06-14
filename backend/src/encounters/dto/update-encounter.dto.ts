@@ -1,6 +1,7 @@
 import { OmitType, PartialType, ApiPropertyOptional } from '@nestjs/swagger';
 import { CreateEncounterDto } from './create-encounter.dto';
-import { IsOptional, IsNumber, IsBoolean, IsInt, Min } from 'class-validator';
+import { IsOptional, IsNumber, IsInt, Min } from 'class-validator';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 export class UpdateEncounterDto extends PartialType(
   OmitType(CreateEncounterDto, ['campaignId'] as const)
@@ -17,7 +18,7 @@ export class UpdateEncounterDto extends PartialType(
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   isActive?: boolean;
 
   /**

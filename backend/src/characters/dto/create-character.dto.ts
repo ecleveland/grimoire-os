@@ -4,13 +4,13 @@ import {
   IsNumber,
   IsArray,
   ValidateNested,
-  IsBoolean,
   IsIn,
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DIE_TYPES, Feature } from '@grimoire-os/shared';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 class AbilityScoresDto {
   @ApiPropertyOptional({ example: 10 })
@@ -99,7 +99,7 @@ class InventoryItemDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   equipped?: boolean;
 }
 
@@ -370,7 +370,7 @@ export class CreateCharacterDto {
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   heroicInspiration?: boolean;
 
   @ApiPropertyOptional({ type: HitDiceDto })
