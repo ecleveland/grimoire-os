@@ -691,11 +691,13 @@ export default function InitiativeTrackerPage() {
   const rollNpcInitiatives = async (mode: 'each' | 'shared') => {
     if (!encounter || writePending) return;
     if (!encounter.combatants.some(c => c.isNpc)) return;
-    const shared = mode === 'shared' ? rollInitiativeMod(0) : 0;
+    // Shared mode rolls one d20 up front and gives it to every NPC; each mode
+    // rolls per NPC (d20 + its snapshotted modifier, flat d20 when absent).
+    // rollInitiativeMod never returns < 1, so `?? rollPerNpc` only falls through
+    // in each mode (sharedRoll is null there).
+    const sharedRoll = mode === 'shared' ? rollInitiativeMod(0) : null;
     const combatants = encounter.combatants.map(c =>
-      c.isNpc
-        ? { ...c, initiative: mode === 'shared' ? shared : rollInitiativeMod(c.initiativeMod ?? 0) }
-        : c
+      c.isNpc ? { ...c, initiative: sharedRoll ?? rollInitiativeMod(c.initiativeMod ?? 0) } : c
     );
     // Follow the active combatant across the re-sort: a PC keeps its object
     // reference; an NPC was replaced, so map to its new object by stored index.
