@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { useApiQuery, useApiMutation, invalidateApiPath, apiQueryKey } from '@/lib/query';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
@@ -31,83 +33,65 @@ const LIMIT = 20;
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
-  const [campaign, setCampaign] = useState<Campaign | null>(null);
-  const [notes, setNotes] = useState<NoteListItem[]>([]);
-  const [notesTotal, setNotesTotal] = useState(0);
-  const [notesLastPage, setNotesLastPage] = useState(1);
-  const [notesPage, setNotesPage] = useState(1);
-  const [encounters, setEncounters] = useState<EncounterListItem[]>([]);
-  const [encountersTotal, setEncountersTotal] = useState(0);
-  const [encountersLastPage, setEncountersLastPage] = useState(1);
-  const [encountersPage, setEncountersPage] = useState(1);
-  const [recentNpcs, setRecentNpcs] = useState<NpcListItem[]>([]);
-  const [npcsTotal, setNpcsTotal] = useState(0);
+  const queryClient = useQueryClient();
+
   const [tab, setTab] = useState<Tab>('overview');
-  const [loading, setLoading] = useState(true);
-  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [notesPage, setNotesPage] = useState(1);
+  const [encountersPage, setEncountersPage] = useState(1);
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
-  const [deletingEncounterId, setDeletingEncounterId] = useState<string | null>(null);
-  const [encountersRefresh, setEncountersRefresh] = useState(0);
   const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
+  const campaignQuery = useApiQuery<Campaign>(`/campaigns/${id}`, {
+    errorToast: { message: 'Failed to load campaign', id: 'load-campaign' },
+  });
+  const campaign = campaignQuery.data ?? null;
   const isOwner = campaign && user && campaign.ownerId === user.userId;
+  // The campaign cache is the single source of truth for the invite code;
+  // generate/revoke write it back via setQueryData (below) so it can't go stale
+  // and resurface a revoked code on a cached remount.
+  const inviteCode = campaign?.inviteCode ?? null;
 
-  useEffect(() => {
-    apiFetch<Campaign>(`/campaigns/${id}`)
-      .then(c => {
-        setCampaign(c);
-        if (c.inviteCode) setInviteCode(c.inviteCode);
-      })
-      .catch(() => toast.error('Failed to load campaign'))
-      .finally(() => setLoading(false));
-  }, [id]);
+  // Tab list reads. Each is gated on its tab being active (no fetch until the
+  // user opens it) and carries `isLoading`, so the empty state no longer flashes
+  // while the request is still in flight.
+  const notesQuery = useApiQuery<PaginatedResponse<NoteListItem>>(
+    `/notes?campaignId=${id}&page=${notesPage}&limit=${LIMIT}`,
+    { enabled: tab === 'notes', errorToast: { message: 'Failed to load notes', id: 'load-notes' } }
+  );
+  const encountersQuery = useApiQuery<PaginatedResponse<EncounterListItem>>(
+    `/encounters?campaignId=${id}&page=${encountersPage}&limit=${LIMIT}`,
+    {
+      enabled: tab === 'encounters',
+      errorToast: { message: 'Failed to load encounters', id: 'load-encounters' },
+    }
+  );
+  const npcsQuery = useApiQuery<PaginatedResponse<NpcListItem>>(
+    `/npcs?campaignId=${id}&page=1&limit=3`,
+    { enabled: tab === 'npcs', errorToast: { message: 'Failed to load NPCs', id: 'load-npcs' } }
+  );
 
+  const notes = notesQuery.data?.data ?? [];
+  const notesTotal = notesQuery.data?.total ?? 0;
+  const notesLastPage = notesQuery.data?.lastPage ?? 1;
+  const encounters = encountersQuery.data?.data ?? [];
+  const encountersTotal = encountersQuery.data?.total ?? 0;
+  const encountersLastPage = encountersQuery.data?.lastPage ?? 1;
+  const recentNpcs = npcsQuery.data?.data ?? [];
+  const npcsTotal = npcsQuery.data?.total ?? 0;
+
+  // Self-heal: a fetched encounters page that comes back empty and out of range
+  // (rows were deleted elsewhere) steps back to the real last page.
   useEffect(() => {
-    if (tab === 'notes') {
-      apiFetch<PaginatedResponse<NoteListItem>>(
-        `/notes?campaignId=${id}&page=${notesPage}&limit=${LIMIT}`
-      )
-        .then(res => {
-          setNotes(res.data);
-          setNotesTotal(res.total);
-          setNotesLastPage(res.lastPage);
-        })
-        .catch(err => {
-          console.error('Failed to load notes:', err);
-          toast.error('Failed to load notes', { id: 'load-notes' });
-        });
+    const d = encountersQuery.data;
+    if (
+      tab === 'encounters' &&
+      d &&
+      d.data.length === 0 &&
+      encountersPage > Math.max(1, d.lastPage)
+    ) {
+      setEncountersPage(Math.max(1, d.lastPage));
     }
-    if (tab === 'encounters') {
-      apiFetch<PaginatedResponse<EncounterListItem>>(
-        `/encounters?campaignId=${id}&page=${encountersPage}&limit=${LIMIT}`
-      )
-        .then(res => {
-          setEncounters(res.data);
-          setEncountersTotal(res.total);
-          setEncountersLastPage(res.lastPage);
-          // Self-heal: if this page no longer exists on the server (rows were
-          // deleted elsewhere), step to the real last page.
-          if (res.data.length === 0 && encountersPage > Math.max(1, res.lastPage)) {
-            setEncountersPage(Math.max(1, res.lastPage));
-          }
-        })
-        .catch(err => {
-          console.error('Failed to load encounters:', err);
-          toast.error('Failed to load encounters', { id: 'load-encounters' });
-        });
-    }
-    if (tab === 'npcs') {
-      apiFetch<PaginatedResponse<NpcListItem>>(`/npcs?campaignId=${id}&page=1&limit=3`)
-        .then(res => {
-          setRecentNpcs(res.data);
-          setNpcsTotal(res.total);
-        })
-        .catch(err => {
-          console.error('Failed to load NPCs:', err);
-          toast.error('Failed to load NPCs', { id: 'load-npcs' });
-        });
-    }
-  }, [tab, id, notesPage, encountersPage, encountersRefresh]);
+  }, [encountersQuery.data, encountersPage, tab]);
 
   const handleTabChange = (newTab: Tab) => {
     if (newTab !== tab) {
@@ -117,55 +101,62 @@ export default function CampaignDetailPage() {
     }
   };
 
-  const generateInviteCode = async () => {
-    try {
-      const res = await apiFetch<InviteCodeResponse>(`/campaigns/${id}/invite-code`, {
-        method: 'POST',
-      });
-      setInviteCode(res.inviteCode);
-      toast.success('Invite code generated!');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to generate invite code');
-    }
-  };
+  const setCachedInviteCode = (code: string | undefined) =>
+    queryClient.setQueryData<Campaign>(apiQueryKey(`/campaigns/${id}`), prev =>
+      prev ? { ...prev, inviteCode: code } : prev
+    );
 
-  const revokeInviteCode = async () => {
-    try {
-      await apiFetch(`/campaigns/${id}/invite-code`, { method: 'DELETE' });
-      setInviteCode(null);
-      toast.success('Invite code revoked');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to revoke invite code');
+  const generateInvite = useApiMutation(
+    () => apiFetch<InviteCodeResponse>(`/campaigns/${id}/invite-code`, { method: 'POST' }),
+    {
+      onSuccess: res => {
+        setCachedInviteCode(res.inviteCode);
+        toast.success('Invite code generated!');
+      },
+      onError: err =>
+        toast.error(err instanceof Error ? err.message : 'Failed to generate invite code'),
     }
-  };
+  );
 
-  const performDeleteEncounter = async () => {
-    if (!encounterToDelete || deletingEncounterId) return;
-    setDeletingEncounterId(encounterToDelete.id);
-    try {
-      await apiFetch(`/encounters/${encounterToDelete.id}`, { method: 'DELETE' });
-      toast.success('Encounter deleted');
-      // Re-sync from the server so the page contents, total, and lastPage stay
-      // consistent; clamp the page in case the last row of the final page went
-      // away. Both updates land in one batch, so the effect refetches once even
-      // when the page is unchanged (or its setter bails out).
-      const lastPageAfterDelete = Math.max(1, Math.ceil((encountersTotal - 1) / LIMIT));
-      setEncountersPage(p => Math.min(p, lastPageAfterDelete));
-      setEncountersRefresh(r => r + 1);
-      // The row that held focus is about to unmount; if focus was dropped on
-      // <body>, land it somewhere stable — but never steal it from an element
-      // the user has since moved to.
-      if (document.activeElement === document.body) {
-        encountersHeadingRef.current?.focus();
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete encounter');
-    } finally {
-      setDeletingEncounterId(null);
+  const revokeInvite = useApiMutation(
+    () => apiFetch(`/campaigns/${id}/invite-code`, { method: 'DELETE' }),
+    {
+      onSuccess: () => {
+        setCachedInviteCode(undefined);
+        toast.success('Invite code revoked');
+      },
+      onError: err =>
+        toast.error(err instanceof Error ? err.message : 'Failed to revoke invite code'),
     }
-  };
+  );
 
-  if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  const deleteEncounter = useApiMutation(
+    (enc: EncounterListItem) => apiFetch(`/encounters/${enc.id}`, { method: 'DELETE' }),
+    {
+      onSuccess: async () => {
+        toast.success('Encounter deleted');
+        // Clamp the page in case the last row of the final page went away, then
+        // invalidate so the list re-syncs from the server rather than being
+        // patched locally (keeps contents, total, and lastPage consistent).
+        const lastPageAfterDelete = Math.max(1, Math.ceil((encountersTotal - 1) / LIMIT));
+        setEncountersPage(p => Math.min(p, lastPageAfterDelete));
+        // Trailing `&` bounds the prefix to this campaign's list keys
+        // (`…campaignId=<id>&page=…`) so a sibling id can't be caught.
+        await invalidateApiPath(queryClient, `/encounters?campaignId=${id}&`);
+        // The row that held focus is about to unmount; if focus dropped to
+        // <body>, land it somewhere stable — but never steal it from an element
+        // the user has since moved to.
+        if (document.activeElement === document.body) {
+          encountersHeadingRef.current?.focus();
+        }
+      },
+      onError: err =>
+        toast.error(err instanceof Error ? err.message : 'Failed to delete encounter'),
+    }
+  );
+
+  if (campaignQuery.isPending)
+    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   if (!campaign) return <div className="text-gray-500 dark:text-gray-400">Campaign not found.</div>;
 
   const tabs: { key: Tab; label: string }[] = [
@@ -233,16 +224,18 @@ export default function CampaignDetailPage() {
                 Copy
               </button>
               <button
-                onClick={revokeInviteCode}
-                className="text-sm text-red-600 hover:text-red-700"
+                onClick={() => revokeInvite.mutate()}
+                disabled={revokeInvite.isPending}
+                className="text-sm text-red-600 hover:text-red-700 disabled:opacity-50"
               >
                 Revoke
               </button>
             </div>
           ) : (
             <button
-              onClick={generateInviteCode}
-              className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              onClick={() => generateInvite.mutate()}
+              disabled={generateInvite.isPending}
+              className="px-3 py-1 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               Generate Invite Code
             </button>
@@ -309,7 +302,9 @@ export default function CampaignDetailPage() {
               New Note
             </Link>
           </div>
-          {notes.length === 0 ? (
+          {notesQuery.isLoading ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading notes…</p>
+          ) : notes.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400">No notes yet.</p>
           ) : (
             <>
@@ -375,7 +370,9 @@ export default function CampaignDetailPage() {
               </Link>
             </div>
           </div>
-          {recentNpcs.length === 0 ? (
+          {npcsQuery.isLoading ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading NPCs…</p>
+          ) : recentNpcs.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400">No NPCs yet.</p>
           ) : (
             <div className="space-y-3">
@@ -420,7 +417,9 @@ export default function CampaignDetailPage() {
               New Encounter
             </Link>
           </div>
-          {encounters.length === 0 ? (
+          {encountersQuery.isLoading ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading encounters…</p>
+          ) : encounters.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400">No encounters yet.</p>
           ) : (
             <>
@@ -445,7 +444,7 @@ export default function CampaignDetailPage() {
                     {isOwner && (
                       <button
                         onClick={() => setEncounterToDelete(enc)}
-                        disabled={deletingEncounterId !== null}
+                        disabled={deleteEncounter.isPending}
                         aria-label={`Delete ${enc.name}`}
                         className="px-3 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
                       >
@@ -476,7 +475,9 @@ export default function CampaignDetailPage() {
         description={`Delete "${encounterToDelete?.name ?? ''}"? This cannot be undone.`}
         confirmLabel="Delete"
         variant="danger"
-        onConfirm={performDeleteEncounter}
+        onConfirm={() => {
+          if (encounterToDelete) deleteEncounter.mutate(encounterToDelete);
+        }}
       />
     </div>
   );

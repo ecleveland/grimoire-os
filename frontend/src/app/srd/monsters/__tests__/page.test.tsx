@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import MonsterListPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -93,10 +94,17 @@ function makeResponse(monsters: SrdMonster[]): PaginatedResponse<SrdMonster> {
 }
 
 function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <PrintTrayProvider>
-      <MonsterListPage />
-    </PrintTrayProvider>
+    <QueryClientProvider client={client}>
+      <PrintTrayProvider>
+        <MonsterListPage />
+      </PrintTrayProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -182,6 +190,35 @@ describe('MonsterListPage', () => {
       expect(params.get('page')).toBe('1');
       expect(params.get('q')).toBe('gob');
       expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('keep-previous-data paging', () => {
+    it('keeps the previous page rows visible (no flash) while the next page loads', async () => {
+      let resolvePage2!: (v: PaginatedResponse<SrdMonster>) => void;
+      mockApiFetch.mockReset();
+      mockApiFetch.mockResolvedValueOnce(makeResponse([goblin, dragon]));
+      mockApiFetch.mockImplementationOnce(
+        () =>
+          new Promise<PaginatedResponse<SrdMonster>>(resolve => {
+            resolvePage2 = resolve;
+          })
+      );
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByText('Goblin');
+
+      // Page to 2; that fetch is left pending.
+      await user.click(screen.getByTestId('pagination'));
+
+      // The prior page's rows stay rendered (keepPreviousData) and the grid marks
+      // itself busy — this is exactly what regresses if keepPreviousData is dropped.
+      await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument());
+      expect(screen.getByText('Goblin')).toBeInTheDocument();
+      expect(screen.getByText('Ancient Red Dragon')).toBeInTheDocument();
+
+      resolvePage2(makeResponse([goblin]));
+      await waitFor(() => expect(screen.queryByText('Ancient Red Dragon')).not.toBeInTheDocument());
     });
   });
 
