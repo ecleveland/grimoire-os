@@ -1,14 +1,6 @@
-import {
-  IsArray,
-  IsBoolean,
-  IsInt,
-  IsObject,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Min,
-} from 'class-validator';
+import { IsArray, IsInt, IsObject, IsOptional, IsString, IsUUID, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 export class CreateNpcDto {
   @ApiProperty()
@@ -130,6 +122,6 @@ export class CreateNpcDto {
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   isManual?: boolean;
 }

@@ -1,9 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
-  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -12,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 /**
  * Body for creating a homebrew item (VEG-296). Mirrors the SRD item shape;
@@ -72,12 +71,7 @@ export class CreateItemDto {
 
   @ApiPropertyOptional({ example: false })
   @IsOptional()
-  // Restore the raw body value: without this, the global pipe's
-  // enableImplicitConversion coerces any non-empty string (including 'false')
-  // to true before @IsBoolean runs. The transform's `value` is already
-  // coerced; only `obj` still holds the original. (Same fix as VEG-314.)
-  @Transform(({ obj }: { obj: Record<string, unknown> }) => obj.stealthDisadvantage)
-  @IsBoolean()
+  @IsStrictBoolean()
   stealthDisadvantage?: boolean;
 
   @ApiPropertyOptional({ example: 13 })
@@ -105,13 +99,11 @@ export class CreateItemDto {
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
-  @Transform(({ obj }: { obj: Record<string, unknown> }) => obj.requiresAttunement)
-  @IsBoolean()
+  @IsStrictBoolean()
   requiresAttunement?: boolean;
 
   @ApiPropertyOptional({ example: true })
   @IsOptional()
-  @Transform(({ obj }: { obj: Record<string, unknown> }) => obj.isMagic)
-  @IsBoolean()
+  @IsStrictBoolean()
   isMagic?: boolean;
 }

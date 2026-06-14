@@ -2,7 +2,6 @@ import {
   IsString,
   IsOptional,
   IsArray,
-  IsBoolean,
   IsIn,
   IsInt,
   IsNumber,
@@ -13,6 +12,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { CONDITIONS } from '@grimoire-os/shared';
 import type { Condition, LootItemSource } from '@grimoire-os/shared';
 
@@ -150,7 +150,7 @@ class CombatantDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   isNpc?: boolean;
 
   @ApiPropertyOptional()

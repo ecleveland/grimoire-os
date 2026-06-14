@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsIn, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 // Optional generator constraint overrides. Mirrors GenerateNpcDto fields
 // except `campaignId`, which is always inherited from the source NPC.
@@ -52,7 +53,7 @@ export class RelatedConstraintsOverrideDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   combatRelevant?: boolean;
 }
 

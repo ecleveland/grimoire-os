@@ -1,5 +1,4 @@
 import {
-  IsBoolean,
   IsIn,
   IsNumber,
   IsObject,
@@ -11,6 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 export class LootOverridesDto {
   @ApiPropertyOptional({ minimum: 0 })
@@ -89,7 +89,7 @@ export class GenerateNpcDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsBoolean()
+  @IsStrictBoolean()
   combatRelevant?: boolean;
 
   @ApiPropertyOptional({ type: LootOverridesDto })
