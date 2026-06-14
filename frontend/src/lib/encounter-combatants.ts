@@ -171,5 +171,8 @@ export function buildMonsterCombatants(
     // override) and fall back to the canonical CR→XP value.
     cr: monster.challengeRating,
     xp: monster.experiencePoints ?? xpForCr(monster.challengeRating),
+    // Snapshot the DEX-based initiative modifier (VEG-370) so the tracker can
+    // roll d20 + mod for this NPC without re-fetching the stat block.
+    initiativeMod: dexModifier(monster),
   }));
 }

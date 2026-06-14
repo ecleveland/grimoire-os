@@ -172,6 +172,13 @@ export interface Combatant {
    * party combatants; absent on monsters and hand-typed PCs.
    */
   level?: number;
+  /**
+   * Initiative modifier snapshotted from the source monster's DEX at add/link
+   * time (VEG-370), so the tracker's "Roll NPC initiative" can roll d20 + mod
+   * without re-fetching the stat block. Set on monster combatants; absent on
+   * hand-typed NPCs and older rows, which roll a flat d20.
+   */
+  initiativeMod?: number;
 }
 
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;

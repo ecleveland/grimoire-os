@@ -346,6 +346,7 @@ describe('NewEncounterPage', () => {
           monsterId: 'mon-goblin',
           cr: 0.25,
           xp: 50,
+          initiativeMod: 2, // dex 14 → +2
         },
         {
           name: 'Goblin 2',
@@ -357,6 +358,7 @@ describe('NewEncounterPage', () => {
           monsterId: 'mon-goblin',
           cr: 0.25,
           xp: 50,
+          initiativeMod: 2,
         },
       ]);
       expect(mockRouterPush).toHaveBeenCalledWith('/campaigns/camp-1/encounters/enc-1');
