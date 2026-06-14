@@ -13,13 +13,17 @@ const DENOMINATION_LABELS: Record<string, string> = {
   pp: 'PP',
 };
 
+const ATTUNEMENT_SLOTS = 3;
+
 export default function InventorySection({ character }: InventorySectionProps) {
   const inventory = character.inventory ?? [];
   const currency = character.currency ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  const attunedItems = (character.attunedItems ?? []).slice(0, ATTUNEMENT_SLOTS);
   const hasInventory = inventory.length > 0;
   const hasCurrency = Object.values(currency).some(v => v > 0);
+  const hasAttunement = attunedItems.length > 0;
 
-  if (!hasInventory && !hasCurrency) return null;
+  if (!hasInventory && !hasCurrency && !hasAttunement) return null;
 
   return (
     <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
@@ -77,6 +81,37 @@ export default function InventorySection({ character }: InventorySectionProps) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Magic Item Attunement (up to 3) */}
+      {hasAttunement && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase text-center mb-3">
+            Attunement
+          </h3>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            {Array.from({ length: ATTUNEMENT_SLOTS }, (_, i) => {
+              const item = attunedItems[i];
+              return item ? (
+                <div
+                  key={i}
+                  data-testid="attunement-slot-filled"
+                  className="p-2 border border-indigo-300 dark:border-indigo-600 rounded text-sm font-medium text-gray-900 dark:text-gray-100"
+                >
+                  {item.name}
+                </div>
+              ) : (
+                <div
+                  key={i}
+                  data-testid="attunement-slot-empty"
+                  className="p-2 border border-dashed border-gray-300 dark:border-gray-600 rounded text-xs text-gray-400 dark:text-gray-500"
+                >
+                  Empty
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

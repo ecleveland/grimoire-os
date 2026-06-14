@@ -31,8 +31,8 @@ const baseCharacter: Character = {
   languages: [],
   savingThrows: [],
   skills: [],
-  knownSpells: [],
-  preparedSpells: [],
+  spells: [],
+  attunedItems: [],
   spellSlots: [],
   inventory: [
     { name: 'Chain Mail', quantity: 1, weight: 55, equipped: true },
@@ -133,6 +133,57 @@ describe('InventorySection', () => {
     it('does not render Coins section when all currency values are 0', () => {
       const char = { ...baseCharacter, currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 } };
       render(<InventorySection character={char} />);
+      expect(screen.queryByText('Coins')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Attunement', () => {
+    const attuned = {
+      ...baseCharacter,
+      attunedItems: [
+        { name: 'Cloak of Protection' },
+        { name: 'Ring of Evasion', itemId: '123e4567-e89b-42d3-a456-426614174000' },
+      ],
+    };
+
+    it('renders the Attunement header and attuned item names', () => {
+      render(<InventorySection character={attuned} />);
+      expect(screen.getByText('Attunement')).toBeInTheDocument();
+      expect(screen.getByText('Cloak of Protection')).toBeInTheDocument();
+      expect(screen.getByText('Ring of Evasion')).toBeInTheDocument();
+    });
+
+    it('always shows 3 slots, filling the remainder with empty placeholders', () => {
+      render(<InventorySection character={attuned} />);
+      expect(screen.getAllByTestId('attunement-slot-filled')).toHaveLength(2);
+      expect(screen.getAllByTestId('attunement-slot-empty')).toHaveLength(1);
+    });
+
+    it('caps display at 3 slots even if more are somehow present', () => {
+      const overAttuned = {
+        ...baseCharacter,
+        attunedItems: [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }],
+      };
+      render(<InventorySection character={overAttuned} />);
+      expect(screen.getAllByTestId('attunement-slot-filled')).toHaveLength(3);
+      expect(screen.queryByTestId('attunement-slot-empty')).not.toBeInTheDocument();
+      expect(screen.queryByText('D')).not.toBeInTheDocument();
+    });
+
+    it('does not render the Attunement section when there are no attuned items', () => {
+      render(<InventorySection character={baseCharacter} />);
+      expect(screen.queryByText('Attunement')).not.toBeInTheDocument();
+    });
+
+    it('renders the section when attunement is the only content', () => {
+      const char = {
+        ...attuned,
+        inventory: [],
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      };
+      render(<InventorySection character={char} />);
+      expect(screen.getByText('Attunement')).toBeInTheDocument();
+      expect(screen.queryByText('Equipment')).not.toBeInTheDocument();
       expect(screen.queryByText('Coins')).not.toBeInTheDocument();
     });
   });

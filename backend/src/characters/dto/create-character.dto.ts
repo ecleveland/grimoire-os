@@ -2,14 +2,18 @@ import {
   IsString,
   IsOptional,
   IsNumber,
+  IsInt,
+  Min,
+  Max,
   IsArray,
+  ArrayMaxSize,
   ValidateNested,
   IsIn,
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DIE_TYPES, Feature } from '@grimoire-os/shared';
+import { AttunedItem, DIE_TYPES, Feature, SpellEntry } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 class AbilityScoresDto {
@@ -183,6 +187,69 @@ class FeatureDto implements Feature {
   description?: string;
 }
 
+class SpellEntryDto implements SpellEntry {
+  @ApiProperty({ example: 3, description: '0 = cantrip' })
+  @IsInt()
+  @Min(0)
+  @Max(9)
+  level!: number;
+
+  @ApiProperty({ example: 'Fireball' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsStrictBoolean()
+  prepared?: boolean;
+
+  @ApiPropertyOptional({ example: '1 action' })
+  @IsOptional()
+  @IsString()
+  castingTime?: string;
+
+  @ApiPropertyOptional({ example: '150 feet' })
+  @IsOptional()
+  @IsString()
+  range?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsStrictBoolean()
+  concentration?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsStrictBoolean()
+  ritual?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsStrictBoolean()
+  material?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @ApiPropertyOptional({ description: 'Optional link to the Spell catalog row' })
+  @IsOptional()
+  @IsUUID()
+  spellId?: string;
+}
+
+class AttunedItemDto implements AttunedItem {
+  @ApiProperty({ example: 'Cloak of Protection' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional({ description: 'Optional link to the Item catalog row' })
+  @IsOptional()
+  @IsUUID()
+  itemId?: string;
+}
+
 export class CreateCharacterDto {
   @ApiProperty({ example: 'Thorin Ironforge' })
   @IsString()
@@ -289,17 +356,12 @@ export class CreateCharacterDto {
   @IsNumber()
   spellAttackBonus?: number;
 
-  @ApiPropertyOptional({ type: [String] })
+  @ApiPropertyOptional({ type: [SpellEntryDto] })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  knownSpells?: string[];
-
-  @ApiPropertyOptional({ type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  preparedSpells?: string[];
+  @ValidateNested({ each: true })
+  @Type(() => SpellEntryDto)
+  spells?: SpellEntryDto[];
 
   @ApiPropertyOptional({ type: [SpellSlotDto] })
   @IsOptional()
@@ -314,6 +376,14 @@ export class CreateCharacterDto {
   @ValidateNested({ each: true })
   @Type(() => InventoryItemDto)
   inventory?: InventoryItemDto[];
+
+  @ApiPropertyOptional({ type: [AttunedItemDto], description: 'Up to 3 attuned magic items' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => AttunedItemDto)
+  attunedItems?: AttunedItemDto[];
 
   @ApiPropertyOptional({ type: CurrencyDto })
   @IsOptional()

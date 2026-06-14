@@ -122,6 +122,99 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('spells', () => {
+    it('accepts a fully-populated structured spell entry', async () => {
+      const dto = toDto({
+        ...baseDto,
+        spells: [
+          {
+            level: 3,
+            name: 'Fireball',
+            prepared: true,
+            castingTime: '1 action',
+            range: '150 feet',
+            concentration: false,
+            ritual: false,
+            material: true,
+            notes: 'A tiny ball of bat guano and sulfur',
+            spellId: '123e4567-e89b-42d3-a456-426614174000',
+          },
+        ],
+      });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'spells')).toHaveLength(0);
+    });
+
+    it('accepts a name-only cantrip entry (level 0)', async () => {
+      const dto = toDto({ ...baseDto, spells: [{ level: 0, name: 'Fire Bolt' }] });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'spells')).toHaveLength(0);
+    });
+
+    it('rejects an entry missing the required name', async () => {
+      const dto = toDto({ ...baseDto, spells: [{ level: 1 }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'spells')).toBeDefined();
+    });
+
+    it.each([-1, 10, 2.5])('rejects an out-of-range / non-integer level (%s)', async level => {
+      const dto = toDto({ ...baseDto, spells: [{ level, name: 'Bad' }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'spells')).toBeDefined();
+    });
+
+    it('rejects a non-boolean concentration flag', async () => {
+      const dto = toDto({ ...baseDto, spells: [{ level: 1, name: 'X', concentration: 'yes' }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'spells')).toBeDefined();
+    });
+
+    it('rejects a non-UUID spellId', async () => {
+      const dto = toDto({ ...baseDto, spells: [{ level: 1, name: 'X', spellId: 'not-a-uuid' }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'spells')).toBeDefined();
+    });
+  });
+
+  describe('attunedItems', () => {
+    it('accepts up to 3 attuned items', async () => {
+      const dto = toDto({
+        ...baseDto,
+        attunedItems: [
+          { name: 'Cloak of Protection' },
+          { name: 'Ring of Evasion', itemId: '123e4567-e89b-42d3-a456-426614174000' },
+          { name: 'Amulet of Health' },
+        ],
+      });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'attunedItems')).toHaveLength(0);
+    });
+
+    it('rejects more than 3 attuned items', async () => {
+      const dto = toDto({
+        ...baseDto,
+        attunedItems: [{ name: 'A' }, { name: 'B' }, { name: 'C' }, { name: 'D' }],
+      });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'attunedItems')).toBeDefined();
+    });
+
+    it('rejects an item missing the required name', async () => {
+      const dto = toDto({
+        ...baseDto,
+        attunedItems: [{ itemId: '123e4567-e89b-42d3-a456-426614174000' }],
+      });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'attunedItems')).toBeDefined();
+    });
+
+    it('rejects a non-UUID itemId', async () => {
+      const dto = toDto({ ...baseDto, attunedItems: [{ name: 'X', itemId: 'nope' }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'attunedItems')).toBeDefined();
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);

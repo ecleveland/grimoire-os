@@ -1,6 +1,7 @@
 import type { CampaignStatus, NoteVisibility, Role } from './enums';
 import type {
   AbilityScores,
+  AttunedItem,
   Combatant,
   CombatantLootItem,
   Currency,
@@ -9,6 +10,7 @@ import type {
   HitDice,
   HitPoints,
   InventoryItem,
+  SpellEntry,
   SpellSlot,
   Weapon,
 } from './embedded';
@@ -64,10 +66,10 @@ export interface Character {
   spellcastingAbility?: string;
   spellSaveDC?: number;
   spellAttackBonus?: number;
-  knownSpells: string[];
-  preparedSpells: string[];
+  spells: SpellEntry[];
   spellSlots: SpellSlot[];
   inventory: InventoryItem[];
+  attunedItems: AttunedItem[];
   currency: Currency;
   features: Feature[];
   personalityTraits?: string;
