@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import CampaignDetailPage from '../page';
 import type { Campaign, Note, Encounter, Npc, PaginatedResponse } from '@/lib/types';
 
@@ -24,6 +26,18 @@ vi.mock('sonner', () => ({
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => mockUseAuth(),
 }));
+
+// Fresh QueryClient per render with retries off so error states resolve
+// immediately instead of waiting on react-query's retry/backoff.
+function renderPage() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return render(<CampaignDetailPage />, { wrapper });
+}
 
 function makeCampaign(over: Partial<Campaign> = {}): Campaign {
   return {
@@ -113,24 +127,23 @@ beforeEach(() => {
 describe('CampaignDetailPage', () => {
   it('shows the loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
-    render(<CampaignDetailPage />);
+    renderPage();
     expect(screen.getByText(/^loading\.\.\./i)).toBeInTheDocument();
   });
 
-  it('shows a not-found message if the campaign request resolves with null/undefined', async () => {
+  it('shows a not-found message and toasts when the campaign request rejects', async () => {
     mockApiFetch.mockRejectedValue(new Error('404'));
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText(/campaign not found/i)).toBeInTheDocument());
     expect(mockToastError).toHaveBeenCalledWith('Failed to load campaign');
   });
 
   it('renders campaign name, status, players, session, description, and setting', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign());
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
-    // Status appears twice (header badge + overview list); both should say "active"
     expect(screen.getAllByText('active').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('2 players')).toBeInTheDocument();
     expect(screen.getByText(/session 4/i)).toBeInTheDocument();
@@ -140,7 +153,7 @@ describe('CampaignDetailPage', () => {
 
   it('shows the Edit link only when the current user owns the campaign', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ ownerId: 'user-1' }));
-    const { unmount } = render(<CampaignDetailPage />);
+    const { unmount } = renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -152,7 +165,7 @@ describe('CampaignDetailPage', () => {
 
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(makeCampaign({ ownerId: 'someone-else' }));
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -161,7 +174,7 @@ describe('CampaignDetailPage', () => {
 
   it('renders the overview tab content by default', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign());
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -178,7 +191,7 @@ describe('CampaignDetailPage', () => {
       makeListResponse([makeNote({ id: 'note-a', title: 'Session 1 recap' })])
     );
     const user = userEvent.setup();
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -191,11 +204,30 @@ describe('CampaignDetailPage', () => {
     expect(link).toHaveAttribute('href', '/campaigns/camp-1/notes/note-a');
   });
 
+  it('does not flash the empty state while notes are still loading', async () => {
+    let resolveNotes!: (v: PaginatedResponse<Note>) => void;
+    mockApiFetch.mockResolvedValueOnce(makeCampaign());
+    mockApiFetch.mockImplementationOnce(
+      () => new Promise<PaginatedResponse<Note>>(resolve => (resolveNotes = resolve))
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /^notes$/i }));
+    // While the request is in flight the "No notes yet." copy must not appear.
+    expect(screen.queryByText(/no notes yet/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/loading notes/i)).toBeInTheDocument();
+    resolveNotes(makeListResponse<Note>([]));
+    await waitFor(() => expect(screen.getByText(/no notes yet/i)).toBeInTheDocument());
+  });
+
   it('shows the empty state when the notes tab has no notes', async () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockResolvedValueOnce(makeListResponse<Note>([]));
     const user = userEvent.setup();
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -208,7 +240,7 @@ describe('CampaignDetailPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockRejectedValueOnce(new Error('notes boom'));
     const user = userEvent.setup();
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -228,7 +260,7 @@ describe('CampaignDetailPage', () => {
       makeListResponse([makeEncounter({ id: 'enc-a', name: 'Goblin Ambush', round: 2 })])
     );
     const user = userEvent.setup();
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -245,7 +277,7 @@ describe('CampaignDetailPage', () => {
       makeListResponse([makeNpc({ id: 'npc-a', name: 'Old Maelin' })])
     );
     const user = userEvent.setup();
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -269,7 +301,7 @@ describe('CampaignDetailPage', () => {
         configurable: true,
       });
       mockApiFetch.mockResolvedValue(makeCampaign({ inviteCode: 'ABCD-1234' }));
-      render(<CampaignDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('ABCD-1234')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /copy/i }));
       expect(writeText).toHaveBeenCalledWith('ABCD-1234');
@@ -280,7 +312,7 @@ describe('CampaignDetailPage', () => {
       mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: undefined }));
       mockApiFetch.mockResolvedValueOnce({ inviteCode: 'NEW-CODE' });
       const user = userEvent.setup();
-      render(<CampaignDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /generate invite code/i })).toBeInTheDocument()
       );
@@ -297,7 +329,7 @@ describe('CampaignDetailPage', () => {
       mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: undefined }));
       mockApiFetch.mockRejectedValueOnce(new Error('rate limited'));
       const user = userEvent.setup();
-      render(<CampaignDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /generate invite code/i })).toBeInTheDocument()
       );
@@ -309,7 +341,7 @@ describe('CampaignDetailPage', () => {
       mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: 'ABCD-1234' }));
       mockApiFetch.mockResolvedValueOnce(undefined);
       const user = userEvent.setup();
-      render(<CampaignDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('ABCD-1234')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /revoke/i }));
       await waitFor(() =>
@@ -326,7 +358,7 @@ describe('CampaignDetailPage', () => {
       mockApiFetch.mockResolvedValueOnce(makeCampaign({ inviteCode: 'STAY-PUT' }));
       mockApiFetch.mockRejectedValueOnce(new Error('server down'));
       const user = userEvent.setup();
-      render(<CampaignDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('STAY-PUT')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /revoke/i }));
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('server down'));
@@ -336,7 +368,7 @@ describe('CampaignDetailPage', () => {
 
   it('hides the invite-code panel for non-owners', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ ownerId: 'other' }));
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -345,7 +377,7 @@ describe('CampaignDetailPage', () => {
 
   it('hides the session line when currentSession is undefined', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ currentSession: undefined }));
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );
@@ -353,14 +385,43 @@ describe('CampaignDetailPage', () => {
   });
 
   describe('encounter delete (VEG-291)', () => {
-    async function openEncountersTab(
-      user: ReturnType<typeof userEvent.setup>,
-      campaign = makeCampaign(),
-      encounters = [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })]
-    ) {
-      mockApiFetch.mockResolvedValueOnce(campaign);
-      mockApiFetch.mockResolvedValueOnce(makeListResponse(encounters));
-      render(<CampaignDetailPage />);
+    // Path-routing mock: the encounters list is read from a mutable closure, so a
+    // DELETE followed by react-query's cache invalidation re-reads the shrunken
+    // list — no brittle call-order sequencing.
+    function routeCampaign(opts: {
+      campaign?: Campaign;
+      encounters: Encounter[];
+      onDelete?: (id: string) => Promise<unknown>;
+    }) {
+      const campaign = opts.campaign ?? makeCampaign();
+      let rows = opts.encounters;
+      mockApiFetch.mockImplementation(
+        (path: string, init?: { method?: string }): Promise<unknown> => {
+          if (path.startsWith('/campaigns/camp-1') && init?.method === undefined) {
+            return Promise.resolve(campaign);
+          }
+          if (path.startsWith('/encounters/') && init?.method === 'DELETE') {
+            const id = path.split('/')[2];
+            if (opts.onDelete) return opts.onDelete(id);
+            rows = rows.filter(e => e.id !== id);
+            return Promise.resolve(undefined);
+          }
+          if (path.startsWith('/encounters?campaignId=camp-1')) {
+            const params = new URLSearchParams(path.split('?')[1]);
+            const page = Number(params.get('page') ?? '1');
+            const limit = Number(params.get('limit') ?? '20');
+            const total = rows.length;
+            const lastPage = Math.max(1, Math.ceil(total / limit));
+            const data = rows.slice((page - 1) * limit, page * limit);
+            return Promise.resolve({ data, total, page, lastPage, limit });
+          }
+          return Promise.resolve(makeListResponse([]));
+        }
+      );
+    }
+
+    async function openEncountersTab(user: ReturnType<typeof userEvent.setup>) {
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
       );
@@ -370,23 +431,27 @@ describe('CampaignDetailPage', () => {
 
     it('shows a delete button per encounter for the campaign owner', async () => {
       const user = userEvent.setup();
+      routeCampaign({ encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })] });
       await openEncountersTab(user);
       expect(screen.getByRole('button', { name: /delete goblin ambush/i })).toBeInTheDocument();
     });
 
     it('hides the delete button for non-owners', async () => {
       const user = userEvent.setup();
-      await openEncountersTab(user, makeCampaign({ ownerId: 'someone-else' }));
+      routeCampaign({
+        campaign: makeCampaign({ ownerId: 'someone-else' }),
+        encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })],
+      });
+      await openEncountersTab(user);
       expect(
         screen.queryByRole('button', { name: /delete goblin ambush/i })
       ).not.toBeInTheDocument();
     });
 
-    it('confirming sends DELETE with the right id, refetches the page, and toasts success', async () => {
+    it('confirming sends DELETE with the right id, re-syncs the list, and toasts success', async () => {
       const user = userEvent.setup();
+      routeCampaign({ encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })] });
       await openEncountersTab(user);
-      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
-      mockApiFetch.mockResolvedValueOnce(makeListResponse<Encounter>([])); // refetch
       await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
       const dialog = screen.getByRole('dialog');
       expect(dialog).toHaveTextContent(/delete encounter/i);
@@ -396,92 +461,82 @@ describe('CampaignDetailPage', () => {
         '/encounters/enc-a',
         expect.objectContaining({ method: 'DELETE' })
       );
-      // The list is re-synced from the server, not patched locally.
+      // The list is re-synced from the server (refetched), not patched locally.
       const encounterListCalls = mockApiFetch.mock.calls.filter(
-        c => typeof c[0] === 'string' && c[0].startsWith('/encounters?campaignId=camp-1&page=1')
+        c => typeof c[0] === 'string' && c[0].startsWith('/encounters?campaignId=camp-1')
       );
-      expect(encounterListCalls.length).toBe(2);
+      expect(encounterListCalls.length).toBeGreaterThanOrEqual(2);
       expect(mockToastSuccess).toHaveBeenCalledWith('Encounter deleted');
     });
 
-    it('deleting the last row of a later page refetches the previous page', async () => {
+    it('deleting the last row of a later page clamps back to the previous page', async () => {
       const user = userEvent.setup();
-      const pageOne = Array.from({ length: 20 }, (_, i) =>
+      const rows = Array.from({ length: 21 }, (_, i) =>
         makeEncounter({ id: `enc-${i}`, name: `Encounter ${i}` })
       );
-      mockApiFetch.mockResolvedValueOnce(makeCampaign());
-      mockApiFetch.mockResolvedValueOnce({
-        data: pageOne,
-        total: 21,
-        page: 1,
-        lastPage: 2,
-        limit: 20,
-      });
-      render(<CampaignDetailPage />);
+      routeCampaign({ encounters: rows });
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
       );
       await user.click(screen.getByRole('button', { name: /^encounters$/i }));
       await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
 
-      mockApiFetch.mockResolvedValueOnce({
-        data: [makeEncounter({ id: 'enc-last', name: 'Last One' })],
-        total: 21,
-        page: 2,
-        lastPage: 2,
-        limit: 20,
-      });
       await user.click(screen.getByRole('button', { name: 'Next' }));
-      await waitFor(() => expect(screen.getByText('Last One')).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText('Encounter 20')).toBeInTheDocument());
 
-      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
-      mockApiFetch.mockResolvedValueOnce({
-        data: pageOne,
-        total: 20,
-        page: 1,
-        lastPage: 1,
-        limit: 20,
-      });
-      await user.click(screen.getByRole('button', { name: /delete last one/i }));
+      await user.click(screen.getByRole('button', { name: /delete encounter 20/i }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
+
+      // 20 rows remain → page 2 no longer exists → clamp to page 1.
       await waitFor(() =>
-        expect(mockApiFetch).toHaveBeenLastCalledWith(
-          expect.stringContaining('/encounters?campaignId=camp-1&page=1')
-        )
+        expect(
+          mockApiFetch.mock.calls.filter(
+            c => typeof c[0] === 'string' && c[0].includes('/encounters?campaignId=camp-1&page=1')
+          ).length
+        ).toBeGreaterThanOrEqual(2)
       );
       await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
     });
 
     it('re-clamps to the server lastPage when a fetched page comes back empty', async () => {
       const user = userEvent.setup();
-      const pageOne = Array.from({ length: 20 }, (_, i) =>
+      // 21 rows so page 2 exists, then another DM "deletes" down to 20 between
+      // our page-1 view and the page-2 fetch.
+      const rows = Array.from({ length: 21 }, (_, i) =>
         makeEncounter({ id: `enc-${i}`, name: `Encounter ${i}` })
       );
-      mockApiFetch.mockResolvedValueOnce(makeCampaign());
-      mockApiFetch.mockResolvedValueOnce({
-        data: pageOne,
-        total: 21,
-        page: 1,
-        lastPage: 2,
-        limit: 20,
+      let dropped = false;
+      mockApiFetch.mockImplementation((path: string): Promise<unknown> => {
+        if (path.startsWith('/campaigns/camp-1')) return Promise.resolve(makeCampaign());
+        if (path.startsWith('/encounters?campaignId=camp-1')) {
+          const params = new URLSearchParams(path.split('?')[1]);
+          const page = Number(params.get('page') ?? '1');
+          const live = dropped ? rows.slice(0, 20) : rows;
+          const total = live.length;
+          const lastPage = Math.max(1, Math.ceil(total / 20));
+          // Simulate the concurrent shrink the first time page 2 is requested.
+          if (page === 2 && !dropped) {
+            dropped = true;
+            return Promise.resolve({ data: [], total: 20, page: 2, lastPage: 1, limit: 20 });
+          }
+          return Promise.resolve({
+            data: live.slice((page - 1) * 20, page * 20),
+            total,
+            page,
+            lastPage,
+            limit: 20,
+          });
+        }
+        return Promise.resolve(makeListResponse([]));
       });
-      render(<CampaignDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
       );
       await user.click(screen.getByRole('button', { name: /^encounters$/i }));
       await waitFor(() => expect(screen.getByText('Encounter 0')).toBeInTheDocument());
 
-      // The server shrank while we were looking at page 1 (another DM deleted
-      // encounters): page 2 no longer exists.
-      mockApiFetch.mockResolvedValueOnce({ data: [], total: 20, page: 2, lastPage: 1, limit: 20 });
-      mockApiFetch.mockResolvedValueOnce({
-        data: pageOne,
-        total: 20,
-        page: 1,
-        lastPage: 1,
-        limit: 20,
-      });
       await user.click(screen.getByRole('button', { name: 'Next' }));
       await waitFor(() =>
         expect(mockApiFetch).toHaveBeenLastCalledWith(
@@ -493,8 +548,11 @@ describe('CampaignDetailPage', () => {
 
     it('disables the delete button while the DELETE is in flight', async () => {
       const user = userEvent.setup();
+      routeCampaign({
+        encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })],
+        onDelete: () => new Promise(() => {}), // never resolves
+      });
       await openEncountersTab(user);
-      mockApiFetch.mockReturnValueOnce(new Promise(() => {})); // DELETE never resolves
       await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
       expect(screen.getByRole('button', { name: /delete goblin ambush/i })).toBeDisabled();
@@ -502,30 +560,40 @@ describe('CampaignDetailPage', () => {
 
     it('moves focus to the Encounters heading after a successful delete', async () => {
       const user = userEvent.setup();
+      routeCampaign({ encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })] });
       await openEncountersTab(user);
-      mockApiFetch.mockResolvedValueOnce(undefined); // DELETE
-      mockApiFetch.mockResolvedValueOnce(makeListResponse<Encounter>([])); // refetch
       await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
       await waitFor(() => expect(screen.queryByText('Goblin Ambush')).not.toBeInTheDocument());
-      expect(screen.getByRole('heading', { name: 'Encounters' })).toHaveFocus();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'Encounters' })).toHaveFocus()
+      );
     });
 
     it('cancelling closes the dialog without calling DELETE and keeps the row', async () => {
       const user = userEvent.setup();
+      routeCampaign({ encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })] });
       await openEncountersTab(user);
-      const callsBefore = mockApiFetch.mock.calls.length;
+      const deleteCallsBefore = mockApiFetch.mock.calls.filter(
+        c => (c[1] as { method?: string } | undefined)?.method === 'DELETE'
+      ).length;
       await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-      expect(mockApiFetch.mock.calls.length).toBe(callsBefore);
+      const deleteCallsAfter = mockApiFetch.mock.calls.filter(
+        c => (c[1] as { method?: string } | undefined)?.method === 'DELETE'
+      ).length;
+      expect(deleteCallsAfter).toBe(deleteCallsBefore);
       expect(screen.getByText('Goblin Ambush')).toBeInTheDocument();
     });
 
     it('toasts the error message when DELETE rejects with an Error and keeps the row', async () => {
       const user = userEvent.setup();
+      routeCampaign({
+        encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })],
+        onDelete: () => Promise.reject(new Error('not yours')),
+      });
       await openEncountersTab(user);
-      mockApiFetch.mockRejectedValueOnce(new Error('not yours'));
       await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('not yours'));
@@ -534,8 +602,11 @@ describe('CampaignDetailPage', () => {
 
     it('toasts a generic message when DELETE rejects with a non-Error', async () => {
       const user = userEvent.setup();
+      routeCampaign({
+        encounters: [makeEncounter({ id: 'enc-a', name: 'Goblin Ambush' })],
+        onDelete: () => Promise.reject('boom'),
+      });
       await openEncountersTab(user);
-      mockApiFetch.mockRejectedValueOnce('boom');
       await user.click(screen.getByRole('button', { name: /delete goblin ambush/i }));
       await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }));
       await waitFor(() =>
@@ -547,7 +618,7 @@ describe('CampaignDetailPage', () => {
 
   it('uses singular "player" wording when there is exactly one player', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ playerIds: ['only-one'] }));
-    render(<CampaignDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
     );

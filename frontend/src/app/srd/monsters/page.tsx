@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
+import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
+import { useApiQuery, invalidateApiPath } from '@/lib/query';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 import CreateEntityLink from '@/components/CreateEntityLink';
@@ -60,11 +62,8 @@ const CHALLENGE_RATINGS = [
 
 export default function MonsterListPage() {
   const { isDm, isAdmin, user } = useAuth();
-  const [monsters, setMonsters] = useState<SrdMonster[]>([]);
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -76,8 +75,27 @@ export default function MonsterListPage() {
   const [addEncounterId, setAddEncounterId] = useState('');
   const [addSubmitting, setAddSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const listParams = new URLSearchParams();
+  listParams.set('page', String(page));
+  listParams.set('limit', String(LIMIT));
+  if (search) listParams.set('q', search);
+  if (typeFilter) listParams.set('type', typeFilter);
+  if (crFilter) listParams.set('cr', crFilter);
+  const listPath = `/srd/monsters?${listParams.toString()}`;
+
+  const listQuery = useApiQuery<PaginatedResponse<SrdMonster>>(listPath, {
+    // keepPreviousData holds the current page visible while the next page/filter
+    // loads, so paging is race-free (no flash of the wrong page) and the search
+    // input never unmounts mid-debounce.
+    placeholderData: keepPreviousData,
+    errorToast: { message: 'Failed to load monsters', id: 'load-monsters' },
+  });
+  const monsters = listQuery.data?.data ?? [];
+  const total = listQuery.data?.total ?? 0;
+  const lastPage = listQuery.data?.lastPage ?? 1;
+  const loading = listQuery.isFetching;
 
   // The owner may edit/delete their homebrew; admins curate shared content.
   const canManageDetail =
@@ -95,7 +113,7 @@ export default function MonsterListPage() {
       // in case the last row of the final page just went away.
       const lastPageAfterDelete = Math.max(1, Math.ceil((total - 1) / LIMIT));
       setPage(p => Math.min(p, lastPageAfterDelete));
-      setRefreshKey(k => k + 1);
+      await invalidateApiPath(queryClient, '/srd/monsters?');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete monster');
     }
@@ -188,33 +206,14 @@ export default function MonsterListPage() {
     };
   }, [searchInput]);
 
-  // Fetch monsters from API
+  // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank the list,
+  // don't strand the user on an empty out-of-range page.
   useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('limit', String(LIMIT));
-    if (search) params.set('q', search);
-    if (typeFilter) params.set('type', typeFilter);
-    if (crFilter) params.set('cr', crFilter);
-
-    apiFetch<PaginatedResponse<SrdMonster>>(`/srd/monsters?${params.toString()}`)
-      .then(res => {
-        setMonsters(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-        // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank
-        // the list, don't strand the user on an empty out-of-range page.
-        if (res.data.length === 0 && page > Math.max(1, res.lastPage)) {
-          setPage(Math.max(1, res.lastPage));
-        }
-      })
-      .catch(err => {
-        console.error('Failed to load monsters:', err);
-        toast.error('Failed to load monsters', { id: 'load-monsters' });
-      })
-      .finally(() => setLoading(false));
-  }, [page, search, typeFilter, crFilter, refreshKey]);
+    const data = listQuery.data;
+    if (data && data.data.length === 0 && page > Math.max(1, data.lastPage)) {
+      setPage(Math.max(1, data.lastPage));
+    }
+  }, [listQuery.data, page]);
 
   const inputClass =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
