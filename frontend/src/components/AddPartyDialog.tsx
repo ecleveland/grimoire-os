@@ -86,8 +86,8 @@ export default function AddPartyDialog({
     return (
       <div data-testid="add-party" className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          No characters are attached to this campaign yet. Players can link their characters from
-          the campaign page.
+          No characters are attached to this campaign yet. Players can add their characters from
+          their character sheet, or pre-attach one when creating a character.
         </p>
         <div className="flex justify-end pt-2">
           <button
