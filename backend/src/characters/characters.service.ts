@@ -1,10 +1,12 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -13,6 +15,7 @@ import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
+import { computeCharacterStats, isKnownAbilityName } from './compute/compute-stats';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -29,10 +32,80 @@ const characterListSelect = {
 
 @Injectable()
 export class CharactersService {
+  private readonly logger = new Logger(CharactersService.name);
+
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService
   ) {}
+
+  // Lightweight ownership/existence guard for write paths (VEG-346). Selects
+  // only `userId` so update/remove don't pay for a full computed DTO + class
+  // lookup just to authorize — the detail read path (findOneForUser) still
+  // returns the computed block.
+  private async assertOwnership(id: string, userId: string): Promise<void> {
+    const character = await this.prisma.character.findUnique({
+      where: { id },
+      select: { userId: true },
+    });
+    if (!character) {
+      throw new NotFoundException(`Character "${id}" not found`);
+    }
+    if (character.userId !== userId) {
+      throw new ForbiddenException('You do not own this character');
+    }
+  }
+
+  // Spell-slot maxima need the class's progression table (VEG-346). Looked up
+  // by name (srd_classes.name is unique); homebrew/unknown classes resolve to
+  // null, in which case slots are omitted but DC/attack still derive from the
+  // character's own spellcastingAbility column.
+  private async loadClassSpellcasting(
+    className: string | null,
+    characterId: string
+  ): Promise<ClassSpellcasting | null> {
+    if (!className) return null;
+    const cls = await this.prisma.srdClass.findUnique({
+      where: { name: className },
+      select: { spellcasting: true },
+    });
+    if (!cls) {
+      // A non-null class with no matching row (typo or homebrew not in the
+      // catalog) silently drops spell slots — log so it's diagnosable rather
+      // than presenting as an inexplicably slot-less caster.
+      this.logger.warn(
+        `Character ${characterId}: class "${className}" not found in srd_classes; spell slots omitted`
+      );
+      return null;
+    }
+    return (cls.spellcasting as ClassSpellcasting | null) ?? null;
+  }
+
+  // Single place every detail read/write funnels through so the authoritative
+  // `computed` block is always attached (VEG-346).
+  private async toCharacterDto(
+    character: Prisma.CharacterGetPayload<object>
+  ): Promise<CharacterDto> {
+    // The spellcastingAbility column is free-form text; an unrecognized value
+    // (typo / bad import) would compute a confidently-wrong save DC. Surface it.
+    if (character.spellcastingAbility && !isKnownAbilityName(character.spellcastingAbility)) {
+      this.logger.warn(
+        `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
+      );
+    }
+    const classSpellcasting = await this.loadClassSpellcasting(character.class, character.id);
+    const computed = computeCharacterStats(
+      {
+        level: character.level,
+        abilityScores: character.abilityScores as AbilityScores | null,
+        savingThrows: character.savingThrows,
+        skills: character.skills,
+        spellcastingAbility: character.spellcastingAbility,
+      },
+      classSpellcasting
+    );
+    return toDto(CharacterDto, { ...character, computed });
+  }
 
   async create(userId: string, dto: CreateCharacterDto) {
     // campaignId is attacker-controlled input: without this check any
@@ -50,7 +123,7 @@ export class CharactersService {
         userId,
       },
     });
-    return toDto(CharacterDto, character);
+    return this.toCharacterDto(character);
   }
 
   async findAllForUser(userId: string, pagination: PaginationDto) {
@@ -77,7 +150,7 @@ export class CharactersService {
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return toDto(CharacterDto, character);
+    return this.toCharacterDto(character);
   }
 
   async findOneForUser(id: string, userId: string) {
@@ -89,7 +162,7 @@ export class CharactersService {
   }
 
   async update(id: string, userId: string, dto: UpdateCharacterDto) {
-    await this.findOneForUser(id, userId);
+    await this.assertOwnership(id, userId);
     const { expectedVersion, ...changes } = dto;
     // Cast needed for JSON field compatibility (see create method comment).
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
@@ -98,7 +171,7 @@ export class CharactersService {
     // No expectedVersion → caller opts out of optimistic locking (VEG-137).
     if (expectedVersion === undefined) {
       const character = await this.prisma.character.update({ where: { id }, data });
-      return toDto(CharacterDto, character);
+      return this.toCharacterDto(character);
     }
 
     // Guarded write: only succeeds if the row is still at expectedVersion.
@@ -125,11 +198,11 @@ export class CharactersService {
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return toDto(CharacterDto, character);
+    return this.toCharacterDto(character);
   }
 
   async remove(id: string, userId: string): Promise<void> {
-    await this.findOneForUser(id, userId);
+    await this.assertOwnership(id, userId);
     await this.prisma.character.delete({ where: { id } });
   }
 }

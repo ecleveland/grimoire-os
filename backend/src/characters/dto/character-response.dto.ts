@@ -1,6 +1,7 @@
 import { Expose } from 'class-transformer';
 import type {
   AbilityScores,
+  ComputedStats,
   Currency,
   DeathSaves,
   Feature,
@@ -62,6 +63,15 @@ export class CharacterDto {
   @Expose() version!: number;
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;
+  /**
+   * Server-derived stats (VEG-346): modifiers, proficiency bonus, save/skill
+   * bonuses, passive perception, initiative, spell DC/attack, spell-slot
+   * maxima. The single source of truth the sheet reads — recomputed per request
+   * from the stored inputs, so it can't drift. Like the JSON blobs above, this
+   * passes through `toDto` untouched (no `@Type`). Always populated on detail
+   * reads/writes; never returned on the slim list projection.
+   */
+  @Expose() computed!: ComputedStats;
 }
 
 /** Slim character shape for list views (VEG-125 projection, VEG-128 DTO). */

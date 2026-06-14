@@ -35,6 +35,10 @@ describe('CharactersService', () => {
     }).compile();
 
     service = module.get<CharactersService>(CharactersService);
+
+    // Default: the character's class exists in the catalog as a non-caster
+    // (mockCharacter is a Fighter). Specific tests override for spellcasters.
+    prisma.srdClass.findUnique.mockResolvedValue({ spellcasting: null });
   });
 
   describe('create', () => {
@@ -49,8 +53,11 @@ describe('CharactersService', () => {
           userId: USER_ID,
         },
       });
-      expect(result).toEqual(mockCharacter);
+      expect(result).toMatchObject(mockCharacter);
       expect(result).toBeInstanceOf(CharacterDto);
+      // create funnels through toCharacterDto, so the computed block is present.
+      expect(result.computed.proficiencyBonus).toBe(3);
+      expect(result.computed.initiative).toBe(1);
     });
 
     it('does not check campaign membership when no campaignId is given', async () => {
@@ -165,7 +172,116 @@ describe('CharactersService', () => {
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
       });
-      expect(result).toEqual(mockCharacter);
+      expect(result).toMatchObject(mockCharacter);
+    });
+
+    it('attaches the computed-stats block derived from the stored inputs', async () => {
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      // mockCharacter is a level-5 Fighter (non-caster): STR 16, DEX 12, CON 14,
+      // WIS 13; proficient in Strength/Constitution saves and Athletics.
+      expect(result.computed.proficiencyBonus).toBe(3);
+      expect(result.computed.initiative).toBe(1);
+      expect(result.computed.abilityModifiers.strength).toBe(3);
+      expect(result.computed.savingThrows['Strength']).toEqual({ bonus: 6, proficient: true });
+      expect(result.computed.skills['Athletics']).toEqual({
+        ability: 'Strength',
+        bonus: 6,
+        proficient: true,
+      });
+      expect(result.computed.passivePerception).toBe(11);
+      // Non-caster: no spellcasting block, no slots.
+      expect(result.computed.spellcasting).toBeNull();
+      expect(result.computed.spellSlots).toBeNull();
+    });
+
+    it('derives spell DC/attack and slot maxima from the class spellcasting data', async () => {
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        class: 'Wizard',
+        level: 5,
+        spellcastingAbility: 'Intelligence',
+        abilityScores: { ...mockCharacter.abilityScores, intelligence: 16 },
+      });
+      prisma.srdClass.findUnique.mockResolvedValue({
+        spellcasting: {
+          ability: 'Intelligence',
+          spellSlotProgression: {
+            5: { 1: 4, 2: 3, 3: 2 },
+            20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1 },
+          },
+        },
+      });
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
+        where: { name: 'Wizard' },
+        select: { spellcasting: true },
+      });
+      // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
+      expect(result.computed.spellcasting).toEqual({
+        ability: 'Intelligence',
+        modifier: 3,
+        saveDC: 14,
+        attackBonus: 6,
+      });
+      expect(result.computed.spellSlots).toEqual({
+        caster: 'full',
+        maxByLevel: { 1: 4, 2: 3, 3: 2 },
+      });
+    });
+
+    it('derives spell DC/attack from spellcastingAbility even when the class is unknown, omitting slots', async () => {
+      const warn = jest.spyOn(
+        (service as unknown as { logger: { warn: jest.Mock } }).logger,
+        'warn'
+      );
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        class: 'Homebrew Warlock',
+        level: 5,
+        spellcastingAbility: 'Charisma',
+        abilityScores: { ...mockCharacter.abilityScores, charisma: 16 },
+      });
+      // Class not present in the catalog.
+      prisma.srdClass.findUnique.mockResolvedValue(null);
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      // CHA 16 → mod 3, prof 3: DC = 14, attack = 6 — derived from the column.
+      expect(result.computed.spellcasting).toEqual({
+        ability: 'Charisma',
+        modifier: 3,
+        saveDC: 14,
+        attackBonus: 6,
+      });
+      // No class row → no progression → slots omitted, and it's logged.
+      expect(result.computed.spellSlots).toBeNull();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('class "Homebrew Warlock" not found')
+      );
+    });
+
+    it('warns when the spellcastingAbility column is not a recognized ability', async () => {
+      const warn = jest.spyOn(
+        (service as unknown as { logger: { warn: jest.Mock } }).logger,
+        'warn'
+      );
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        spellcastingAbility: 'Inteligence', // typo
+      });
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('unrecognized spellcastingAbility "Inteligence"')
+      );
+      // Still renders a caster block, with modifier 0.
+      expect(result.computed.spellcasting?.modifier).toBe(0);
     });
 
     it('should throw NotFoundException when character not found', async () => {
@@ -181,7 +297,7 @@ describe('CharactersService', () => {
 
       const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
-      expect(result).toEqual(mockCharacter);
+      expect(result).toMatchObject(mockCharacter);
     });
 
     it('should throw ForbiddenException when user does not own character', async () => {
@@ -201,14 +317,18 @@ describe('CharactersService', () => {
 
       const result = await service.update(CHARACTER_ID, USER_ID, { level: 6 });
 
+      // Ownership is a lightweight userId-only read (no full DTO / class lookup).
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
+        select: { userId: true },
       });
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
         data: { level: 6 },
       });
       expect(result.level).toBe(6);
+      // The write response carries the recomputed block.
+      expect(result.computed.proficiencyBonus).toBe(3);
     });
 
     it('should throw ForbiddenException when non-owner tries to update', async () => {
@@ -248,6 +368,8 @@ describe('CharactersService', () => {
       expect(prisma.character.update).not.toHaveBeenCalled();
       expect(result.level).toBe(6);
       expect(result.version).toBe(3);
+      // The optimistic re-fetch path also attaches the computed block.
+      expect(result.computed.proficiencyBonus).toBe(3);
     });
 
     it('throws 409 ConflictException carrying currentVersion on a stale write', async () => {
@@ -313,6 +435,7 @@ describe('CharactersService', () => {
 
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
+        select: { userId: true },
       });
       expect(prisma.character.delete).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
