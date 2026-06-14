@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { CacheModule } from '@nestjs/cache-manager';
 import { ItemsController } from './items.controller';
 import { SrdService } from './srd.service';
 import { HomebrewItemsService } from './homebrew-items.service';
@@ -23,6 +24,7 @@ describe('ItemsController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ItemsController],
+      imports: [CacheModule.register()],
       providers: [
         { provide: SrdService, useValue: srdService },
         { provide: HomebrewItemsService, useValue: homebrewService },
