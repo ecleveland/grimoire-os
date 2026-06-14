@@ -74,8 +74,10 @@ describe('JoinCampaignPage', () => {
 
   it('posts the trimmed, encoded code and navigates to the joined campaign on success', async () => {
     const user = userEvent.setup();
-    mockApiFetch.mockResolvedValue(makeCampaign({ id: 'camp-99' }));
-    renderPage();
+    const client = makeTestClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    mockApiFetch.mockResolvedValue(makeCampaign({ id: 'camp-99', name: 'The Joined Campaign' }));
+    renderPage(client);
 
     await user.type(screen.getByLabelText(/invite code/i), '  deadbeefcafe  ');
     await user.click(screen.getByRole('button', { name: /join campaign/i }));
@@ -86,7 +88,59 @@ describe('JoinCampaignPage', () => {
       });
     });
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/camp-99'));
-    expect(mockToastSuccess).toHaveBeenCalled();
+    expect(mockToastSuccess).toHaveBeenCalledWith('Joined The Joined Campaign!');
+    // The campaigns-list cache is invalidated so the new campaign shows on return.
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
+  });
+
+  it('still toasts and navigates when the cache invalidation rejects', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const user = userEvent.setup();
+    const client = makeTestClient();
+    // A failed list refetch must not strand a user who has already joined.
+    vi.spyOn(client, 'invalidateQueries').mockRejectedValue(new Error('refetch failed'));
+    mockApiFetch.mockResolvedValue(makeCampaign({ id: 'camp-99', name: 'The Joined Campaign' }));
+    renderPage(client);
+
+    await user.type(screen.getByLabelText(/invite code/i), 'goodcode');
+    await user.click(screen.getByRole('button', { name: /join campaign/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/camp-99'));
+    expect(mockToastSuccess).toHaveBeenCalledWith('Joined The Joined Campaign!');
+    // The invalidation failure is logged, not swallowed and not surfaced as a join error.
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        'Failed to invalidate campaigns list after join:',
+        expect.any(Error)
+      )
+    );
+    expect(mockToastError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('disables the button and fires a single request while the join is in flight', async () => {
+    const user = userEvent.setup();
+    let resolveJoin: (c: Campaign) => void = () => {};
+    mockApiFetch.mockReturnValue(
+      new Promise<Campaign>(resolve => {
+        resolveJoin = resolve;
+      })
+    );
+    renderPage();
+
+    await user.type(screen.getByLabelText(/invite code/i), 'somecode');
+    await user.click(screen.getByRole('button', { name: /join campaign/i }));
+
+    // Mid-flight the button shows the pending label and is disabled.
+    const button = screen.getByRole('button', { name: /joining/i });
+    expect(button).toBeDisabled();
+
+    // A second submit attempt while pending must not fire another request.
+    await user.click(button);
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+
+    resolveJoin(makeCampaign({ id: 'camp-99' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/camp-99'));
   });
 
   it('encodes codes containing URL-special characters', async () => {

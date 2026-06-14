@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { useApiMutation, invalidateApiPath } from '@/lib/query';
+import FormField from '@/components/FormField';
 import type { Campaign } from '@/lib/types';
 
 export default function JoinCampaignPage() {
@@ -18,13 +19,22 @@ export default function JoinCampaignPage() {
     (inviteCode: string) =>
       apiFetch<Campaign>(`/campaigns/join/${encodeURIComponent(inviteCode)}`, { method: 'POST' }),
     {
-      onSuccess: async campaign => {
-        // Refetch the campaigns list so the newly-joined campaign appears.
-        await invalidateApiPath(queryClient, '/campaigns?');
+      onSuccess: campaign => {
         toast.success(`Joined ${campaign.name}!`);
         router.push(`/campaigns/${campaign.id}`);
+        // Cache refresh is best-effort — it runs *after* the toast/navigate above
+        // so a failed refetch can never strand a user who already joined. The
+        // campaigns list page isn't on react-query yet, so this currently matches
+        // nothing; it's wired ahead of that migration. The trailing `?` keeps the
+        // prefix from also matching `/campaigns/<id>` detail keys.
+        invalidateApiPath(queryClient, '/campaigns?').catch(err =>
+          console.error('Failed to invalidate campaigns list after join:', err)
+        );
       },
-      onError: err => toast.error(err instanceof Error ? err.message : 'Failed to join campaign'),
+      onError: err => {
+        console.error('Failed to join campaign via invite code:', err);
+        toast.error(err instanceof Error ? err.message : 'Failed to join campaign');
+      },
     }
   );
 
@@ -52,23 +62,16 @@ export default function JoinCampaignPage() {
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label
-            htmlFor="invite-code"
-            className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-          >
-            Invite code
-          </label>
-          <input
-            id="invite-code"
-            type="text"
-            value={code}
-            onChange={e => setCode(e.target.value)}
-            autoComplete="off"
-            placeholder="e.g. 3f9a2c…"
-            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:border-indigo-500 focus:outline-none"
-          />
-        </div>
+        <FormField
+          label="Invite code"
+          type="text"
+          value={code}
+          onChange={e => setCode(e.target.value)}
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          placeholder="e.g. 3f9a2c…"
+        />
         <button
           type="submit"
           disabled={!trimmed || join.isPending}
