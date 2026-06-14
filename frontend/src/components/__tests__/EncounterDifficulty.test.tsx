@@ -53,6 +53,22 @@ describe('EncounterDifficulty', () => {
     expect(within(el).getByTestId('difficulty-band')).toHaveTextContent('Low');
   });
 
+  it('shows a summed CR that lands on a fraction value (two CR-1/8 → 1/4)', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          monster({ name: 'Rat', cr: 0.125, xp: 25 }),
+          monster({ name: 'Rat 2', cr: 0.125, xp: 25 }),
+        ]}
+      />
+    );
+    // 0.125 + 0.125 = 0.25 → "1/4"; the separate "2 monsters" count keeps it
+    // from reading as a single quarter-CR monster.
+    const el = screen.getByTestId('encounter-difficulty');
+    expect(el).toHaveTextContent('2 monsters');
+    expect(el).toHaveTextContent('CR 1/4');
+  });
+
   it('formats large XP totals with a thousands separator', () => {
     render(<EncounterDifficulty combatants={[monster({ cr: 5, xp: 1800 }), pc({ level: 1 })]} />);
     expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent('1,800 XP');

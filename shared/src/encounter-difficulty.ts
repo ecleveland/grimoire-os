@@ -129,9 +129,16 @@ export function partyBudget(levels: number[]): PartyBudget | null {
   );
 }
 
-/** A combatant counts toward the monster totals when it's flagged as an NPC. */
+/**
+ * A combatant counts toward the monster totals when it carries a stat-block
+ * snapshot (`cr`/`xp`) — i.e. it was added from the compendium or linked to a
+ * monster. PCs (which carry `level`, not `cr`/`xp`), hand-typed NPCs, and
+ * DM-controlled allies/summons have no snapshot and are excluded, so they can't
+ * inflate the threat budget. Using the snapshot rather than `isNpc` also keeps
+ * a phantom `xpForCr(0)` out of the total for NPCs that have no stat block.
+ */
 function isMonster(c: Combatant): boolean {
-  return c.isNpc === true;
+  return c.cr !== undefined || c.xp !== undefined;
 }
 
 function bandFor(totalXp: number, budget: PartyBudget): DifficultyBand {
@@ -143,27 +150,34 @@ function bandFor(totalXp: number, budget: PartyBudget): DifficultyBand {
 
 /**
  * Summarize an encounter's combatants into the difficulty readout (VEG-362):
- * monster count, total monster XP and summed CR (PCs excluded — "ignore the
- * active players"), the party budget from the PC levels in the encounter, and
- * the 2024 difficulty band. The band is null until at least one PC carries a
- * level, so the UI can prompt to add the party instead of guessing.
+ * monster count, total monster XP and summed CR (only stat-block-snapshotted
+ * monsters count, so PCs and allies are excluded — "ignore the active
+ * players"), the party budget from the PC levels in the encounter, and the
+ * 2024 difficulty band. The band is null until at least one PC carries a level
+ * (so the UI can prompt to add the party instead of guessing) AND there is at
+ * least one monster — rating an empty board "Low" would mislead any consumer
+ * that doesn't replicate a monster-count guard.
  */
 export function summarizeEncounter(combatants: Combatant[]): EncounterSummary {
   const monsters = combatants.filter(isMonster);
+  const monsterCount = monsters.length;
   const totalXp = monsters.reduce((sum, c) => sum + (c.xp ?? xpForCr(c.cr ?? 0)), 0);
   const summedCr = monsters.reduce((sum, c) => sum + (c.cr ?? 0), 0);
 
+  // A PC is any non-monster carrying a level; level-less combatants (hand-typed
+  // PCs) are dropped, biasing the budget smaller — i.e. toward over-stating
+  // difficulty, the safe direction.
   const partyLevels = combatants
     .filter(c => !isMonster(c) && typeof c.level === 'number')
     .map(c => c.level as number);
   const budget = partyBudget(partyLevels);
 
   return {
-    monsterCount: monsters.length,
+    monsterCount,
     totalXp,
     summedCr,
     partyCount: partyLevels.length,
     partyBudget: budget,
-    band: budget ? bandFor(totalXp, budget) : null,
+    band: budget && monsterCount > 0 ? bandFor(totalXp, budget) : null,
   };
 }

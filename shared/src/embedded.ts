@@ -154,7 +154,9 @@ export interface Combatant {
   /**
    * Challenge rating of the source monster (VEG-362), snapshotted at add/link
    * time so the encounter-difficulty readout can sum CR without re-fetching the
-   * stat block. Set on monster combatants; absent on PCs and manual NPCs.
+   * stat block. Set on monster combatants; absent on PCs, hand-typed NPCs, and
+   * DM-controlled allies. Presence of `cr`/`xp` is what marks a combatant as a
+   * threat for the difficulty totals (not the broader `isNpc` flag).
    */
   cr?: number;
   /**

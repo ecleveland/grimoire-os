@@ -122,12 +122,46 @@ describe('summarizeEncounter', () => {
     expect(result.band).toBe('Deadly');
   });
 
-  it('rates Moderate and High at the tier boundaries', () => {
+  it('rates Moderate and High at the tier boundaries, and tips to Deadly one XP over High', () => {
     // Single level-5 PC: 500 / 750 / 1100.
     expect(summarizeEncounter([monster({ cr: 3, xp: 700 }), pc({ level: 5 })]).band).toBe(
       'Moderate'
     );
     expect(summarizeEncounter([monster({ cr: 4, xp: 1100 }), pc({ level: 5 })]).band).toBe('High');
+    // Exactly High budget is still High; one XP over flips to Deadly.
+    expect(summarizeEncounter([monster({ xp: 1100 }), pc({ level: 5 })]).band).toBe('High');
+    expect(summarizeEncounter([monster({ xp: 1101 }), pc({ level: 5 })]).band).toBe('Deadly');
+  });
+
+  it('counts only stat-block-snapshotted combatants as monsters', () => {
+    // A hand-typed NPC (isNpc true, no cr/xp) and a DM ally are not threats and
+    // must not add a phantom xpForCr(0) to the total.
+    const result = summarizeEncounter([
+      monster({ cr: 1, xp: 200 }),
+      { name: 'Bandit', initiative: 8, hp: 11, maxHp: 11, ac: 12, isNpc: true },
+      { name: 'Wolf ally', initiative: 9, hp: 11, maxHp: 11, ac: 13, isNpc: true },
+      pc({ level: 5 }),
+    ]);
+    expect(result.monsterCount).toBe(1);
+    expect(result.totalXp).toBe(200);
+  });
+
+  it('sums the budget across mixed PC levels through summarizeEncounter', () => {
+    const result = summarizeEncounter([
+      monster({ cr: 1, xp: 200 }),
+      pc({ name: 'L1', level: 1 }),
+      pc({ name: 'L5', level: 5 }),
+    ]);
+    // L1 (50/75/100) + L5 (500/750/1100).
+    expect(result.partyCount).toBe(2);
+    expect(result.partyBudget).toEqual({ low: 550, moderate: 825, high: 1200 });
+  });
+
+  it('does not rate an empty board, even with a party present', () => {
+    const result = summarizeEncounter([pc({ level: 5 }), pc({ name: 'B', level: 5 })]);
+    expect(result.monsterCount).toBe(0);
+    expect(result.partyBudget).not.toBeNull();
+    expect(result.band).toBeNull();
   });
 
   it('handles an empty encounter', () => {
