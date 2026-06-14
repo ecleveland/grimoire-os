@@ -1136,9 +1136,21 @@ describe('InitiativeTrackerPage', () => {
   // currentTurn indexes the initiative-sorted rows. Appending a combatant that
   // sorts above the active row must move currentTurn to the active combatant's
   // new index so the highlight follows the same combatant, not whoever sorted
-  // into the old slot. The fix lives in the shared appendCombatants, so all add
-  // paths (manual form + monster lookup) are covered.
+  // into the old slot. The fix lives in the shared appendCombatants, so all
+  // three add paths (manual form, monster lookup, party picker) are covered.
   describe('turn re-anchoring on append (VEG-329)', () => {
+    const thia: PartyCharacter = {
+      id: 'char-1',
+      userId: 'user-2',
+      name: 'Thia',
+      race: 'Elf',
+      class: 'Wizard',
+      level: 5,
+      armorClass: 12,
+      initiative: 2,
+      hitPoints: { max: 22, current: 17, temporary: 0 },
+    };
+
     async function openAddCombatant(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /add combatant/i }));
@@ -1151,6 +1163,11 @@ describe('InitiativeTrackerPage', () => {
           p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
       );
       return JSON.parse((call![1] as { body: string }).body);
+    }
+
+    // Same row-container idiom as the initiative-edit marker tests below.
+    function highlightedRow(): HTMLElement | null {
+      return screen.getByText('»').closest('div.p-4');
     }
 
     it('re-anchors currentTurn when a manual combatant sorts above the active row', async () => {
@@ -1172,7 +1189,7 @@ describe('InitiativeTrackerPage', () => {
       expect(body.expectedVersion).toBe(3);
 
       // The » marker follows Goblin A, not the new top row.
-      expect(screen.getByText('»').closest('[class*="rounded-lg"]')).toHaveTextContent('Goblin A');
+      expect(highlightedRow()).toHaveTextContent('Goblin A');
     });
 
     it('leaves currentTurn untouched when the new combatant sorts below the active row', async () => {
@@ -1192,7 +1209,7 @@ describe('InitiativeTrackerPage', () => {
       // Goblin B stays at index 2 — no currentTurn write (matches the
       // conditional-include pattern of the other re-anchoring paths).
       expect(body).not.toHaveProperty('currentTurn');
-      expect(screen.getByText('»').closest('[class*="rounded-lg"]')).toHaveTextContent('Goblin B');
+      expect(highlightedRow()).toHaveTextContent('Goblin B');
     });
 
     it('re-anchors currentTurn when a monster from the lookup sorts above the active row', async () => {
@@ -1206,6 +1223,47 @@ describe('InitiativeTrackerPage', () => {
       const body = lastPatchBody();
       // Goblin(10) inserts at index 2, pushing Goblin B from index 2 to index 3.
       expect(body.currentTurn).toBe(3);
+      expect(highlightedRow()).toHaveTextContent('Goblin B');
+    });
+
+    it('re-anchors currentTurn when party PCs sort above the active row', async () => {
+      // Active is Goblin A(12) at index 1; Thia is added at initiative 20.
+      routeAddFlow({
+        encounter: makeEncounter({ version: 3, currentTurn: 1 }),
+        characters: [thia],
+      });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      await user.click(screen.getByRole('button', { name: /add party/i }));
+      const dialog = within(await screen.findByRole('dialog'));
+      const init = await dialog.findByRole('spinbutton', { name: /initiative for thia/i });
+      await user.clear(init);
+      await user.type(init, '20');
+      await user.click(dialog.getByRole('button', { name: /add selected/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const body = lastPatchBody();
+      // Thia(20) inserts at index 0, pushing Goblin A from index 1 to index 2.
+      expect(body.currentTurn).toBe(2);
+      expect(highlightedRow()).toHaveTextContent('Goblin A');
+    });
+
+    it('does not write currentTurn when there is no active row (empty encounter)', async () => {
+      // Exercises the `active ? … : currentTurn` fallback: sorting an empty list
+      // yields no active combatant, so indexOf is never consulted.
+      routeAddFlow({ encounter: makeEncounter({ version: 3, combatants: [], currentTurn: 0 }) });
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      const dialog = await openAddCombatant(user);
+
+      await user.type(dialog.getByLabelText(/^name$/i), 'Lone Wolf');
+      await user.click(dialog.getByRole('button', { name: /add combatant/i }));
+
+      await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
+      const body = lastPatchBody();
+      expect(body).not.toHaveProperty('currentTurn');
+      expect(body.combatants as Combatant[]).toHaveLength(1);
     });
   });
 
