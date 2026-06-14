@@ -1,7 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import CharacterSheetHeader from '../CharacterSheetHeader';
 import type { Character } from '@/lib/types';
+
+// Self-contained react-query child; exercised in its own CampaignMembership test.
+vi.mock('../CampaignMembership', () => ({
+  default: () => <div data-testid="campaign-membership" />,
+}));
 
 const mockCharacter: Character = {
   id: 'char-1',

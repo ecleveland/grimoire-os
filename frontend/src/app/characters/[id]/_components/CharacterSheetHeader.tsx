@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Character } from '@/lib/types';
+import CampaignMembership from './CampaignMembership';
 
 interface CharacterSheetHeaderProps {
   character: Character;
@@ -29,6 +30,10 @@ export default function CharacterSheetHeader({ character, isOwner }: CharacterSh
                 <div className="text-sm text-gray-900 dark:text-white">{value ?? '—'}</div>
               </div>
             ))}
+          </div>
+
+          <div className="mt-3">
+            <CampaignMembership character={character} isOwner={isOwner} />
           </div>
         </div>
 
