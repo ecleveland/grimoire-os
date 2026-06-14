@@ -93,6 +93,14 @@ export const XP_BUDGET_PER_CHARACTER: Readonly<Record<number, PartyBudget>> = {
 /** 2024 DMG difficulty tiers, plus a "Deadly" label for over the High budget. */
 export type DifficultyBand = 'Low' | 'Moderate' | 'High' | 'Deadly';
 
+/**
+ * Monsters-per-PC ratio at/above which we flag action economy. The 2024 XP band
+ * ignores how many bodies are on the field, so a swarm of weak monsters can read
+ * "Low" while a flood of attacks overwhelms a small party. 3:1 is the point
+ * where the extra actions clearly outweigh the XP picture.
+ */
+export const ACTION_ECONOMY_RATIO = 3;
+
 export interface EncounterSummary {
   /** Number of monster/NPC combatants (`isNpc === true`). */
   monsterCount: number;
@@ -106,6 +114,13 @@ export interface EncounterSummary {
   partyBudget: PartyBudget | null;
   /** Difficulty band vs. the party budget, or null when the budget is null. */
   band: DifficultyBand | null;
+  /**
+   * True when monsters outnumber the (leveled) PCs by at least
+   * ACTION_ECONOMY_RATIO:1 — a signal the XP band alone misses, since the 2024
+   * model has no monster-count multiplier. Only meaningful when both counts are
+   * > 0.
+   */
+  actionEconomyWarning: boolean;
 }
 
 /**
@@ -172,12 +187,15 @@ export function summarizeEncounter(combatants: Combatant[]): EncounterSummary {
     .map(c => c.level as number);
   const budget = partyBudget(partyLevels);
 
+  const partyCount = partyLevels.length;
   return {
     monsterCount,
     totalXp,
     summedCr,
-    partyCount: partyLevels.length,
+    partyCount,
     partyBudget: budget,
     band: budget && monsterCount > 0 ? bandFor(totalXp, budget) : null,
+    actionEconomyWarning:
+      monsterCount > 0 && partyCount > 0 && monsterCount >= partyCount * ACTION_ECONOMY_RATIO,
   };
 }

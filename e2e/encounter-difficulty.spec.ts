@@ -60,13 +60,17 @@ test.describe('Encounter difficulty readout (VEG-362)', () => {
     const monsterName = ((await monsterDialog.locator('h3').first().textContent()) ?? '').trim();
     await monsterDialog.getByRole('button', { name: /add to encounter/i }).click();
     await expect(monsterDialog.getByLabel('Quantity')).toBeVisible();
+    // Three of them vs the single PC → also trips the action-economy warning.
+    await monsterDialog.getByLabel('Quantity').fill('3');
     await monsterDialog.getByRole('button', { name: /add to encounter/i }).click();
     await expect(page.getByRole('dialog')).toBeHidden();
 
-    // The create-page readout now reflects the monster + a rated band.
-    await expect(readout).toContainText(/1 monster/);
+    // The create-page readout now reflects the monsters + a rated band, and
+    // flags the 3-vs-1 action economy the XP band alone would miss.
+    await expect(readout).toContainText(/3 monsters/);
     await expect(readout).toContainText(/XP/);
     await expect(readout.getByTestId('difficulty-band')).toBeVisible();
+    await expect(readout.getByTestId('action-economy-warning')).toBeVisible();
 
     await page.getByRole('button', { name: /create encounter/i }).click();
     await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/encounters/[^/]+$`));
@@ -74,10 +78,13 @@ test.describe('Encounter difficulty readout (VEG-362)', () => {
 
     // The tracker shows the same readout, computed from the persisted snapshots.
     const trackerReadout = page.getByTestId('encounter-difficulty');
-    await expect(trackerReadout).toContainText(/1 monster/);
+    await expect(trackerReadout).toContainText(/3 monsters/);
     await expect(trackerReadout).toContainText(/XP/);
     await expect(trackerReadout.getByTestId('difficulty-band')).toBeVisible();
+    await expect(trackerReadout.getByTestId('action-economy-warning')).toBeVisible();
     // Sanity: the monster joined as a stat-block-linked combatant.
-    await expect(page.getByRole('button', { name: monsterName, exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: monsterName, exact: true }).first()
+    ).toBeVisible();
   });
 });

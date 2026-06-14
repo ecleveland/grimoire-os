@@ -26,7 +26,8 @@ interface Props {
  * is presentation only.
  */
 export default function EncounterDifficulty({ combatants, className }: Props) {
-  const { monsterCount, totalXp, summedCr, band } = summarizeEncounter(combatants);
+  const { monsterCount, totalXp, summedCr, band, partyCount, actionEconomyWarning } =
+    summarizeEncounter(combatants);
 
   const wrapClass = ['flex flex-wrap items-center gap-x-2 gap-y-1 text-sm', className]
     .filter(Boolean)
@@ -63,6 +64,15 @@ export default function EncounterDifficulty({ combatants, className }: Props) {
       ) : (
         <span className="text-xs text-gray-400 dark:text-gray-500">
           Add party PCs to rate difficulty
+        </span>
+      )}
+      {actionEconomyWarning && (
+        <span
+          data-testid="action-economy-warning"
+          title="The 2024 XP band ignores how many monsters there are. With this many attackers per PC, action economy can make the fight far harder than the XP suggests."
+          className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+        >
+          ⚠ {monsterCount} vs {partyCount} PC{partyCount === 1 ? '' : 's'} · action economy
         </span>
       )}
     </div>

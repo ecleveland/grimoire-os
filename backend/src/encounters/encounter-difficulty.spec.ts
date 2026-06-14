@@ -164,6 +164,33 @@ describe('summarizeEncounter', () => {
     expect(result.band).toBeNull();
   });
 
+  it('flags action economy when monsters outnumber PCs by 3:1 or more', () => {
+    const swarm = summarizeEncounter([
+      ...Array.from({ length: 13 }, (_, i) => monster({ name: `Goblin ${i}`, cr: 0.25, xp: 50 })),
+      pc({ level: 10 }),
+    ]);
+    expect(swarm.actionEconomyWarning).toBe(true);
+    // The XP band itself stays RAW: 650 XP is still well under a lvl-10 low budget.
+    expect(swarm.band).toBe('Low');
+
+    // Exactly 3:1 trips it; 2:1 does not.
+    expect(
+      summarizeEncounter([monster(), monster({ name: 'B' }), monster({ name: 'C' }), pc()])
+        .actionEconomyWarning
+    ).toBe(true);
+    expect(summarizeEncounter([monster(), monster({ name: 'B' }), pc()]).actionEconomyWarning).toBe(
+      false
+    );
+  });
+
+  it('never flags action economy without a leveled party or without monsters', () => {
+    expect(
+      summarizeEncounter([monster(), monster({ name: 'B' }), monster({ name: 'C' })])
+        .actionEconomyWarning
+    ).toBe(false); // monsters, no PC level
+    expect(summarizeEncounter([pc(), pc({ name: 'B' })]).actionEconomyWarning).toBe(false); // no monsters
+  });
+
   it('handles an empty encounter', () => {
     const result = summarizeEncounter([]);
     expect(result.monsterCount).toBe(0);

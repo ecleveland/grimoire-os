@@ -85,6 +85,37 @@ describe('EncounterDifficulty', () => {
     expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent(/add party pcs/i);
   });
 
+  it('warns about action economy when monsters swamp the party', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          ...Array.from({ length: 13 }, (_, i) =>
+            monster({ name: `Goblin ${i}`, cr: 0.25, xp: 50 })
+          ),
+          pc({ level: 10 }),
+        ]}
+      />
+    );
+    const warning = screen.getByTestId('action-economy-warning');
+    expect(warning).toHaveTextContent('13 vs 1 PC');
+    // The XP band is still shown alongside (RAW), here "Low".
+    expect(screen.getByTestId('difficulty-band')).toHaveTextContent('Low');
+  });
+
+  it('does not warn about action economy for a balanced fight', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          monster(),
+          monster({ name: 'B' }),
+          pc({ level: 3 }),
+          pc({ name: 'P2', level: 3 }),
+        ]}
+      />
+    );
+    expect(screen.queryByTestId('action-economy-warning')).not.toBeInTheDocument();
+  });
+
   it('uses the singular noun for a single monster', () => {
     render(<EncounterDifficulty combatants={[monster()]} />);
     expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent('1 monster');
