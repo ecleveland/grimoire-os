@@ -288,6 +288,24 @@ describe('InitiativeTrackerPage', () => {
       );
     });
 
+    it('clamps a stale out-of-range turn marker back into range on step back', async () => {
+      // 3 combatants but a corrupted marker at index 5 — stepping back must land
+      // on a valid row (last index 2) rather than persist another bad index.
+      mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 5, round: 2, version: 1 }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('button', { name: /previous turn/i });
+      await user.click(screen.getByRole('button', { name: /previous turn/i }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          '/encounters/enc-1',
+          expect.objectContaining({
+            body: JSON.stringify({ currentTurn: 2, round: 2, expectedVersion: 1 }),
+          })
+        )
+      );
+    });
+
     it('is disabled at the very start (round 1, turn 0)', async () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
       render(<InitiativeTrackerPage />);

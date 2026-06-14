@@ -304,7 +304,9 @@ export default function InitiativeTrackerPage() {
       prevIndex = sorted.length - 1;
       newRound -= 1;
     }
-    patchEncounter({ currentTurn: prevIndex, round: newRound });
+    // Clamp the upper bound too, so a stale out-of-range marker can't persist a
+    // still-invalid index — nextTurn self-heals via its wrap, this mirrors that.
+    patchEncounter({ currentTurn: Math.min(prevIndex, sorted.length - 1), round: newRound });
   };
 
   // Commit the drafted HP: one clamped, version-guarded PATCH. Empty/invalid
