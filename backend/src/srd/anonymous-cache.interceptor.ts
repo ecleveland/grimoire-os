@@ -26,10 +26,11 @@ import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payl
  * bypass the cache and see shared edits immediately.
  *
  * Memory: entries are keyed by full URL, so the free-text `?q=` search surface
- * is unbounded in cardinality, and the module's default in-memory store has no
- * size cap (only the 24h lazy TTL). High-cardinality anonymous traffic (e.g. a
- * crawler) can therefore accrete entries until they expire. A follow-up could
- * bound the global store with an LRU cap; today the TTL is the only backstop.
+ * is unbounded in cardinality. The global store is an LRU-bounded CacheableMemory
+ * (VEG-340, see config/cache.config.ts), so high-cardinality anonymous traffic
+ * (e.g. a crawler) evicts the least-recently-used entry once the cap is hit
+ * rather than accreting one 24h entry per distinct URL; the 24h TTL is the
+ * secondary backstop.
  */
 @Injectable()
 export class AnonymousCacheInterceptor extends CacheInterceptor {

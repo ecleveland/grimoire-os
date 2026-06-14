@@ -62,8 +62,12 @@ Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs l
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
 | INTERNAL_API_URL | No | falls back to NEXT_PUBLIC_API_URL |
+| CACHE_TTL_MS | No | 86400000 (24h) |
+| CACHE_LRU_SIZE | No | 1000 |
 
 `INTERNAL_API_URL` is the server-side base URL for SSR data fetches (the SRD reference pages render as server components — VEG-320). In Docker it's `http://backend:3001/api` (the frontend container can't reach the backend via the host-published `localhost` URL); locally it's unset and falls back to `NEXT_PUBLIC_API_URL`.
+
+`CACHE_TTL_MS` / `CACHE_LRU_SIZE` tune the global in-memory response cache (`backend/src/config/cache.config.ts`, VEG-340). The cache is LRU-bounded so high-cardinality anonymous traffic (e.g. `/srd/search?q=<unique>`) can't accrete unbounded 24h entries and OOM a small self-host; raise `CACHE_LRU_SIZE` on instances with more heap, or lower `CACHE_TTL_MS` for a shorter staleness window.
 
 ## API Docs
 
