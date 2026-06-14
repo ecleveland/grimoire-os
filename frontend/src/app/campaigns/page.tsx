@@ -45,12 +45,20 @@ export default function CampaignsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Campaigns</h1>
-        <Link
-          href="/campaigns/new"
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          New Campaign
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/campaigns/join"
+            className="px-4 py-2 border border-indigo-600 text-indigo-600 rounded-lg hover:bg-indigo-50 dark:hover:bg-gray-800 transition-colors"
+          >
+            Join Campaign
+          </Link>
+          <Link
+            href="/campaigns/new"
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            New Campaign
+          </Link>
+        </div>
       </div>
 
       {campaigns.length === 0 ? (
