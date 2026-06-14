@@ -134,6 +134,13 @@ export default function InitiativeTrackerPage() {
   const [concDraft, setConcDraft] = useState<{ name: string; index: number; value: string } | null>(
     null
   );
+  // In-progress combatant-notes edit (VEG-289), committed on blur/Enter. Same
+  // name + sorted-row-index keying as the other drafts.
+  const [notesDraft, setNotesDraft] = useState<{
+    name: string;
+    index: number;
+    value: string;
+  } | null>(null);
   const [viewMonster, setViewMonster] = useState<SrdMonster | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewLoading, setViewLoading] = useState(false);
@@ -279,6 +286,25 @@ export default function InitiativeTrackerPage() {
       newRound += 1;
     }
     patchEncounter({ currentTurn: nextIndex, round: newRound });
+  };
+
+  // Step back through the initiative order (VEG-289), mirroring nextTurn:
+  // wrapping past the top rolls the round back. Clamped at the very start
+  // (round 1, turn 0) so the tracker can't reverse before the encounter began.
+  const previousTurn = () => {
+    if (!encounter) return;
+    if (encounter.round === 1 && encounter.currentTurn === 0) return;
+    const sorted = sortByInitiative(encounter.combatants);
+    const activeCombatants = sorted.filter(c => c.hp > 0);
+    if (activeCombatants.length === 0) return;
+
+    let prevIndex = encounter.currentTurn - 1;
+    let newRound = encounter.round;
+    if (prevIndex < 0) {
+      prevIndex = sorted.length - 1;
+      newRound -= 1;
+    }
+    patchEncounter({ currentTurn: prevIndex, round: newRound });
   };
 
   // Commit the drafted HP: one clamped, version-guarded PATCH. Empty/invalid
@@ -620,6 +646,21 @@ export default function InitiativeTrackerPage() {
     );
   };
 
+  // Commit the drafted combatant notes (VEG-289): trim and persist, dropping the
+  // key entirely when emptied (absent means no notes). No draft → no-op, so a
+  // focus/blur without a change never fires a PATCH.
+  const commitCombatantNotes = async (name: string) => {
+    if (!notesDraft || notesDraft.name !== name) return;
+    const notes = notesDraft.value.trim();
+    setNotesDraft(null);
+    await mutateCombatantRow(name, notesDraft.index, c => {
+      const next = { ...c };
+      if (notes) next.notes = notes;
+      else delete next.notes;
+      return next;
+    });
+  };
+
   // Set or clear exhaustion (VEG-287). Levels 1–6 persist; 0 (or out of range)
   // drops the key, mirroring "absent means none".
   const setExhaustion = async (name: string, rowIndex: number, level: number) => {
@@ -771,6 +812,7 @@ export default function InitiativeTrackerPage() {
   const rowHoldsAmount = makeRowHoldsDraft(amountDraft);
   const rowHoldsInit = makeRowHoldsDraft(initDraft);
   const rowHoldsConc = makeRowHoldsDraft(concDraft);
+  const rowHoldsNotes = makeRowHoldsDraft(notesDraft);
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -793,6 +835,14 @@ export default function InitiativeTrackerPage() {
               className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
             >
               {encounter.isActive ? 'End Combat' : 'Start Combat'}
+            </button>
+            <button
+              type="button"
+              onClick={previousTurn}
+              disabled={encounter.round === 1 && encounter.currentTurn === 0}
+              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Previous Turn
             </button>
             <button
               onClick={nextTurn}
@@ -1236,6 +1286,28 @@ export default function InitiativeTrackerPage() {
                       </option>
                     ))}
                   </select>
+                  {/* Quick-edit notes (VEG-289), committed on blur/Enter; empty
+                      clears them. Read-only view for non-controllers renders below. */}
+                  <input
+                    type="text"
+                    placeholder="Notes"
+                    aria-label={`Notes for ${c.name}`}
+                    value={rowHoldsNotes(c, i) ? notesDraft!.value : (c.notes ?? '')}
+                    onChange={e => setNotesDraft({ name: c.name, index: i, value: e.target.value })}
+                    onBlur={() => commitCombatantNotes(c.name)}
+                    onKeyDown={e => {
+                      // Enter commits via the blur handler — one commit path.
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                    className="min-w-0 flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  />
+                </div>
+              )}
+              {/* Notes are shown to everyone (view); only controllers get the
+                  edit field above (VEG-289). */}
+              {!isController && c.notes && (
+                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                  <span className="font-medium">Notes:</span> {c.notes}
                 </div>
               )}
               {/* DM-only drop view (VEG-301) — the player reveal is a separate ticket. */}

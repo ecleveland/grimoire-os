@@ -254,6 +254,128 @@ describe('InitiativeTrackerPage', () => {
     );
   });
 
+  describe('previous turn (VEG-289)', () => {
+    it('steps back within the round', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 2, round: 1, version: 1 }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('button', { name: /previous turn/i });
+      await user.click(screen.getByRole('button', { name: /previous turn/i }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          '/encounters/enc-1',
+          expect.objectContaining({
+            body: JSON.stringify({ currentTurn: 1, round: 1, expectedVersion: 1 }),
+          })
+        )
+      );
+    });
+
+    it('wraps to the last combatant and decrements the round', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 2, version: 1 }));
+      const user = userEvent.setup();
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('button', { name: /previous turn/i });
+      await user.click(screen.getByRole('button', { name: /previous turn/i }));
+      await waitFor(() =>
+        // 3 combatants → last index 2; round 2 → 1.
+        expect(mockApiFetch).toHaveBeenLastCalledWith(
+          '/encounters/enc-1',
+          expect.objectContaining({
+            body: JSON.stringify({ currentTurn: 2, round: 1, expectedVersion: 1 }),
+          })
+        )
+      );
+    });
+
+    it('is disabled at the very start (round 1, turn 0)', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
+      render(<InitiativeTrackerPage />);
+      const btn = await screen.findByRole('button', { name: /previous turn/i });
+      expect(btn).toBeDisabled();
+    });
+
+    it('hides the turn controls from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByRole('button', { name: /previous turn/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('combatant notes (VEG-289)', () => {
+    function patchBody() {
+      const call = mockApiFetch.mock.calls.find(
+        ([p, o]) =>
+          p === '/encounters/enc-1' && (o as { method?: string } | undefined)?.method === 'PATCH'
+      );
+      return call ? JSON.parse((call[1] as { body: string }).body) : undefined;
+    }
+
+    it('shows a controller an editable notes field pre-filled from the combatant', async () => {
+      mockApiFetch.mockResolvedValue(
+        makeEncounter({
+          combatants: [makeCombatant({ name: 'Spy', notes: 'secretly a doppelganger' })],
+        })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByLabelText('Notes for Spy')).toHaveValue('secretly a doppelganger');
+    });
+
+    it('shows non-controllers the notes read-only (no edit field)', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(
+        makeEncounter({
+          createdBy: 'user-1',
+          combatants: [makeCombatant({ name: 'Spy', notes: 'lair hazard' })],
+        })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.getByText(/lair hazard/)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Notes for Spy')).not.toBeInTheDocument();
+    });
+
+    it('persists an edited note via a version-guarded PATCH', async () => {
+      routeAddFlow({
+        encounter: makeEncounter({ version: 4, combatants: [makeCombatant({ name: 'Spy' })] }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      const input = screen.getByLabelText('Notes for Spy');
+      fireEvent.change(input, { target: { value: 'bloodied at half HP' } });
+      fireEvent.blur(input);
+      await waitFor(() => expect(patchBody()).toBeDefined());
+      const body = patchBody()!;
+      expect(body.expectedVersion).toBe(4);
+      expect(body.combatants[0].notes).toBe('bloodied at half HP');
+    });
+
+    it('clears the notes key when the field is emptied', async () => {
+      routeAddFlow({
+        encounter: makeEncounter({
+          version: 4,
+          combatants: [makeCombatant({ name: 'Spy', notes: 'temp' })],
+        }),
+      });
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      const input = screen.getByLabelText('Notes for Spy');
+      fireEvent.change(input, { target: { value: '   ' } });
+      fireEvent.blur(input);
+      await waitFor(() => expect(patchBody()).toBeDefined());
+      expect(patchBody()!.combatants[0]).not.toHaveProperty('notes');
+    });
+  });
+
   it('does not advance turn when every combatant has 0 HP', async () => {
     mockApiFetch.mockResolvedValue(
       makeEncounter({
