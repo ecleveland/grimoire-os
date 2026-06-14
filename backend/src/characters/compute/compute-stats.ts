@@ -4,6 +4,7 @@ import type {
   ComputedAbilityModifiers,
   ComputedSave,
   ComputedSkill,
+  ComputedSpellcasting,
   ComputedSpellSlots,
   ComputedStats,
   SpellcasterType,
@@ -87,6 +88,15 @@ function scoreFor(abilityScores: AbilityScores | null, key: keyof AbilityScores)
 function abilityKeyFromName(name: string): keyof AbilityScores | null {
   const key = name.toLowerCase() as keyof AbilityScores;
   return ABILITY_KEYS.includes(key) ? key : null;
+}
+
+/**
+ * Whether a string names one of the six abilities. The service uses this to
+ * flag a corrupt/typo'd `spellcastingAbility` column (free-form text) rather
+ * than letting it silently produce a wrong save DC (VEG-346).
+ */
+export function isKnownAbilityName(name: string): boolean {
+  return abilityKeyFromName(name) !== null;
 }
 
 // ── Spell slots ────────────────────────────────────────────────────────
@@ -178,16 +188,19 @@ export function computeCharacterStats(
 
   // Spellcasting ability: an explicit column wins (covers subclass casters like
   // Eldritch Knight), else fall back to the class default. Null → non-caster.
+  // An unrecognized name (corrupt column) yields modifier 0; the service logs
+  // it so the wrong-but-rendered DC is observable rather than silent.
   const resolvedAbility = spellcastingAbility ?? classSpellcasting?.ability ?? null;
-  let spellcastingModifier: number | null = null;
-  let spellSaveDC: number | null = null;
-  let spellAttackBonus: number | null = null;
+  let spellcasting: ComputedSpellcasting | null = null;
   if (resolvedAbility) {
     const key = abilityKeyFromName(resolvedAbility);
-    const mod = key ? abilityModifiers[key] : abilityModifier(10);
-    spellcastingModifier = mod;
-    spellSaveDC = 8 + profBonus + mod;
-    spellAttackBonus = profBonus + mod;
+    const mod = key ? abilityModifiers[key] : 0;
+    spellcasting = {
+      ability: resolvedAbility,
+      modifier: mod,
+      saveDC: 8 + profBonus + mod,
+      attackBonus: profBonus + mod,
+    };
   }
 
   return {
@@ -197,10 +210,7 @@ export function computeCharacterStats(
     savingThrows: savingThrowBonuses,
     skills: skillBonuses,
     passivePerception,
-    spellcastingAbility: resolvedAbility,
-    spellcastingModifier,
-    spellSaveDC,
-    spellAttackBonus,
+    spellcasting,
     spellSlots: resolveSpellSlots(level, classSpellcasting),
   };
 }

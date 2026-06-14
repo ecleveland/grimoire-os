@@ -37,6 +37,22 @@ export interface ComputedSpellSlots {
 }
 
 /**
+ * Derived spellcasting numbers, present as a unit only for casters. Grouping
+ * the four fields makes the "all set or all absent" invariant unrepresentable
+ * as four independent nulls (VEG-346).
+ */
+export interface ComputedSpellcasting {
+  /** Resolved spellcasting ability, full name (e.g. "Wisdom"). */
+  ability: string;
+  /** Modifier of the spellcasting ability. */
+  modifier: number;
+  /** 8 + proficiency bonus + spellcasting modifier. */
+  saveDC: number;
+  /** Proficiency bonus + spellcasting modifier. */
+  attackBonus: number;
+}
+
+/**
  * Authoritative derived values for a character. Everything here is a pure
  * function of the character's stored inputs — recomputed per read, never
  * persisted. Spellcasting fields are null for non-casters.
@@ -52,14 +68,8 @@ export interface ComputedStats {
   /** Keyed by skill name (e.g. "Athletics"). */
   skills: Record<string, ComputedSkill>;
   passivePerception: number;
-  /** Resolved spellcasting ability (full name), or null for non-casters. */
-  spellcastingAbility: string | null;
-  /** Modifier of the spellcasting ability, or null for non-casters. */
-  spellcastingModifier: number | null;
-  /** 8 + proficiency bonus + spellcasting modifier, or null for non-casters. */
-  spellSaveDC: number | null;
-  /** Proficiency bonus + spellcasting modifier, or null for non-casters. */
-  spellAttackBonus: number | null;
+  /** Spell save DC / attack bonus / modifier, or null for non-casters. */
+  spellcasting: ComputedSpellcasting | null;
   /** Max spell slots per level from the class progression, or null. */
   spellSlots: ComputedSpellSlots | null;
 }

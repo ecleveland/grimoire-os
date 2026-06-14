@@ -147,31 +147,44 @@ describe('computeCharacterStats', () => {
     expect(computeCharacterStats(input({ skills: ['Perception'] })).passivePerception).toBe(14);
   });
 
-  it('leaves all spellcasting fields null for a non-caster', () => {
+  it('leaves spellcasting null for a non-caster', () => {
     const stats = computeCharacterStats(input());
-    expect(stats.spellcastingAbility).toBeNull();
-    expect(stats.spellcastingModifier).toBeNull();
-    expect(stats.spellSaveDC).toBeNull();
-    expect(stats.spellAttackBonus).toBeNull();
+    expect(stats.spellcasting).toBeNull();
     expect(stats.spellSlots).toBeNull();
   });
 
   it('derives spell save DC and attack bonus from the class spellcasting ability', () => {
     // Charisma mod -1, prof 3 at level 5: DC = 8 + 3 + (-1) = 10; attack = 3 + (-1) = 2
     const stats = computeCharacterStats(input(), FULL_CASTER);
-    expect(stats.spellcastingAbility).toBe('Charisma');
-    expect(stats.spellcastingModifier).toBe(-1);
-    expect(stats.spellSaveDC).toBe(10);
-    expect(stats.spellAttackBonus).toBe(2);
+    expect(stats.spellcasting).toEqual({
+      ability: 'Charisma',
+      modifier: -1,
+      saveDC: 10,
+      attackBonus: 2,
+    });
   });
 
   it('prefers an explicit spellcastingAbility column over the class default', () => {
     // Character column says Wisdom (mod 1) even though class is Charisma.
     const stats = computeCharacterStats(input({ spellcastingAbility: 'Wisdom' }), FULL_CASTER);
-    expect(stats.spellcastingAbility).toBe('Wisdom');
-    expect(stats.spellcastingModifier).toBe(1);
-    expect(stats.spellSaveDC).toBe(12);
-    expect(stats.spellAttackBonus).toBe(4);
+    expect(stats.spellcasting).toEqual({
+      ability: 'Wisdom',
+      modifier: 1,
+      saveDC: 12,
+      attackBonus: 4,
+    });
+  });
+
+  it('computes with modifier 0 for an unrecognized spellcasting ability name', () => {
+    // A corrupt/typo'd column still renders a caster block (the service logs it),
+    // but the unknown ability contributes modifier 0: DC = 8 + 3 + 0 = 11.
+    const stats = computeCharacterStats(input({ spellcastingAbility: 'Inteligence' }));
+    expect(stats.spellcasting).toEqual({
+      ability: 'Inteligence',
+      modifier: 0,
+      saveDC: 11,
+      attackBonus: 3,
+    });
   });
 
   it('exposes full-caster spell slot maxima at the character level', () => {
