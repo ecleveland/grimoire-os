@@ -8,8 +8,8 @@ import { toast } from 'sonner';
 import type { Character, AbilityScores, CampaignListItem, PaginatedResponse } from '@/lib/types';
 import FormField from '@/components/FormField';
 
-// The backend caps `limit` at 100 (PaginationDto); one page is plenty to
-// populate this optional single-select picker.
+// The backend rejects `limit` > 100 (PaginationDto `@Max(100)`); one page is
+// plenty to populate this optional single-select picker.
 const CAMPAIGN_PICKER_LIMIT = 100;
 
 const abilityKeys: (keyof AbilityScores)[] = [
@@ -53,7 +53,11 @@ export default function NewCharacterPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const campaignsQuery = useApiQuery<PaginatedResponse<CampaignListItem>>(
-    `/campaigns?page=1&limit=${CAMPAIGN_PICKER_LIMIT}`
+    `/campaigns?page=1&limit=${CAMPAIGN_PICKER_LIMIT}`,
+    {
+      errorToast:
+        'Could not load your campaigns — you can add this character to one later from its sheet.',
+    }
   );
   const campaigns = campaignsQuery.data?.data ?? [];
 

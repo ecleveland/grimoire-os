@@ -8,9 +8,10 @@ import { apiFetch } from '@/lib/api';
 import { useApiQuery, useApiMutation, apiQueryKey } from '@/lib/query';
 import type { Campaign, CampaignListItem, Character, PaginatedResponse } from '@/lib/types';
 
-// The picker lists the caller's campaigns in a single page. The backend caps
-// `limit` at 100 (PaginationDto); a player in >100 campaigns is not a realistic
-// case for this single-select control, and slice 3 owns richer roster tooling.
+// The picker lists the caller's campaigns in a single page. The backend rejects
+// `limit` > 100 (PaginationDto `@Max(100)`), so 100 is the largest single page;
+// a player in >100 campaigns is not a realistic case for this single-select
+// control, and slice 3 owns richer roster tooling.
 const CAMPAIGN_PICKER_LIMIT = 100;
 
 interface CampaignMembershipProps {
@@ -27,7 +28,7 @@ export default function CampaignMembership({ character, isOwner }: CampaignMembe
   const needsCampaigns = isOwner || !!character.campaignId;
   const campaignsQuery = useApiQuery<PaginatedResponse<CampaignListItem>>(
     `/campaigns?page=1&limit=${CAMPAIGN_PICKER_LIMIT}`,
-    { enabled: needsCampaigns }
+    { enabled: needsCampaigns, errorToast: 'Failed to load your campaigns' }
   );
   const campaigns = campaignsQuery.data?.data ?? [];
 
@@ -37,8 +38,11 @@ export default function CampaignMembership({ character, isOwner }: CampaignMembe
     {
       onSuccess: () => {
         toast.success('Added to campaign!');
-        // Refetch the character so the sheet reflects its new campaign.
-        queryClient.invalidateQueries({ queryKey: apiQueryKey(`/characters/${character.id}`) });
+        // Refetch the character so the sheet reflects its new campaign. Best-effort:
+        // a failed refetch must not be swallowed as an unobserved rejection.
+        queryClient
+          .invalidateQueries({ queryKey: apiQueryKey(`/characters/${character.id}`) })
+          .catch(err => console.error('Failed to refetch character after attach:', err));
       },
       onError: err => {
         console.error('Failed to add character to campaign:', err);
@@ -69,7 +73,9 @@ export default function CampaignMembership({ character, isOwner }: CampaignMembe
   // Unattached: only the owner can attach their character.
   if (!isOwner) return null;
 
-  if (!campaignsQuery.isPending && campaigns.length === 0) {
+  // Only show the empty prompt once the list has actually loaded — a failed
+  // fetch (toasted above) must not masquerade as "you have no campaigns".
+  if (campaignsQuery.isSuccess && campaigns.length === 0) {
     return (
       <p className="text-sm text-gray-500 dark:text-gray-400">
         <Link

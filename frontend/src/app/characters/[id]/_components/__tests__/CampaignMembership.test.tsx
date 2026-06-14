@@ -92,6 +92,67 @@ describe('CampaignMembership', () => {
     expect(screen.queryByRole('combobox')).toBeNull();
   });
 
+  it('falls back to a generic link label when the attached campaign is not in the list', async () => {
+    // e.g. attached to a campaign beyond the fetched page, or the viewer isn't a member.
+    routeApiFetch([makeCampaign({ id: 'other', name: 'Some Other Campaign' })]);
+    renderControl(
+      <CampaignMembership
+        character={makeCharacter({ campaignId: 'camp-unknown' })}
+        isOwner={true}
+      />
+    );
+
+    const link = await screen.findByRole('link', { name: /view campaign/i });
+    expect(link).toHaveAttribute('href', '/campaigns/camp-unknown');
+  });
+
+  it('shows the attached campaign link to a non-owner viewer too', async () => {
+    routeApiFetch([makeCampaign({ id: 'camp-1', name: 'The Lost Mines' })]);
+    renderControl(
+      <CampaignMembership character={makeCharacter({ campaignId: 'camp-1' })} isOwner={false} />
+    );
+
+    expect(await screen.findByRole('link', { name: /the lost mines/i })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('reflects the attached campaign after the parent refetches post-attach', async () => {
+    routeApiFetch([makeCampaign({ id: 'camp-2', name: 'Curse of Strahd' })]);
+    const { rerender } = renderControl(
+      <CampaignMembership character={makeCharacter({ id: 'char-1' })} isOwner={true} />
+    );
+    // Starts unattached: the picker is shown.
+    await screen.findByRole('combobox', { name: /add to campaign/i });
+
+    // After attach, the parent's character query refetches and passes the
+    // attached character down — the control flips to the campaign link.
+    rerender(
+      <CampaignMembership
+        character={makeCharacter({ id: 'char-1', campaignId: 'camp-2' })}
+        isOwner={true}
+      />
+    );
+    expect(await screen.findByRole('link', { name: /curse of strahd/i })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it('does not flash the empty state while the campaigns list is loading', async () => {
+    let resolveCampaigns: (r: PaginatedResponse<CampaignListItem>) => void = () => {};
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/campaigns?'))
+        return new Promise<PaginatedResponse<CampaignListItem>>(resolve => {
+          resolveCampaigns = resolve;
+        });
+      return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
+    });
+    renderControl(<CampaignMembership character={makeCharacter()} isOwner={true} />);
+
+    // While pending, the "Join a campaign" empty prompt must not appear.
+    expect(screen.queryByText(/join a campaign/i)).toBeNull();
+    resolveCampaigns(campaignsResponse([]));
+    expect(await screen.findByText(/join a campaign/i)).toBeInTheDocument();
+  });
+
   it('renders a campaign picker for the owner when unattached', async () => {
     routeApiFetch([
       makeCampaign({ id: 'camp-1', name: 'The Lost Mines' }),
