@@ -1,5 +1,6 @@
 export * from './enums';
 export * from './embedded';
+export * from './encounter-difficulty';
 export * from './entities';
 export * from './loot';
 export * from './pagination';

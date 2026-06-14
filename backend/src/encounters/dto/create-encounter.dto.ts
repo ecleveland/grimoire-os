@@ -206,6 +206,34 @@ class CombatantDto {
   @ValidateNested()
   @Type(() => CombatantDeathSavesDto)
   deathSaves?: CombatantDeathSavesDto;
+
+  @ApiPropertyOptional({
+    description:
+      'Challenge rating snapshotted from the source monster (VEG-362); drives the summed-CR readout.',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cr?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'XP snapshotted from the source monster (VEG-362); the monster experiencePoints or the CR→XP value.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  xp?: number;
+
+  @ApiPropertyOptional({
+    description:
+      "Character level snapshotted from a PC's sheet (VEG-362); drives the party budget.",
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  level?: number;
 }
 
 export class CreateEncounterDto {

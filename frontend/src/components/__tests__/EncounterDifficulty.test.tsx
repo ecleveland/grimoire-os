@@ -1,0 +1,124 @@
+import { describe, it, expect } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+import EncounterDifficulty from '@/components/EncounterDifficulty';
+import type { Combatant } from '@/lib/types';
+
+const monster = (over: Partial<Combatant> = {}): Combatant => ({
+  name: 'Goblin',
+  initiative: 12,
+  hp: 7,
+  maxHp: 7,
+  ac: 15,
+  isNpc: true,
+  monsterId: 'mon-goblin',
+  cr: 0.25,
+  xp: 50,
+  ...over,
+});
+
+const pc = (over: Partial<Combatant> = {}): Combatant => ({
+  name: 'Aragorn',
+  initiative: 10,
+  hp: 40,
+  maxHp: 45,
+  ac: 16,
+  isNpc: false,
+  level: 3,
+  ...over,
+});
+
+describe('EncounterDifficulty', () => {
+  it('shows the empty state when there are no monsters', () => {
+    render(<EncounterDifficulty combatants={[pc()]} />);
+    expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent(/no monsters yet/i);
+    expect(screen.queryByTestId('difficulty-band')).not.toBeInTheDocument();
+  });
+
+  it('shows count, total XP, summed CR, and the difficulty band', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          monster({ cr: 0.25, xp: 50 }),
+          monster({ name: 'Goblin 2', cr: 0.25, xp: 50 }),
+          monster({ name: 'Goblin 3', cr: 0.25, xp: 50 }),
+          pc({ level: 3 }),
+        ]}
+      />
+    );
+    const el = screen.getByTestId('encounter-difficulty');
+    expect(el).toHaveTextContent('3 monsters');
+    expect(el).toHaveTextContent('150 XP');
+    expect(el).toHaveTextContent('CR 0.75'); // summed 0.25*3; non-special fractions print as decimals
+    // 150 XP <= level-3 low budget (150) -> Low.
+    expect(within(el).getByTestId('difficulty-band')).toHaveTextContent('Low');
+  });
+
+  it('shows a summed CR that lands on a fraction value (two CR-1/8 → 1/4)', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          monster({ name: 'Rat', cr: 0.125, xp: 25 }),
+          monster({ name: 'Rat 2', cr: 0.125, xp: 25 }),
+        ]}
+      />
+    );
+    // 0.125 + 0.125 = 0.25 → "1/4"; the separate "2 monsters" count keeps it
+    // from reading as a single quarter-CR monster.
+    const el = screen.getByTestId('encounter-difficulty');
+    expect(el).toHaveTextContent('2 monsters');
+    expect(el).toHaveTextContent('CR 1/4');
+  });
+
+  it('formats large XP totals with a thousands separator', () => {
+    render(<EncounterDifficulty combatants={[monster({ cr: 5, xp: 1800 }), pc({ level: 1 })]} />);
+    expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent('1,800 XP');
+  });
+
+  it('rates an over-budget encounter as Deadly', () => {
+    render(<EncounterDifficulty combatants={[monster({ cr: 1, xp: 200 }), pc({ level: 1 })]} />);
+    expect(screen.getByTestId('difficulty-band')).toHaveTextContent('Deadly');
+  });
+
+  it('prompts to add the party when no PC has a level', () => {
+    render(<EncounterDifficulty combatants={[monster(), pc({ level: undefined })]} />);
+    expect(screen.queryByTestId('difficulty-band')).not.toBeInTheDocument();
+    expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent(/add party pcs/i);
+  });
+
+  it('warns about action economy when monsters swamp the party', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          ...Array.from({ length: 13 }, (_, i) =>
+            monster({ name: `Goblin ${i}`, cr: 0.25, xp: 50 })
+          ),
+          pc({ level: 10 }),
+        ]}
+      />
+    );
+    const warning = screen.getByTestId('action-economy-warning');
+    expect(warning).toHaveTextContent('13 vs 1 PC');
+    // The XP band is still shown alongside (RAW), here "Low".
+    expect(screen.getByTestId('difficulty-band')).toHaveTextContent('Low');
+  });
+
+  it('does not warn about action economy for a balanced fight', () => {
+    render(
+      <EncounterDifficulty
+        combatants={[
+          monster(),
+          monster({ name: 'B' }),
+          pc({ level: 3 }),
+          pc({ name: 'P2', level: 3 }),
+        ]}
+      />
+    );
+    expect(screen.queryByTestId('action-economy-warning')).not.toBeInTheDocument();
+  });
+
+  it('uses the singular noun for a single monster', () => {
+    render(<EncounterDifficulty combatants={[monster()]} />);
+    expect(screen.getByTestId('encounter-difficulty')).toHaveTextContent('1 monster');
+    expect(screen.getByTestId('encounter-difficulty')).not.toHaveTextContent('1 monsters');
+  });
+});

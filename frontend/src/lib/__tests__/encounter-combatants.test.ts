@@ -117,6 +117,8 @@ describe('buildMonsterCombatants', () => {
         ac: 15,
         isNpc: true,
         monsterId: 'mon-goblin',
+        cr: 0.25,
+        xp: 50,
       },
       {
         name: 'Goblin 2',
@@ -126,8 +128,26 @@ describe('buildMonsterCombatants', () => {
         ac: 15,
         isNpc: true,
         monsterId: 'mon-goblin',
+        cr: 0.25,
+        xp: 50,
       },
     ]);
+  });
+
+  it('snapshots cr and the CR→XP value (VEG-362), preferring the monster own xp', () => {
+    const fromCr = buildMonsterCombatants(
+      makeMonster({ challengeRating: 1 }),
+      { quantity: 1, initiatives: [10] },
+      []
+    );
+    expect(fromCr[0]).toMatchObject({ cr: 1, xp: 200 });
+
+    const homebrew = buildMonsterCombatants(
+      makeMonster({ challengeRating: 1, experiencePoints: 999 }),
+      { quantity: 1, initiatives: [10] },
+      []
+    );
+    expect(homebrew[0]).toMatchObject({ cr: 1, xp: 999 });
   });
 
   it('auto-numbers around combatants already in the encounter', () => {
@@ -236,8 +256,49 @@ describe('buildPartyCombatants', () => {
       ['Goblin']
     );
     expect(result).toEqual([
-      { name: 'Thia', initiative: 14, hp: 17, maxHp: 22, ac: 12, isNpc: false },
+      { name: 'Thia', initiative: 14, hp: 17, maxHp: 22, ac: 12, isNpc: false, level: 5 },
     ]);
+  });
+
+  it('snapshots the sheet level (VEG-362)', () => {
+    const [c] = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 8 }), initiative: 12 }],
+      []
+    );
+    expect(c.level).toBe(8);
+  });
+
+  it('clamps the snapshotted level to a whole 1–20 so the combatant write stays valid', () => {
+    // The character layer does not bound level, but CombatantDto does
+    // (@IsInt @Min(1) @Max(20)) — an out-of-range snapshot would 400 the write.
+    const low = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 0 }), initiative: 10 }],
+      []
+    );
+    expect(low[0].level).toBe(1);
+    const high = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 25 }), initiative: 10 }],
+      []
+    );
+    expect(high[0].level).toBe(20);
+    const fractional = buildPartyCombatants(
+      [{ character: makePartyCharacter({ level: 5.9 }), initiative: 10 }],
+      []
+    );
+    expect(fractional[0].level).toBe(5);
+  });
+
+  it('omits level when the sheet value is not a finite number', () => {
+    const [c] = buildPartyCombatants(
+      [
+        {
+          character: makePartyCharacter({ level: undefined as unknown as number }),
+          initiative: 10,
+        },
+      ],
+      []
+    );
+    expect(c).not.toHaveProperty('level');
   });
 
   it('auto-numbers against existing combatants and within the batch', () => {

@@ -1,4 +1,5 @@
 import type { Combatant, PartyCharacter, SrdMonster } from '@/lib/types';
+import { xpForCr } from '@grimoire-os/shared';
 
 /** Derive the 5e DEX modifier from a monster's raw DEX score: floor((dex - 10) / 2). */
 export function dexModifier(monster: SrdMonster): number {
@@ -114,6 +115,16 @@ export function buildPartyCombatants(
     const maxHp = character.hitPoints?.max ?? 10;
     const current = character.hitPoints?.current ?? maxHp;
     const tempHp = character.hitPoints?.temporary ?? 0;
+    // Snapshot the sheet level (VEG-362) so the difficulty budget comes from the
+    // encounter's own PCs without re-fetching the roster. Clamp to a whole 1–20:
+    // a character's level isn't bounded at the character layer, but the
+    // combatant write contract is (@IsInt @Min(1) @Max(20)), and every combatant
+    // is echoed back on later PATCHes — an out-of-range snapshot would 400 the
+    // write and brick the encounter. A non-finite level is omitted so the PC
+    // simply doesn't contribute to the budget.
+    const level = Number.isFinite(character.level)
+      ? Math.min(20, Math.max(1, Math.trunc(character.level)))
+      : undefined;
     return {
       name,
       initiative,
@@ -122,6 +133,7 @@ export function buildPartyCombatants(
       ...(tempHp > 0 ? { tempHp } : {}),
       ac: character.armorClass ?? 10,
       isNpc: false,
+      ...(level !== undefined ? { level } : {}),
     };
   });
 }
@@ -154,5 +166,10 @@ export function buildMonsterCombatants(
     ac: monster.armorClass,
     isNpc: true,
     monsterId: monster.id,
+    // Snapshot CR + XP (VEG-362) so the difficulty readout can sum them without
+    // re-fetching the stat block; prefer the monster's own XP (homebrew can
+    // override) and fall back to the canonical CR→XP value.
+    cr: monster.challengeRating,
+    xp: monster.experiencePoints ?? xpForCr(monster.challengeRating),
   }));
 }

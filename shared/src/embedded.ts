@@ -151,6 +151,27 @@ export interface Combatant {
    * cleared on revival above 0 HP. Only meaningful for `isNpc: false`.
    */
   deathSaves?: DeathSaves;
+  /**
+   * Challenge rating of the source monster (VEG-362), snapshotted at add/link
+   * time so the encounter-difficulty readout can sum CR without re-fetching the
+   * stat block. Set on monster combatants; absent on PCs, hand-typed NPCs, and
+   * DM-controlled allies. Presence of `cr`/`xp` is what marks a combatant as a
+   * threat for the difficulty totals (not the broader `isNpc` flag).
+   */
+  cr?: number;
+  /**
+   * Experience-point value of the source monster (VEG-362), snapshotted at
+   * add/link time (the monster's own `experiencePoints` when present, else the
+   * canonical CR→XP value). Lets a homebrew monster keep its custom XP. Set
+   * alongside `cr`.
+   */
+  xp?: number;
+  /**
+   * Character level snapshotted from the PC's sheet at add time (VEG-362), so
+   * the difficulty budget can be computed from the encounter's own PCs. Set on
+   * party combatants; absent on monsters and hand-typed PCs.
+   */
+  level?: number;
 }
 
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;

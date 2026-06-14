@@ -820,6 +820,7 @@ describe('InitiativeTrackerPage', () => {
         maxHp: 22,
         ac: 12,
         isNpc: false,
+        level: 5,
       });
       expect(patchBody!.combatants[4]).toEqual({
         name: 'Mort',
@@ -828,6 +829,7 @@ describe('InitiativeTrackerPage', () => {
         maxHp: 18,
         ac: 14,
         isNpc: false,
+        level: 3,
       });
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -1275,7 +1277,13 @@ describe('InitiativeTrackerPage', () => {
       return makeEncounter({
         combatants: [
           makeCombatant({ name: 'Hero', initiative: 18, isNpc: false, monsterId: undefined }),
-          makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+          makeCombatant({
+            name: 'Goblin A',
+            initiative: 12,
+            monsterId: 'monster-1',
+            cr: 0.25,
+            xp: 50,
+          }),
         ],
         ...over,
       });
@@ -1335,9 +1343,11 @@ describe('InitiativeTrackerPage', () => {
 
       expect(patchBody!.expectedVersion).toBe(7);
       const hero = patchBody!.combatants.find(c => c.name === 'Hero')!;
-      // Reference-only linking: monsterId is set, the DM's customized row survives.
+      // Linking sets monsterId and snapshots the stat block's cr/xp (VEG-362)
+      // for the difficulty readout, while leaving the DM's customized row alone.
       expect(hero.monsterId).toBe('monster-1');
       expect(hero).toMatchObject({ name: 'Hero', initiative: 18, hp: 7, maxHp: 7, ac: 13 });
+      expect(hero).toMatchObject({ cr: 0.25, xp: 50 });
       const goblin = patchBody!.combatants.find(c => c.name === 'Goblin A')!;
       expect(goblin.monsterId).toBe('monster-1');
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
@@ -1410,6 +1420,10 @@ describe('InitiativeTrackerPage', () => {
       expect(body.expectedVersion).toBe(7);
       const goblin = (body.combatants as Combatant[]).find(c => c.name === 'Goblin A')!;
       expect(goblin).not.toHaveProperty('monsterId');
+      // The stat-block snapshot goes with the linkage (VEG-362), so the row
+      // stops counting toward difficulty.
+      expect(goblin).not.toHaveProperty('cr');
+      expect(goblin).not.toHaveProperty('xp');
       expect(goblin).toMatchObject({ initiative: 12, hp: 7, maxHp: 7, ac: 13 });
     });
 
@@ -1427,6 +1441,41 @@ describe('InitiativeTrackerPage', () => {
       expect(
         screen.queryByRole('button', { name: /reroll loot for orphan/i })
       ).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Encounter difficulty readout (VEG-362) ───────────────────────────────────
+
+  describe('encounter difficulty readout', () => {
+    it('shows monster XP/CR and the difficulty band to the controller', async () => {
+      mockApiFetch.mockResolvedValue(
+        makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', isNpc: false, level: 3 }),
+            makeCombatant({ name: 'Goblin A', cr: 0.25, xp: 50 }),
+            makeCombatant({ name: 'Goblin B', cr: 0.25, xp: 50 }),
+          ],
+        })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      const readout = screen.getByTestId('encounter-difficulty');
+      expect(readout).toHaveTextContent('2 monsters');
+      expect(readout).toHaveTextContent('100 XP'); // 2 × CR 1/4 (50)
+      expect(within(readout).getByTestId('difficulty-band')).toBeInTheDocument();
+    });
+
+    it('hides the readout from non-controllers', async () => {
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'someone-else', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      mockApiFetch.mockResolvedValue(
+        makeEncounter({ createdBy: 'user-1', combatants: [makeCombatant({ cr: 1, xp: 200 })] })
+      );
+      render(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByTestId('encounter-difficulty')).not.toBeInTheDocument();
     });
   });
 

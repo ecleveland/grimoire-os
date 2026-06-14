@@ -11,6 +11,7 @@ import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import AddCombatantDialog from '@/components/AddCombatantDialog';
+import EncounterDifficulty from '@/components/EncounterDifficulty';
 import AddPartyDialog from '@/components/AddPartyDialog';
 import LinkMonsterDialog from '@/components/LinkMonsterDialog';
 import {
@@ -28,7 +29,7 @@ import {
   DEATH_SAVE_MAX,
 } from '@/lib/death-saves';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
-import { aggregateCombatantLoot, CONDITIONS } from '@grimoire-os/shared';
+import { aggregateCombatantLoot, CONDITIONS, xpForCr } from '@grimoire-os/shared';
 import type {
   CombatantLootCoinage,
   CombatantLootItem,
@@ -534,13 +535,16 @@ export default function InitiativeTrackerPage() {
     return patchEncounter({ combatants: sorted });
   };
 
-  // Link an unlinked row to a monster (VEG-328). Reference-only: just sets
-  // monsterId, never touching the DM's possibly-customized name/HP/AC.
+  // Link an unlinked row to a monster (VEG-328). Leaves the DM's
+  // possibly-customized name/HP/AC alone, but does snapshot the stat block's
+  // cr/xp (VEG-362) so the linked row counts toward encounter difficulty.
   const linkMonsterToCombatant = async (monster: SrdMonster) => {
     if (!linkTarget) return;
     const result = await mutateCombatantRow(linkTarget.name, linkTarget.index, c => ({
       ...c,
       monsterId: monster.id,
+      cr: monster.challengeRating,
+      xp: monster.experiencePoints ?? xpForCr(monster.challengeRating),
     }));
     if (result === 'missing') {
       toast.error('That combatant is no longer in the encounter.');
@@ -562,6 +566,10 @@ export default function InitiativeTrackerPage() {
     const result = await mutateCombatantRow(name, rowIndex, c => {
       const next = { ...c };
       delete next.monsterId;
+      // Drop the snapshotted stat-block numbers too (VEG-362), so an unlinked
+      // row stops counting toward difficulty — matching how it loses Reroll.
+      delete next.cr;
+      delete next.xp;
       return next;
     });
     if (result && result !== 'missing') toast.success(`Unlinked ${name}`);
@@ -749,6 +757,15 @@ export default function InitiativeTrackerPage() {
           </div>
         )}
       </div>
+
+      {/* Encounter difficulty (VEG-362): DM-planning info, controller-only like
+          the loot panel. Monsters drive XP/CR; the PCs in the encounter set the
+          2024 budget. */}
+      {isController && (
+        <div className="mb-4">
+          <EncounterDifficulty combatants={encounter.combatants} />
+        </div>
+      )}
 
       <div className="space-y-2">
         {sorted.map((c, i) => {
