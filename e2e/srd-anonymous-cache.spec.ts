@@ -52,4 +52,48 @@ test.describe('Anonymous SRD response caching (VEG-333)', () => {
     expect(second.ok()).toBeTruthy();
     expect(second.headers()['x-cache']).toBeUndefined();
   });
+
+  // The load-bearing leak guard: an authenticated caller must NOT be served a
+  // cache entry that an anonymous request already populated on the same URL.
+  test('does not serve an anon-cached entry to an authenticated caller on the same URL', async ({
+    page,
+  }) => {
+    const url = uniqueUrl();
+
+    // 1. Anonymous requests populate (then hit) the shared cache for this URL.
+    expect((await page.request.get(url)).headers()['x-cache']).toBe('MISS');
+    expect((await page.request.get(url)).headers()['x-cache']).toBe('HIT');
+
+    // 2. Now register and hit the SAME url. The cache entry exists, but the
+    // authenticated path must bypass it — no X-Cache stamp means it never read
+    // (or could be served) the shared entry.
+    await registerPlayer(page);
+    const authed = await page.request.get(url);
+    expect(authed.ok()).toBeTruthy();
+    expect(authed.headers()['x-cache']).toBeUndefined();
+  });
+
+  test('two authenticated users never share a cache entry on the same URL', async ({
+    page,
+    browser,
+  }) => {
+    const url = uniqueUrl();
+
+    // User A (this context) — bypasses the cache.
+    await registerPlayer(page);
+    expect((await page.request.get(url)).headers()['x-cache']).toBeUndefined();
+
+    // User B in a fresh, isolated context — also bypasses; neither caches for
+    // the other, so a HIT could never cross between them.
+    const ctxB = await browser.newContext();
+    try {
+      const pageB = await ctxB.newPage();
+      await registerPlayer(pageB);
+      const b = await pageB.request.get(url);
+      expect(b.ok()).toBeTruthy();
+      expect(b.headers()['x-cache']).toBeUndefined();
+    } finally {
+      await ctxB.close();
+    }
+  });
 });

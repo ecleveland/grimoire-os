@@ -112,6 +112,25 @@ describe('AnonymousCacheInterceptor (VEG-333)', () => {
     expect(cache.store.size).toBe(0);
   });
 
+  it('does not cache a non-GET request even for an anonymous caller', async () => {
+    // The owner-aware controllers also expose POST/PATCH/DELETE homebrew CRUD.
+    // The inherited GET-only rule must keep those uncached — caching a mutation
+    // response (or serving a stale catalog after a write) would be a real bug.
+    const cache = makeCacheManager();
+    const interceptor = makeInterceptor(cache);
+    const ctx = makeContext({ method: 'POST', url: '/srd/monsters' });
+    const handler = jest.fn();
+
+    const r1 = await run(interceptor, ctx, { created: 1 }, handler);
+    const r2 = await run(interceptor, ctx, { created: 2 }, handler);
+
+    expect(r1).toEqual({ created: 1 });
+    expect(r2).toEqual({ created: 2 });
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(cache.set).not.toHaveBeenCalled();
+    expect(cache.store.size).toBe(0);
+  });
+
   it('never shares a cached entry between two authenticated users on the same URL', async () => {
     const cache = makeCacheManager();
     const interceptor = makeInterceptor(cache);

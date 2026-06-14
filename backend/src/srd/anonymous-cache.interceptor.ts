@@ -13,11 +13,17 @@ import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payl
  * every request (the unified-search UNION ALL being the worst case).
  *
  * This interceptor caches those anonymous responses by URL with the module's
- * default TTL, while authenticated requests (identified by `req.user`, which the
- * `OptionalJwtAuthGuard` populates before interceptors run) bypass the cache
- * entirely — never reading a shared entry and never writing one. So a user's
- * homebrew can't leak into another response, and a caller always sees their own
- * writes immediately.
+ * default TTL (24h), while authenticated requests (identified by `req.user`,
+ * which the `OptionalJwtAuthGuard` populates before interceptors run) bypass the
+ * cache entirely — never reading a shared entry and never writing one. So a
+ * user's homebrew can't leak into another response, and a caller always sees
+ * their own writes immediately.
+ *
+ * Staleness: like the SrdController cache it restores, there is no write-path
+ * invalidation, so an admin edit to *shared*-tier (globally-visible) content
+ * reaches anonymous viewers only after the entry's 24h TTL expires. That's the
+ * accepted pre-VEG-293 behavior this ticket restores; authenticated callers
+ * bypass the cache and see shared edits immediately.
  */
 @Injectable()
 export class AnonymousCacheInterceptor extends CacheInterceptor {
