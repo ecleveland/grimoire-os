@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -13,6 +14,7 @@ import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
+import { computeCharacterStats } from './compute/compute-stats';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -34,6 +36,38 @@ export class CharactersService {
     private campaignAuth: CampaignAuthService
   ) {}
 
+  // Spell-slot maxima need the class's progression table (VEG-346). Looked up
+  // by name (srd_classes.name is unique); homebrew/unknown classes resolve to
+  // null, in which case slots are omitted but DC/attack still derive from the
+  // character's own spellcastingAbility column.
+  private async loadClassSpellcasting(className: string | null): Promise<ClassSpellcasting | null> {
+    if (!className) return null;
+    const cls = await this.prisma.srdClass.findUnique({
+      where: { name: className },
+      select: { spellcasting: true },
+    });
+    return (cls?.spellcasting as ClassSpellcasting | null) ?? null;
+  }
+
+  // Single place every detail read/write funnels through so the authoritative
+  // `computed` block is always attached (VEG-346).
+  private async toCharacterDto(
+    character: Prisma.CharacterGetPayload<object>
+  ): Promise<CharacterDto> {
+    const classSpellcasting = await this.loadClassSpellcasting(character.class);
+    const computed = computeCharacterStats(
+      {
+        level: character.level,
+        abilityScores: character.abilityScores as AbilityScores | null,
+        savingThrows: character.savingThrows,
+        skills: character.skills,
+        spellcastingAbility: character.spellcastingAbility,
+      },
+      classSpellcasting
+    );
+    return toDto(CharacterDto, { ...character, computed });
+  }
+
   async create(userId: string, dto: CreateCharacterDto) {
     // campaignId is attacker-controlled input: without this check any
     // authenticated user could inject a character into an arbitrary campaign,
@@ -50,7 +84,7 @@ export class CharactersService {
         userId,
       },
     });
-    return toDto(CharacterDto, character);
+    return this.toCharacterDto(character);
   }
 
   async findAllForUser(userId: string, pagination: PaginationDto) {
@@ -77,7 +111,7 @@ export class CharactersService {
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return toDto(CharacterDto, character);
+    return this.toCharacterDto(character);
   }
 
   async findOneForUser(id: string, userId: string) {
@@ -98,7 +132,7 @@ export class CharactersService {
     // No expectedVersion → caller opts out of optimistic locking (VEG-137).
     if (expectedVersion === undefined) {
       const character = await this.prisma.character.update({ where: { id }, data });
-      return toDto(CharacterDto, character);
+      return this.toCharacterDto(character);
     }
 
     // Guarded write: only succeeds if the row is still at expectedVersion.
@@ -125,7 +159,7 @@ export class CharactersService {
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return toDto(CharacterDto, character);
+    return this.toCharacterDto(character);
   }
 
   async remove(id: string, userId: string): Promise<void> {

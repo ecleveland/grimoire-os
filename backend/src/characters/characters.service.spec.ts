@@ -49,7 +49,7 @@ describe('CharactersService', () => {
           userId: USER_ID,
         },
       });
-      expect(result).toEqual(mockCharacter);
+      expect(result).toMatchObject(mockCharacter);
       expect(result).toBeInstanceOf(CharacterDto);
     });
 
@@ -165,7 +165,62 @@ describe('CharactersService', () => {
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
       });
-      expect(result).toEqual(mockCharacter);
+      expect(result).toMatchObject(mockCharacter);
+    });
+
+    it('attaches the computed-stats block derived from the stored inputs', async () => {
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      // mockCharacter is a level-5 Fighter (non-caster): STR 16, DEX 12, CON 14,
+      // WIS 13; proficient in Strength/Constitution saves and Athletics.
+      expect(result.computed.proficiencyBonus).toBe(3);
+      expect(result.computed.initiative).toBe(1);
+      expect(result.computed.abilityModifiers.strength).toBe(3);
+      expect(result.computed.savingThrows['Strength']).toEqual({ bonus: 6, proficient: true });
+      expect(result.computed.skills['Athletics']).toEqual({
+        ability: 'Strength',
+        bonus: 6,
+        proficient: true,
+      });
+      expect(result.computed.passivePerception).toBe(11);
+      // Non-caster: no spell fields, no slot lookup attempted.
+      expect(result.computed.spellSaveDC).toBeNull();
+      expect(result.computed.spellSlots).toBeNull();
+    });
+
+    it('derives spell DC/attack and slot maxima from the class spellcasting data', async () => {
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        class: 'Wizard',
+        level: 5,
+        spellcastingAbility: 'Intelligence',
+        abilityScores: { ...mockCharacter.abilityScores, intelligence: 16 },
+      });
+      prisma.srdClass.findUnique.mockResolvedValue({
+        spellcasting: {
+          ability: 'Intelligence',
+          spellSlotProgression: {
+            5: { 1: 4, 2: 3, 3: 2 },
+            20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1 },
+          },
+        },
+      });
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
+        where: { name: 'Wizard' },
+        select: { spellcasting: true },
+      });
+      // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
+      expect(result.computed.spellSaveDC).toBe(14);
+      expect(result.computed.spellAttackBonus).toBe(6);
+      expect(result.computed.spellSlots).toEqual({
+        caster: 'full',
+        maxByLevel: { 1: 4, 2: 3, 3: 2 },
+      });
     });
 
     it('should throw NotFoundException when character not found', async () => {
@@ -181,7 +236,7 @@ describe('CharactersService', () => {
 
       const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
-      expect(result).toEqual(mockCharacter);
+      expect(result).toMatchObject(mockCharacter);
     });
 
     it('should throw ForbiddenException when user does not own character', async () => {
