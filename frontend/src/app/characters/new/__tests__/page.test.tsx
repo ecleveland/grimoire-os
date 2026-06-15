@@ -55,7 +55,7 @@ function makeCampaign(over: Partial<CampaignListItem> = {}): CampaignListItem {
 }
 
 function campaignsResponse(items: CampaignListItem[]): PaginatedResponse<CampaignListItem> {
-  return { data: items, total: items.length, page: 1, lastPage: 1, limit: 100 };
+  return { data: items, total: items.length, page: 1, lastPage: 1 };
 }
 
 // The campaigns-list GET populates the picker; the POST creates the character.

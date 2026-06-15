@@ -53,7 +53,16 @@ export default function SrdCombobox({
   const [highlight, setHighlight] = useState(-1);
 
   const query = value.trim().toLowerCase();
-  const filtered = query ? options.filter(o => o.name.toLowerCase().includes(query)) : options;
+  // After a committed pick the value equals an option's name; show the full list
+  // then so the user can browse to a *different* option instead of being stuck
+  // with the one match. Only narrow while they're typing a partial.
+  const isExactMatch = options.some(o => o.name.toLowerCase() === query);
+  const filtered =
+    query && !isExactMatch ? options.filter(o => o.name.toLowerCase().includes(query)) : options;
+  // Clamp: the controlled value can shrink `filtered` out from under a stale
+  // highlight, so derive the effective active index rather than trusting it raw.
+  const activeIndex = highlight >= 0 && highlight < filtered.length ? highlight : -1;
+  const activeId = activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined;
 
   // Close the dropdown on an outside click.
   useEffect(() => {
@@ -87,12 +96,16 @@ export default function SrdCombobox({
     }
     if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setHighlight(h => Math.max(h - 1, 0));
+      setOpen(true);
+      setHighlight(h => (h <= 0 ? 0 : h - 1));
       return;
     }
-    if (e.key === 'Enter' && open && highlight >= 0 && highlight < filtered.length) {
+    if (e.key === 'Enter' && open) {
+      // Never let Enter inside an open combobox bubble up and submit the form:
+      // pick the highlighted option, or just accept the typed (custom) value.
       e.preventDefault();
-      pick(filtered[highlight]);
+      if (activeIndex >= 0) pick(filtered[activeIndex]);
+      else setOpen(false);
     }
   };
 
@@ -109,6 +122,7 @@ export default function SrdCombobox({
           role="combobox"
           aria-expanded={open}
           aria-controls={listId}
+          aria-activedescendant={activeId}
           aria-autocomplete="list"
           autoComplete="off"
           disabled={disabled}
@@ -147,8 +161,9 @@ export default function SrdCombobox({
             filtered.map((option, i) => (
               <li
                 key={option.id}
+                id={`${listId}-opt-${i}`}
                 role="option"
-                aria-selected={i === highlight}
+                aria-selected={i === activeIndex}
                 // onMouseDown (not onClick) so it fires before the input's blur
                 // closes the list.
                 onMouseDown={e => {
@@ -157,7 +172,7 @@ export default function SrdCombobox({
                 }}
                 onMouseEnter={() => setHighlight(i)}
                 className={`cursor-pointer px-3 py-2 text-sm ${
-                  i === highlight
+                  i === activeIndex
                     ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-200'
                     : 'text-gray-900 dark:text-gray-100'
                 }`}

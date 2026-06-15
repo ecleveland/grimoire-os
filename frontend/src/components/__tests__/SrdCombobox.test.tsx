@@ -104,4 +104,51 @@ describe('SrdCombobox', () => {
     await userEvent.click(screen.getByLabelText('Class'));
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
+
+  it('marks the highlighted option aria-selected', async () => {
+    render(<SrdCombobox label="Class" value="" options={options} onChange={vi.fn()} />);
+    screen.getByLabelText('Class').focus();
+    await userEvent.keyboard('{ArrowDown}'); // highlight first -> Barbarian
+    expect(screen.getByRole('option', { name: 'Barbarian' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+  });
+
+  it('does NOT submit the surrounding form when Enter is pressed with no highlight', async () => {
+    const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <SrdCombobox label="Class" value="Fig" options={options} onChange={vi.fn()} />
+        <button type="submit">Go</button>
+      </form>
+    );
+    await userEvent.click(screen.getByLabelText('Class')); // open, highlight = -1
+    await userEvent.keyboard('{Enter}');
+    expect(onSubmit).not.toHaveBeenCalled();
+    // Enter accepted the typed value and closed the list.
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('shows the full list again after the value matches an option (browse to switch)', async () => {
+    render(<SrdCombobox label="Class" value="Fighter" options={options} onChange={vi.fn()} />);
+    await userEvent.click(screen.getByLabelText('Class'));
+    // Not just "Fighter" — the user can still see and pick the others.
+    expect(screen.getByRole('option', { name: 'Barbarian' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Bard' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Fighter' })).toBeInTheDocument();
+  });
+
+  it('closes when clicking outside', async () => {
+    render(
+      <div>
+        <SrdCombobox label="Class" value="" options={options} onChange={vi.fn()} />
+        <button type="button">outside</button>
+      </div>
+    );
+    await userEvent.click(screen.getByLabelText('Class'));
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('outside'));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
 });

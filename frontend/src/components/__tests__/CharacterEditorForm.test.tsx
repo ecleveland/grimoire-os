@@ -141,8 +141,9 @@ function makeCharacter(over: Partial<Character> = {}): Character {
 }
 
 function renderForm(over: Partial<React.ComponentProps<typeof CharacterEditorForm>> = {}) {
-  const onSubmit = over.onSubmit ?? vi.fn();
-  const onCancel = over.onCancel ?? vi.fn();
+  // Always fresh mocks (no test overrides them) so `.mock` is well-typed.
+  const onSubmit = vi.fn();
+  const onCancel = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -334,6 +335,88 @@ describe('CharacterEditorForm autofill', () => {
     const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
     expect(submitted.race).toBe('Elf');
     expect(submitted.languages).toEqual(['Common', 'Elvish']);
+  });
+
+  it('autofills background grants via its Apply button', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.background = 'Sage';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: /apply sage traits/i }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+    expect(submitted.skills).toEqual(['Arcana', 'History']);
+    expect(submitted.proficiencies).toEqual(["Calligrapher's Supplies"]);
+  });
+
+  it('re-applying the same grants is a no-op (idempotent + "already applied" toast)', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.class = 'Fighter';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    const applyBtn = await screen.findByRole('button', { name: /apply fighter traits/i });
+    await user.click(applyBtn);
+    await user.click(applyBtn); // second click — nothing new to add
+
+    expect(mockToastSuccess).toHaveBeenLastCalledWith(expect.stringMatching(/already applied/i));
+    // Constitution chip appears exactly once (no duplication).
+    expect(screen.getAllByText('Constitution')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual([
+      'Strength',
+      'Constitution',
+    ]);
+  });
+
+  it('clears a chosen subclass when a new class is picked', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.subclass = 'Evoker';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/^class/i));
+    await user.click(await screen.findByRole('option', { name: 'Fighter' }));
+    expect((screen.getByLabelText(/^subclass/i) as HTMLInputElement).value).toBe('');
+
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).subclass).toBe('');
+  });
+
+  it('lists subclasses scoped to the chosen class', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.class = 'Fighter';
+    renderForm({ initialValues: initial });
+    // With an SRD class chosen, the gating hint is gone and the scoped subclass
+    // (Champion, classId cls-fighter) is offered.
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/select an srd class to list its subclasses/i)
+      ).not.toBeInTheDocument()
+    );
+    await userEvent.click(screen.getByLabelText(/^subclass/i));
+    expect(await screen.findByRole('option', { name: 'Champion' })).toBeInTheDocument();
+  });
+});
+
+describe('CharacterEditorForm — granted-traits summary', () => {
+  it('shows the empty hint when nothing is granted', () => {
+    renderForm();
+    expect(screen.getByText(/nothing yet/i)).toBeInTheDocument();
+  });
+
+  it('renders a spellcasting-only character as populated (not empty)', () => {
+    const initial = emptyCharacterFormValues();
+    initial.spellcastingAbility = 'Intelligence';
+    renderForm({ initialValues: initial });
+    expect(screen.queryByText(/nothing yet/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Spellcasting ability')).toBeInTheDocument();
+    expect(screen.getByText('Intelligence')).toBeInTheDocument();
   });
 });
 

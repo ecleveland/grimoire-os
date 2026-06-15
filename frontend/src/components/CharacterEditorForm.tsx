@@ -129,12 +129,39 @@ export function characterToFormValues(c: Character): CharacterFormValues {
   };
 }
 
+// The set of Character fields this editor writes. Annotating the payload with
+// this Pick means dropping/renaming a field here (or forgetting to send a newly
+// added grant field) is a compile error, not a silent failed-to-persist bug.
+type CharacterWriteFields = Pick<
+  Character,
+  | 'name'
+  | 'race'
+  | 'class'
+  | 'subclass'
+  | 'level'
+  | 'background'
+  | 'alignment'
+  | 'size'
+  | 'abilityScores'
+  | 'armorClass'
+  | 'initiative'
+  | 'speed'
+  | 'hitPoints'
+  | 'hitDice'
+  | 'savingThrows'
+  | 'skills'
+  | 'proficiencies'
+  | 'languages'
+  | 'armorTraining'
+  | 'spellcastingAbility'
+>;
+
 /**
  * The API request body for create/update, derived from the form values. The
  * page wrappers spread this and append `campaignId` / `expectedVersion`. The
  * backend `CreateCharacterDto`/`UpdateCharacterDto` accept every key here.
  */
-export function characterFormPayload(v: CharacterFormValues) {
+export function characterFormPayload(v: CharacterFormValues): CharacterWriteFields {
   return {
     name: v.name,
     race: v.race,
@@ -404,6 +431,9 @@ export default function CharacterEditorForm({
             value={values.class}
             options={classes}
             onChange={v => set('class', v)}
+            // Picking a class invalidates any chosen subclass (subclasses are
+            // scoped to the class), so clear it to avoid a mismatched pair.
+            onSelect={() => set('subclass', '')}
             helperText="Pick from the SRD or type a custom class."
           />
         </div>
