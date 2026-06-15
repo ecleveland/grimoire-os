@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
@@ -3633,5 +3633,114 @@ describe('InitiativeTrackerPage', () => {
         screen.queryByRole('button', { name: 'Reset death saves for Hero' })
       ).not.toBeInTheDocument();
     });
+  });
+});
+
+// ── Live-combat layout: sticky turn bar + auto-following stat panel (VEG-384) ──
+// jsdom has no matchMedia, so the page's useMediaQuery defaults to "narrow"
+// (modal viewer, single column). `stubWide` opts a test into the wide layout
+// where the right-hand stat panel is live; afterEach removes it so the default
+// narrow behaviour the rest of the suite relies on is restored.
+describe('live-combat layout (VEG-384)', () => {
+  function stubWide(matches = true) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: (query: string) => ({
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    });
+  }
+
+  afterEach(() => {
+    delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+  });
+
+  it("shows a sticky turn bar with the round and the current combatant's turn", async () => {
+    mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+    expect(screen.getByText(/round 1/i)).toBeInTheDocument();
+    // currentTurn 0 → Hero (highest initiative) is up.
+    expect(screen.getByText(/hero's turn/i)).toBeInTheDocument();
+  });
+
+  it('updates the sticky bar after advancing the turn', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 0, round: 1 }));
+    mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 1, round: 1 }));
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByText(/hero's turn/i);
+    await user.click(screen.getByRole('button', { name: /next turn/i }));
+    expect(await screen.findByText(/goblin a's turn/i)).toBeInTheDocument();
+  });
+
+  it('auto-follows the active combatant into the right-hand stat panel on wide screens', async () => {
+    stubWide(true);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/encounters/enc-1') {
+        return Promise.resolve(
+          makeEncounter({
+            currentTurn: 0,
+            combatants: [
+              makeCombatant({ name: 'Goblin A', initiative: 18, monsterId: 'monster-1' }),
+            ],
+          })
+        );
+      }
+      if (path === '/srd/monsters/monster-1') return Promise.resolve(goblinMonster);
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    render(<InitiativeTrackerPage />);
+    // The stat block appears with no click — it follows whoever is up.
+    expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+    expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1');
+  });
+
+  it('pins a clicked combatant into the panel instead of opening the modal on wide screens', async () => {
+    stubWide(true);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/encounters/enc-1') {
+        return Promise.resolve(
+          makeEncounter({
+            currentTurn: 0,
+            combatants: [
+              makeCombatant({ name: 'Hero', initiative: 18, isNpc: false }), // active, no monster
+              makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+            ],
+          })
+        );
+      }
+      if (path === '/srd/monsters/monster-1') return Promise.resolve(goblinMonster);
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+    // The active combatant (Hero) has no linked monster → panel prompts instead.
+    expect(screen.getByText(/no stat block for hero/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^goblin a$/i }));
+    // Loads into the panel, not a modal dialog.
+    expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps turn controls out of the sticky bar for non-controllers', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { userId: 'someone-else', username: 'p', role: 'player' },
+      isDm: false,
+    });
+    mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0 }));
+    render(<InitiativeTrackerPage />);
+    await screen.findByText(/hero's turn/i);
+    expect(screen.queryByRole('button', { name: /next turn/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /previous turn/i })).not.toBeInTheDocument();
   });
 });
