@@ -965,8 +965,11 @@ export default function InitiativeTrackerPage() {
   const rowHoldsNotes = makeRowHoldsDraft(notesDraft);
 
   return (
-    <div ref={containerRef} className="lg:flex lg:gap-6 lg:items-start">
-      <div className="flex-1 min-w-0 max-w-3xl mx-auto lg:mx-0">
+    <div
+      ref={containerRef}
+      className="lg:grid lg:grid-cols-[minmax(0,1fr)_38rem] lg:gap-6 lg:items-start"
+    >
+      <div className="min-w-0 max-w-3xl mx-auto lg:mx-0 lg:max-w-none">
         <div className="flex items-start justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{encounter.name}</h1>
@@ -1702,7 +1705,7 @@ export default function InitiativeTrackerPage() {
           The wrapper's margin-top anchors it level with the active card (see
           panelOffset); a long block scrolls within the panel. Hidden below
           `lg`, where the modal viewer takes over instead. */}
-      <aside className="hidden lg:block w-80 shrink-0" aria-label="Active creature stat block">
+      <aside className="hidden lg:block min-w-0" aria-label="Active creature stat block">
         <div
           className="transition-[margin-top] duration-200 ease-out"
           style={{ marginTop: panelOffset }}
