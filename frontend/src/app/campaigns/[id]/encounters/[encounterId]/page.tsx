@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -52,6 +52,23 @@ import { formatCoinage } from '@/lib/coinage';
 // edit it directly — so tie order is deterministic and user-controlled.
 const sortByInitiative = (combatants: Combatant[]) =>
   [...combatants].sort((a, b) => b.initiative - a.initiative);
+
+// Tracks a CSS media query, SSR/jsdom-safe: defaults to false (and never
+// throws) when `matchMedia` is unavailable, so the tracker degrades to its
+// single-column layout — the active-creature stat block lives in the modal
+// viewer rather than the always-on side panel.
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const update = () => setMatches(mql.matches);
+    update();
+    mql.addEventListener('change', update);
+    return () => mql.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
 
 const smallButtonBase =
   'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors';
@@ -174,6 +191,28 @@ export default function InitiativeTrackerPage() {
   // Clear-all confirm (VEG-284).
   const [confirmClearAll, setConfirmClearAll] = useState(false);
 
+  // Live-combat side panel (VEG-384). On wide screens the active creature's
+  // stat block floats in a sticky right-hand column so the DM never scrolls to
+  // read it. `pinnedMonsterId` is a click-override: clicking a combatant's name
+  // pins its stat block until the turn advances, otherwise the panel follows
+  // whoever is up. The cache spares us a refetch of the (static) SRD monster on
+  // every turn.
+  const isWide = useMediaQuery('(min-width: 1024px)');
+  const [pinnedMonsterId, setPinnedMonsterId] = useState<string | null>(null);
+  const [panelMonster, setPanelMonster] = useState<SrdMonster | null>(null);
+  const [panelLoading, setPanelLoading] = useState(false);
+  const monsterCacheRef = useRef<Map<string, SrdMonster>>(new Map());
+  // The two-column row and the active card, used to (a) anchor the stat panel
+  // level with the active card and (b) scroll that card into view as the turn
+  // advances, so the turn controls and damage/status controls — now inline on
+  // the active card — never sit off-screen (VEG-384).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const activeCardRef = useRef<HTMLDivElement>(null);
+  const [panelOffset, setPanelOffset] = useState(0);
+  // Distinguishes a genuine turn change from the initial load, so the page
+  // doesn't yank-scroll on first render.
+  const prevTurnRef = useRef<number | null>(null);
+
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
       .then(setEncounter)
@@ -184,6 +223,103 @@ export default function InitiativeTrackerPage() {
   useEffect(() => {
     fetchEncounter();
   }, [fetchEncounter]);
+
+  // The monster whose turn it is (if any) drives the side panel by default.
+  const activeMonsterId = encounter
+    ? (sortByInitiative(encounter.combatants)[encounter.currentTurn]?.monsterId ?? null)
+    : null;
+  // What the panel shows: an explicit pin wins, else the active combatant; only
+  // on wide screens (the panel is hidden below `lg`, so don't fetch for it).
+  const panelMonsterId = isWide ? (pinnedMonsterId ?? activeMonsterId) : null;
+
+  // Advancing/stepping the turn drops any manual pin so the panel resumes
+  // following whoever is now up.
+  useEffect(() => {
+    setPinnedMonsterId(null);
+  }, [encounter?.currentTurn]);
+
+  // Load the panel's stat block, served from the per-session cache when we've
+  // already fetched that monster. A 200-null body (not visible to this viewer,
+  // or deleted) clears the panel rather than sticking on the loader.
+  useEffect(() => {
+    if (!panelMonsterId) {
+      setPanelMonster(null);
+      setPanelLoading(false);
+      return;
+    }
+    const cached = monsterCacheRef.current.get(panelMonsterId);
+    if (cached) {
+      setPanelMonster(cached);
+      setPanelLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPanelMonster(null);
+    setPanelLoading(true);
+    apiFetch<SrdMonster | null>(`/srd/monsters/${panelMonsterId}`)
+      .then(monster => {
+        if (cancelled) return;
+        if (monster) {
+          monsterCacheRef.current.set(panelMonsterId, monster);
+          setPanelMonster(monster);
+        } else {
+          setPanelMonster(null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setPanelMonster(null);
+      })
+      .finally(() => {
+        if (!cancelled) setPanelLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [panelMonsterId]);
+
+  // Scroll the active card into view when the turn advances (not on first
+  // load). Brings the card — and its now-inline turn/damage/status controls —
+  // to the DM instead of making them scroll to it. Guarded for jsdom, which
+  // has no scrollIntoView.
+  useEffect(() => {
+    if (!encounter) return;
+    const prev = prevTurnRef.current;
+    prevTurnRef.current = encounter.currentTurn;
+    if (prev === null || prev === encounter.currentTurn) return;
+    const card = activeCardRef.current;
+    if (card && typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [encounter?.currentTurn]);
+
+  // Anchor the right-hand stat panel level with the active card: measure the
+  // card's offset within the two-column row and push the panel down to match,
+  // re-measuring when the active card changes, when cards resize (HP/condition
+  // edits shift the list), or on window resize. Only on wide screens — the
+  // panel is hidden below `lg`. getBoundingClientRect is 0 and ResizeObserver
+  // is absent under jsdom, so this no-ops harmlessly in tests.
+  useEffect(() => {
+    if (!isWide) {
+      setPanelOffset(0);
+      return;
+    }
+    const measure = () => {
+      const container = containerRef.current;
+      const card = activeCardRef.current;
+      if (!container || !card) return;
+      const offset = card.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      setPanelOffset(prev => (Math.abs(prev - offset) > 1 ? Math.max(0, offset) : prev));
+    };
+    measure();
+    const Observer = typeof ResizeObserver !== 'undefined' ? ResizeObserver : null;
+    const ro = Observer ? new Observer(measure) : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [isWide, encounter?.currentTurn]);
 
   // Shared 409 recovery: another writer won the version race — refetch and let
   // the user retry against fresh state. Returns true if the error was handled.
@@ -788,11 +924,27 @@ export default function InitiativeTrackerPage() {
       .finally(() => setViewLoading(false));
   };
 
+  // A name click pins the stat block into the always-visible side panel on wide
+  // screens; below `lg` that panel is hidden, so fall back to the modal viewer.
+  const showCombatantMonster = (monsterId: string) =>
+    isWide ? setPinnedMonsterId(monsterId) : viewCombatantMonster(monsterId);
+
   if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   if (!encounter)
     return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
 
   const sorted = sortByInitiative(encounter.combatants);
+  // The active row, clamped so a stale/out-of-range currentTurn still resolves
+  // to a real card — that card hosts the inline turn controls, which must stay
+  // reachable for the DM to step a corrupted marker back into range (-1 only
+  // when there are no combatants at all).
+  const activeRowIndex =
+    sorted.length === 0 ? -1 : Math.min(Math.max(encounter.currentTurn, 0), sorted.length - 1);
+  const activeCombatant = sorted[activeRowIndex] ?? null;
+  // A "peek": the panel is pinned to a monster other than the active
+  // combatant's, i.e. a quick reference (resistances/immunities) that leaves
+  // whose-turn-it-is untouched. The banner makes that explicit and reversible.
+  const isPeeking = isWide && pinnedMonsterId !== null && pinnedMonsterId !== activeMonsterId;
   const isController = isDm || (user && encounter.createdBy === user.userId);
   const hasMonsterCombatants = encounter.combatants.some(c => c.monsterId);
   const rolledDropCount = encounter.combatants.filter(c => c.loot).length;
@@ -817,709 +969,804 @@ export default function InitiativeTrackerPage() {
   const rowHoldsNotes = makeRowHoldsDraft(notesDraft);
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{encounter.name}</h1>
-          <div className="flex items-center gap-3 mt-2">
-            <Badge variant={encounter.isActive ? 'success' : 'neutral'} size="md">
-              {encounter.isActive ? 'Active' : 'Inactive'}
-            </Badge>
-            <span className="text-sm text-gray-500 dark:text-gray-400">
-              Round {encounter.round}
-            </span>
+    <div
+      ref={containerRef}
+      className="lg:grid lg:grid-cols-[minmax(0,1fr)_38rem] lg:gap-6 lg:items-start"
+    >
+      <div className="min-w-0 max-w-3xl mx-auto lg:mx-0 lg:max-w-none">
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{encounter.name}</h1>
+            <div className="flex items-center gap-3 mt-2">
+              <Badge variant={encounter.isActive ? 'success' : 'neutral'} size="md">
+                {encounter.isActive ? 'Active' : 'Inactive'}
+              </Badge>
+              {/* The round normally rides on the active card's inline header; with
+                  no combatants there is no such card, so surface it here so the
+                  round is never hidden (and never duplicated — these are mutually
+                  exclusive). */}
+              {!activeCombatant && (
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Round {encounter.round}
+                </span>
+              )}
+            </div>
           </div>
+          {isController && (
+            <div className="flex gap-2">
+              <button
+                onClick={toggleActive}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                {encounter.isActive ? 'End Combat' : 'Start Combat'}
+              </button>
+            </div>
+          )}
         </div>
-        {isController && (
-          <div className="flex gap-2">
-            <button
-              onClick={toggleActive}
-              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
-            >
-              {encounter.isActive ? 'End Combat' : 'Start Combat'}
-            </button>
-            <button
-              type="button"
-              onClick={previousTurn}
-              disabled={encounter.round === 1 && encounter.currentTurn === 0}
-              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Previous Turn
-            </button>
-            <button
-              onClick={nextTurn}
-              className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-            >
-              Next Turn
-            </button>
-          </div>
-        )}
-      </div>
 
-      {/* Encounter difficulty (VEG-362): DM-planning info, controller-only like
+        {/* Encounter difficulty (VEG-362): DM-planning info, controller-only like
           the loot panel. Monsters drive XP/CR; the PCs in the encounter set the
           2024 budget. */}
-      {isController && (
-        <div className="mb-4">
-          <EncounterDifficulty combatants={encounter.combatants} />
-        </div>
-      )}
+        {isController && (
+          <div className="mb-4">
+            <EncounterDifficulty combatants={encounter.combatants} />
+          </div>
+        )}
 
-      <div className="space-y-2">
-        {sorted.map((c, i) => {
-          const isCurrent = i === encounter.currentTurn;
-          const isDead = c.hp <= 0;
-          // The roll endpoint addresses combatants by their position in the
-          // stored array, not the sorted row. `sorted` shares object
-          // references with `encounter.combatants`, so identity lookup maps
-          // row → array index even with duplicate names.
-          const arrayIndex = encounter.combatants.indexOf(c);
-          return (
-            <div
-              key={`${c.name}-${i}`}
-              className={`p-4 rounded-lg border transition-colors ${
-                isCurrent
-                  ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-300 dark:border-indigo-700'
-                  : isDead
-                    ? 'bg-red-50/50 dark:bg-red-900/10 border-gray-200 dark:border-gray-700'
-                    : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-              }`}
-            >
-              {/* Dimming applies to the stats line only — the drop view below
+        <div className="space-y-2">
+          {sorted.map((c, i) => {
+            const isCurrent = i === activeRowIndex;
+            const isDead = c.hp <= 0;
+            // The roll endpoint addresses combatants by their position in the
+            // stored array, not the sorted row. `sorted` shares object
+            // references with `encounter.combatants`, so identity lookup maps
+            // row → array index even with duplicate names.
+            const arrayIndex = encounter.combatants.indexOf(c);
+            return (
+              <div
+                key={`${c.name}-${i}`}
+                ref={isCurrent ? activeCardRef : undefined}
+                className={`p-4 rounded-lg border transition-colors ${
+                  isCurrent
+                    ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-300 dark:border-indigo-700'
+                    : isDead
+                      ? 'bg-red-50/50 dark:bg-red-900/10 border-gray-200 dark:border-gray-700'
+                      : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
+                }`}
+              >
+                {/* Inline turn header (VEG-384): the round, whose turn it is, and
+                  the turn controls live on the active card itself, so they sit
+                  beside that card's damage/status controls — no scrolling back
+                  to a top bar. Controls stay controller-only. */}
+                {isCurrent && (
+                  <div className="-mx-4 -mt-4 mb-3 flex items-center justify-between gap-3 rounded-t-lg border-b border-indigo-200 dark:border-indigo-800 bg-indigo-100/70 dark:bg-indigo-900/40 px-4 py-2">
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className="text-xs font-medium uppercase tracking-wide text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
+                        Round {encounter.round}
+                      </span>
+                      <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                        {c.name}&apos;s turn
+                      </span>
+                    </div>
+                    {isController && (
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={previousTurn}
+                          disabled={encounter.round === 1 && encounter.currentTurn === 0}
+                          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Previous Turn
+                        </button>
+                        <button
+                          onClick={nextTurn}
+                          className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                          Next Turn
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {/* Dimming applies to the stats line only — the drop view below
                   must stay legible, since dead monsters are exactly the ones
                   whose loot the DM reads out. */}
-              <div
-                className={`flex items-center gap-4${isDead && !isCurrent ? ' opacity-60' : ''}`}
-              >
-                {isCurrent && (
-                  <span className="text-indigo-600 dark:text-indigo-400 text-lg font-bold">
-                    &raquo;
-                  </span>
-                )}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {c.monsterId ? (
-                      <button
-                        type="button"
-                        onClick={() => viewCombatantMonster(c.monsterId!)}
-                        className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
-                      >
-                        {c.name}
-                      </button>
-                    ) : (
-                      <span className="font-medium text-gray-900 dark:text-white">{c.name}</span>
-                    )}
-                    {c.isNpc && (
-                      <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded">
-                        NPC
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-4 text-sm">
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">Init</div>
-                    {isController ? (
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        aria-label={`Initiative for ${c.name}`}
-                        value={rowHoldsInit(c, i) ? initDraft!.value : c.initiative}
-                        onChange={e =>
-                          setInitDraft({ name: c.name, index: i, value: e.target.value })
-                        }
-                        onBlur={() => commitCombatantInitiative(c.name)}
-                        onKeyDown={e => {
-                          // Enter commits via the blur handler — a single commit
-                          // path, so it can't double-PATCH with a stale draft.
-                          if (e.key === 'Enter') e.currentTarget.blur();
-                        }}
-                        className="w-14 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                    ) : (
-                      <div className="font-mono font-medium text-gray-900 dark:text-white">
-                        {c.initiative}
-                      </div>
-                    )}
-                  </div>
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">AC</div>
-                    <div className="font-mono font-medium text-gray-900 dark:text-white">
-                      {c.ac}
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-xs text-gray-500 dark:text-gray-400">HP</div>
-                    {isController ? (
-                      <input
-                        type="number"
-                        aria-label={`HP for ${c.name}`}
-                        value={rowHoldsDraft(c, i) ? hpDraft!.value : c.hp}
-                        onChange={e =>
-                          setHpDraft({ name: c.name, index: i, value: e.target.value })
-                        }
-                        onBlur={() => commitCombatantHp(c.name)}
-                        onKeyDown={e => {
-                          // Enter commits via the blur handler — a single commit
-                          // path, so it can't double-PATCH with a stale draft.
-                          if (e.key === 'Enter') e.currentTarget.blur();
-                        }}
-                        className="w-16 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                    ) : (
-                      <div className="font-mono font-medium text-gray-900 dark:text-white">
-                        {c.hp}/{c.maxHp}
-                      </div>
-                    )}
-                  </div>
-                  {isController && <div className="text-xs text-gray-400">/{c.maxHp}</div>}
-                  {(c.tempHp ?? 0) > 0 && (
-                    <div
-                      className="text-xs font-mono font-medium text-sky-600 dark:text-sky-400"
-                      title="Temporary HP"
-                    >
-                      +{c.tempHp} temp
-                    </div>
+                <div
+                  className={`flex items-center gap-4${isDead && !isCurrent ? ' opacity-60' : ''}`}
+                >
+                  {isCurrent && (
+                    <span className="text-indigo-600 dark:text-indigo-400 text-lg font-bold">
+                      &raquo;
+                    </span>
                   )}
-                </div>
-              </div>
-              {/* Status chips (VEG-287): conditions, concentration, and
-                  exhaustion — shown to everyone. Controllers get a remove ×
-                  on each condition; the add/toggle controls render below. */}
-              {((c.conditions?.length ?? 0) > 0 || c.concentration || (c.exhaustion ?? 0) > 0) && (
-                <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                  {(c.conditions ?? []).map(cond => (
-                    <span
-                      key={cond}
-                      className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded"
-                    >
-                      {cond}
-                      {isController && (
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {c.monsterId ? (
                         <button
                           type="button"
-                          aria-label={`Remove ${cond} from ${c.name}`}
-                          onClick={() => toggleCondition(c.name, i, cond)}
-                          disabled={writePending}
-                          className="hover:text-purple-900 dark:hover:text-purple-100 disabled:opacity-50"
+                          onClick={() => showCombatantMonster(c.monsterId!)}
+                          className="font-medium text-indigo-600 dark:text-indigo-400 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded"
                         >
-                          &times;
+                          {c.name}
                         </button>
+                      ) : (
+                        <span className="font-medium text-gray-900 dark:text-white">{c.name}</span>
                       )}
-                    </span>
-                  ))}
-                  {c.concentration && (
-                    <span
-                      className="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded"
-                      title="Concentration"
-                    >
-                      Concentrating{c.concentration.spell ? `: ${c.concentration.spell}` : ''}
-                    </span>
-                  )}
-                  {(c.exhaustion ?? 0) > 0 && (
-                    <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
-                      Exhaustion {c.exhaustion}
-                    </span>
-                  )}
-                </div>
-              )}
-              {/* Death saves (VEG-288): only for a downed PC. Pips + status are
-                  shown to everyone; the mark/reset controls are controller-only
-                  and lock once the tally resolves to stable or dead. */}
-              {showsDeathSaves(c) &&
-                (() => {
-                  const status = deathSaveStatus(c.deathSaves);
-                  const successes = c.deathSaves?.successes ?? 0;
-                  const failures = c.deathSaves?.failures ?? 0;
-                  const pips = (filled: number, tone: string) =>
-                    Array.from({ length: DEATH_SAVE_MAX }, (_, k) => (
-                      <span
-                        key={k}
-                        className={`inline-block w-2.5 h-2.5 rounded-full border ${
-                          k < filled ? tone : 'border-gray-300 dark:border-gray-600'
-                        }`}
-                      />
-                    ));
-                  return (
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-                      <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                        Death Saves
-                      </span>
-                      <span
-                        className="inline-flex items-center gap-1"
-                        aria-label={`Death save successes for ${c.name}: ${successes} of ${DEATH_SAVE_MAX}`}
-                      >
-                        {pips(successes, 'bg-emerald-500 border-emerald-500')}
-                      </span>
-                      <span
-                        className="inline-flex items-center gap-1"
-                        aria-label={`Death save failures for ${c.name}: ${failures} of ${DEATH_SAVE_MAX}`}
-                      >
-                        {pips(failures, 'bg-red-500 border-red-500')}
-                      </span>
-                      {status === 'stable' && (
-                        <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded">
-                          Stable
+                      {c.isNpc && (
+                        <span className="text-xs px-1.5 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 rounded">
+                          NPC
                         </span>
-                      )}
-                      {status === 'dead' && (
-                        <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
-                          Dead
-                        </span>
-                      )}
-                      {isController && (
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            aria-label={`Mark death save success for ${c.name}`}
-                            onClick={() => markDeathSaveOnRow(c.name, i, 'success')}
-                            disabled={writePending}
-                            className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
-                          >
-                            + Success
-                          </button>
-                          <button
-                            type="button"
-                            aria-label={`Mark death save failure for ${c.name}`}
-                            onClick={() => markDeathSaveOnRow(c.name, i, 'failure')}
-                            disabled={writePending}
-                            className={`${smallButtonBase} text-red-700 dark:text-red-400`}
-                          >
-                            + Failure
-                          </button>
-                          {c.deathSaves && (
-                            <button
-                              type="button"
-                              aria-label={`Reset death saves for ${c.name}`}
-                              onClick={() => resetDeathSaves(c.name, i)}
-                              disabled={writePending}
-                              className={lootButtonClass}
-                            >
-                              Reset
-                            </button>
-                          )}
-                        </div>
                       )}
                     </div>
-                  );
-                })()}
-              {/* Row management (left) + damage/heal/temp HP controls (right,
-                  VEG-286). The raw HP input above stays as the advanced
-                  affordance for direct corrections; these are the
-                  table-friendly paths. */}
-              {isController &&
-                (() => {
-                  const rowAmount = rowHoldsAmount(c, i) ? parseAmount(amountDraft!.value) : null;
-                  const actionsDisabled = writePending || rowAmount === null;
-                  return (
-                    <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        {/* Manual tiebreak (VEG-285): swap with the adjacent
-                            row, offered only inside a tie group. */}
-                        {i > 0 && sorted[i - 1].initiative === c.initiative && (
-                          <button
-                            type="button"
-                            aria-label={`Move ${c.name} up`}
-                            onClick={() => moveCombatant(c.name, i, 'up')}
-                            disabled={writePending}
-                            className={lootButtonClass}
-                          >
-                            &uarr;
-                          </button>
-                        )}
-                        {i < sorted.length - 1 && sorted[i + 1].initiative === c.initiative && (
-                          <button
-                            type="button"
-                            aria-label={`Move ${c.name} down`}
-                            onClick={() => moveCombatant(c.name, i, 'down')}
-                            disabled={writePending}
-                            className={lootButtonClass}
-                          >
-                            &darr;
-                          </button>
-                        )}
-                        {/* Link / unlink the stat-block reference (VEG-328). */}
-                        {!c.monsterId && (
-                          <button
-                            type="button"
-                            aria-label={`Link monster for ${c.name}`}
-                            onClick={() => setLinkTarget({ name: c.name, index: i })}
-                            disabled={writePending}
-                            className={lootButtonClass}
-                          >
-                            Link monster
-                          </button>
-                        )}
-                        {c.monsterId && (
-                          <button
-                            type="button"
-                            aria-label={`Unlink monster from ${c.name}`}
-                            onClick={() => unlinkCombatant(c.name, i)}
-                            disabled={writePending}
-                            className={lootButtonClass}
-                          >
-                            Unlink
-                          </button>
-                        )}
-                        {c.monsterId && !c.loot && (
-                          <button
-                            type="button"
-                            aria-label={`Roll loot for ${c.name}`}
-                            onClick={() =>
-                              rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)
-                            }
-                            disabled={writePending}
-                            className={lootButtonClass}
-                          >
-                            Roll loot
-                          </button>
-                        )}
-                        {/* Remove the row (VEG-284) — confirmed via dialog below. */}
-                        <button
-                          type="button"
-                          aria-label={`Remove ${c.name}`}
-                          onClick={() => setRemoveTarget({ name: c.name, index: i })}
-                          disabled={writePending}
-                          className={`${smallButtonBase} text-red-700 dark:text-red-400`}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
+                  </div>
+                  <div className="flex items-center gap-4 text-sm">
+                    <div className="text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">Init</div>
+                      {isController ? (
                         <input
                           type="text"
                           inputMode="numeric"
-                          placeholder="Amount"
-                          aria-label={`Damage or heal amount for ${c.name}`}
-                          value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
+                          aria-label={`Initiative for ${c.name}`}
+                          value={rowHoldsInit(c, i) ? initDraft!.value : c.initiative}
                           onChange={e =>
-                            setAmountDraft({ name: c.name, index: i, value: e.target.value })
+                            setInitDraft({ name: c.name, index: i, value: e.target.value })
                           }
-                          className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          onBlur={() => commitCombatantInitiative(c.name)}
+                          onKeyDown={e => {
+                            // Enter commits via the blur handler — a single commit
+                            // path, so it can't double-PATCH with a stale draft.
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                          }}
+                          className="w-14 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                         />
-                        <button
-                          type="button"
-                          aria-label={`Damage ${c.name}`}
-                          onClick={() => applyHpAction('damage', c.name, i)}
-                          disabled={actionsDisabled}
-                          className={`${smallButtonBase} text-red-700 dark:text-red-400`}
-                        >
-                          Damage
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Heal ${c.name}`}
-                          onClick={() => applyHpAction('heal', c.name, i)}
-                          disabled={actionsDisabled}
-                          className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
-                        >
-                          Heal
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Grant temp HP to ${c.name}`}
-                          onClick={() => applyHpAction('temp', c.name, i)}
-                          disabled={actionsDisabled}
-                          className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
-                        >
-                          Temp HP
-                        </button>
+                      ) : (
+                        <div className="font-mono font-medium text-gray-900 dark:text-white">
+                          {c.initiative}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">AC</div>
+                      <div className="font-mono font-medium text-gray-900 dark:text-white">
+                        {c.ac}
                       </div>
                     </div>
-                  );
-                })()}
-              {/* Status editing (VEG-287): add a condition, toggle/name a
+                    <div className="text-center">
+                      <div className="text-xs text-gray-500 dark:text-gray-400">HP</div>
+                      {isController ? (
+                        <input
+                          type="number"
+                          aria-label={`HP for ${c.name}`}
+                          value={rowHoldsDraft(c, i) ? hpDraft!.value : c.hp}
+                          onChange={e =>
+                            setHpDraft({ name: c.name, index: i, value: e.target.value })
+                          }
+                          onBlur={() => commitCombatantHp(c.name)}
+                          onKeyDown={e => {
+                            // Enter commits via the blur handler — a single commit
+                            // path, so it can't double-PATCH with a stale draft.
+                            if (e.key === 'Enter') e.currentTarget.blur();
+                          }}
+                          className="w-16 px-1 py-0.5 text-center font-mono font-medium border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
+                      ) : (
+                        <div className="font-mono font-medium text-gray-900 dark:text-white">
+                          {c.hp}/{c.maxHp}
+                        </div>
+                      )}
+                    </div>
+                    {isController && <div className="text-xs text-gray-400">/{c.maxHp}</div>}
+                    {(c.tempHp ?? 0) > 0 && (
+                      <div
+                        className="text-xs font-mono font-medium text-sky-600 dark:text-sky-400"
+                        title="Temporary HP"
+                      >
+                        +{c.tempHp} temp
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {/* Status chips (VEG-287): conditions, concentration, and
+                  exhaustion — shown to everyone. Controllers get a remove ×
+                  on each condition; the add/toggle controls render below. */}
+                {((c.conditions?.length ?? 0) > 0 ||
+                  c.concentration ||
+                  (c.exhaustion ?? 0) > 0) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {(c.conditions ?? []).map(cond => (
+                      <span
+                        key={cond}
+                        className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded"
+                      >
+                        {cond}
+                        {isController && (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${cond} from ${c.name}`}
+                            onClick={() => toggleCondition(c.name, i, cond)}
+                            disabled={writePending}
+                            className="hover:text-purple-900 dark:hover:text-purple-100 disabled:opacity-50"
+                          >
+                            &times;
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                    {c.concentration && (
+                      <span
+                        className="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded"
+                        title="Concentration"
+                      >
+                        Concentrating{c.concentration.spell ? `: ${c.concentration.spell}` : ''}
+                      </span>
+                    )}
+                    {(c.exhaustion ?? 0) > 0 && (
+                      <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
+                        Exhaustion {c.exhaustion}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* Death saves (VEG-288): only for a downed PC. Pips + status are
+                  shown to everyone; the mark/reset controls are controller-only
+                  and lock once the tally resolves to stable or dead. */}
+                {showsDeathSaves(c) &&
+                  (() => {
+                    const status = deathSaveStatus(c.deathSaves);
+                    const successes = c.deathSaves?.successes ?? 0;
+                    const failures = c.deathSaves?.failures ?? 0;
+                    const pips = (filled: number, tone: string) =>
+                      Array.from({ length: DEATH_SAVE_MAX }, (_, k) => (
+                        <span
+                          key={k}
+                          className={`inline-block w-2.5 h-2.5 rounded-full border ${
+                            k < filled ? tone : 'border-gray-300 dark:border-gray-600'
+                          }`}
+                        />
+                      ));
+                    return (
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+                        <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                          Death Saves
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-1"
+                          aria-label={`Death save successes for ${c.name}: ${successes} of ${DEATH_SAVE_MAX}`}
+                        >
+                          {pips(successes, 'bg-emerald-500 border-emerald-500')}
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-1"
+                          aria-label={`Death save failures for ${c.name}: ${failures} of ${DEATH_SAVE_MAX}`}
+                        >
+                          {pips(failures, 'bg-red-500 border-red-500')}
+                        </span>
+                        {status === 'stable' && (
+                          <span className="text-xs px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded">
+                            Stable
+                          </span>
+                        )}
+                        {status === 'dead' && (
+                          <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
+                            Dead
+                          </span>
+                        )}
+                        {isController && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              aria-label={`Mark death save success for ${c.name}`}
+                              onClick={() => markDeathSaveOnRow(c.name, i, 'success')}
+                              disabled={writePending}
+                              className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
+                            >
+                              + Success
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Mark death save failure for ${c.name}`}
+                              onClick={() => markDeathSaveOnRow(c.name, i, 'failure')}
+                              disabled={writePending}
+                              className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                            >
+                              + Failure
+                            </button>
+                            {c.deathSaves && (
+                              <button
+                                type="button"
+                                aria-label={`Reset death saves for ${c.name}`}
+                                onClick={() => resetDeathSaves(c.name, i)}
+                                disabled={writePending}
+                                className={lootButtonClass}
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                {/* Row management (left) + damage/heal/temp HP controls (right,
+                  VEG-286). The raw HP input above stays as the advanced
+                  affordance for direct corrections; these are the
+                  table-friendly paths. */}
+                {isController &&
+                  (() => {
+                    const rowAmount = rowHoldsAmount(c, i) ? parseAmount(amountDraft!.value) : null;
+                    const actionsDisabled = writePending || rowAmount === null;
+                    return (
+                      <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          {/* Manual tiebreak (VEG-285): swap with the adjacent
+                            row, offered only inside a tie group. */}
+                          {i > 0 && sorted[i - 1].initiative === c.initiative && (
+                            <button
+                              type="button"
+                              aria-label={`Move ${c.name} up`}
+                              onClick={() => moveCombatant(c.name, i, 'up')}
+                              disabled={writePending}
+                              className={lootButtonClass}
+                            >
+                              &uarr;
+                            </button>
+                          )}
+                          {i < sorted.length - 1 && sorted[i + 1].initiative === c.initiative && (
+                            <button
+                              type="button"
+                              aria-label={`Move ${c.name} down`}
+                              onClick={() => moveCombatant(c.name, i, 'down')}
+                              disabled={writePending}
+                              className={lootButtonClass}
+                            >
+                              &darr;
+                            </button>
+                          )}
+                          {/* Link / unlink the stat-block reference (VEG-328). */}
+                          {!c.monsterId && (
+                            <button
+                              type="button"
+                              aria-label={`Link monster for ${c.name}`}
+                              onClick={() => setLinkTarget({ name: c.name, index: i })}
+                              disabled={writePending}
+                              className={lootButtonClass}
+                            >
+                              Link monster
+                            </button>
+                          )}
+                          {c.monsterId && (
+                            <button
+                              type="button"
+                              aria-label={`Unlink monster from ${c.name}`}
+                              onClick={() => unlinkCombatant(c.name, i)}
+                              disabled={writePending}
+                              className={lootButtonClass}
+                            >
+                              Unlink
+                            </button>
+                          )}
+                          {c.monsterId && !c.loot && (
+                            <button
+                              type="button"
+                              aria-label={`Roll loot for ${c.name}`}
+                              onClick={() =>
+                                rollLoot(encounter, arrayIndex, `Rolled loot for ${c.name}`)
+                              }
+                              disabled={writePending}
+                              className={lootButtonClass}
+                            >
+                              Roll loot
+                            </button>
+                          )}
+                          {/* Remove the row (VEG-284) — confirmed via dialog below. */}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${c.name}`}
+                            onClick={() => setRemoveTarget({ name: c.name, index: i })}
+                            disabled={writePending}
+                            className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="Amount"
+                            aria-label={`Damage or heal amount for ${c.name}`}
+                            value={rowHoldsAmount(c, i) ? amountDraft!.value : ''}
+                            onChange={e =>
+                              setAmountDraft({ name: c.name, index: i, value: e.target.value })
+                            }
+                            className="w-20 px-2 py-1 text-xs text-center font-mono border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          />
+                          <button
+                            type="button"
+                            aria-label={`Damage ${c.name}`}
+                            onClick={() => applyHpAction('damage', c.name, i)}
+                            disabled={actionsDisabled}
+                            className={`${smallButtonBase} text-red-700 dark:text-red-400`}
+                          >
+                            Damage
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Heal ${c.name}`}
+                            onClick={() => applyHpAction('heal', c.name, i)}
+                            disabled={actionsDisabled}
+                            className={`${smallButtonBase} text-emerald-700 dark:text-emerald-400`}
+                          >
+                            Heal
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Grant temp HP to ${c.name}`}
+                            onClick={() => applyHpAction('temp', c.name, i)}
+                            disabled={actionsDisabled}
+                            className={`${smallButtonBase} text-sky-700 dark:text-sky-400`}
+                          >
+                            Temp HP
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                {/* Status editing (VEG-287): add a condition, toggle/name a
                   concentration spell, set exhaustion. Controller-only; the
                   read-only chips above are shown to everyone. */}
-              {isController && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <select
-                    aria-label={`Add condition to ${c.name}`}
-                    value=""
-                    onChange={e => {
-                      if (e.target.value) toggleCondition(c.name, i, e.target.value as Condition);
-                    }}
-                    disabled={writePending}
-                    className={statusSelectClass}
-                  >
-                    <option value="">+ Condition</option>
-                    {CONDITIONS.filter(cond => !(c.conditions ?? []).includes(cond)).map(cond => (
-                      <option key={cond} value={cond}>
-                        {cond}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    aria-label={`Toggle concentration for ${c.name}`}
-                    onClick={() => toggleConcentration(c.name, i)}
-                    disabled={writePending}
-                    className={lootButtonClass}
-                  >
-                    {c.concentration ? 'Stop concentrating' : 'Concentrate'}
-                  </button>
-                  {c.concentration && (
+                {isController && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <select
+                      aria-label={`Add condition to ${c.name}`}
+                      value=""
+                      onChange={e => {
+                        if (e.target.value) toggleCondition(c.name, i, e.target.value as Condition);
+                      }}
+                      disabled={writePending}
+                      className={statusSelectClass}
+                    >
+                      <option value="">+ Condition</option>
+                      {CONDITIONS.filter(cond => !(c.conditions ?? []).includes(cond)).map(cond => (
+                        <option key={cond} value={cond}>
+                          {cond}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      aria-label={`Toggle concentration for ${c.name}`}
+                      onClick={() => toggleConcentration(c.name, i)}
+                      disabled={writePending}
+                      className={lootButtonClass}
+                    >
+                      {c.concentration ? 'Stop concentrating' : 'Concentrate'}
+                    </button>
+                    {c.concentration && (
+                      <input
+                        type="text"
+                        placeholder="Spell"
+                        aria-label={`Concentration spell for ${c.name}`}
+                        value={
+                          rowHoldsConc(c, i) ? concDraft!.value : (c.concentration.spell ?? '')
+                        }
+                        onChange={e =>
+                          setConcDraft({ name: c.name, index: i, value: e.target.value })
+                        }
+                        onBlur={() => commitConcentrationSpell(c.name)}
+                        onKeyDown={e => {
+                          // Enter commits via the blur handler — one commit path.
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                        }}
+                        className="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    )}
+                    <select
+                      aria-label={`Exhaustion for ${c.name}`}
+                      value={c.exhaustion ?? 0}
+                      onChange={e => setExhaustion(c.name, i, Number(e.target.value))}
+                      disabled={writePending}
+                      className={statusSelectClass}
+                    >
+                      <option value={0}>Exhaustion: none</option>
+                      {[1, 2, 3, 4, 5, 6].map(n => (
+                        <option key={n} value={n}>
+                          Exhaustion {n}
+                        </option>
+                      ))}
+                    </select>
+                    {/* Quick-edit notes (VEG-289), committed on blur/Enter; empty
+                      clears them. Read-only view for non-controllers renders below. */}
                     <input
                       type="text"
-                      placeholder="Spell"
-                      aria-label={`Concentration spell for ${c.name}`}
-                      value={rowHoldsConc(c, i) ? concDraft!.value : (c.concentration.spell ?? '')}
+                      placeholder="Notes"
+                      aria-label={`Notes for ${c.name}`}
+                      value={rowHoldsNotes(c, i) ? notesDraft!.value : (c.notes ?? '')}
                       onChange={e =>
-                        setConcDraft({ name: c.name, index: i, value: e.target.value })
+                        setNotesDraft({ name: c.name, index: i, value: e.target.value })
                       }
-                      onBlur={() => commitConcentrationSpell(c.name)}
+                      onBlur={() => commitCombatantNotes(c.name)}
                       onKeyDown={e => {
                         // Enter commits via the blur handler — one commit path.
                         if (e.key === 'Enter') e.currentTarget.blur();
                       }}
-                      className="w-28 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      className="min-w-0 flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
-                  )}
-                  <select
-                    aria-label={`Exhaustion for ${c.name}`}
-                    value={c.exhaustion ?? 0}
-                    onChange={e => setExhaustion(c.name, i, Number(e.target.value))}
-                    disabled={writePending}
-                    className={statusSelectClass}
-                  >
-                    <option value={0}>Exhaustion: none</option>
-                    {[1, 2, 3, 4, 5, 6].map(n => (
-                      <option key={n} value={n}>
-                        Exhaustion {n}
-                      </option>
-                    ))}
-                  </select>
-                  {/* Quick-edit notes (VEG-289), committed on blur/Enter; empty
-                      clears them. Read-only view for non-controllers renders below. */}
-                  <input
-                    type="text"
-                    placeholder="Notes"
-                    aria-label={`Notes for ${c.name}`}
-                    value={rowHoldsNotes(c, i) ? notesDraft!.value : (c.notes ?? '')}
-                    onChange={e => setNotesDraft({ name: c.name, index: i, value: e.target.value })}
-                    onBlur={() => commitCombatantNotes(c.name)}
-                    onKeyDown={e => {
-                      // Enter commits via the blur handler — one commit path.
-                      if (e.key === 'Enter') e.currentTarget.blur();
-                    }}
-                    className="min-w-0 flex-1 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
-                </div>
-              )}
-              {/* Notes are shown to everyone (view); only controllers get the
+                  </div>
+                )}
+                {/* Notes are shown to everyone (view); only controllers get the
                   edit field above (VEG-289). */}
-              {!isController && c.notes && (
-                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
-                  <span className="font-medium">Notes:</span> {c.notes}
-                </div>
-              )}
-              {/* DM-only drop view (VEG-301) — the player reveal is a separate ticket. */}
-              {isController && c.loot && (
-                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex items-start justify-between gap-2 text-sm">
-                  <LootDisplay coinage={c.loot.coinage} items={c.loot.items} />
-                  {/* Rerolling needs the monster reference; an unlinked row
+                {!isController && c.notes && (
+                  <div className="mt-2 text-xs text-gray-600 dark:text-gray-400">
+                    <span className="font-medium">Notes:</span> {c.notes}
+                  </div>
+                )}
+                {/* DM-only drop view (VEG-301) — the player reveal is a separate ticket. */}
+                {isController && c.loot && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700 flex items-start justify-between gap-2 text-sm">
+                    <LootDisplay coinage={c.loot.coinage} items={c.loot.items} />
+                    {/* Rerolling needs the monster reference; an unlinked row
                       (VEG-328) keeps its drop readable but can't reroll. */}
-                  {c.monsterId && (
-                    <button
-                      type="button"
-                      aria-label={`Reroll loot for ${c.name}`}
-                      onClick={() =>
-                        rollLoot(encounter, arrayIndex, `Re-rolled loot for ${c.name}`)
-                      }
-                      disabled={writePending}
-                      className={lootButtonClass}
-                    >
-                      Reroll
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                    {c.monsterId && (
+                      <button
+                        type="button"
+                        aria-label={`Reroll loot for ${c.name}`}
+                        onClick={() =>
+                          rollLoot(encounter, arrayIndex, `Re-rolled loot for ${c.name}`)
+                        }
+                        disabled={writePending}
+                        className={lootButtonClass}
+                      >
+                        Reroll
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
-      {isController && (
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAddCombatantOpen(true)}
-            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
-          >
-            Add combatant
-          </button>
-          <button
-            type="button"
-            onClick={openAddParty}
-            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
-          >
-            Add party
-          </button>
-          {/* Roll initiative for every NPC at once (VEG-370), as a single menu:
-              "Each" rolls per-NPC d20 + DEX mod; "One shared roll" gives the
-              whole group one d20. */}
-          {encounter.combatants.some(c => c.isNpc) && (
-            <DropdownMenu
-              testId="roll-initiative-menu"
-              label={
-                <>
-                  <span aria-hidden="true">🎲</span> Roll initiative
-                </>
-              }
-              disabled={writePending}
-              buttonClassName="inline-flex items-center px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              items={[
-                {
-                  label: 'Each NPC separately',
-                  description: "d20 + each NPC's DEX modifier",
-                  onSelect: () => rollNpcInitiatives('each'),
-                },
-                {
-                  label: 'One shared roll',
-                  description: 'one d20 for the whole group',
-                  onSelect: () => rollNpcInitiatives('shared'),
-                },
-              ]}
-            />
-          )}
-          {encounter.combatants.length > 0 && (
+        {isController && (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setConfirmClearAll(true)}
-              disabled={writePending}
-              className="ml-auto px-3 py-1.5 text-sm border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              onClick={() => setAddCombatantOpen(true)}
+              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
             >
-              Clear all
+              Add combatant
             </button>
-          )}
-        </div>
-      )}
-
-      {isController && (
-        <div className="mt-6 p-4 rounded-lg border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Encounter loot</h2>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={autoRollLoot}
-                  onChange={e => setAutoRollLoot(e.target.checked)}
-                  className="rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500"
-                />
-                Auto-roll loot on death
-              </label>
+            <button
+              type="button"
+              onClick={openAddParty}
+              className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+            >
+              Add party
+            </button>
+            {/* Roll initiative for every NPC at once (VEG-370), as a single menu:
+              "Each" rolls per-NPC d20 + DEX mod; "One shared roll" gives the
+              whole group one d20. */}
+            {encounter.combatants.some(c => c.isNpc) && (
+              <DropdownMenu
+                testId="roll-initiative-menu"
+                label={
+                  <>
+                    <span aria-hidden="true">🎲</span> Roll initiative
+                  </>
+                }
+                disabled={writePending}
+                buttonClassName="inline-flex items-center px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                items={[
+                  {
+                    label: 'Each NPC separately',
+                    description: "d20 + each NPC's DEX modifier",
+                    onSelect: () => rollNpcInitiatives('each'),
+                  },
+                  {
+                    label: 'One shared roll',
+                    description: 'one d20 for the whole group',
+                    onSelect: () => rollNpcInitiatives('shared'),
+                  },
+                ]}
+              />
+            )}
+            {encounter.combatants.length > 0 && (
               <button
                 type="button"
-                onClick={() => {
-                  // Rolling the whole encounter replaces existing drops on the
-                  // backend — confirm before clobbering anything already rolled.
-                  if (rolledDropCount > 0) setConfirmBulkRoll(true);
-                  else rollLoot(encounter, undefined, 'Rolled loot for the encounter');
-                }}
-                disabled={!hasMonsterCombatants || writePending}
-                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                onClick={() => setConfirmClearAll(true)}
+                disabled={writePending}
+                className="ml-auto px-3 py-1.5 text-sm border border-red-300 dark:border-red-800 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-700 dark:text-red-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Roll loot for encounter
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+
+        {isController && (
+          <div className="mt-6 p-4 rounded-lg border bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Encounter loot
+              </h2>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={autoRollLoot}
+                    onChange={e => setAutoRollLoot(e.target.checked)}
+                    className="rounded border-gray-300 dark:border-gray-600 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  Auto-roll loot on death
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Rolling the whole encounter replaces existing drops on the
+                    // backend — confirm before clobbering anything already rolled.
+                    if (rolledDropCount > 0) setConfirmBulkRoll(true);
+                    else rollLoot(encounter, undefined, 'Rolled loot for the encounter');
+                  }}
+                  disabled={!hasMonsterCombatants || writePending}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Roll loot for encounter
+                </button>
+              </div>
+            </div>
+            {lootTotal ? (
+              <div className="mt-3 text-sm">
+                <LootDisplay coinage={lootTotal.coinage} items={lootTotal.items} />
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">No loot rolled yet.</p>
+            )}
+          </div>
+        )}
+
+        <ConfirmDialog
+          open={removeTarget !== null}
+          onOpenChange={open => {
+            if (!open) setRemoveTarget(null);
+          }}
+          title="Remove combatant?"
+          description={`Remove ${removeTarget?.name ?? ''} from the encounter? Their HP and any rolled loot are discarded.`}
+          confirmLabel="Remove"
+          onConfirm={() => {
+            if (removeTarget) removeCombatant(removeTarget.name, removeTarget.index);
+          }}
+        />
+
+        <ConfirmDialog
+          open={confirmClearAll}
+          onOpenChange={setConfirmClearAll}
+          title="Clear all combatants?"
+          description="This removes every combatant from the tracker and resets it to round 1."
+          confirmLabel="Clear all"
+          onConfirm={clearAllCombatants}
+        />
+
+        <ConfirmDialog
+          open={confirmBulkRoll}
+          onOpenChange={setConfirmBulkRoll}
+          title="Reroll existing loot?"
+          description={`Rolling loot for the encounter will replace the ${rolledDropCount} drop${
+            rolledDropCount === 1 ? '' : 's'
+          } already rolled.`}
+          confirmLabel="Roll all"
+          onConfirm={() => rollLoot(encounter, undefined, 'Rolled loot for the encounter')}
+        />
+
+        <Modal
+          open={addCombatantOpen}
+          onClose={() => setAddCombatantOpen(false)}
+          label="Add combatant"
+        >
+          <AddCombatantDialog
+            onConfirm={addManualCombatant}
+            onCancel={() => setAddCombatantOpen(false)}
+            submitting={writePending}
+          />
+        </Modal>
+
+        <Modal open={linkTarget !== null} onClose={() => setLinkTarget(null)} label="Link monster">
+          {linkTarget && (
+            <LinkMonsterDialog
+              combatantName={linkTarget.name}
+              onSelect={linkMonsterToCombatant}
+              onCancel={() => setLinkTarget(null)}
+              submitting={writePending}
+            />
+          )}
+        </Modal>
+
+        <Modal open={addPartyOpen} onClose={() => setAddPartyOpen(false)} label="Add party">
+          {partyRoster === null ? (
+            <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              Loading party…
+            </p>
+          ) : (
+            <AddPartyDialog
+              characters={partyRoster}
+              existingNames={encounter.combatants.map(c => c.name)}
+              onConfirm={addPartyToEncounter}
+              onCancel={() => setAddPartyOpen(false)}
+              submitting={writePending}
+            />
+          )}
+        </Modal>
+
+        <MonsterLookupPanel canAdd={!!isController} onAdd={addMonsterToEncounter} />
+
+        <Modal
+          open={viewOpen}
+          onClose={() => setViewOpen(false)}
+          label={viewMonster?.name ?? 'Monster'}
+        >
+          {viewLoading || !viewMonster ? (
+            <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+              Loading monster…
+            </p>
+          ) : (
+            <MonsterStatBlock monster={viewMonster} />
+          )}
+        </Modal>
+      </div>
+
+      {/* Floating stat block (VEG-384): follows the active combatant (or a
+          pinned one) so the DM reads the fighting creature without scrolling.
+          The wrapper's margin-top anchors it level with the active card (see
+          panelOffset); a long block scrolls within the panel. Hidden below
+          `lg`, where the modal viewer takes over instead. */}
+      <aside
+        className="hidden lg:block min-w-0"
+        aria-label="Active creature stat block"
+        data-testid="active-stat-panel"
+      >
+        <div
+          className="transition-[margin-top] duration-200 ease-out"
+          style={{ marginTop: panelOffset }}
+        >
+          {/* Quick-reference banner (VEG-384): shown when the panel is peeking a
+              non-active combatant, reassuring the DM the turn hasn't moved and
+              offering a one-click snap back to the active creature. */}
+          {isPeeking && activeCombatant && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                  Quick reference
+                </p>
+                <p className="truncate text-xs text-amber-700/90 dark:text-amber-300">
+                  Still {activeCombatant.name}&apos;s turn
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinnedMonsterId(null)}
+                className="shrink-0 rounded border border-amber-400 px-2 py-1 text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/40"
+              >
+                Back to current turn
               </button>
             </div>
-          </div>
-          {lootTotal ? (
-            <div className="mt-3 text-sm">
-              <LootDisplay coinage={lootTotal.coinage} items={lootTotal.items} />
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">No loot rolled yet.</p>
           )}
+          <div className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+            {panelLoading ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading stat block…</p>
+            ) : panelMonster ? (
+              <MonsterStatBlock monster={panelMonster} />
+            ) : activeCombatant ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No stat block for {activeCombatant.name}. Click a monster combatant&apos;s name to
+                pin its stat block here.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                The active creature&apos;s stat block will appear here.
+              </p>
+            )}
+          </div>
         </div>
-      )}
-
-      <ConfirmDialog
-        open={removeTarget !== null}
-        onOpenChange={open => {
-          if (!open) setRemoveTarget(null);
-        }}
-        title="Remove combatant?"
-        description={`Remove ${removeTarget?.name ?? ''} from the encounter? Their HP and any rolled loot are discarded.`}
-        confirmLabel="Remove"
-        onConfirm={() => {
-          if (removeTarget) removeCombatant(removeTarget.name, removeTarget.index);
-        }}
-      />
-
-      <ConfirmDialog
-        open={confirmClearAll}
-        onOpenChange={setConfirmClearAll}
-        title="Clear all combatants?"
-        description="This removes every combatant from the tracker and resets it to round 1."
-        confirmLabel="Clear all"
-        onConfirm={clearAllCombatants}
-      />
-
-      <ConfirmDialog
-        open={confirmBulkRoll}
-        onOpenChange={setConfirmBulkRoll}
-        title="Reroll existing loot?"
-        description={`Rolling loot for the encounter will replace the ${rolledDropCount} drop${
-          rolledDropCount === 1 ? '' : 's'
-        } already rolled.`}
-        confirmLabel="Roll all"
-        onConfirm={() => rollLoot(encounter, undefined, 'Rolled loot for the encounter')}
-      />
-
-      <Modal
-        open={addCombatantOpen}
-        onClose={() => setAddCombatantOpen(false)}
-        label="Add combatant"
-      >
-        <AddCombatantDialog
-          onConfirm={addManualCombatant}
-          onCancel={() => setAddCombatantOpen(false)}
-          submitting={writePending}
-        />
-      </Modal>
-
-      <Modal open={linkTarget !== null} onClose={() => setLinkTarget(null)} label="Link monster">
-        {linkTarget && (
-          <LinkMonsterDialog
-            combatantName={linkTarget.name}
-            onSelect={linkMonsterToCombatant}
-            onCancel={() => setLinkTarget(null)}
-            submitting={writePending}
-          />
-        )}
-      </Modal>
-
-      <Modal open={addPartyOpen} onClose={() => setAddPartyOpen(false)} label="Add party">
-        {partyRoster === null ? (
-          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-            Loading party…
-          </p>
-        ) : (
-          <AddPartyDialog
-            characters={partyRoster}
-            existingNames={encounter.combatants.map(c => c.name)}
-            onConfirm={addPartyToEncounter}
-            onCancel={() => setAddPartyOpen(false)}
-            submitting={writePending}
-          />
-        )}
-      </Modal>
-
-      <MonsterLookupPanel canAdd={!!isController} onAdd={addMonsterToEncounter} />
-
-      <Modal
-        open={viewOpen}
-        onClose={() => setViewOpen(false)}
-        label={viewMonster?.name ?? 'Monster'}
-      >
-        {viewLoading || !viewMonster ? (
-          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">
-            Loading monster…
-          </p>
-        ) : (
-          <MonsterStatBlock monster={viewMonster} />
-        )}
-      </Modal>
+      </aside>
     </div>
   );
 }
