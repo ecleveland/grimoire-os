@@ -79,8 +79,11 @@ test.describe('Custom monsters (VEG-293)', () => {
     const combatant = page.getByRole('button', { name, exact: true }).first();
     await expect(combatant).toBeVisible();
     await combatant.click();
-    await expect(page.getByTestId('monster-stat-block')).toBeVisible();
-    await expect(page.getByRole('dialog').getByText('Shadow Bite.')).toBeVisible();
+    // On a desktop viewport the stat block surfaces in the always-on side panel
+    // (VEG-384) rather than a modal dialog.
+    const statPanel = page.getByTestId('active-stat-panel');
+    await expect(statPanel.getByTestId('monster-stat-block')).toBeVisible();
+    await expect(statPanel.getByText('Shadow Bite.')).toBeVisible();
   });
 
   test("another user's homebrew never hydrates into a print set (VEG-331)", async ({ page }) => {

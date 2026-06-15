@@ -37,9 +37,12 @@ test.describe('Add monster to encounter + click-combatant-to-view (VEG-260)', ()
     const combatant = page.getByRole('button', { name: monsterName, exact: true }).first();
     await expect(combatant).toBeVisible();
 
-    // Clicking the linked combatant re-opens its source stat block (VEG-260).
+    // Clicking the linked combatant surfaces its source stat block (VEG-260).
+    // On a desktop viewport that lands in the always-on side panel (VEG-384),
+    // not a modal; narrow screens still use the dialog viewer.
     await combatant.click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByTestId('monster-stat-block')).toBeVisible();
+    const statPanel = page.getByTestId('active-stat-panel');
+    await expect(statPanel.getByTestId('monster-stat-block')).toBeVisible();
+    await expect(statPanel.getByRole('heading', { name: monsterName })).toBeVisible();
   });
 });

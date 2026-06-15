@@ -1709,7 +1709,11 @@ export default function InitiativeTrackerPage() {
           The wrapper's margin-top anchors it level with the active card (see
           panelOffset); a long block scrolls within the panel. Hidden below
           `lg`, where the modal viewer takes over instead. */}
-      <aside className="hidden lg:block min-w-0" aria-label="Active creature stat block">
+      <aside
+        className="hidden lg:block min-w-0"
+        aria-label="Active creature stat block"
+        data-testid="active-stat-panel"
+      >
         <div
           className="transition-[margin-top] duration-200 ease-out"
           style={{ marginTop: panelOffset }}
