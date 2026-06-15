@@ -130,6 +130,27 @@ describe('NewCharacterPage — campaign picker', () => {
     expect(lastPostBody()).not.toHaveProperty('campaignId');
   });
 
+  it('includes the new slice-1 fields (size, initiative, hit dice) in the create request', async () => {
+    routeApiFetch([]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+    await user.type(screen.getByLabelText(/name/i), 'Mialee');
+    await user.selectOptions(screen.getByLabelText(/^size/i), 'Small');
+    await user.selectOptions(screen.getByLabelText(/hit die$/i), 'd6');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+    expect(lastPostBody()).toMatchObject({
+      name: 'Mialee',
+      size: 'Small',
+      initiative: 0,
+      hitDice: { dieType: 'd6', total: 1, spent: 0 },
+      hitPoints: { max: 10, current: 10, temporary: 0 },
+    });
+  });
+
   it('toasts an error and stays on the page when creation fails', async () => {
     mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
       if (path.startsWith('/campaigns?'))
