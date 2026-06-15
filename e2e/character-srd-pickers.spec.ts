@@ -34,12 +34,15 @@ test.describe('character editor — SRD pickers + autofill', () => {
     await firstRace.click();
     await expect(raceInput).toHaveValue(raceName);
 
-    // Autofill the class's granted traits — the read-only summary fills in.
-    await expect(page.getByText(/nothing yet/i)).toBeVisible();
+    // Before autofill no proficiency toggles are selected.
+    const pressed = page.locator('button[aria-pressed="true"]');
+    await expect(pressed).toHaveCount(0);
+
+    // Autofill the class's granted traits — saves/armor toggles light up.
     await page
       .getByRole('button', { name: new RegExp(`apply ${escapeRegExp(className)} traits`, 'i') })
       .click();
-    await expect(page.getByText(/nothing yet/i)).toHaveCount(0);
+    await expect(pressed.first()).toBeVisible();
 
     await page.getByRole('button', { name: /create character/i }).click();
     await expect(page.getByRole('heading', { name: 'Picker Hero' })).toBeVisible();
@@ -48,7 +51,7 @@ test.describe('character editor — SRD pickers + autofill', () => {
     await page.getByRole('link', { name: /edit/i }).first().click();
     await expect(page.getByLabel(/^class/i)).toHaveValue(className);
     await expect(page.getByLabel(/^race/i)).toHaveValue(raceName);
-    await expect(page.getByText(/nothing yet/i)).toHaveCount(0);
+    await expect(page.locator('button[aria-pressed="true"]').first()).toBeVisible();
   });
 
   test('keeps a homebrew class typed by hand (manual override)', async ({ page }) => {
