@@ -981,6 +981,15 @@ export default function InitiativeTrackerPage() {
               <Badge variant={encounter.isActive ? 'success' : 'neutral'} size="md">
                 {encounter.isActive ? 'Active' : 'Inactive'}
               </Badge>
+              {/* The round normally rides on the active card's inline header; with
+                  no combatants there is no such card, so surface it here so the
+                  round is never hidden (and never duplicated — these are mutually
+                  exclusive). */}
+              {!activeCombatant && (
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  Round {encounter.round}
+                </span>
+              )}
             </div>
           </div>
           {isController && (

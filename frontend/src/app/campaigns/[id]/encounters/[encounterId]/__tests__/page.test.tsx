@@ -3768,6 +3768,16 @@ describe('live-combat layout (VEG-384)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('falls back to a page-header round when there are no combatants', async () => {
+    // No active card to host the inline turn header, so the round shows in the
+    // page header instead — and is never duplicated when combatants exist.
+    mockApiFetch.mockResolvedValue(makeEncounter({ combatants: [], currentTurn: 0, round: 3 }));
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+    expect(screen.getByText(/round 3/i)).toBeInTheDocument();
+    expect(screen.queryByText(/'s turn/i)).not.toBeInTheDocument();
+  });
+
   it('keeps turn controls off the card header for non-controllers', async () => {
     mockUseAuth.mockReturnValue({
       user: { userId: 'someone-else', username: 'p', role: 'player' },
