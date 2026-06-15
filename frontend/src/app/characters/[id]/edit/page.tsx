@@ -1,106 +1,74 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiFetch } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { apiFetch, ApiError } from '@/lib/api';
+import { invalidateApiPath, useApiQuery } from '@/lib/query';
 import { toast } from 'sonner';
-import type { Character, AbilityScores } from '@/lib/types';
-import FormField from '@/components/FormField';
+import type { Character } from '@/lib/types';
 import ConfirmDialog from '@/components/ConfirmDialog';
-
-const abilityKeys: (keyof AbilityScores)[] = [
-  'strength',
-  'dexterity',
-  'constitution',
-  'intelligence',
-  'wisdom',
-  'charisma',
-];
-const abilityLabels: Record<keyof AbilityScores, string> = {
-  strength: 'STR',
-  dexterity: 'DEX',
-  constitution: 'CON',
-  intelligence: 'INT',
-  wisdom: 'WIS',
-  charisma: 'CHA',
-};
+import CharacterEditorForm, {
+  characterFormPayload,
+  characterToFormValues,
+  type CharacterFormValues,
+} from '@/components/CharacterEditorForm';
 
 export default function EditCharacterPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const [name, setName] = useState('');
-  const [race, setRace] = useState('');
-  const [charClass, setCharClass] = useState('');
-  const [level, setLevel] = useState(1);
-  const [background, setBackground] = useState('');
-  const [alignment, setAlignment] = useState('');
-  const [abilityScores, setAbilityScores] = useState<AbilityScores>({
-    strength: 10,
-    dexterity: 10,
-    constitution: 10,
-    intelligence: 10,
-    wisdom: 10,
-    charisma: 10,
-  });
-  const [maxHp, setMaxHp] = useState(10);
-  const [currentHp, setCurrentHp] = useState(10);
-  const [armorClass, setArmorClass] = useState(10);
-  const [speed, setSpeed] = useState(30);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
+  const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  // Bumped after a 409 reload to remount the form with the freshly-fetched
+  // values (the form seeds its state from initialValues only on mount).
+  const [formKey, setFormKey] = useState(0);
 
-  useEffect(() => {
-    setLoading(true);
-    setLoadError(false);
-    apiFetch<Character>(`/characters/${id}`)
-      .then(c => {
-        setName(c.name);
-        setRace(c.race || '');
-        setCharClass(c.class || '');
-        setLevel(c.level);
-        setBackground(c.background || '');
-        setAlignment(c.alignment || '');
-        setAbilityScores(c.abilityScores);
-        setMaxHp(c.hitPoints.max);
-        setCurrentHp(c.hitPoints.current);
-        setArmorClass(c.armorClass);
-        setSpeed(c.speed);
-      })
-      .catch(() => {
-        // Without this flag the form would render its defaults (level 1, all
-        // 10s) and one Save would PATCH them over the real record (VEG-317).
-        setLoadError(true);
-        toast.error('Failed to load character');
-      })
-      .finally(() => setLoading(false));
-  }, [id, reloadKey]);
+  const query = useApiQuery<Character>(`/characters/${id}`, {
+    errorToast: 'Failed to load character',
+  });
+  const character = query.data;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (values: CharacterFormValues) => {
+    if (!character) return;
     setSubmitting(true);
     try {
       await apiFetch(`/characters/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({
-          name,
-          race,
-          class: charClass,
-          level,
-          background,
-          alignment,
-          abilityScores,
-          hitPoints: { max: maxHp, current: currentHp, temporary: 0 },
-          armorClass,
-          speed,
+          ...characterFormPayload(values),
+          // Optimistic-locking guard (VEG-137): reject if the row moved on since
+          // we loaded it, rather than silently clobbering a concurrent edit.
+          expectedVersion: character.version,
         }),
       });
       toast.success('Character updated!');
+      // The sheet reads the same `/characters/:id` query cache; without this it
+      // would render the pre-edit values after we navigate back to it.
+      await invalidateApiPath(queryClient, `/characters/${id}`);
       router.push(`/characters/${id}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update character');
+      if (err instanceof ApiError && err.status === 409) {
+        // Reload the latest server state, then remount the form (it seeds from
+        // initialValues only on mount) so the next save carries the new version.
+        // refetch() resolves with a result rather than throwing, so inspect it:
+        // if the reload itself failed, say so instead of falsely claiming the
+        // form now holds the latest.
+        const result = await query.refetch();
+        if (result.isError || !result.data) {
+          toast.error(
+            'This character was changed elsewhere, and reloading the latest version failed — refresh the page and try again.'
+          );
+        } else {
+          toast.error(
+            'This character was changed elsewhere. Reloaded the latest version — re-apply your changes and save again.'
+          );
+          setFormKey(k => k + 1);
+        }
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Failed to update character');
+      }
+    } finally {
       setSubmitting(false);
     }
   };
@@ -115,14 +83,20 @@ export default function EditCharacterPage() {
     }
   };
 
-  if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
-  if (loadError)
+  if (query.isLoading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  // Guard on `!character`, not `isError`: an initial-load failure leaves us with
+  // no data (show Retry — without it the form would render defaults and one Save
+  // would PATCH them over the real record, VEG-317). But react-query keeps the
+  // last good `data` when a *refetch* fails (e.g. the post-409 reload), so keying
+  // off `isError` here would discard the user's in-progress edits on a transient
+  // blip. With data in hand we keep the form mounted.
+  if (!character)
     return (
       <div className="text-center py-12">
         <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load character.</p>
         <button
           type="button"
-          onClick={() => setReloadKey(k => k + 1)}
+          onClick={() => query.refetch()}
           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
         >
           Retry
@@ -133,126 +107,14 @@ export default function EditCharacterPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Edit Character</h1>
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Basic Info</h2>
-          <FormField
-            label="Name"
-            type="text"
-            required
-            value={name}
-            onChange={e => setName(e.target.value)}
-          />
-          <div className="grid grid-cols-2 gap-4">
-            <FormField
-              label="Race"
-              type="text"
-              value={race}
-              onChange={e => setRace(e.target.value)}
-            />
-            <FormField
-              label="Class"
-              type="text"
-              value={charClass}
-              onChange={e => setCharClass(e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <FormField
-              label="Level"
-              type="number"
-              min={1}
-              max={20}
-              value={level}
-              onChange={e => setLevel(Number(e.target.value))}
-            />
-            <FormField
-              label="Background"
-              type="text"
-              value={background}
-              onChange={e => setBackground(e.target.value)}
-            />
-            <FormField
-              label="Alignment"
-              type="text"
-              value={alignment}
-              onChange={e => setAlignment(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-            Ability Scores
-          </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-            {abilityKeys.map(key => (
-              <div key={key} className="text-center">
-                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                  {abilityLabels[key]}
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={30}
-                  value={abilityScores[key]}
-                  onChange={e =>
-                    setAbilityScores(prev => ({ ...prev, [key]: Number(e.target.value) }))
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-center"
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Combat Stats</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <FormField
-              label="Max HP"
-              type="number"
-              value={maxHp}
-              onChange={e => setMaxHp(Number(e.target.value))}
-            />
-            <FormField
-              label="Current HP"
-              type="number"
-              value={currentHp}
-              onChange={e => setCurrentHp(Number(e.target.value))}
-            />
-            <FormField
-              label="Armor Class"
-              type="number"
-              value={armorClass}
-              onChange={e => setArmorClass(Number(e.target.value))}
-            />
-            <FormField
-              label="Speed"
-              type="number"
-              value={speed}
-              onChange={e => setSpeed(Number(e.target.value))}
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              {submitting ? 'Saving...' : 'Save Changes'}
-            </button>
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+      <CharacterEditorForm
+        key={formKey}
+        initialValues={characterToFormValues(character)}
+        submitLabel="Save Changes"
+        submitting={submitting}
+        onSubmit={handleSubmit}
+        onCancel={() => router.back()}
+        footerExtra={
           <button
             type="button"
             onClick={() => setConfirmDeleteOpen(true)}
@@ -260,8 +122,8 @@ export default function EditCharacterPage() {
           >
             Delete
           </button>
-        </div>
-      </form>
+        }
+      />
       <ConfirmDialog
         open={confirmDeleteOpen}
         onOpenChange={setConfirmDeleteOpen}

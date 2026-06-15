@@ -16,10 +16,22 @@ export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 export const CombatantType = { PC: 'pc', NPC: 'npc' } as const;
 export type CombatantType = (typeof CombatantType)[keyof typeof CombatantType];
 
+// Hit-die faces — mirrors DIE_TYPES in @grimoire-os/shared (the backend
+// HitDiceDto validates `dieType` with `@IsIn(DIE_TYPES)`). Defined locally as a
+// value because Turbopack can't resolve file:-linked packages for value imports.
+export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
+export type DieType = (typeof DIE_TYPES)[number];
+
+// Creature sizes, smallest to largest. Stored as a free-text string server-side
+// (the DTO doesn't constrain it), but the editor offers the canonical set.
+export const SIZES = ['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'] as const;
+export type Size = (typeof SIZES)[number];
+
 export type {
   // Embedded types
   AbilityScores,
   HitPoints,
+  HitDice,
   DeathSaves,
   SpellEntry,
   SpellSlot,
