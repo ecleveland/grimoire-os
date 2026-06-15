@@ -70,7 +70,7 @@ const srdBackgrounds: SrdBackground[] = [
     skillProficiencies: ['Arcana', 'History'],
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 2,
-    personalityTraits: ['I am eager to learn.'],
+    personalityTraits: ['I am eager to learn.', 'I speak only in quotes.'],
     ideals: ['Knowledge above all.'],
     bonds: ['I protect my library.'],
     flaws: ['I overlook the obvious.'],
@@ -571,6 +571,35 @@ describe('CharacterEditorForm — personality & details', () => {
     // Appended on a new line, original text kept.
     expect((onSubmit.mock.calls[0][0] as CharacterFormValues).ideals).toBe(
       'My own idea.\nKnowledge above all.'
+    );
+  });
+
+  it('appends a suggestion to an empty field with no leading newline', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.background = 'Sage';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'I am eager to learn.' }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).personalityTraits).toBe(
+      'I am eager to learn.'
+    );
+  });
+
+  it('stacks multiple suggestions, newline-joined', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.background = 'Sage';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: 'I am eager to learn.' }));
+    await user.click(screen.getByRole('button', { name: 'I speak only in quotes.' }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).personalityTraits).toBe(
+      'I am eager to learn.\nI speak only in quotes.'
     );
   });
 
