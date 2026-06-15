@@ -163,10 +163,10 @@ model Character {
   spellcastingAbility String?
   spellSaveDC         Int?
   spellAttackBonus    Int?
-  knownSpells         String[]
-  preparedSpells      String[]
+  spells              Json?
   spellSlots          Json?
   inventory           Json?
+  attunedItems        Json?
   currency            Json?
   features            Json?
   personalityTraits   String?

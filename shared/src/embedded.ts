@@ -24,6 +24,45 @@ export interface SpellSlot {
   used: number;
 }
 
+/**
+ * A structured spell on a character's sheet (VEG-347), replacing the old bare
+ * `knownSpells`/`preparedSpells` string arrays. Carries the per-spell metadata
+ * the 2024 "Cantrips & Prepared Spells" table shows: Concentration / Ritual /
+ * Material (C·R·M) flags, casting time, range, notes, and level. `prepared`
+ * distinguishes a prepared spell from one merely in the repertoire (cantrips
+ * are always available). `spellId` optionally links to the Spell catalog for
+ * later catalog-driven features (workstream C) without requiring it now.
+ */
+export interface SpellEntry {
+  /** Spell level; 0 = cantrip. */
+  level: number;
+  name: string;
+  /** Whether the spell is currently prepared. */
+  prepared?: boolean;
+  castingTime?: string;
+  range?: string;
+  /** Requires concentration. */
+  concentration?: boolean;
+  /** Can be cast as a ritual. */
+  ritual?: boolean;
+  /** Requires a material component. */
+  material?: boolean;
+  notes?: string;
+  /** Optional link to the Spell catalog row (srd/shared/homebrew). */
+  spellId?: string;
+}
+
+/**
+ * A magic item the character is attuned to (VEG-347). The 2024 sheet allows up
+ * to three; the cap is enforced at the DTO boundary, not the type. `itemId`
+ * optionally links to the Item catalog.
+ */
+export interface AttunedItem {
+  name: string;
+  /** Optional link to the Item catalog row. */
+  itemId?: string;
+}
+
 export interface InventoryItem {
   name: string;
   quantity: number;

@@ -62,10 +62,10 @@ export const mockCharacter = {
   spellcastingAbility: null,
   spellSaveDC: null,
   spellAttackBonus: null,
-  knownSpells: [],
-  preparedSpells: [],
+  spells: [],
   spellSlots: null,
   inventory: [{ name: 'Longsword', quantity: 1, equipped: true }],
+  attunedItems: [],
   currency: { cp: 0, sp: 0, ep: 0, gp: 50, pp: 0 },
   features: [
     {

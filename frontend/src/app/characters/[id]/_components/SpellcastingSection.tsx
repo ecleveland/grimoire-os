@@ -18,10 +18,12 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
   const abilityScore = getAbilityScore(character.abilityScores, character.spellcastingAbility);
   const modifier = abilityModifier(abilityScore);
   const spellSlots = character.spellSlots ?? [];
-  const knownSpells = character.knownSpells ?? [];
-  const preparedSpells = character.preparedSpells ?? [];
+  // Sort by level (cantrips first), then name, mirroring the 2024 sheet table.
+  const spells = [...(character.spells ?? [])].sort(
+    (a, b) => a.level - b.level || a.name.localeCompare(b.name)
+  );
   const hasSpellSlots = spellSlots.length > 0;
-  const hasSpells = knownSpells.length > 0 || preparedSpells.length > 0;
+  const hasSpells = spells.length > 0;
 
   return (
     <div className="space-y-4">
@@ -96,24 +98,77 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase text-center mb-3">
             Cantrips & Prepared Spells
           </h3>
-          <div className="space-y-1">
-            {knownSpells.map(spell => (
-              <div
-                key={spell}
-                className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0"
-              >
-                {spell}
-              </div>
-            ))}
-            {preparedSpells.map(spell => (
-              <div
-                key={spell}
-                className="text-sm text-gray-700 dark:text-gray-300 py-0.5 border-b border-gray-100 dark:border-gray-700 last:border-0"
-              >
-                {spell}
-              </div>
-            ))}
-          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs uppercase text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                <th className="text-center font-medium py-1 w-12">Prep</th>
+                <th className="text-center font-medium py-1 w-10">Lv</th>
+                <th className="text-left font-medium py-1">Name</th>
+                <th className="text-left font-medium py-1">Time</th>
+                <th className="text-left font-medium py-1">Range</th>
+                <th
+                  className="text-center font-medium py-1 w-16"
+                  title="Concentration · Ritual · Material"
+                >
+                  C·R·M
+                </th>
+                <th className="text-left font-medium py-1">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {spells.map((spell, i) => (
+                <tr
+                  key={spell.spellId ?? `${spell.name}-${i}`}
+                  data-testid={`spell-${spell.name}`}
+                  className="text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700 last:border-0"
+                >
+                  <td className="text-center py-0.5">
+                    {spell.level === 0 ? (
+                      <span className="text-gray-400" aria-label="Cantrip (always prepared)">
+                        —
+                      </span>
+                    ) : (
+                      <span
+                        data-testid={spell.prepared ? 'prepared-yes' : 'prepared-no'}
+                        aria-label={spell.prepared ? 'Prepared' : 'Not prepared'}
+                        className={`inline-block w-3 h-3 rounded-sm ${
+                          spell.prepared
+                            ? 'bg-indigo-600 dark:bg-indigo-400'
+                            : 'border border-gray-400 dark:border-gray-500'
+                        }`}
+                      />
+                    )}
+                  </td>
+                  <td className="text-center py-0.5">{spell.level}</td>
+                  <td className="py-0.5 font-medium">{spell.name}</td>
+                  <td className="py-0.5 text-gray-500 dark:text-gray-400">
+                    {spell.castingTime ?? '—'}
+                  </td>
+                  <td className="py-0.5 text-gray-500 dark:text-gray-400">{spell.range ?? '—'}</td>
+                  <td className="text-center py-0.5">
+                    <span className="inline-flex gap-1 font-semibold text-indigo-600 dark:text-indigo-400">
+                      {spell.concentration && (
+                        <abbr title="Concentration" data-testid="flag-concentration">
+                          C
+                        </abbr>
+                      )}
+                      {spell.ritual && (
+                        <abbr title="Ritual" data-testid="flag-ritual">
+                          R
+                        </abbr>
+                      )}
+                      {spell.material && (
+                        <abbr title="Material" data-testid="flag-material">
+                          M
+                        </abbr>
+                      )}
+                    </span>
+                  </td>
+                  <td className="py-0.5 text-gray-500 dark:text-gray-400">{spell.notes ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

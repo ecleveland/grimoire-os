@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import SpellcastingSection from '../SpellcastingSection';
 import type { Character } from '@/lib/types';
 
@@ -34,14 +34,28 @@ const baseCharacter: Character = {
   spellcastingAbility: 'Intelligence',
   spellSaveDC: 15,
   spellAttackBonus: 7,
-  knownSpells: ['Fire Bolt', 'Mage Hand', 'Prestidigitation'],
-  preparedSpells: ['Magic Missile', 'Shield', 'Fireball', 'Counterspell'],
+  spells: [
+    { level: 0, name: 'Fire Bolt' },
+    { level: 0, name: 'Mage Hand' },
+    { level: 1, name: 'Magic Missile', prepared: true },
+    { level: 1, name: 'Shield', prepared: false },
+    { level: 1, name: 'Detect Magic', prepared: true, ritual: true, concentration: true },
+    {
+      level: 3,
+      name: 'Fireball',
+      prepared: true,
+      castingTime: '1 action',
+      range: '150 feet',
+      material: true,
+    },
+  ],
   spellSlots: [
     { level: 1, total: 4, used: 2 },
     { level: 2, total: 3, used: 1 },
     { level: 3, total: 2, used: 0 },
   ],
   inventory: [],
+  attunedItems: [],
   currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   features: [],
   createdAt: '2026-01-01T00:00:00Z',
@@ -140,32 +154,118 @@ describe('SpellcastingSection', () => {
       expect(screen.getByText('Cantrips & Prepared Spells')).toBeInTheDocument();
     });
 
-    it('renders known spells', () => {
+    it('renders every structured spell by name', () => {
       render(<SpellcastingSection character={baseCharacter} />);
-      expect(screen.getByText('Fire Bolt')).toBeInTheDocument();
-      expect(screen.getByText('Mage Hand')).toBeInTheDocument();
-      expect(screen.getByText('Prestidigitation')).toBeInTheDocument();
+      for (const name of [
+        'Fire Bolt',
+        'Mage Hand',
+        'Magic Missile',
+        'Shield',
+        'Detect Magic',
+        'Fireball',
+      ]) {
+        expect(screen.getByText(name)).toBeInTheDocument();
+      }
     });
 
-    it('renders prepared spells', () => {
+    it('renders the spell level for each entry', () => {
       render(<SpellcastingSection character={baseCharacter} />);
-      expect(screen.getByText('Magic Missile')).toBeInTheDocument();
-      expect(screen.getByText('Shield')).toBeInTheDocument();
-      expect(screen.getByText('Fireball')).toBeInTheDocument();
-      expect(screen.getByText('Counterspell')).toBeInTheDocument();
+      const fireball = screen.getByTestId('spell-Fireball');
+      expect(within(fireball).getByText('3')).toBeInTheDocument();
     });
 
-    it('does not render spell list section when both lists are empty', () => {
-      const char = { ...baseCharacter, knownSpells: [], preparedSpells: [] };
+    it('sorts spells by level, then alphabetically within a level', () => {
+      const char = {
+        ...baseCharacter,
+        spells: [
+          { level: 3, name: 'Fireball' },
+          { level: 0, name: 'Mage Hand' },
+          { level: 1, name: 'Shield' },
+          { level: 0, name: 'Fire Bolt' },
+          { level: 1, name: 'Bless' },
+        ],
+      };
+      render(<SpellcastingSection character={char} />);
+      const order = screen
+        .getAllByTestId(/^spell-(?!slots-)/)
+        .map(r => r.getAttribute('data-testid'));
+      expect(order).toEqual([
+        'spell-Fire Bolt', // level 0 (Fire < Mage)
+        'spell-Mage Hand', // level 0
+        'spell-Bless', // level 1 (Bless < Shield)
+        'spell-Shield', // level 1
+        'spell-Fireball', // level 3
+      ]);
+    });
+
+    it('treats a leveled spell with no prepared flag as not prepared', () => {
+      const char = { ...baseCharacter, spells: [{ level: 1, name: 'Bless' }] };
+      render(<SpellcastingSection character={char} />);
+      const row = screen.getByTestId('spell-Bless');
+      expect(within(row).getByTestId('prepared-no')).toBeInTheDocument();
+      expect(within(row).queryByTestId('prepared-yes')).not.toBeInTheDocument();
+    });
+
+    it('renders em-dash fallbacks for a spell missing casting time and range', () => {
+      const char = { ...baseCharacter, spells: [{ level: 1, name: 'Bless' }] };
+      render(<SpellcastingSection character={char} />);
+      const cells = within(screen.getByTestId('spell-Bless')).getAllByRole('cell');
+      // columns: [prep, level, name, casting time, range, C·R·M, notes]
+      expect(cells[3].textContent).toBe('—');
+      expect(cells[4].textContent).toBe('—');
+    });
+
+    it('renders a spell note when present', () => {
+      const char = {
+        ...baseCharacter,
+        spells: [{ level: 1, name: 'Bless', notes: 'pinch of holy water' }],
+      };
+      render(<SpellcastingSection character={char} />);
+      expect(
+        within(screen.getByTestId('spell-Bless')).getByText('pinch of holy water')
+      ).toBeInTheDocument();
+    });
+
+    it('shows the C·R·M flags for a spell that has them', () => {
+      render(<SpellcastingSection character={baseCharacter} />);
+      // Detect Magic: Concentration + Ritual.
+      const detect = screen.getByTestId('spell-Detect Magic');
+      expect(within(detect).getByTestId('flag-concentration')).toBeInTheDocument();
+      expect(within(detect).getByTestId('flag-ritual')).toBeInTheDocument();
+      expect(within(detect).queryByTestId('flag-material')).not.toBeInTheDocument();
+      // Fireball: Material only.
+      const fireball = screen.getByTestId('spell-Fireball');
+      expect(within(fireball).getByTestId('flag-material')).toBeInTheDocument();
+      expect(within(fireball).queryByTestId('flag-concentration')).not.toBeInTheDocument();
+    });
+
+    it('renders casting time and range when present', () => {
+      render(<SpellcastingSection character={baseCharacter} />);
+      const fireball = screen.getByTestId('spell-Fireball');
+      expect(within(fireball).getByText('1 action')).toBeInTheDocument();
+      expect(within(fireball).getByText('150 feet')).toBeInTheDocument();
+    });
+
+    it('marks leveled spells as prepared or not, and exempts cantrips', () => {
+      render(<SpellcastingSection character={baseCharacter} />);
+      // Magic Missile (level 1, prepared) → filled indicator.
+      expect(
+        within(screen.getByTestId('spell-Magic Missile')).getByTestId('prepared-yes')
+      ).toBeInTheDocument();
+      // Shield (level 1, not prepared) → empty indicator.
+      expect(
+        within(screen.getByTestId('spell-Shield')).getByTestId('prepared-no')
+      ).toBeInTheDocument();
+      // Fire Bolt (cantrip) → no prepared indicator at all.
+      const cantrip = screen.getByTestId('spell-Fire Bolt');
+      expect(within(cantrip).queryByTestId('prepared-yes')).not.toBeInTheDocument();
+      expect(within(cantrip).queryByTestId('prepared-no')).not.toBeInTheDocument();
+    });
+
+    it('does not render the spell list section when there are no spells', () => {
+      const char = { ...baseCharacter, spells: [] };
       render(<SpellcastingSection character={char} />);
       expect(screen.queryByText('Cantrips & Prepared Spells')).not.toBeInTheDocument();
-    });
-
-    it('renders only known spells when prepared is empty', () => {
-      const char = { ...baseCharacter, preparedSpells: [] };
-      render(<SpellcastingSection character={char} />);
-      expect(screen.getByText('Cantrips & Prepared Spells')).toBeInTheDocument();
-      expect(screen.getByText('Fire Bolt')).toBeInTheDocument();
     });
   });
 });

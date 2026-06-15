@@ -1,6 +1,7 @@
 import { Expose } from 'class-transformer';
 import type {
   AbilityScores,
+  AttunedItem,
   ComputedStats,
   Currency,
   DeathSaves,
@@ -8,6 +9,7 @@ import type {
   HitDice,
   HitPoints,
   InventoryItem,
+  SpellEntry,
   SpellSlot,
   Weapon,
 } from '@grimoire-os/shared';
@@ -42,10 +44,10 @@ export class CharacterDto {
   @Expose() spellcastingAbility!: string | null;
   @Expose() spellSaveDC!: number | null;
   @Expose() spellAttackBonus!: number | null;
-  @Expose() knownSpells!: string[];
-  @Expose() preparedSpells!: string[];
+  @Expose() spells!: SpellEntry[] | null;
   @Expose() spellSlots!: SpellSlot[] | null;
   @Expose() inventory!: InventoryItem[] | null;
+  @Expose() attunedItems!: AttunedItem[] | null;
   @Expose() currency!: Currency | null;
   @Expose() features!: Feature[] | null;
   @Expose() personalityTraits!: string | null;
