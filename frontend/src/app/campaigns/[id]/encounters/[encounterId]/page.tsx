@@ -202,6 +202,16 @@ export default function InitiativeTrackerPage() {
   const [panelMonster, setPanelMonster] = useState<SrdMonster | null>(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const monsterCacheRef = useRef<Map<string, SrdMonster>>(new Map());
+  // The two-column row and the active card, used to (a) anchor the stat panel
+  // level with the active card and (b) scroll that card into view as the turn
+  // advances, so the turn controls and damage/status controls — now inline on
+  // the active card — never sit off-screen (VEG-384).
+  const containerRef = useRef<HTMLDivElement>(null);
+  const activeCardRef = useRef<HTMLDivElement>(null);
+  const [panelOffset, setPanelOffset] = useState(0);
+  // Distinguishes a genuine turn change from the initial load, so the page
+  // doesn't yank-scroll on first render.
+  const prevTurnRef = useRef<number | null>(null);
 
   const fetchEncounter = useCallback(() => {
     apiFetch<Encounter>(`/encounters/${encounterId}`)
@@ -266,6 +276,50 @@ export default function InitiativeTrackerPage() {
       cancelled = true;
     };
   }, [panelMonsterId]);
+
+  // Scroll the active card into view when the turn advances (not on first
+  // load). Brings the card — and its now-inline turn/damage/status controls —
+  // to the DM instead of making them scroll to it. Guarded for jsdom, which
+  // has no scrollIntoView.
+  useEffect(() => {
+    if (!encounter) return;
+    const prev = prevTurnRef.current;
+    prevTurnRef.current = encounter.currentTurn;
+    if (prev === null || prev === encounter.currentTurn) return;
+    const card = activeCardRef.current;
+    if (card && typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [encounter?.currentTurn]);
+
+  // Anchor the right-hand stat panel level with the active card: measure the
+  // card's offset within the two-column row and push the panel down to match,
+  // re-measuring when the active card changes, when cards resize (HP/condition
+  // edits shift the list), or on window resize. Only on wide screens — the
+  // panel is hidden below `lg`. getBoundingClientRect is 0 and ResizeObserver
+  // is absent under jsdom, so this no-ops harmlessly in tests.
+  useEffect(() => {
+    if (!isWide) {
+      setPanelOffset(0);
+      return;
+    }
+    const measure = () => {
+      const container = containerRef.current;
+      const card = activeCardRef.current;
+      if (!container || !card) return;
+      const offset = card.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      setPanelOffset(prev => (Math.abs(prev - offset) > 1 ? Math.max(0, offset) : prev));
+    };
+    measure();
+    const Observer = typeof ResizeObserver !== 'undefined' ? ResizeObserver : null;
+    const ro = Observer ? new Observer(measure) : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [isWide, encounter?.currentTurn]);
 
   // Shared 409 recovery: another writer won the version race — refetch and let
   // the user retry against fresh state. Returns true if the error was handled.
@@ -880,7 +934,13 @@ export default function InitiativeTrackerPage() {
     return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
 
   const sorted = sortByInitiative(encounter.combatants);
-  const activeCombatant = sorted[encounter.currentTurn] ?? null;
+  // The active row, clamped so a stale/out-of-range currentTurn still resolves
+  // to a real card — that card hosts the inline turn controls, which must stay
+  // reachable for the DM to step a corrupted marker back into range (-1 only
+  // when there are no combatants at all).
+  const activeRowIndex =
+    sorted.length === 0 ? -1 : Math.min(Math.max(encounter.currentTurn, 0), sorted.length - 1);
+  const activeCombatant = sorted[activeRowIndex] ?? null;
   const isController = isDm || (user && encounter.createdBy === user.userId);
   const hasMonsterCombatants = encounter.combatants.some(c => c.monsterId);
   const rolledDropCount = encounter.combatants.filter(c => c.loot).length;
@@ -905,7 +965,7 @@ export default function InitiativeTrackerPage() {
   const rowHoldsNotes = makeRowHoldsDraft(notesDraft);
 
   return (
-    <div className="lg:flex lg:gap-6 lg:items-start">
+    <div ref={containerRef} className="lg:flex lg:gap-6 lg:items-start">
       <div className="flex-1 min-w-0 max-w-3xl mx-auto lg:mx-0">
         <div className="flex items-start justify-between mb-6">
           <div>
@@ -928,39 +988,6 @@ export default function InitiativeTrackerPage() {
           )}
         </div>
 
-        {/* Sticky turn bar (VEG-384): the round, whose turn it is, and the turn
-          controls ride along at the top of the tracker column so the DM can
-          advance initiative without scrolling back up. Controls stay
-          controller-only, mirroring the old header buttons. */}
-        <div className="sticky top-0 z-10 mb-4 flex items-center justify-between gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-white/95 dark:bg-gray-800/95 backdrop-blur px-4 py-2">
-          <div className="flex items-baseline gap-3 min-w-0">
-            <span className="text-sm font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
-              Round {encounter.round}
-            </span>
-            <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-              {activeCombatant ? `${activeCombatant.name}'s turn` : '—'}
-            </span>
-          </div>
-          {isController && (
-            <div className="flex gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={previousTurn}
-                disabled={encounter.round === 1 && encounter.currentTurn === 0}
-                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                Previous Turn
-              </button>
-              <button
-                onClick={nextTurn}
-                className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-              >
-                Next Turn
-              </button>
-            </div>
-          )}
-        </div>
-
         {/* Encounter difficulty (VEG-362): DM-planning info, controller-only like
           the loot panel. Monsters drive XP/CR; the PCs in the encounter set the
           2024 budget. */}
@@ -972,7 +999,7 @@ export default function InitiativeTrackerPage() {
 
         <div className="space-y-2">
           {sorted.map((c, i) => {
-            const isCurrent = i === encounter.currentTurn;
+            const isCurrent = i === activeRowIndex;
             const isDead = c.hp <= 0;
             // The roll endpoint addresses combatants by their position in the
             // stored array, not the sorted row. `sorted` shares object
@@ -982,6 +1009,7 @@ export default function InitiativeTrackerPage() {
             return (
               <div
                 key={`${c.name}-${i}`}
+                ref={isCurrent ? activeCardRef : undefined}
                 className={`p-4 rounded-lg border transition-colors ${
                   isCurrent
                     ? 'bg-indigo-50 dark:bg-indigo-900/20 border-indigo-300 dark:border-indigo-700'
@@ -990,6 +1018,40 @@ export default function InitiativeTrackerPage() {
                       : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                 }`}
               >
+                {/* Inline turn header (VEG-384): the round, whose turn it is, and
+                  the turn controls live on the active card itself, so they sit
+                  beside that card's damage/status controls — no scrolling back
+                  to a top bar. Controls stay controller-only. */}
+                {isCurrent && (
+                  <div className="-mx-4 -mt-4 mb-3 flex items-center justify-between gap-3 rounded-t-lg border-b border-indigo-200 dark:border-indigo-800 bg-indigo-100/70 dark:bg-indigo-900/40 px-4 py-2">
+                    <div className="flex items-baseline gap-2 min-w-0">
+                      <span className="text-xs font-medium uppercase tracking-wide text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
+                        Round {encounter.round}
+                      </span>
+                      <span className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                        {c.name}&apos;s turn
+                      </span>
+                    </div>
+                    {isController && (
+                      <div className="flex gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={previousTurn}
+                          disabled={encounter.round === 1 && encounter.currentTurn === 0}
+                          className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Previous Turn
+                        </button>
+                        <button
+                          onClick={nextTurn}
+                          className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                        >
+                          Next Turn
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* Dimming applies to the stats line only — the drop view below
                   must stay legible, since dead monsters are exactly the ones
                   whose loot the DM reads out. */}
@@ -1637,23 +1699,30 @@ export default function InitiativeTrackerPage() {
 
       {/* Floating stat block (VEG-384): follows the active combatant (or a
           pinned one) so the DM reads the fighting creature without scrolling.
-          Hidden below `lg`, where the modal viewer takes over instead. */}
+          The wrapper's margin-top anchors it level with the active card (see
+          panelOffset); a long block scrolls within the panel. Hidden below
+          `lg`, where the modal viewer takes over instead. */}
       <aside className="hidden lg:block w-80 shrink-0" aria-label="Active creature stat block">
-        <div className="sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-          {panelLoading ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">Loading stat block…</p>
-          ) : panelMonster ? (
-            <MonsterStatBlock monster={panelMonster} />
-          ) : activeCombatant ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              No stat block for {activeCombatant.name}. Click a monster combatant&apos;s name to pin
-              its stat block here.
-            </p>
-          ) : (
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              The active creature&apos;s stat block will appear here.
-            </p>
-          )}
+        <div
+          className="transition-[margin-top] duration-200 ease-out"
+          style={{ marginTop: panelOffset }}
+        >
+          <div className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+            {panelLoading ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading stat block…</p>
+            ) : panelMonster ? (
+              <MonsterStatBlock monster={panelMonster} />
+            ) : activeCombatant ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No stat block for {activeCombatant.name}. Click a monster combatant&apos;s name to
+                pin its stat block here.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                The active creature&apos;s stat block will appear here.
+              </p>
+            )}
+          </div>
         </div>
       </aside>
     </div>

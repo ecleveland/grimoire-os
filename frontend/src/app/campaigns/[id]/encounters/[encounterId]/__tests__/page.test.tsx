@@ -3661,9 +3661,10 @@ describe('live-combat layout (VEG-384)', () => {
 
   afterEach(() => {
     delete (window as unknown as { matchMedia?: unknown }).matchMedia;
+    delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
   });
 
-  it("shows a sticky turn bar with the round and the current combatant's turn", async () => {
+  it('shows an inline turn header on the active card with the round and whose turn it is', async () => {
     mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
     render(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
@@ -3672,7 +3673,17 @@ describe('live-combat layout (VEG-384)', () => {
     expect(screen.getByText(/hero's turn/i)).toBeInTheDocument();
   });
 
-  it('updates the sticky bar after advancing the turn', async () => {
+  it('renders the turn header only on the active card', async () => {
+    mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 1, round: 1 }));
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+    // currentTurn 1 → Goblin A is up; only its card carries the header.
+    expect(screen.getByText(/goblin a's turn/i)).toBeInTheDocument();
+    expect(screen.queryByText(/hero's turn/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/'s turn/i)).toHaveLength(1);
+  });
+
+  it('moves the inline turn header to the next card after advancing', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 0, round: 1 }));
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 1, round: 1 }));
     const user = userEvent.setup();
@@ -3680,6 +3691,31 @@ describe('live-combat layout (VEG-384)', () => {
     await screen.findByText(/hero's turn/i);
     await user.click(screen.getByRole('button', { name: /next turn/i }));
     expect(await screen.findByText(/goblin a's turn/i)).toBeInTheDocument();
+    expect(screen.queryByText(/hero's turn/i)).not.toBeInTheDocument();
+  });
+
+  it('auto-scrolls the active card into view when the turn advances', async () => {
+    const scrollSpy = vi.fn();
+    // jsdom has no scrollIntoView; install a spy to assert the auto-scroll.
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
+    mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 0, round: 1 }));
+    mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 1, round: 1 }));
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByText(/hero's turn/i);
+    scrollSpy.mockClear(); // ignore anything before the first real advance
+    await user.click(screen.getByRole('button', { name: /next turn/i }));
+    await screen.findByText(/goblin a's turn/i);
+    expect(scrollSpy).toHaveBeenCalled();
+  });
+
+  it('does not auto-scroll on initial load', async () => {
+    const scrollSpy = vi.fn();
+    (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
+    mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
+    render(<InitiativeTrackerPage />);
+    await screen.findByText(/hero's turn/i);
+    expect(scrollSpy).not.toHaveBeenCalled();
   });
 
   it('auto-follows the active combatant into the right-hand stat panel on wide screens', async () => {
@@ -3732,7 +3768,7 @@ describe('live-combat layout (VEG-384)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('keeps turn controls out of the sticky bar for non-controllers', async () => {
+  it('keeps turn controls off the card header for non-controllers', async () => {
     mockUseAuth.mockReturnValue({
       user: { userId: 'someone-else', username: 'p', role: 'player' },
       isDm: false,
