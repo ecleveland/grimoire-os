@@ -31,13 +31,16 @@ describe('TokenListEditor', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('ignores blank and duplicate entries', async () => {
+  it('ignores blank and duplicate entries (case-insensitive)', async () => {
     const onChange = vi.fn();
     render(<TokenListEditor label="Languages" value={['Common']} onChange={onChange} />);
     const input = screen.getByLabelText('Languages');
     await userEvent.click(screen.getByRole('button', { name: /add/i })); // blank
     await userEvent.type(input, 'Common');
-    await userEvent.click(screen.getByRole('button', { name: /add/i })); // duplicate
+    await userEvent.click(screen.getByRole('button', { name: /add/i })); // exact duplicate
+    await userEvent.clear(input);
+    await userEvent.type(input, 'common');
+    await userEvent.click(screen.getByRole('button', { name: /add/i })); // case-variant duplicate
     expect(onChange).not.toHaveBeenCalled();
   });
 

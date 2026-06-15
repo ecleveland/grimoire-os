@@ -37,7 +37,8 @@ export default function TokenListEditor({
   const add = () => {
     const token = draft.trim();
     if (!token) return;
-    if (!value.includes(token)) onChange([...value, token]);
+    // Case-insensitive dedupe so "Common" + "common" don't both land.
+    if (!value.some(t => t.toLowerCase() === token.toLowerCase())) onChange([...value, token]);
     setDraft('');
   };
 

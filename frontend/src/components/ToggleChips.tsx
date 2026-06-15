@@ -28,6 +28,12 @@ export default function ToggleChips({
   const selected = new Set(value);
   const pool = new Set(highlight ?? []);
 
+  // Always render any selected value, even one outside the canonical option set
+  // (legacy/homebrew data, or an SRD grant that didn't normalize). Otherwise it
+  // would be invisible here yet still persist — and un-removable.
+  const extras = value.filter(v => !options.includes(v));
+  const allOptions = extras.length ? [...options, ...extras] : options;
+
   const toggle = (opt: string) =>
     onChange(selected.has(opt) ? value.filter(v => v !== opt) : [...value, opt]);
 
@@ -35,7 +41,7 @@ export default function ToggleChips({
     <fieldset>
       <legend className={legendClasses}>{label}</legend>
       <div className="flex flex-wrap gap-2">
-        {options.map(opt => {
+        {allOptions.map(opt => {
           const on = selected.has(opt);
           return (
             <button

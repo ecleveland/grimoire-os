@@ -207,13 +207,33 @@ function union(current: string[], additions: string[]): { merged: string[]; adde
   return { merged: added.length ? [...current, ...added] : current, added };
 }
 
+/**
+ * SRD class `armorProficiencies` are phrases ('Light armor', 'All armor',
+ * 'Shields (…)') while the editor's armor-training toggles use the canonical
+ * ARMOR_TYPES. Map phrases onto those so autofilled armor lights up the toggles
+ * (and the sheet's armor dots). Unrecognized phrasing is kept verbatim.
+ */
+export function normalizeArmorProficiencies(raw: string[]): string[] {
+  const out: string[] = [];
+  for (const item of raw) {
+    const lc = item.toLowerCase();
+    if (lc.includes('all armor')) out.push('Light', 'Medium', 'Heavy');
+    else if (lc.includes('light')) out.push('Light');
+    else if (lc.includes('medium')) out.push('Medium');
+    else if (lc.includes('heavy')) out.push('Heavy');
+    else if (lc.includes('shield')) out.push('Shields');
+    else out.push(item);
+  }
+  return [...new Set(out)];
+}
+
 export function applyClassGrants(
   v: CharacterFormValues,
   c: SrdClass
 ): { values: CharacterFormValues; added: GrantSummary[] } {
   const added: GrantSummary[] = [];
   const saves = union(v.savingThrows, c.savingThrows);
-  const armor = union(v.armorTraining, c.armorProficiencies);
+  const armor = union(v.armorTraining, normalizeArmorProficiencies(c.armorProficiencies));
   const profs = union(v.proficiencies, [...c.weaponProficiencies, ...c.toolProficiencies]);
   if (saves.added.length) added.push({ label: 'Saving throws', values: saves.added });
   if (armor.added.length) added.push({ label: 'Armor training', values: armor.added });
@@ -316,7 +336,7 @@ function ProficienciesSection({
 }: ProficienciesSectionProps) {
   const poolChosen = values.skills.filter(s => classSkillPool.includes(s)).length;
   const skillsHelper =
-    classSkillPool.length > 0
+    classSkillPool.length > 0 && numSkillChoices > 0
       ? `From your class (choose ${numSkillChoices}): ${poolChosen} of ${numSkillChoices} chosen`
       : undefined;
 

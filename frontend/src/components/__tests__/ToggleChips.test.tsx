@@ -53,6 +53,22 @@ describe('ToggleChips', () => {
     expect(onChange).toHaveBeenCalledWith(['Strength']);
   });
 
+  it('renders a selected value outside the option set so it stays removable', async () => {
+    const onChange = vi.fn();
+    render(
+      <ToggleChips
+        label="Armor Training"
+        options={['Light', 'Medium', 'Heavy', 'Shields']}
+        value={['Light armor']} // legacy/non-canonical value not in options
+        onChange={onChange}
+      />
+    );
+    const orphan = screen.getByRole('button', { name: 'Light armor' });
+    expect(orphan).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(orphan);
+    expect(onChange).toHaveBeenCalledWith([]); // can be toggled off
+  });
+
   it('marks highlighted (class-pool) options with a star', () => {
     render(
       <ToggleChips
