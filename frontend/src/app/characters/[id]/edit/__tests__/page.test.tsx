@@ -90,10 +90,15 @@ function makeCharacter(over: Partial<Character> = {}): Character {
   };
 }
 
+// The editor also fetches SRD catalogs for its pickers; route those to empty
+// arrays so they don't interfere with the character-load assertions.
+const isSrd = (path: string) => path.startsWith('/srd');
+
 // Route a GET to the loaded character; PATCH/DELETE resolve/reject per the
 // supplied handler so each test controls only the write outcome.
 function routeLoad(character: Character, onWrite?: (opts?: { method?: string }) => unknown) {
   mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+    if (isSrd(path)) return Promise.resolve([]);
     if (!opts || opts.method === undefined || opts.method === 'GET') {
       return Promise.resolve(character);
     }
@@ -148,8 +153,17 @@ describe('EditCharacterPage', () => {
   });
 
   it('Retry re-fetches and renders the form once the load succeeds', async () => {
-    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
-    mockApiFetch.mockResolvedValueOnce(makeCharacter());
+    let charLoads = 0;
+    mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (isSrd(path)) return Promise.resolve([]);
+      if (!opts || opts.method === 'GET' || opts.method === undefined) {
+        charLoads += 1;
+        return charLoads === 1
+          ? Promise.reject(new Error('boom'))
+          : Promise.resolve(makeCharacter());
+      }
+      return Promise.resolve(undefined);
+    });
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
@@ -196,16 +210,18 @@ describe('EditCharacterPage', () => {
     // The save invalidates the shared `/characters/:id` cache (so the sheet
     // shows fresh data on return), which refetches the still-mounted query — a
     // second GET fires after the initial load + PATCH.
-    const getCount = () =>
-      mockApiFetch.mock.calls.filter(([, o]) => !(o as { method?: string } | undefined)?.method)
-        .length;
-    await waitFor(() => expect(getCount()).toBeGreaterThanOrEqual(2));
+    const charGetCount = () =>
+      mockApiFetch.mock.calls.filter(
+        ([p, o]) => p === '/characters/char-1' && !(o as { method?: string } | undefined)?.method
+      ).length;
+    await waitFor(() => expect(charGetCount()).toBeGreaterThanOrEqual(2));
   });
 
   it('on a 409 conflict, reloads the latest version and the next save carries it', async () => {
     let loads = 0;
     let patches = 0;
     mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (isSrd(path)) return Promise.resolve([]);
       if (!opts || opts.method === 'GET' || opts.method === undefined) {
         loads += 1;
         // First load is version 3; the post-conflict reload returns version 5.
@@ -252,6 +268,7 @@ describe('EditCharacterPage', () => {
   it('keeps the form (not the Retry screen) and warns when the post-409 reload fails', async () => {
     let loads = 0;
     mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (isSrd(path)) return Promise.resolve([]);
       if (!opts || opts.method === 'GET' || opts.method === undefined) {
         loads += 1;
         // Initial load succeeds; the post-conflict reload fails.
