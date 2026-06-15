@@ -941,6 +941,10 @@ export default function InitiativeTrackerPage() {
   const activeRowIndex =
     sorted.length === 0 ? -1 : Math.min(Math.max(encounter.currentTurn, 0), sorted.length - 1);
   const activeCombatant = sorted[activeRowIndex] ?? null;
+  // A "peek": the panel is pinned to a monster other than the active
+  // combatant's, i.e. a quick reference (resistances/immunities) that leaves
+  // whose-turn-it-is untouched. The banner makes that explicit and reversible.
+  const isPeeking = isWide && pinnedMonsterId !== null && pinnedMonsterId !== activeMonsterId;
   const isController = isDm || (user && encounter.createdBy === user.userId);
   const hasMonsterCombatants = encounter.combatants.some(c => c.monsterId);
   const rolledDropCount = encounter.combatants.filter(c => c.loot).length;
@@ -1710,6 +1714,28 @@ export default function InitiativeTrackerPage() {
           className="transition-[margin-top] duration-200 ease-out"
           style={{ marginTop: panelOffset }}
         >
+          {/* Quick-reference banner (VEG-384): shown when the panel is peeking a
+              non-active combatant, reassuring the DM the turn hasn't moved and
+              offering a one-click snap back to the active creature. */}
+          {isPeeking && activeCombatant && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-300 dark:border-amber-700/60 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                  Quick reference
+                </p>
+                <p className="truncate text-xs text-amber-700/90 dark:text-amber-300">
+                  Still {activeCombatant.name}&apos;s turn
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinnedMonsterId(null)}
+                className="shrink-0 rounded border border-amber-400 px-2 py-1 text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-600 dark:text-amber-200 dark:hover:bg-amber-900/40"
+              >
+                Back to current turn
+              </button>
+            </div>
+          )}
           <div className="max-h-[calc(100vh-2rem)] overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
             {panelLoading ? (
               <p className="text-sm text-gray-500 dark:text-gray-400">Loading stat block…</p>

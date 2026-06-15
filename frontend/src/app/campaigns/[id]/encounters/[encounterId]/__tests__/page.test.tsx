@@ -3779,4 +3779,46 @@ describe('live-combat layout (VEG-384)', () => {
     expect(screen.queryByRole('button', { name: /next turn/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /previous turn/i })).not.toBeInTheDocument();
   });
+
+  it('peeks a card as a quick reference without changing the turn, and returns on demand', async () => {
+    stubWide(true);
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/encounters/enc-1') {
+        return Promise.resolve(
+          makeEncounter({
+            currentTurn: 0,
+            combatants: [
+              makeCombatant({ name: 'Hero', initiative: 18, isNpc: false }), // active PC
+              makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+            ],
+          })
+        );
+      }
+      if (path === '/srd/monsters/monster-1') return Promise.resolve(goblinMonster);
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+    // Active is Hero (a PC) → panel prompts, no quick-reference banner yet.
+    expect(screen.queryByText(/quick reference/i)).not.toBeInTheDocument();
+
+    // Peek the goblin's stat block.
+    await user.click(screen.getByRole('button', { name: /^goblin a$/i }));
+    expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
+    expect(screen.getByText(/quick reference/i)).toBeInTheDocument();
+    expect(screen.getByText(/still hero's turn/i)).toBeInTheDocument();
+
+    // Peeking is view-only: it never wrote a turn change.
+    const patchCalls = mockApiFetch.mock.calls.filter(
+      ([, init]) => (init as { method?: string } | undefined)?.method === 'PATCH'
+    );
+    expect(patchCalls).toHaveLength(0);
+
+    // Snap back to the active creature.
+    await user.click(screen.getByRole('button', { name: /back to current turn/i }));
+    await waitFor(() => expect(screen.queryByText('Nimble Escape.')).not.toBeInTheDocument());
+    expect(screen.queryByText(/quick reference/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/no stat block for hero/i)).toBeInTheDocument();
+  });
 });
