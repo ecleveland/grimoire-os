@@ -49,14 +49,26 @@ export default function EditCharacterPage() {
       router.push(`/characters/${id}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        toast.error(
-          'This character was changed elsewhere. Reloaded the latest version — re-apply your changes and save again.'
-        );
-        await query.refetch();
-        setFormKey(k => k + 1);
+        // Reload the latest server state, then remount the form (it seeds from
+        // initialValues only on mount) so the next save carries the new version.
+        // refetch() resolves with a result rather than throwing, so inspect it:
+        // if the reload itself failed, say so instead of falsely claiming the
+        // form now holds the latest.
+        const result = await query.refetch();
+        if (result.isError || !result.data) {
+          toast.error(
+            'This character was changed elsewhere, and reloading the latest version failed — refresh the page and try again.'
+          );
+        } else {
+          toast.error(
+            'This character was changed elsewhere. Reloaded the latest version — re-apply your changes and save again.'
+          );
+          setFormKey(k => k + 1);
+        }
       } else {
         toast.error(err instanceof Error ? err.message : 'Failed to update character');
       }
+    } finally {
       setSubmitting(false);
     }
   };
@@ -72,9 +84,13 @@ export default function EditCharacterPage() {
   };
 
   if (query.isLoading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
-  // Without this guard the form would render its defaults and one Save would
-  // PATCH them over the real record (VEG-317).
-  if (query.isError || !character)
+  // Guard on `!character`, not `isError`: an initial-load failure leaves us with
+  // no data (show Retry — without it the form would render defaults and one Save
+  // would PATCH them over the real record, VEG-317). But react-query keeps the
+  // last good `data` when a *refetch* fails (e.g. the post-409 reload), so keying
+  // off `isError` here would discard the user's in-progress edits on a transient
+  // blip. With data in hand we keep the form mounted.
+  if (!character)
     return (
       <div className="text-center py-12">
         <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load character.</p>

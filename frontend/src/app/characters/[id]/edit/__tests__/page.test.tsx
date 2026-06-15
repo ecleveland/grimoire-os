@@ -192,17 +192,72 @@ describe('EditCharacterPage', () => {
       expectedVersion: 3,
     });
     expect(mockPush).toHaveBeenCalledWith('/characters/char-1');
+
+    // The save invalidates the shared `/characters/:id` cache (so the sheet
+    // shows fresh data on return), which refetches the still-mounted query — a
+    // second GET fires after the initial load + PATCH.
+    const getCount = () =>
+      mockApiFetch.mock.calls.filter(([, o]) => !(o as { method?: string } | undefined)?.method)
+        .length;
+    await waitFor(() => expect(getCount()).toBeGreaterThanOrEqual(2));
   });
 
-  it('on a 409 conflict, toasts and reloads the latest version into the form', async () => {
+  it('on a 409 conflict, reloads the latest version and the next save carries it', async () => {
     let loads = 0;
+    let patches = 0;
     mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
       if (!opts || opts.method === 'GET' || opts.method === undefined) {
         loads += 1;
         // First load is version 3; the post-conflict reload returns version 5.
-        return Promise.resolve(
-          makeCharacter({ version: loads === 1 ? 3 : 5, name: 'Server Name' })
+        return Promise.resolve(makeCharacter({ version: loads === 1 ? 3 : 5 }));
+      }
+      patches += 1;
+      // First save loses the optimistic-lock race; the retry (against the
+      // reloaded version) succeeds.
+      if (patches === 1) {
+        return Promise.reject(
+          new ApiError(409, 'Character was modified by another request', { currentVersion: 5 })
         );
+      }
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Thora Ironfist')
+    );
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    // Conflict toast + a reload GET; the user stays on the page.
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/changed elsewhere/i))
+    );
+    await waitFor(() => expect(loads).toBe(2));
+    expect(mockPush).not.toHaveBeenCalled();
+
+    // Critical: the form must have re-seeded from the reloaded character, so the
+    // retried save carries the NEW version (5), not the stale 3 — otherwise it
+    // would 409 forever. (Removing the formKey remount would break this.)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Character updated!'));
+    expect(lastWriteBody()).toMatchObject({ expectedVersion: 5 });
+    expect(mockPush).toHaveBeenCalledWith('/characters/char-1');
+  });
+
+  it('keeps the form (not the Retry screen) and warns when the post-409 reload fails', async () => {
+    let loads = 0;
+    mockApiFetch.mockImplementation((path: string, opts?: { method?: string }) => {
+      if (!opts || opts.method === 'GET' || opts.method === undefined) {
+        loads += 1;
+        // Initial load succeeds; the post-conflict reload fails.
+        return loads === 1
+          ? Promise.resolve(makeCharacter({ version: 3 }))
+          : Promise.reject(new Error('network down'));
       }
       return Promise.reject(
         new ApiError(409, 'Character was modified by another request', { currentVersion: 5 })
@@ -212,17 +267,19 @@ describe('EditCharacterPage', () => {
     renderPage();
 
     await waitFor(() =>
-      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Server Name')
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Thora Ironfist')
     );
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     await waitFor(() =>
-      expect(mockToastError).toHaveBeenCalledWith(expect.stringMatching(/changed elsewhere/i))
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringMatching(/reloading the latest version failed/i)
+      )
     );
-    // A reload GET fired after the conflict; the user stays on the page.
-    await waitFor(() => expect(loads).toBe(2));
-    expect(mockPush).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /save changes/i })).not.toBeDisabled();
+    // react-query keeps the last good data on a refetch error, so the form stays
+    // mounted (with the user's edits) instead of collapsing to the Retry screen.
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
   });
 
   it('toasts the message and stays on the page for a non-409 PATCH failure', async () => {

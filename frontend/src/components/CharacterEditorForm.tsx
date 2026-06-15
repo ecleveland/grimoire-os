@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import type { AbilityScores, Character, DieType, HitDice, HitPoints } from '@/lib/types';
+import { toast } from 'sonner';
+import type { AbilityScores, Character, DieType, HitDice, HitPoints, Size } from '@/lib/types';
 import { DIE_TYPES, SIZES } from '@/lib/types';
 import FormField from '@/components/FormField';
 
@@ -17,7 +18,7 @@ export interface CharacterFormValues {
   level: number;
   background: string;
   alignment: string;
-  size: string;
+  size: Size;
   abilityScores: AbilityScores;
   armorClass: number;
   initiative: number;
@@ -80,7 +81,9 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     level: c.level,
     background: c.background ?? '',
     alignment: c.alignment ?? '',
-    size: c.size ?? 'Medium',
+    // Server-side `size` is free-text; coerce to the canonical union, falling
+    // back to Medium for absent/legacy values outside the set.
+    size: (SIZES as readonly string[]).includes(c.size ?? '') ? (c.size as Size) : 'Medium',
     abilityScores: c.abilityScores,
     armorClass: c.armorClass,
     initiative: c.initiative ?? 0,
@@ -146,7 +149,13 @@ export default function CharacterEditorForm({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    void onSubmit(values);
+    // Callers own the user-facing success/error toasts; this is a backstop so a
+    // handler that rejects without its own catch can't fail silently (which
+    // would leave the submit button stuck on "Saving…").
+    Promise.resolve(onSubmit(values)).catch(err => {
+      console.error('CharacterEditorForm onSubmit failed:', err);
+      toast.error('Something went wrong saving the character.');
+    });
   };
 
   return (
@@ -208,7 +217,7 @@ export default function CharacterEditorForm({
             as="select"
             label="Size"
             value={values.size}
-            onChange={e => set('size', e.target.value)}
+            onChange={e => set('size', e.target.value as Size)}
           >
             {SIZES.map(s => (
               <option key={s} value={s}>
