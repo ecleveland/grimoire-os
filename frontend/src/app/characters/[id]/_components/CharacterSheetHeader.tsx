@@ -19,7 +19,20 @@ export default function CharacterSheetHeader({ character, isOwner }: CharacterSh
     <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{character.name}</h1>
+          <div className="flex items-center gap-3">
+            {character.avatarUrl && (
+              // Arbitrary user-supplied URL — next/image can't optimize an
+              // unknown remote host without whitelisting, so use a plain img.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={character.avatarUrl}
+                alt=""
+                data-testid="character-avatar"
+                className="w-12 h-12 rounded-full object-cover border border-gray-200 dark:border-gray-700"
+              />
+            )}
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{character.name}</h1>
+          </div>
 
           <div className="flex flex-wrap gap-x-6 gap-y-2 mt-3">
             {fields.map(({ label, value, testId }) => (

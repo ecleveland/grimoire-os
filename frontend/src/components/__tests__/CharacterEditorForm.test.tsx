@@ -70,10 +70,10 @@ const srdBackgrounds: SrdBackground[] = [
     skillProficiencies: ['Arcana', 'History'],
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 2,
-    personalityTraits: [],
-    ideals: [],
-    bonds: [],
-    flaws: [],
+    personalityTraits: ['I am eager to learn.'],
+    ideals: ['Knowledge above all.'],
+    bonds: ['I protect my library.'],
+    flaws: ['I overlook the obvious.'],
     source: 'SRD',
   },
 ];
@@ -523,6 +523,64 @@ describe('CharacterEditorForm — editable proficiencies', () => {
 
     await user.click(screen.getByRole('button', { name: /create character/i }));
     expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual(['Strength']);
+  });
+});
+
+describe('CharacterEditorForm — personality & details', () => {
+  it('submits appearance, backstory, and avatar URL', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/appearance/i), 'Tall and weathered.');
+    await user.type(screen.getByLabelText(/backstory/i), 'Raised by wolves.');
+    await user.type(screen.getByLabelText(/avatar url/i), 'https://img.example/a.png');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      appearance: 'Tall and weathered.',
+      backstory: 'Raised by wolves.',
+      avatarUrl: 'https://img.example/a.png',
+    });
+  });
+
+  it('prefills personality fields from an existing character', () => {
+    renderForm({
+      initialValues: characterToFormValues(
+        makeCharacter({ appearance: 'Scarred', ideals: 'Freedom', avatarUrl: 'http://x/y.png' })
+      ),
+    });
+    expect((screen.getByLabelText(/appearance/i) as HTMLTextAreaElement).value).toBe('Scarred');
+    expect((screen.getByLabelText(/^ideals/i) as HTMLTextAreaElement).value).toBe('Freedom');
+    expect((screen.getByLabelText(/avatar url/i) as HTMLInputElement).value).toBe('http://x/y.png');
+  });
+
+  it('appends an SRD background suggestion to the matching field (non-destructive)', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.background = 'Sage';
+    initial.ideals = 'My own idea.';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    // The suggestion chip appears once the SRD background resolves.
+    await user.click(await screen.findByRole('button', { name: 'Knowledge above all.' }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    // Appended on a new line, original text kept.
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).ideals).toBe(
+      'My own idea.\nKnowledge above all.'
+    );
+  });
+
+  it('offers no suggestion chips for a homebrew (non-SRD) background', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.background = 'Cartographer of the Void';
+    renderForm({ initialValues: initial });
+    // Let SRD settle, then confirm no suggestion affordance.
+    await waitFor(() => expect(screen.getByLabelText(/^ideals/i)).toBeInTheDocument());
+    expect(screen.queryByText(/suggestions from/i)).not.toBeInTheDocument();
   });
 });
 
