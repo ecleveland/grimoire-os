@@ -55,12 +55,14 @@ function makeCampaign(over: Partial<CampaignListItem> = {}): CampaignListItem {
 }
 
 function campaignsResponse(items: CampaignListItem[]): PaginatedResponse<CampaignListItem> {
-  return { data: items, total: items.length, page: 1, lastPage: 1, limit: 100 };
+  return { data: items, total: items.length, page: 1, lastPage: 1 };
 }
 
 // The campaigns-list GET populates the picker; the POST creates the character.
+// The editor also pulls SRD catalogs for its pickers — route those to [].
 function routeApiFetch(campaigns: CampaignListItem[], created: Partial<Character> = {}) {
   mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+    if (path.startsWith('/srd/')) return Promise.resolve([]);
     if (path.startsWith('/campaigns?')) return Promise.resolve(campaignsResponse(campaigns));
     if (options?.method === 'POST')
       return Promise.resolve({ id: 'char-new', ...created } as Character);
@@ -153,6 +155,7 @@ describe('NewCharacterPage — campaign picker', () => {
 
   it('toasts an error and stays on the page when creation fails', async () => {
     mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+      if (path.startsWith('/srd/')) return Promise.resolve([]);
       if (path.startsWith('/campaigns?'))
         return Promise.resolve(campaignsResponse([makeCampaign()]));
       if (options?.method === 'POST') return Promise.reject(new Error('Name is required'));
