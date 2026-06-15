@@ -11,13 +11,17 @@ import type {
   Size,
   SrdBackground,
   SrdClass,
+  SrdLanguage,
   SrdRace,
   SrdSubclass,
 } from '@/lib/types';
 import { DIE_TYPES, SIZES } from '@/lib/types';
+import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
 import { useApiQuery } from '@/lib/query';
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
+import ToggleChips from '@/components/ToggleChips';
+import TokenListEditor from '@/components/TokenListEditor';
 
 // Editable shape of a character. Slice 1 covered identity/abilities/combat;
 // slice 2 (VEG-348) adds the SRD-grant fields below so picking a class/race/
@@ -39,10 +43,8 @@ export interface CharacterFormValues {
   speed: number;
   hitPoints: HitPoints;
   hitDice: HitDice;
-  // SRD-grant targets. There's no dedicated editor for these yet (slice 3,
-  // "Proficiencies & training"); slice 2 fills them via the autofill helpers and
-  // surfaces them read-only, but they round-trip through the payload so the
-  // grants persist.
+  // Proficiencies & training — editable via ProficienciesSection (slice 3) and
+  // also written by the SRD autofill helpers (slice 2).
   savingThrows: string[];
   skills: string[];
   proficiencies: string[];
@@ -205,13 +207,33 @@ function union(current: string[], additions: string[]): { merged: string[]; adde
   return { merged: added.length ? [...current, ...added] : current, added };
 }
 
+/**
+ * SRD class `armorProficiencies` are phrases ('Light armor', 'All armor',
+ * 'Shields (…)') while the editor's armor-training toggles use the canonical
+ * ARMOR_TYPES. Map phrases onto those so autofilled armor lights up the toggles
+ * (and the sheet's armor dots). Unrecognized phrasing is kept verbatim.
+ */
+export function normalizeArmorProficiencies(raw: string[]): string[] {
+  const out: string[] = [];
+  for (const item of raw) {
+    const lc = item.toLowerCase();
+    if (lc.includes('all armor')) out.push('Light', 'Medium', 'Heavy');
+    else if (lc.includes('light')) out.push('Light');
+    else if (lc.includes('medium')) out.push('Medium');
+    else if (lc.includes('heavy')) out.push('Heavy');
+    else if (lc.includes('shield')) out.push('Shields');
+    else out.push(item);
+  }
+  return [...new Set(out)];
+}
+
 export function applyClassGrants(
   v: CharacterFormValues,
   c: SrdClass
 ): { values: CharacterFormValues; added: GrantSummary[] } {
   const added: GrantSummary[] = [];
   const saves = union(v.savingThrows, c.savingThrows);
-  const armor = union(v.armorTraining, c.armorProficiencies);
+  const armor = union(v.armorTraining, normalizeArmorProficiencies(c.armorProficiencies));
   const profs = union(v.proficiencies, [...c.weaponProficiencies, ...c.toolProficiencies]);
   if (saves.added.length) added.push({ label: 'Saving throws', values: saves.added });
   if (armor.added.length) added.push({ label: 'Armor training', values: armor.added });
@@ -289,66 +311,84 @@ interface CharacterEditorFormProps {
   footerExtra?: ReactNode;
 }
 
-function Chips({ items }: { items: string[] }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {items.map(i => (
-        <span
-          key={i}
-          className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-        >
-          {i}
-        </span>
-      ))}
-    </div>
-  );
+interface ProficienciesSectionProps {
+  values: CharacterFormValues;
+  set: <K extends keyof CharacterFormValues>(key: K, value: CharacterFormValues[K]) => void;
+  /** The selected class's skill-choice pool, highlighted on the skill toggles. */
+  classSkillPool: string[];
+  numSkillChoices: number;
+  languageSuggestions: string[];
 }
 
-/** Read-only view of the SRD-granted lists (the slice-3 editor will make them editable). */
-function GrantedTraits({ values }: { values: CharacterFormValues }) {
-  const rows: { label: string; items: string[] }[] = [
-    { label: 'Saving throws', items: values.savingThrows },
-    { label: 'Skills', items: values.skills },
-    { label: 'Languages', items: values.languages },
-    { label: 'Armor training', items: values.armorTraining },
-    { label: 'Other proficiencies', items: values.proficiencies },
-  ];
-  const hasAny = rows.some(r => r.items.length > 0) || values.spellcastingAbility !== '';
+/**
+ * Editable proficiencies & training (VEG-348 slice 3). Saves/skills/armor are
+ * toggle groups over the canonical 5e sets; the class skill pool is highlighted
+ * with an advisory "X of N chosen" counter (never enforced — manual override).
+ * Languages and weapon/tool proficiencies are open-ended token lists. The
+ * autofill buttons above write into these same fields.
+ */
+function ProficienciesSection({
+  values,
+  set,
+  classSkillPool,
+  numSkillChoices,
+  languageSuggestions,
+}: ProficienciesSectionProps) {
+  const poolChosen = values.skills.filter(s => classSkillPool.includes(s)).length;
+  const skillsHelper =
+    classSkillPool.length > 0 && numSkillChoices > 0
+      ? `From your class (choose ${numSkillChoices}): ${poolChosen} of ${numSkillChoices} chosen`
+      : undefined;
 
   return (
     <div className={cardClass}>
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className={sectionHeading}>Proficiencies &amp; Training</h2>
-        <span className="text-xs text-gray-500 dark:text-gray-400">
-          Granted — full editing comes in a later update
-        </span>
-      </div>
-      {!hasAny ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Nothing yet. Pick an SRD class, species, or background above and use “Apply … traits”.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {values.spellcastingAbility !== '' && (
-            <div>
-              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                Spellcasting ability
-              </div>
-              <Chips items={[values.spellcastingAbility]} />
-            </div>
-          )}
-          {rows
-            .filter(r => r.items.length > 0)
-            .map(r => (
-              <div key={r.label}>
-                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                  {r.label}
-                </div>
-                <Chips items={r.items} />
-              </div>
-            ))}
-        </div>
-      )}
+      <h2 className={sectionHeading}>Proficiencies &amp; Training</h2>
+      <ToggleChips
+        label="Saving Throws"
+        options={ABILITY_NAMES}
+        value={values.savingThrows}
+        onChange={v => set('savingThrows', v)}
+      />
+      <ToggleChips
+        label="Skills"
+        options={SKILL_NAMES}
+        value={values.skills}
+        onChange={v => set('skills', v)}
+        highlight={classSkillPool}
+        helperText={skillsHelper}
+      />
+      <ToggleChips
+        label="Armor Training"
+        options={ARMOR_TYPES}
+        value={values.armorTraining}
+        onChange={v => set('armorTraining', v)}
+      />
+      <TokenListEditor
+        label="Languages"
+        value={values.languages}
+        onChange={v => set('languages', v)}
+        suggestions={languageSuggestions}
+        placeholder="Add a language…"
+      />
+      <TokenListEditor
+        label="Weapon & Tool Proficiencies"
+        value={values.proficiencies}
+        onChange={v => set('proficiencies', v)}
+        placeholder="Add a proficiency…"
+      />
+      <FormField
+        as="select"
+        label="Spellcasting Ability"
+        value={values.spellcastingAbility}
+        onChange={e => set('spellcastingAbility', e.target.value)}
+      >
+        <option value="">None</option>
+        {ABILITY_NAMES.map(a => (
+          <option key={a} value={a}>
+            {a}
+          </option>
+        ))}
+      </FormField>
     </div>
   );
 }
@@ -370,6 +410,9 @@ export default function CharacterEditorForm({
   const classes = useApiQuery<SrdClass[]>('/srd/classes').data ?? [];
   const races = useApiQuery<SrdRace[]>('/srd/races').data ?? [];
   const backgrounds = useApiQuery<SrdBackground[]>('/srd/backgrounds').data ?? [];
+  const languageSuggestions = (useApiQuery<SrdLanguage[]>('/srd/languages').data ?? []).map(
+    l => l.name
+  );
 
   // Resolve the current free-text values back to SRD entities (by name) so we
   // can scope subclasses and offer the autofill action — works whether the user
@@ -526,10 +569,14 @@ export default function CharacterEditorForm({
         {identityExtra}
       </div>
 
-      {/* ── Proficiencies & Training (granted) ─────────────────────
-          Read-only for now; a dedicated editor arrives in slice 3. Surfaces
-          what the autofill applied so it isn't an invisible black box. */}
-      <GrantedTraits values={values} />
+      {/* ── Proficiencies & Training ───────────────────────────── */}
+      <ProficienciesSection
+        values={values}
+        set={set}
+        classSkillPool={selectedClass?.skillChoices ?? []}
+        numSkillChoices={selectedClass?.numSkillChoices ?? 0}
+        languageSuggestions={languageSuggestions}
+      />
 
       {/* ── Ability Scores ─────────────────────────────────────── */}
       <div className={cardClass}>

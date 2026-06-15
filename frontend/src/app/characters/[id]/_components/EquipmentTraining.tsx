@@ -1,10 +1,9 @@
 import type { Character } from '@/lib/types';
+import { ARMOR_TYPES } from '@/lib/dnd-constants';
 
 interface EquipmentTrainingProps {
   character: Character;
 }
-
-const ARMOR_TYPES = ['Light', 'Medium', 'Heavy', 'Shields'] as const;
 
 export default function EquipmentTraining({ character }: EquipmentTrainingProps) {
   const armorTraining = character.armorTraining ?? [];

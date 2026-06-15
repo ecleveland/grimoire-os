@@ -10,6 +10,7 @@ import CharacterEditorForm, {
   characterFormPayload,
   characterToFormValues,
   emptyCharacterFormValues,
+  normalizeArmorProficiencies,
   summarizeGrants,
   type CharacterFormValues,
 } from '../CharacterEditorForm';
@@ -85,6 +86,7 @@ vi.mock('@/lib/api', () => ({
     if (path === '/srd/classes') return Promise.resolve(srdClasses);
     if (path === '/srd/races') return Promise.resolve(srdRaces);
     if (path === '/srd/backgrounds') return Promise.resolve(srdBackgrounds);
+    if (path === '/srd/languages') return Promise.resolve([{ id: 'lang-1', name: 'Draconic' }]);
     if (path.startsWith('/srd/subclasses')) return Promise.resolve(srdSubclasses);
     return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
   },
@@ -253,6 +255,22 @@ describe('autofill helpers', () => {
     expect(values.languages).toEqual([]); // background languages is a count, not names
   });
 
+  it('normalizeArmorProficiencies maps SRD phrases onto canonical armor types', () => {
+    expect(normalizeArmorProficiencies(['Light armor', 'Medium armor', 'Shields'])).toEqual([
+      'Light',
+      'Medium',
+      'Shields',
+    ]);
+    // "All armor" expands; unknown phrasing is kept verbatim; result is deduped.
+    expect(normalizeArmorProficiencies(['All armor', 'Shields'])).toEqual([
+      'Light',
+      'Medium',
+      'Heavy',
+      'Shields',
+    ]);
+    expect(normalizeArmorProficiencies(['Exotic plating'])).toEqual(['Exotic plating']);
+  });
+
   it('summarizeGrants formats additions and reports a no-op', () => {
     expect(summarizeGrants('Fighter', [{ label: 'Saving throws', values: ['Strength'] }])).toMatch(
       /Applied from Fighter — Saving throws: Strength/
@@ -295,8 +313,11 @@ describe('CharacterEditorForm autofill', () => {
     await user.click(applyBtn);
 
     expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringMatching(/Applied from Fighter/));
-    // The read-only summary surfaces what was applied.
-    expect(screen.getByText('Constitution')).toBeInTheDocument();
+    // The Constitution saving-throw toggle is now pressed.
+    expect(screen.getByRole('button', { name: /^constitution$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
 
     await user.click(screen.getByRole('button', { name: /create character/i }));
     const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
@@ -363,8 +384,11 @@ describe('CharacterEditorForm autofill', () => {
     await user.click(applyBtn); // second click — nothing new to add
 
     expect(mockToastSuccess).toHaveBeenLastCalledWith(expect.stringMatching(/already applied/i));
-    // Constitution chip appears exactly once (no duplication).
-    expect(screen.getAllByText('Constitution')).toHaveLength(1);
+    // The Constitution save toggle is pressed (once — toggles can't duplicate).
+    expect(screen.getByRole('button', { name: /^constitution$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
 
     await user.click(screen.getByRole('button', { name: /create character/i }));
     expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual([
@@ -404,19 +428,101 @@ describe('CharacterEditorForm autofill', () => {
   });
 });
 
-describe('CharacterEditorForm — granted-traits summary', () => {
-  it('shows the empty hint when nothing is granted', () => {
-    renderForm();
-    expect(screen.getByText(/nothing yet/i)).toBeInTheDocument();
+describe('CharacterEditorForm — editable proficiencies', () => {
+  it('toggles a saving throw and submits it', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /^wisdom$/i }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual(['Wisdom']);
   });
 
-  it('renders a spellcasting-only character as populated (not empty)', () => {
+  it('adds a language via the token editor', async () => {
     const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('Languages'), 'Draconic{Enter}');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).languages).toEqual(['Draconic']);
+  });
+
+  it('reflects and updates the spellcasting ability select', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
     initial.spellcastingAbility = 'Intelligence';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    const select = screen.getByLabelText('Spellcasting Ability') as HTMLSelectElement;
+    expect(select.value).toBe('Intelligence');
+    await user.selectOptions(select, 'Wisdom');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).spellcastingAbility).toBe('Wisdom');
+  });
+
+  it('highlights the class skill pool and the counter tracks pool picks only', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.class = 'Fighter'; // pool: Acrobatics/Athletics/Perception, choose 2
     renderForm({ initialValues: initial });
-    expect(screen.queryByText(/nothing yet/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Spellcasting ability')).toBeInTheDocument();
-    expect(screen.getByText('Intelligence')).toBeInTheDocument();
+    const user = userEvent.setup();
+
+    expect(
+      await screen.findByText(/from your class \(choose 2\): 0 of 2 chosen/i)
+    ).toBeInTheDocument();
+
+    // A pool skill advances the counter…
+    await user.click(screen.getByRole('button', { name: /^athletics/i }));
+    expect(screen.getByText(/1 of 2 chosen/i)).toBeInTheDocument();
+    // …a non-pool skill does not.
+    await user.click(screen.getByRole('button', { name: /^stealth$/i }));
+    expect(screen.getByText(/1 of 2 chosen/i)).toBeInTheDocument();
+  });
+
+  it('toggles armor training into the submitted payload', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Heavy' }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).armorTraining).toEqual(['Heavy']);
+  });
+
+  it('adds a weapon/tool proficiency into the proficiencies field (not languages)', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+    await user.type(
+      screen.getByLabelText(/weapon & tool proficiencies/i),
+      'Martial weapons{Enter}'
+    );
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+    expect(submitted.proficiencies).toEqual(['Martial weapons']);
+    expect(submitted.languages).toEqual([]);
+  });
+
+  it('lets the user toggle OFF a save that autofill granted', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    initial.class = 'Fighter';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole('button', { name: /apply fighter traits/i }));
+    // Constitution is now granted/pressed — remove it.
+    const con = screen.getByRole('button', { name: /^constitution$/i });
+    expect(con).toHaveAttribute('aria-pressed', 'true');
+    await user.click(con);
+
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual(['Strength']);
   });
 });
 

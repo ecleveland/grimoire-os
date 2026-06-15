@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -94,7 +94,11 @@ describe('NewCharacterPage — campaign picker', () => {
 
     expect(await screen.findByRole('option', { name: 'The Lost Mines' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: 'Curse of Strahd' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'None' })).toBeInTheDocument();
+    // "None" also appears in the Spellcasting Ability select, so scope to the
+    // campaign picker.
+    expect(
+      within(screen.getByLabelText('Campaign')).getByRole('option', { name: 'None' })
+    ).toBeInTheDocument();
   });
 
   it('hides the picker entirely when the user has no campaigns', async () => {
