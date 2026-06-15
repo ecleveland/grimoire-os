@@ -1,4 +1,5 @@
 import type { AbilityScores } from '@/lib/types';
+import { SKILLS } from '@/lib/dnd-constants';
 
 export const ABILITY_KEYS: (keyof AbilityScores)[] = [
   'strength',
@@ -47,26 +48,11 @@ export function skillBonus(abilityScore: number, level: number, isProficient: bo
   return abilityModifier(abilityScore) + (isProficient ? proficiencyBonus(level) : 0);
 }
 
-export const SKILL_ABILITY_MAP: Record<string, string> = {
-  Athletics: 'Strength',
-  Acrobatics: 'Dexterity',
-  'Sleight of Hand': 'Dexterity',
-  Stealth: 'Dexterity',
-  Arcana: 'Intelligence',
-  History: 'Intelligence',
-  Investigation: 'Intelligence',
-  Nature: 'Intelligence',
-  Religion: 'Intelligence',
-  'Animal Handling': 'Wisdom',
-  Insight: 'Wisdom',
-  Medicine: 'Wisdom',
-  Perception: 'Wisdom',
-  Survival: 'Wisdom',
-  Deception: 'Charisma',
-  Intimidation: 'Charisma',
-  Performance: 'Charisma',
-  Persuasion: 'Charisma',
-};
+// Derived from the canonical SKILLS list (single source of truth in
+// @/lib/dnd-constants) so the sheet and the editor can't drift.
+export const SKILL_ABILITY_MAP: Record<string, string> = Object.fromEntries(
+  SKILLS.map(s => [s.name, s.ability])
+);
 
 export const ABILITY_SKILLS_MAP: Record<string, string[]> = Object.entries(
   SKILL_ABILITY_MAP

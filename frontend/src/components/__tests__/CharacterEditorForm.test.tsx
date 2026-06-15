@@ -85,6 +85,7 @@ vi.mock('@/lib/api', () => ({
     if (path === '/srd/classes') return Promise.resolve(srdClasses);
     if (path === '/srd/races') return Promise.resolve(srdRaces);
     if (path === '/srd/backgrounds') return Promise.resolve(srdBackgrounds);
+    if (path === '/srd/languages') return Promise.resolve([{ id: 'lang-1', name: 'Draconic' }]);
     if (path.startsWith('/srd/subclasses')) return Promise.resolve(srdSubclasses);
     return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
   },
@@ -295,8 +296,11 @@ describe('CharacterEditorForm autofill', () => {
     await user.click(applyBtn);
 
     expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringMatching(/Applied from Fighter/));
-    // The read-only summary surfaces what was applied.
-    expect(screen.getByText('Constitution')).toBeInTheDocument();
+    // The Constitution saving-throw toggle is now pressed.
+    expect(screen.getByRole('button', { name: /^constitution$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
 
     await user.click(screen.getByRole('button', { name: /create character/i }));
     const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
@@ -363,8 +367,11 @@ describe('CharacterEditorForm autofill', () => {
     await user.click(applyBtn); // second click — nothing new to add
 
     expect(mockToastSuccess).toHaveBeenLastCalledWith(expect.stringMatching(/already applied/i));
-    // Constitution chip appears exactly once (no duplication).
-    expect(screen.getAllByText('Constitution')).toHaveLength(1);
+    // The Constitution save toggle is pressed (once — toggles can't duplicate).
+    expect(screen.getByRole('button', { name: /^constitution$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
 
     await user.click(screen.getByRole('button', { name: /create character/i }));
     expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual([
@@ -404,19 +411,50 @@ describe('CharacterEditorForm autofill', () => {
   });
 });
 
-describe('CharacterEditorForm — granted-traits summary', () => {
-  it('shows the empty hint when nothing is granted', () => {
-    renderForm();
-    expect(screen.getByText(/nothing yet/i)).toBeInTheDocument();
+describe('CharacterEditorForm — editable proficiencies', () => {
+  it('toggles a saving throw and submits it', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /^wisdom$/i }));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).savingThrows).toEqual(['Wisdom']);
   });
 
-  it('renders a spellcasting-only character as populated (not empty)', () => {
+  it('adds a language via the token editor', async () => {
     const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('Languages'), 'Draconic{Enter}');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).languages).toEqual(['Draconic']);
+  });
+
+  it('reflects and updates the spellcasting ability select', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
     initial.spellcastingAbility = 'Intelligence';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    const select = screen.getByLabelText('Spellcasting Ability') as HTMLSelectElement;
+    expect(select.value).toBe('Intelligence');
+    await user.selectOptions(select, 'Wisdom');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).spellcastingAbility).toBe('Wisdom');
+  });
+
+  it('highlights the class skill pool with an advisory counter', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.class = 'Fighter'; // pool: Acrobatics/Athletics/Perception, choose 2
     renderForm({ initialValues: initial });
-    expect(screen.queryByText(/nothing yet/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Spellcasting ability')).toBeInTheDocument();
-    expect(screen.getByText('Intelligence')).toBeInTheDocument();
+    expect(
+      await screen.findByText(/from your class \(choose 2\): 0 of 2 chosen/i)
+    ).toBeInTheDocument();
   });
 });
 
