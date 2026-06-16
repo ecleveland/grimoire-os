@@ -33,8 +33,20 @@ test.describe('guided character builder — class selection', () => {
     await skillChips.nth(1).click();
     await expect(next).toBeEnabled();
 
-    // Advance through the optional stub steps to Review (Fighter has no Spells step).
-    for (const heading of [/origin/i, /abilities/i, /equipment/i]) {
+    // Origin step — pick a background and species; their grants are summarized.
+    await next.click();
+    await expect(page.getByRole('heading', { name: /origin/i })).toBeVisible();
+    const background = page.getByRole('combobox', { name: /background/i });
+    await background.click();
+    await page.getByRole('option').first().click();
+    await expect(page.getByRole('group', { name: /background grants/i })).toBeVisible();
+    const species = page.getByRole('combobox', { name: /species/i });
+    await species.click();
+    await page.getByRole('option').first().click();
+    await expect(page.getByRole('group', { name: /species grants/i })).toBeVisible();
+
+    // Advance through the remaining optional stub steps to Review.
+    for (const heading of [/abilities/i, /equipment/i]) {
       await next.click();
       await expect(page.getByRole('heading', { name: heading })).toBeVisible();
     }
