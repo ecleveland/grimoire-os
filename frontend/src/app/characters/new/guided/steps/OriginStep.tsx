@@ -29,6 +29,14 @@ const summaryCard =
  * Deferred by design: the background ability-score increase (no seeded data; the
  * Abilities step owns "+ background increases", VEG-381), starting equipment
  * (VEG-382), and the background feat / personality suggestions.
+ *
+ * Known cross-step limitation: skills/proficiencies/languages are flat, un-sourced
+ * string lists merged by several steps, so a few cross-step orderings reconcile
+ * imperfectly — e.g. switching a background after also picking one of its skills
+ * as a class skill can over-remove that skill, and ClassStep re-applying its
+ * grants (which replace `proficiencies`) after Origin can drop a background's tool
+ * proficiency. Fully fixing this needs source-tagged grants shared across steps
+ * (a later pass). Features avoid it here via their `source` tag.
  */
 export default function OriginStep({ value, onChange }: WizardStepProps) {
   const racesQuery = useApiQuery<SrdRace[]>('/srd/races');
@@ -38,20 +46,22 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
   const selectedRace = races.find(r => r.name === value.race);
   const selectedBackground = backgrounds.find(b => b.name === value.background);
 
-  // Species reconciliation. Track the languages this species added and its name
-  // (which sources its trait-features) so a switch removes exactly those.
+  // Species reconciliation. Features are reconciled by source — dropping every
+  // species-sourced feature (source ∈ the race catalog) and re-adding the
+  // current species' traits — so it's idempotent: re-entering the step (the draft
+  // survives unmounts, but this ref does not) can't duplicate traits. Languages
+  // use the ref to remove the previous species' contribution on a switch.
   const appliedRace = useRef<{ name: string; langs: string[] } | null>(null);
   useEffect(() => {
+    const raceNames = new Set(races.map(r => r.name));
     if (selectedRace) {
       if (appliedRace.current?.name !== selectedRace.name) {
         const prev = appliedRace.current;
         const baseLangs = prev
           ? value.languages.filter(l => !prev.langs.includes(l))
           : value.languages;
-        const baseFeatures = prev
-          ? value.features.filter(f => f.source !== prev.name)
-          : value.features;
         const langs = mergeUnique(baseLangs, selectedRace.languages);
+        const baseFeatures = value.features.filter(f => !raceNames.has(f.source ?? ''));
         const traitFeatures: Feature[] = selectedRace.traits.map(t => ({
           name: t.name,
           description: t.description,
@@ -73,10 +83,10 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
       appliedRace.current = null;
       onChange({
         languages: value.languages.filter(l => !prev.langs.includes(l)),
-        features: value.features.filter(f => f.source !== prev.name),
+        features: value.features.filter(f => !raceNames.has(f.source ?? '')),
       });
     }
-  }, [selectedRace, value, onChange]);
+  }, [selectedRace, races, value, onChange]);
 
   // Background reconciliation. Track the skills/proficiencies this background
   // added so a switch removes exactly those (class skill picks survive).

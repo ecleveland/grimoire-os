@@ -175,6 +175,58 @@ describe('OriginStep — background + species', () => {
     expect(skills).toHaveTextContent('Intimidation');
   });
 
+  it('does not duplicate species traits when re-entered with a race already set', async () => {
+    // Simulate a remount (Origin → later step → Back): the draft already carries
+    // the Elf contribution, and OriginStep's refs start fresh.
+    renderStep([ELF], [], {
+      race: 'Elf',
+      speed: 30,
+      size: 'Medium',
+      languages: ['Common', 'Elvish'],
+      features: [
+        { name: 'Darkvision', description: 'See in the dark.', source: 'Elf' },
+        { name: 'Fey Ancestry', description: 'Advantage vs charm.', source: 'Elf' },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: /species grants/i })).toBeVisible()
+    );
+    const features = screen.getByTestId('features').textContent ?? '';
+    expect(features.match(/Darkvision/g)).toHaveLength(1);
+    expect(features.match(/Fey Ancestry/g)).toHaveLength(1);
+    // Languages aren't doubled either.
+    expect(screen.getByTestId('languages')).toHaveTextContent('Common,Elvish');
+  });
+
+  it('clears its species grants when the name is edited to a non-SRD value', async () => {
+    const user = userEvent.setup();
+    renderStep([ELF], [], { skills: ['Acrobatics'] });
+
+    await pickSpecies(user, 'Elf');
+    await waitFor(() => expect(screen.getByTestId('features')).toHaveTextContent('Darkvision:Elf'));
+
+    // Edit the committed name into a non-matching custom value.
+    await user.type(screen.getByRole('combobox', { name: /species/i }), 'x');
+    await waitFor(() => expect(screen.getByTestId('features')).not.toHaveTextContent('Darkvision'));
+    expect(screen.getByTestId('languages')).not.toHaveTextContent('Elvish');
+    // An unrelated draft field is untouched.
+    expect(screen.getByTestId('skills')).toHaveTextContent('Acrobatics');
+  });
+
+  it('keeps the current size when the species size is not a canonical value', async () => {
+    const user = userEvent.setup();
+    const KOBOLD: SrdRace = { ...ELF, id: 'kobold', name: 'Kobold', size: 'Medium or Small' };
+    renderStep([KOBOLD], [], { size: 'Small' });
+
+    await pickSpecies(user, 'Kobold');
+
+    // "Medium or Small" isn't a canonical Size → size is left as-is; other grants still apply.
+    await waitFor(() => expect(screen.getByTestId('race')).toHaveTextContent('Kobold'));
+    expect(screen.getByTestId('size')).toHaveTextContent('Small');
+    expect(screen.getByTestId('speed')).toHaveTextContent('30');
+  });
+
   it('replaces the previous species traits and languages when switched', async () => {
     const user = userEvent.setup();
     renderStep([ELF, DWARF], []);
