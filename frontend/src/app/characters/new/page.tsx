@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { useApiQuery } from '@/lib/query';
@@ -52,6 +53,17 @@ export default function NewCharacterPage() {
   return (
     <div className="max-w-2xl mx-auto">
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Create Character</h1>
+      <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm dark:border-indigo-900 dark:bg-indigo-950">
+        <span className="text-indigo-900 dark:text-indigo-200">
+          New to D&amp;D? Try the step-by-step guided builder.
+        </span>
+        <Link
+          href="/characters/new/guided"
+          className="shrink-0 font-medium text-indigo-700 hover:underline dark:text-indigo-300"
+        >
+          Guided builder →
+        </Link>
+      </div>
       <CharacterEditorForm
         initialValues={emptyCharacterFormValues()}
         submitLabel="Create Character"
