@@ -161,6 +161,85 @@ describe('GuidedCharacterPage — wizard shell', () => {
     expect(mockToastSuccess).toHaveBeenCalledWith('Character created!');
   });
 
+  it('navigates via the progress bar — jump back to a visited step, then forward to a reachable one', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+
+    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Rogue');
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
+
+    // Jump back to Class via the progress bar; the typed class survives.
+    await user.click(within(progress).getByRole('button', { name: /class/i }));
+    expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /class/i })).toHaveValue('Rogue');
+
+    // Forward jump to Review is allowed now that the only required prior step (Class) is satisfied.
+    await user.click(within(progress).getByRole('button', { name: /review/i }));
+    expect(screen.getByRole('heading', { name: /review/i })).toBeInTheDocument();
+  });
+
+  it('gates forward jumps on the progress bar behind incomplete required steps', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+
+    // With no class chosen, Review is unreachable via the progress bar.
+    const reviewBtn = within(progress).getByRole('button', { name: /review/i });
+    expect(reviewBtn).toBeDisabled();
+
+    // Satisfying the Class step unlocks the forward jump.
+    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Bard');
+    expect(reviewBtn).toBeEnabled();
+  });
+
+  it('shows Skip only on optional steps and advances an optional step via Next without input', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+
+    // The required Class step has no Skip.
+    expect(screen.queryByRole('button', { name: /^skip$/i })).toBeNull();
+
+    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Cleric');
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    // Origin is optional — Skip appears, and Next advances with no input entered.
+    expect(screen.getByRole('button', { name: /^skip$/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    expect(screen.getByRole('heading', { name: /abilities/i })).toBeInTheDocument();
+  });
+
+  it('disables the Create button and shows "Creating…" while the request is in flight', async () => {
+    let resolvePost!: (c: Character) => void;
+    mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+      if (options?.method === 'POST')
+        return new Promise<Character>(resolve => {
+          resolvePost = resolve;
+        });
+      return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await advanceToReview(user);
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    // Pending: label flips and the button is disabled so it can't be submitted twice.
+    const pending = await screen.findByRole('button', { name: /creating/i });
+    expect(pending).toBeDisabled();
+    const postCalls = mockApiFetch.mock.calls.filter(
+      ([, opts]) => (opts as { method?: string } | undefined)?.method === 'POST'
+    );
+    expect(postCalls).toHaveLength(1);
+
+    resolvePost({ id: 'char-new' } as Character);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+  });
+
   it('toasts an error and stays on the Review step when creation fails', async () => {
     mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
       if (options?.method === 'POST') return Promise.reject(new Error('Name is required'));

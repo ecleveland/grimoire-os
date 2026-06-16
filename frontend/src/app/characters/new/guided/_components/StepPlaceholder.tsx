@@ -14,7 +14,13 @@ interface StepPlaceholderProps {
  * content.
  */
 export default function StepPlaceholder({ title, summary, ticket }: StepPlaceholderProps) {
-  const headingId = `step-${title.toLowerCase()}-heading`;
+  // Slugify so multi-word/punctuated titles still yield a valid, collision-free
+  // id for the aria-labelledby association.
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const headingId = `step-${slug}-heading`;
   return (
     <section aria-labelledby={headingId} className="space-y-3">
       <h2 id={headingId} className="text-xl font-semibold text-gray-900 dark:text-white">

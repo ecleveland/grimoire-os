@@ -47,4 +47,4 @@ export const STEPS: WizardStepDef[] = [
   },
 ];
 
-export type { WizardStepDef, WizardStepProps } from './types';
+export type { WizardStepDef, WizardStepProps, WizardStepId } from './types';
