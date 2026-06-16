@@ -34,8 +34,12 @@ export default function GuidedCharacterPage() {
   // Clamp the stored index: a step disappearing can shrink the list under us.
   const stepIndex = Math.min(rawStepIndex, visibleSteps.length - 1);
 
+  // A step is complete when its draft-derived predicate holds AND it hasn't
+  // reported itself incomplete. A reported value can only further restrict
+  // (never loosen) the draft default, so a stale `true` can't mask a draft that
+  // has since regressed.
   const isComplete = useCallback(
-    (step: (typeof STEPS)[number]) => reported[step.id] ?? step.isValid(draft),
+    (step: (typeof STEPS)[number]) => step.isValid(draft) && (reported[step.id] ?? true),
     [reported, draft]
   );
 

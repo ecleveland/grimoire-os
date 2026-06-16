@@ -295,6 +295,38 @@ describe('GuidedCharacterPage — wizard shell', () => {
     await waitFor(() => expect(within(progress).getByText('Spells')).toBeInTheDocument());
   });
 
+  it('removes the Spells step when switching to a non-caster and keeps the wizard on a real step', async () => {
+    const FIGHTER: SrdClass = {
+      ...WIZARD,
+      id: 'fighter',
+      name: 'Fighter',
+      hitDie: 'd10',
+      skillChoices: ['Acrobatics', 'Athletics', 'History', 'Insight', 'Perception'],
+      spellcasting: undefined,
+    };
+    routeApiFetch({ classes: [WIZARD, FIGHTER] });
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+
+    // Become a caster and walk onto the Spells step.
+    await selectSrdClass(user, 'Wizard');
+    const skills = screen.getByRole('group', { name: /skills/i });
+    await user.click(within(skills).getByRole('button', { name: /arcana/i }));
+    await user.click(within(skills).getByRole('button', { name: /history/i }));
+    await waitFor(() => expect(within(progress).getByText('Spells')).toBeInTheDocument());
+    await user.click(within(progress).getByRole('button', { name: /spells/i }));
+    expect(screen.getByRole('heading', { name: /spells/i })).toBeInTheDocument();
+
+    // Jump back to Class and switch to a non-caster — the Spells step vanishes.
+    await user.click(within(progress).getByRole('button', { name: /class/i }));
+    await selectSrdClass(user, 'Fighter');
+    await waitFor(() => expect(within(progress).queryByText('Spells')).toBeNull());
+    // The wizard is still on a real (non-blank) step, and navigation still works.
+    expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^next$/i })).toBeInTheDocument();
+  });
+
   it('gates Next on the class skill count for an SRD class', async () => {
     routeApiFetch({ classes: [WIZARD] });
     const user = userEvent.setup();

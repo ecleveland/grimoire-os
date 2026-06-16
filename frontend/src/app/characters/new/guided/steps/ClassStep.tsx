@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useApiQuery } from '@/lib/query';
 import { DIE_TYPES, type DieType, type SrdClass, type SrdSubclass } from '@/lib/types';
 import {
@@ -57,16 +57,38 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
   const numSkillChoices = selectedClass?.numSkillChoices ?? 0;
   const chosenPoolSkills = value.skills.filter(s => skillPool.includes(s));
 
-  // Valid once a class is named and (for a recognized SRD class) exactly the
-  // required number of skills are picked. A custom/homebrew class name has no
-  // pool, so the count requirement is trivially met.
-  const stepValid =
-    value.class.trim() !== '' &&
-    (numSkillChoices === 0 || chosenPoolSkills.length === numSkillChoices);
-
+  // Reconcile the class-derived grants whenever the resolved SRD class changes —
+  // whether the user clicked an option or typed the name exactly. Keyed off the
+  // applied class id so we apply once per class (and don't clobber skill picks on
+  // every render). When the name no longer matches an SRD class (custom/homebrew
+  // entry), drop the previous class's grants so nothing stale lingers.
+  const appliedClassId = useRef<string | null>(null);
   useEffect(() => {
-    onValidChange?.(stepValid);
-  }, [stepValid, onValidChange]);
+    if (selectedClass) {
+      if (appliedClassId.current !== selectedClass.id) {
+        appliedClassId.current = selectedClass.id;
+        onChange(classGrants(selectedClass, value));
+      }
+    } else if (appliedClassId.current !== null) {
+      appliedClassId.current = null;
+      onChange({
+        savingThrows: [],
+        armorTraining: [],
+        proficiencies: [],
+        spellcastingAbility: '',
+        skills: [],
+        subclass: '',
+      });
+    }
+  }, [selectedClass, onChange, value]);
+
+  // The class-name gate lives in the step def's isValid; this reports the extra
+  // SRD-derived rule: an unrecognized class has no pool (count trivially met),
+  // a recognized one needs exactly numSkillChoices picks.
+  const skillsComplete = numSkillChoices === 0 || chosenPoolSkills.length === numSkillChoices;
+  useEffect(() => {
+    onValidChange?.(skillsComplete);
+  }, [skillsComplete, onValidChange]);
 
   const toggleSkill = (next: string[]) => {
     // Cap at the allowed count: ignore a pick that would exceed numSkillChoices.
@@ -84,11 +106,9 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
         label="Class"
         required
         value={value.class}
+        // Just set the name on change/pick; the effect above reconciles the
+        // grants once value.class resolves to (or away from) an SRD class.
         onChange={v => onChange({ class: v })}
-        onSelect={opt => {
-          const c = classes.find(x => x.id === opt.id);
-          if (c) onChange(classGrants(c, value));
-        }}
         options={classes.map(c => ({ id: c.id, name: c.name }))}
         loading={classesQuery.isLoading}
         placeholder="Search classes…"

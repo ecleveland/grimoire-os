@@ -19,11 +19,11 @@ export interface WizardStepProps {
   value: CharacterFormValues;
   onChange: (patch: Partial<CharacterFormValues>) => void;
   /**
-   * Steps whose "is this complete?" answer depends on data the draft alone can't
-   * express — e.g. the Class step enforcing exactly `numSkillChoices` picks,
-   * where the required count comes from async SRD data — report their validity
-   * here. The shell prefers a reported value over the step def's `isValid`.
-   * Pure steps can ignore this and rely on `isValid(draft)`.
+   * An *additional* gate for steps whose completeness depends on data the draft
+   * alone can't express — e.g. the Class step enforcing exactly `numSkillChoices`
+   * picks, where the required count comes from async SRD data. It composes with
+   * (ANDs) the step def's `isValid(draft)`; it can only further restrict, never
+   * loosen. Pure steps ignore this and rely on `isValid(draft)` alone.
    */
   onValidChange?: (valid: boolean) => void;
 }
@@ -44,9 +44,8 @@ export interface WizardStepDef {
    */
   optional: boolean;
   /**
-   * Default "is this step complete?" derived from the draft. A step may refine
-   * this at runtime via `onValidChange` (see WizardStepProps); when it does, the
-   * reported value wins.
+   * The draft-derived part of "is this step complete?". A step may impose an
+   * extra runtime gate via `onValidChange` (see WizardStepProps); both must hold.
    */
   isValid: (draft: CharacterFormValues) => boolean;
   /**
