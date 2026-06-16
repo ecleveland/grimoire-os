@@ -42,6 +42,7 @@ const mockCharacter: Character = {
   inventory: [],
   currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   features: [],
+  version: 1,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -92,6 +93,20 @@ describe('CharacterSheetHeader', () => {
     it('does not render Edit link when isOwner is false', () => {
       render(<CharacterSheetHeader character={mockCharacter} isOwner={false} />);
       expect(screen.queryByRole('link', { name: 'Edit' })).toBeNull();
+    });
+  });
+
+  describe('avatar', () => {
+    it('renders the avatar image when avatarUrl is set', () => {
+      const char = { ...mockCharacter, avatarUrl: 'https://img.example/a.png' };
+      render(<CharacterSheetHeader character={char} isOwner={false} />);
+      const avatar = screen.getByTestId('character-avatar');
+      expect(avatar).toHaveAttribute('src', 'https://img.example/a.png');
+    });
+
+    it('omits the avatar when avatarUrl is absent', () => {
+      render(<CharacterSheetHeader character={mockCharacter} isOwner={false} />);
+      expect(screen.queryByTestId('character-avatar')).toBeNull();
     });
   });
 

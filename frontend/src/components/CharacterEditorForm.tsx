@@ -51,6 +51,15 @@ export interface CharacterFormValues {
   languages: string[];
   armorTraining: string[];
   spellcastingAbility: string;
+  // Personality & details (slice 4) — free text; the selected SRD background can
+  // suggest traits/ideals/bonds/flaws.
+  appearance: string;
+  personalityTraits: string;
+  ideals: string;
+  bonds: string;
+  flaws: string;
+  backstory: string;
+  avatarUrl: string;
 }
 
 const abilityKeys: (keyof AbilityScores)[] = [
@@ -100,6 +109,13 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     languages: [],
     armorTraining: [],
     spellcastingAbility: '',
+    appearance: '',
+    personalityTraits: '',
+    ideals: '',
+    bonds: '',
+    flaws: '',
+    backstory: '',
+    avatarUrl: '',
   };
 }
 
@@ -128,6 +144,13 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     languages: c.languages ?? [],
     armorTraining: c.armorTraining ?? [],
     spellcastingAbility: c.spellcastingAbility ?? '',
+    appearance: c.appearance ?? '',
+    personalityTraits: c.personalityTraits ?? '',
+    ideals: c.ideals ?? '',
+    bonds: c.bonds ?? '',
+    flaws: c.flaws ?? '',
+    backstory: c.backstory ?? '',
+    avatarUrl: c.avatarUrl ?? '',
   };
 }
 
@@ -156,6 +179,13 @@ type CharacterWriteFields = Pick<
   | 'languages'
   | 'armorTraining'
   | 'spellcastingAbility'
+  | 'appearance'
+  | 'personalityTraits'
+  | 'ideals'
+  | 'bonds'
+  | 'flaws'
+  | 'backstory'
+  | 'avatarUrl'
 >;
 
 /**
@@ -185,6 +215,13 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     languages: v.languages,
     armorTraining: v.armorTraining,
     spellcastingAbility: v.spellcastingAbility,
+    appearance: v.appearance,
+    personalityTraits: v.personalityTraits,
+    ideals: v.ideals,
+    bonds: v.bonds,
+    flaws: v.flaws,
+    backstory: v.backstory,
+    avatarUrl: v.avatarUrl,
   };
 }
 
@@ -389,6 +426,94 @@ function ProficienciesSection({
           </option>
         ))}
       </FormField>
+    </div>
+  );
+}
+
+type SuggestKey = 'personalityTraits' | 'ideals' | 'bonds' | 'flaws';
+const PERSONALITY_FIELDS: { key: SuggestKey; label: string }[] = [
+  { key: 'personalityTraits', label: 'Personality Traits' },
+  { key: 'ideals', label: 'Ideals' },
+  { key: 'bonds', label: 'Bonds' },
+  { key: 'flaws', label: 'Flaws' },
+];
+
+interface PersonalityDetailsSectionProps {
+  values: CharacterFormValues;
+  set: <K extends keyof CharacterFormValues>(key: K, value: CharacterFormValues[K]) => void;
+  /** When the chosen background is an SRD one, its suggestion arrays. */
+  background?: SrdBackground;
+}
+
+/**
+ * Personality & details (slice 4): appearance, the four personality fields,
+ * backstory, and an avatar URL. When an SRD background is selected, each
+ * personality field offers its suggestions as chips that append (non-destructive)
+ * to the free-text the user can still edit.
+ */
+function PersonalityDetailsSection({ values, set, background }: PersonalityDetailsSectionProps) {
+  const append = (key: SuggestKey, text: string) => {
+    const current = values[key];
+    set(key, current.trim() ? `${current.trimEnd()}\n${text}` : text);
+  };
+
+  const suggestionsFor = (key: SuggestKey): string[] => (background ? (background[key] ?? []) : []);
+
+  return (
+    <div className={cardClass}>
+      <h2 className={sectionHeading}>Personality &amp; Details</h2>
+      <FormField
+        as="textarea"
+        rows={2}
+        label="Appearance"
+        value={values.appearance}
+        onChange={e => set('appearance', e.target.value)}
+      />
+      {PERSONALITY_FIELDS.map(({ key, label }) => {
+        const suggestions = suggestionsFor(key);
+        return (
+          <div key={key}>
+            <FormField
+              as="textarea"
+              rows={2}
+              label={label}
+              value={values[key]}
+              onChange={e => set(key, e.target.value)}
+            />
+            {suggestions.length > 0 && (
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Suggestions from {background?.name}:
+                </span>
+                {suggestions.map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => append(key, s)}
+                    className="px-2 py-0.5 text-xs rounded-full border border-indigo-300 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-indigo-900/20"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <FormField
+        as="textarea"
+        rows={4}
+        label="Backstory"
+        value={values.backstory}
+        onChange={e => set('backstory', e.target.value)}
+      />
+      <FormField
+        type="url"
+        label="Avatar URL"
+        value={values.avatarUrl}
+        onChange={e => set('avatarUrl', e.target.value)}
+        helperText="Link to a portrait image, shown on the character sheet."
+      />
     </div>
   );
 }
@@ -688,6 +813,9 @@ export default function CharacterEditorForm({
           />
         </div>
       </div>
+
+      {/* ── Personality & Details ──────────────────────────────── */}
+      <PersonalityDetailsSection values={values} set={set} background={selectedBackground} />
 
       {/* ── Actions ────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
