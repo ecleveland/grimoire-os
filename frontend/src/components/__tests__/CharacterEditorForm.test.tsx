@@ -213,6 +213,23 @@ describe('pure helpers', () => {
       spellcastingAbility: '',
     });
   });
+
+  it('characterFormPayload drops weapon/feature rows with no name', () => {
+    const v = emptyCharacterFormValues();
+    v.weapons = [
+      { name: 'Rapier', attackBonus: '+5', damage: '1d8', damageType: 'piercing', notes: '' },
+      { name: '  ', attackBonus: '', damage: '', damageType: '', notes: '' },
+    ];
+    v.features = [
+      { name: 'Second Wind', source: 'Fighter', description: '' },
+      { name: '', source: '', description: 'orphan' },
+    ];
+    const payload = characterFormPayload(v);
+    expect(payload.weapons).toEqual([
+      { name: 'Rapier', attackBonus: '+5', damage: '1d8', damageType: 'piercing', notes: '' },
+    ]);
+    expect(payload.features).toEqual([{ name: 'Second Wind', source: 'Fighter', description: '' }]);
+  });
 });
 
 describe('autofill helpers', () => {
@@ -610,6 +627,41 @@ describe('CharacterEditorForm — personality & details', () => {
     // Let SRD settle, then confirm no suggestion affordance.
     await waitFor(() => expect(screen.getByLabelText(/^ideals/i)).toBeInTheDocument());
     expect(screen.queryByText(/suggestions from/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('CharacterEditorForm — weapons & features', () => {
+  it('adds a weapon and submits it', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: /add weapon/i }));
+    fireEvent.change(screen.getByLabelText('Weapon name'), { target: { value: 'Rapier' } });
+    fireEvent.change(screen.getByLabelText('Damage'), { target: { value: '1d8' } });
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).weapons).toEqual([
+      { name: 'Rapier', attackBonus: '', damage: '1d8', damageType: '', notes: '' },
+    ]);
+  });
+
+  it('prefills existing weapons/features and offers class/species as feature sources', () => {
+    renderForm({
+      initialValues: characterToFormValues(
+        makeCharacter({
+          weapons: [
+            { name: 'Warhammer', attackBonus: '+6', damage: '1d8+4', damageType: 'bludgeoning' },
+          ],
+          features: [{ name: 'Second Wind', source: 'Fighter', description: 'Regain HP.' }],
+        })
+      ),
+    });
+    expect((screen.getByLabelText('Weapon name') as HTMLInputElement).value).toBe('Warhammer');
+    expect((screen.getByLabelText('Feature name') as HTMLInputElement).value).toBe('Second Wind');
+    // The feature source input wires a datalist (class/species suggestions).
+    expect(screen.getByLabelText('Feature source')).toHaveAttribute('list');
   });
 });
 
