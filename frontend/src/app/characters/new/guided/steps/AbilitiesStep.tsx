@@ -21,6 +21,9 @@ const MODES: { id: Mode; label: string }[] = [
 ];
 
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8] as const;
+// Score shown for an array slot the user hasn't assigned yet — keeps the draft
+// consistent with the (blank) selects instead of leaving stale numbers behind.
+const ARRAY_UNASSIGNED = 10;
 
 // SRD point-buy: 27 points, scores bounded 8–15 with rising marginal cost.
 const POINT_BUY_BUDGET = 27;
@@ -46,7 +49,10 @@ const cardClass = 'rounded-md border border-gray-200 p-3 dark:border-gray-700';
  * Step 3 — Ability scores (VEG-381). Three generation modes write the resulting
  * six scores into the draft, and a live computed preview (modifiers, saves,
  * skills) is derived from the shared sheet math so it matches the saved sheet.
- * Each mode just *sets* `abilityScores`, so re-entering the step is idempotent.
+ * Each mode just *sets* `abilityScores`, so re-entering the step is idempotent —
+ * the final scores survive navigation. The mode + array-assignment UI state is
+ * local, so re-entering shows manual mode over the persisted scores (preserving
+ * that working state across remounts is part of the VEG-393 builder-state work).
  *
  * Deferred (VEG-393): the background ability-score increase is additive on top of
  * the base scores and needs builder-state separation to survive remounts without
@@ -59,20 +65,18 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
 
   const setScores = (next: AbilityScores) => onChange({ abilityScores: next });
 
+  const fill = (n: number): AbilityScores =>
+    Object.fromEntries(ABILITY_KEYS.map(k => [k, n])) as unknown as AbilityScores;
+
   const selectMode = (next: Mode) => {
     setMode(next);
     if (next === 'pointbuy') {
       // Point-buy baseline: every score at 8 (the full 27 points unspent).
-      setScores({
-        strength: 8,
-        dexterity: 8,
-        constitution: 8,
-        intelligence: 8,
-        wisdom: 8,
-        charisma: 8,
-      });
+      setScores(fill(8));
     } else if (next === 'array') {
+      // Start a fresh assignment; scores track the (empty) selects.
       setAssignments(emptyAssignments());
+      setScores(fill(ARRAY_UNASSIGNED));
     }
   };
 
@@ -98,15 +102,20 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
   const assign = (k: AbilityKey, raw: string) => {
     const next = { ...assignments, [k]: raw === '' ? null : Number(raw) };
     setAssignments(next);
-    if (ABILITY_KEYS.every(x => next[x] != null)) {
-      setScores(
-        Object.fromEntries(ABILITY_KEYS.map(x => [x, next[x]])) as unknown as AbilityScores
-      );
-    }
+    // Write on every change so the draft always matches the visible assignment;
+    // a not-yet-assigned ability shows the unassigned default.
+    setScores(
+      Object.fromEntries(
+        ABILITY_KEYS.map(x => [x, next[x] ?? ARRAY_UNASSIGNED])
+      ) as unknown as AbilityScores
+    );
   };
 
   // ── Manual helpers ──
   const setManual = (k: AbilityKey, raw: string) => {
+    // Ignore an empty/blank field (Number('') is 0) so clearing to retype doesn't
+    // silently clamp the score to 1.
+    if (raw.trim() === '') return;
     const n = Number(raw);
     if (!Number.isFinite(n)) return;
     setScores({ ...value.abilityScores, [k]: Math.max(1, Math.min(30, Math.trunc(n))) });
