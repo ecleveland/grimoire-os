@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import GuidedCharacterPage from '../page';
-import type { Character } from '@/lib/types';
+import type { Character, SrdClass } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -24,6 +24,24 @@ vi.mock('sonner', () => ({
   },
 }));
 
+// A spellcasting SRD class — drives the skill-count gate and the Spells step.
+const WIZARD: SrdClass = {
+  id: 'wizard',
+  name: 'Wizard',
+  hitDie: 'd6',
+  primaryAbilities: ['Intelligence'],
+  savingThrows: ['Intelligence', 'Wisdom'],
+  armorProficiencies: [],
+  weaponProficiencies: ['Daggers'],
+  skillChoices: ['Arcana', 'History', 'Insight', 'Investigation', 'Medicine', 'Religion'],
+  toolProficiencies: [],
+  numSkillChoices: 2,
+  features: [],
+  spellcasting: { ability: 'Intelligence' },
+  subclassLevel: 2,
+  source: 'SRD',
+};
+
 function makeTestClient() {
   return new QueryClient({
     defaultOptions: {
@@ -40,13 +58,16 @@ function renderPage(client: QueryClient = makeTestClient()) {
   return render(<GuidedCharacterPage />, { wrapper });
 }
 
-// The shell only talks to the API on submit (POST /characters). Stub steps don't
-// fetch yet; route POST to a created character and reject anything unexpected.
-function routeApiFetch(created: Partial<Character> = {}) {
-  mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+// The shell hits the API for the Class step's SRD catalog and the final POST.
+function routeApiFetch({
+  classes = [],
+  created = {},
+}: { classes?: SrdClass[]; created?: Partial<Character> } = {}) {
+  mockApiFetch.mockImplementation((path?: string, options?: { method?: string }) => {
     if (options?.method === 'POST')
       return Promise.resolve({ id: 'char-new', ...created } as Character);
-    return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
+    if (path === '/srd/classes') return Promise.resolve(classes);
+    return Promise.resolve([]);
   });
 }
 
@@ -57,12 +78,26 @@ function lastPostBody(): Record<string, unknown> {
   return JSON.parse((call![1] as { body: string }).body);
 }
 
-// Advance from the Class step (index 0) all the way to the Review step, skipping
-// the optional stub steps in between.
-async function advanceToReview(user: ReturnType<typeof userEvent.setup>, className = 'Wizard') {
-  await user.type(screen.getByRole('textbox', { name: /class/i }), className);
-  // Class -> Origin -> Abilities -> Equipment -> Spells -> Review = 5 advances.
-  for (let i = 0; i < 5; i++) {
+const classInput = () => screen.getByRole('combobox', { name: /^class/i });
+
+// Type a free-text (homebrew) class name — no SRD match, so no skill gate and
+// not a spellcaster. Enough to satisfy the Class step for shell-navigation tests.
+async function typeClass(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.type(classInput(), name);
+  await waitFor(() => expect(screen.getByRole('button', { name: /^next$/i })).toBeEnabled());
+}
+
+// Pick an SRD class from the combobox (requires the class to be in the catalog).
+async function selectSrdClass(user: ReturnType<typeof userEvent.setup>, name: string) {
+  const input = classInput();
+  await user.clear(input);
+  await user.type(input, name);
+  await user.click(await screen.findByRole('option', { name }));
+}
+
+async function advanceToReview(user: ReturnType<typeof userEvent.setup>, className = 'Rogue') {
+  await typeClass(user, className);
+  for (let i = 0; i < 8 && !screen.queryByRole('heading', { name: /review/i }); i++) {
     await user.click(screen.getByRole('button', { name: /^next$/i }));
   }
   await screen.findByRole('heading', { name: /review/i });
@@ -76,17 +111,17 @@ beforeEach(() => {
 });
 
 describe('GuidedCharacterPage — wizard shell', () => {
-  it('renders the first (Class) step and a progress indicator listing every step', () => {
+  it('renders the Class step and a progress indicator listing the visible steps', () => {
     routeApiFetch();
     renderPage();
 
-    // Class step content is shown first.
     expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
-    // Progress indicator lists all six steps.
     const progress = screen.getByRole('navigation', { name: /progress/i });
-    for (const title of ['Class', 'Origin', 'Abilities', 'Equipment', 'Spells', 'Review']) {
+    for (const title of ['Class', 'Origin', 'Abilities', 'Equipment', 'Review']) {
       expect(within(progress).getByText(title)).toBeInTheDocument();
     }
+    // Spells is hidden until the chosen class is a spellcaster.
+    expect(within(progress).queryByText('Spells')).toBeNull();
   });
 
   it('disables Back on the first step', () => {
@@ -95,14 +130,13 @@ describe('GuidedCharacterPage — wizard shell', () => {
     expect(screen.getByRole('button', { name: /^back$/i })).toBeDisabled();
   });
 
-  it('gates Next until the Class step minimum (a class) is chosen', async () => {
+  it('gates Next until a class is chosen', async () => {
     routeApiFetch();
     const user = userEvent.setup();
     renderPage();
 
     expect(screen.getByRole('button', { name: /^next$/i })).toBeDisabled();
-    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Fighter');
-    expect(screen.getByRole('button', { name: /^next$/i })).toBeEnabled();
+    await typeClass(user, 'Fighter');
 
     await user.click(screen.getByRole('button', { name: /^next$/i }));
     expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
@@ -113,9 +147,8 @@ describe('GuidedCharacterPage — wizard shell', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Fighter');
+    await typeClass(user, 'Fighter');
     await user.click(screen.getByRole('button', { name: /^next$/i }));
-    // On Origin (optional) — Skip jumps forward without any input.
     expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^skip$/i }));
     expect(screen.getByRole('heading', { name: /abilities/i })).toBeInTheDocument();
@@ -126,13 +159,85 @@ describe('GuidedCharacterPage — wizard shell', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Rogue');
+    await typeClass(user, 'Rogue');
     await user.click(screen.getByRole('button', { name: /^next$/i }));
     expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /^back$/i }));
-    // The class typed earlier survives the round trip.
-    expect(screen.getByRole('textbox', { name: /class/i })).toHaveValue('Rogue');
+    expect(classInput()).toHaveValue('Rogue');
+  });
+
+  it('navigates via the progress bar — jump back to a visited step, then forward to a reachable one', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+
+    await typeClass(user, 'Rogue');
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
+
+    await user.click(within(progress).getByRole('button', { name: /class/i }));
+    expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
+    expect(classInput()).toHaveValue('Rogue');
+
+    await user.click(within(progress).getByRole('button', { name: /review/i }));
+    expect(screen.getByRole('heading', { name: /review/i })).toBeInTheDocument();
+  });
+
+  it('gates forward jumps on the progress bar behind incomplete required steps', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+
+    const reviewBtn = within(progress).getByRole('button', { name: /review/i });
+    expect(reviewBtn).toBeDisabled();
+
+    await typeClass(user, 'Bard');
+    await waitFor(() => expect(reviewBtn).toBeEnabled());
+  });
+
+  it('shows Skip only on optional steps and advances an optional step via Next without input', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(screen.queryByRole('button', { name: /^skip$/i })).toBeNull();
+
+    await typeClass(user, 'Cleric');
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    expect(screen.getByRole('button', { name: /^skip$/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^next$/i }));
+    expect(screen.getByRole('heading', { name: /abilities/i })).toBeInTheDocument();
+  });
+
+  it('disables the Create button and shows "Creating…" while the request is in flight', async () => {
+    let resolvePost!: (c: Character) => void;
+    mockApiFetch.mockImplementation((path?: string, options?: { method?: string }) => {
+      if (options?.method === 'POST')
+        return new Promise<Character>(resolve => {
+          resolvePost = resolve;
+        });
+      if (path === '/srd/classes') return Promise.resolve([]);
+      return Promise.resolve([]);
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await advanceToReview(user);
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    const pending = await screen.findByRole('button', { name: /creating/i });
+    expect(pending).toBeDisabled();
+    const postCalls = mockApiFetch.mock.calls.filter(
+      ([, opts]) => (opts as { method?: string } | undefined)?.method === 'POST'
+    );
+    expect(postCalls).toHaveLength(1);
+
+    resolvePost({ id: 'char-new' } as Character);
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
   });
 
   it('blocks submission until the Review step minimum (a name) is provided', async () => {
@@ -152,98 +257,20 @@ describe('GuidedCharacterPage — wizard shell', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await advanceToReview(user, 'Wizard');
+    await advanceToReview(user, 'Fighter');
     await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
     await user.click(screen.getByRole('button', { name: /create character/i }));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
-    expect(lastPostBody()).toMatchObject({ name: 'Mialee', class: 'Wizard' });
+    expect(lastPostBody()).toMatchObject({ name: 'Mialee', class: 'Fighter' });
     expect(mockToastSuccess).toHaveBeenCalledWith('Character created!');
   });
 
-  it('navigates via the progress bar — jump back to a visited step, then forward to a reachable one', async () => {
-    routeApiFetch();
-    const user = userEvent.setup();
-    renderPage();
-    const progress = screen.getByRole('navigation', { name: /progress/i });
-
-    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Rogue');
-    await user.click(screen.getByRole('button', { name: /^next$/i }));
-    expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
-
-    // Jump back to Class via the progress bar; the typed class survives.
-    await user.click(within(progress).getByRole('button', { name: /class/i }));
-    expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /class/i })).toHaveValue('Rogue');
-
-    // Forward jump to Review is allowed now that the only required prior step (Class) is satisfied.
-    await user.click(within(progress).getByRole('button', { name: /review/i }));
-    expect(screen.getByRole('heading', { name: /review/i })).toBeInTheDocument();
-  });
-
-  it('gates forward jumps on the progress bar behind incomplete required steps', async () => {
-    routeApiFetch();
-    const user = userEvent.setup();
-    renderPage();
-    const progress = screen.getByRole('navigation', { name: /progress/i });
-
-    // With no class chosen, Review is unreachable via the progress bar.
-    const reviewBtn = within(progress).getByRole('button', { name: /review/i });
-    expect(reviewBtn).toBeDisabled();
-
-    // Satisfying the Class step unlocks the forward jump.
-    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Bard');
-    expect(reviewBtn).toBeEnabled();
-  });
-
-  it('shows Skip only on optional steps and advances an optional step via Next without input', async () => {
-    routeApiFetch();
-    const user = userEvent.setup();
-    renderPage();
-
-    // The required Class step has no Skip.
-    expect(screen.queryByRole('button', { name: /^skip$/i })).toBeNull();
-
-    await user.type(screen.getByRole('textbox', { name: /class/i }), 'Cleric');
-    await user.click(screen.getByRole('button', { name: /^next$/i }));
-    // Origin is optional — Skip appears, and Next advances with no input entered.
-    expect(screen.getByRole('button', { name: /^skip$/i })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^next$/i }));
-    expect(screen.getByRole('heading', { name: /abilities/i })).toBeInTheDocument();
-  });
-
-  it('disables the Create button and shows "Creating…" while the request is in flight', async () => {
-    let resolvePost!: (c: Character) => void;
-    mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
-      if (options?.method === 'POST')
-        return new Promise<Character>(resolve => {
-          resolvePost = resolve;
-        });
-      return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
-    });
-    const user = userEvent.setup();
-    renderPage();
-
-    await advanceToReview(user);
-    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
-    await user.click(screen.getByRole('button', { name: /create character/i }));
-
-    // Pending: label flips and the button is disabled so it can't be submitted twice.
-    const pending = await screen.findByRole('button', { name: /creating/i });
-    expect(pending).toBeDisabled();
-    const postCalls = mockApiFetch.mock.calls.filter(
-      ([, opts]) => (opts as { method?: string } | undefined)?.method === 'POST'
-    );
-    expect(postCalls).toHaveLength(1);
-
-    resolvePost({ id: 'char-new' } as Character);
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
-  });
-
   it('toasts an error and stays on the Review step when creation fails', async () => {
-    mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+    mockApiFetch.mockImplementation((path?: string, options?: { method?: string }) => {
       if (options?.method === 'POST') return Promise.reject(new Error('Name is required'));
-      return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
+      if (path === '/srd/classes') return Promise.resolve([]);
+      return Promise.resolve([]);
     });
     const user = userEvent.setup();
     renderPage();
@@ -255,5 +282,64 @@ describe('GuidedCharacterPage — wizard shell', () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Name is required'));
     expect(mockPush).not.toHaveBeenCalled();
     expect(screen.getByRole('heading', { name: /review/i })).toBeInTheDocument();
+  });
+
+  it('reveals the Spells step once a spellcasting class is chosen', async () => {
+    routeApiFetch({ classes: [WIZARD] });
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+    expect(within(progress).queryByText('Spells')).toBeNull();
+
+    await selectSrdClass(user, 'Wizard');
+    await waitFor(() => expect(within(progress).getByText('Spells')).toBeInTheDocument());
+  });
+
+  it('removes the Spells step when switching to a non-caster and keeps the wizard on a real step', async () => {
+    const FIGHTER: SrdClass = {
+      ...WIZARD,
+      id: 'fighter',
+      name: 'Fighter',
+      hitDie: 'd10',
+      skillChoices: ['Acrobatics', 'Athletics', 'History', 'Insight', 'Perception'],
+      spellcasting: undefined,
+    };
+    routeApiFetch({ classes: [WIZARD, FIGHTER] });
+    const user = userEvent.setup();
+    renderPage();
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+
+    // Become a caster and walk onto the Spells step.
+    await selectSrdClass(user, 'Wizard');
+    const skills = screen.getByRole('group', { name: /skills/i });
+    await user.click(within(skills).getByRole('button', { name: /arcana/i }));
+    await user.click(within(skills).getByRole('button', { name: /history/i }));
+    await waitFor(() => expect(within(progress).getByText('Spells')).toBeInTheDocument());
+    await user.click(within(progress).getByRole('button', { name: /spells/i }));
+    expect(screen.getByRole('heading', { name: /spells/i })).toBeInTheDocument();
+
+    // Jump back to Class and switch to a non-caster — the Spells step vanishes.
+    await user.click(within(progress).getByRole('button', { name: /class/i }));
+    await selectSrdClass(user, 'Fighter');
+    await waitFor(() => expect(within(progress).queryByText('Spells')).toBeNull());
+    // The wizard is still on a real (non-blank) step, and navigation still works.
+    expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^next$/i })).toBeInTheDocument();
+  });
+
+  it('gates Next on the class skill count for an SRD class', async () => {
+    routeApiFetch({ classes: [WIZARD] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Wizard');
+    const next = screen.getByRole('button', { name: /^next$/i });
+    // Class chosen but 0 of 2 skills picked → still gated.
+    await waitFor(() => expect(next).toBeDisabled());
+
+    const skills = screen.getByRole('group', { name: /skills/i });
+    await user.click(within(skills).getByRole('button', { name: /arcana/i }));
+    await user.click(within(skills).getByRole('button', { name: /history/i }));
+    await waitFor(() => expect(next).toBeEnabled());
   });
 });

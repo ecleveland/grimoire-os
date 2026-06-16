@@ -12,36 +12,60 @@ import {
   emptyCharacterFormValues,
   type CharacterFormValues,
 } from '@/components/CharacterEditorForm';
-import { STEPS } from './steps';
+import { STEPS, type WizardStepId } from './steps';
 import WizardProgress from './_components/WizardProgress';
 
 export default function GuidedCharacterPage() {
   const router = useRouter();
   const [draft, setDraft] = useState<CharacterFormValues>(() => emptyCharacterFormValues());
-  const [stepIndex, setStepIndex] = useState(0);
+  const [rawStepIndex, setRawStepIndex] = useState(0);
+  // Validity reported by steps whose answer depends on more than the draft
+  // (e.g. the Class step's SRD-derived skill-count rule). Overrides isValid.
+  const [reported, setReported] = useState<Partial<Record<WizardStepId, boolean>>>({});
 
   const onChange = useCallback(
     (patch: Partial<CharacterFormValues>) => setDraft(prev => ({ ...prev, ...patch })),
     []
   );
 
-  const completed = useMemo(() => STEPS.map(step => step.isValid(draft)), [draft]);
-  const requiredComplete = useMemo(
-    () => STEPS.every((step, i) => step.optional || completed[i]),
-    [completed]
+  // Steps can drop out for a given draft (e.g. the Spells step for a non-caster),
+  // so the visible list — and thus indices — are derived from the draft.
+  const visibleSteps = useMemo(() => STEPS.filter(s => s.isVisible?.(draft) ?? true), [draft]);
+  // Clamp the stored index: a step disappearing can shrink the list under us.
+  const stepIndex = Math.min(rawStepIndex, visibleSteps.length - 1);
+
+  // A step is complete when its draft-derived predicate holds AND it hasn't
+  // reported itself incomplete. A reported value can only further restrict
+  // (never loosen) the draft default, so a stale `true` can't mask a draft that
+  // has since regressed.
+  const isComplete = useCallback(
+    (step: (typeof STEPS)[number]) => step.isValid(draft) && (reported[step.id] ?? true),
+    [reported, draft]
   );
 
-  const step = STEPS[stepIndex];
+  const completed = useMemo(() => visibleSteps.map(isComplete), [visibleSteps, isComplete]);
+  const requiredComplete = useMemo(
+    () => visibleSteps.every((step, i) => step.optional || completed[i]),
+    [visibleSteps, completed]
+  );
+
+  const step = visibleSteps[stepIndex];
   const isFirst = stepIndex === 0;
-  const isLast = stepIndex === STEPS.length - 1;
+  const isLast = stepIndex === visibleSteps.length - 1;
   const canAdvance = step.optional || completed[stepIndex];
 
   // Back is always allowed; forward jumps require every intervening required step
   // to be satisfied so the user can't skip past a gate via the progress bar.
   const canJumpTo = useCallback(
     (index: number) =>
-      index <= stepIndex || STEPS.slice(0, index).every(s => s.optional || s.isValid(draft)),
-    [stepIndex, draft]
+      index <= stepIndex || visibleSteps.slice(0, index).every(s => s.optional || isComplete(s)),
+    [stepIndex, visibleSteps, isComplete]
+  );
+
+  const reportValidity = useCallback(
+    (valid: boolean) =>
+      setReported(prev => (prev[step.id] === valid ? prev : { ...prev, [step.id]: valid })),
+    [step.id]
   );
 
   const createMutation = useApiMutation<Character, void>(
@@ -62,10 +86,10 @@ export default function GuidedCharacterPage() {
   );
 
   const goNext = () => {
-    if (canAdvance && !isLast) setStepIndex(i => i + 1);
+    if (canAdvance && !isLast) setRawStepIndex(stepIndex + 1);
   };
   const goBack = () => {
-    if (!isFirst) setStepIndex(i => i - 1);
+    if (!isFirst) setRawStepIndex(stepIndex - 1);
   };
   const StepBody = step.Component;
 
@@ -82,17 +106,17 @@ export default function GuidedCharacterPage() {
       </div>
 
       <WizardProgress
-        steps={STEPS}
+        steps={visibleSteps}
         currentIndex={stepIndex}
         completed={completed}
         canJumpTo={canJumpTo}
         onJump={index => {
-          if (canJumpTo(index)) setStepIndex(index);
+          if (canJumpTo(index)) setRawStepIndex(index);
         }}
       />
 
       <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-900">
-        <StepBody value={draft} onChange={onChange} />
+        <StepBody value={draft} onChange={onChange} onValidChange={reportValidity} />
       </div>
 
       <div className="mt-6 flex items-center justify-between gap-3">
