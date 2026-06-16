@@ -18,6 +18,14 @@ export type WizardStepId = 'class' | 'origin' | 'abilities' | 'equipment' | 'spe
 export interface WizardStepProps {
   value: CharacterFormValues;
   onChange: (patch: Partial<CharacterFormValues>) => void;
+  /**
+   * Steps whose "is this complete?" answer depends on data the draft alone can't
+   * express — e.g. the Class step enforcing exactly `numSkillChoices` picks,
+   * where the required count comes from async SRD data — report their validity
+   * here. The shell prefers a reported value over the step def's `isValid`.
+   * Pure steps can ignore this and rely on `isValid(draft)`.
+   */
+  onValidChange?: (valid: boolean) => void;
 }
 
 /**
@@ -35,7 +43,17 @@ export interface WizardStepDef {
    * an optional step it only drives the progress-bar checkmark.
    */
   optional: boolean;
-  /** Whether this step's minimum choice has been made for the given draft. */
+  /**
+   * Default "is this step complete?" derived from the draft. A step may refine
+   * this at runtime via `onValidChange` (see WizardStepProps); when it does, the
+   * reported value wins.
+   */
   isValid: (draft: CharacterFormValues) => boolean;
+  /**
+   * Whether this step is shown for the given draft (default: always shown). Lets
+   * the shell drop steps that don't apply — e.g. the Spells step for a
+   * non-spellcasting class.
+   */
+  isVisible?: (draft: CharacterFormValues) => boolean;
   Component: (props: WizardStepProps) => ReactNode;
 }

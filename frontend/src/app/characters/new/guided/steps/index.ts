@@ -9,6 +9,10 @@ import ReviewStep from './ReviewStep';
 
 const isNonEmpty = (s: string) => s.trim() !== '';
 
+/** A class is a spellcaster once its selection has recorded a spellcasting
+ * ability (written by the Class step). Drives whether the Spells step is shown. */
+export const isSpellcaster = (d: CharacterFormValues) => isNonEmpty(d.spellcastingAbility);
+
 /**
  * The guided builder steps, in SRD creation order. The shell drives ordering,
  * progress, gating, and submission off this list — adding/replacing a slice is a
@@ -37,7 +41,14 @@ export const STEPS: WizardStepDef[] = [
     isValid: () => true,
     Component: EquipmentStep,
   },
-  { id: 'spells', title: 'Spells', optional: true, isValid: () => true, Component: SpellsStep },
+  {
+    id: 'spells',
+    title: 'Spells',
+    optional: true,
+    isValid: () => true,
+    isVisible: isSpellcaster,
+    Component: SpellsStep,
+  },
   {
     id: 'review',
     title: 'Review',
