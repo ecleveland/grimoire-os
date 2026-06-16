@@ -1,0 +1,50 @@
+import type { CharacterFormValues } from '@/components/CharacterEditorForm';
+import type { WizardStepDef } from './types';
+import ClassStep from './ClassStep';
+import OriginStep from './OriginStep';
+import AbilitiesStep from './AbilitiesStep';
+import EquipmentStep from './EquipmentStep';
+import SpellsStep from './SpellsStep';
+import ReviewStep from './ReviewStep';
+
+const isNonEmpty = (s: string) => s.trim() !== '';
+
+/**
+ * The guided builder steps, in SRD creation order. The shell drives ordering,
+ * progress, gating, and submission off this list — adding/replacing a slice is a
+ * matter of editing the relevant step file, not the shell.
+ */
+export const STEPS: WizardStepDef[] = [
+  {
+    id: 'class',
+    title: 'Class',
+    optional: false,
+    isValid: (d: CharacterFormValues) => isNonEmpty(d.class),
+    Component: ClassStep,
+  },
+  { id: 'origin', title: 'Origin', optional: true, isValid: () => true, Component: OriginStep },
+  {
+    id: 'abilities',
+    title: 'Abilities',
+    optional: true,
+    isValid: () => true,
+    Component: AbilitiesStep,
+  },
+  {
+    id: 'equipment',
+    title: 'Equipment',
+    optional: true,
+    isValid: () => true,
+    Component: EquipmentStep,
+  },
+  { id: 'spells', title: 'Spells', optional: true, isValid: () => true, Component: SpellsStep },
+  {
+    id: 'review',
+    title: 'Review',
+    optional: false,
+    isValid: (d: CharacterFormValues) => isNonEmpty(d.name),
+    Component: ReviewStep,
+  },
+];
+
+export type { WizardStepDef, WizardStepProps } from './types';

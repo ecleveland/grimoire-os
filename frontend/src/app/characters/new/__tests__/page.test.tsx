@@ -101,6 +101,16 @@ describe('NewCharacterPage — campaign picker', () => {
     ).toBeInTheDocument();
   });
 
+  it('links to the guided builder', async () => {
+    routeApiFetch([]);
+    renderPage();
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+    expect(screen.getByRole('link', { name: /guided builder/i })).toHaveAttribute(
+      'href',
+      '/characters/new/guided'
+    );
+  });
+
   it('hides the picker entirely when the user has no campaigns', async () => {
     routeApiFetch([]);
     renderPage();
