@@ -32,6 +32,17 @@ describe('FeaturesEditor', () => {
     expect(onChange).toHaveBeenCalledWith([f({ source: 'Elf' })]);
   });
 
+  it('edits the name and description fields', () => {
+    const onChange = vi.fn();
+    render(<FeaturesEditor value={[f()]} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Feature name'), { target: { value: 'Rage' } });
+    expect(onChange).toHaveBeenLastCalledWith([f({ name: 'Rage' })]);
+    fireEvent.change(screen.getByLabelText('Feature description'), {
+      target: { value: 'Advantage on STR.' },
+    });
+    expect(onChange).toHaveBeenLastCalledWith([f({ description: 'Advantage on STR.' })]);
+  });
+
   it('removes the targeted row', async () => {
     const onChange = vi.fn();
     render(<FeaturesEditor value={[f({ name: 'A' }), f({ name: 'B' })]} onChange={onChange} />);

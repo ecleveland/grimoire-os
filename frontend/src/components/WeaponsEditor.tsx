@@ -38,21 +38,21 @@ export default function WeaponsEditor({ value, onChange }: WeaponsEditorProps) {
               <input
                 aria-label="Attack bonus"
                 placeholder="Atk (+5)"
-                value={w.attackBonus}
+                value={w.attackBonus ?? ''}
                 onChange={e => update(i, { attackBonus: e.target.value })}
                 className={`${cell} col-span-2`}
               />
               <input
                 aria-label="Damage"
                 placeholder="Damage (1d8+3)"
-                value={w.damage}
+                value={w.damage ?? ''}
                 onChange={e => update(i, { damage: e.target.value })}
                 className={`${cell} col-span-2`}
               />
               <input
                 aria-label="Damage type"
                 placeholder="Type"
-                value={w.damageType}
+                value={w.damageType ?? ''}
                 onChange={e => update(i, { damageType: e.target.value })}
                 className={`${cell} col-span-2`}
               />

@@ -37,6 +37,17 @@ describe('WeaponsEditor', () => {
     expect(onChange).toHaveBeenCalledWith([w({ damage: '2d6' })]);
   });
 
+  it('edits the notes field and a middle row without disturbing siblings', () => {
+    const onChange = vi.fn();
+    const rows = [w({ name: 'A' }), w({ name: 'B' }), w({ name: 'C' })];
+    render(<WeaponsEditor value={rows} onChange={onChange} />);
+    // Edit the notes of the middle row (index 1).
+    fireEvent.change(screen.getAllByLabelText('Weapon notes')[1], {
+      target: { value: 'silvered' },
+    });
+    expect(onChange).toHaveBeenCalledWith([rows[0], w({ name: 'B', notes: 'silvered' }), rows[2]]);
+  });
+
   it('removes the targeted row', async () => {
     const onChange = vi.fn();
     render(
