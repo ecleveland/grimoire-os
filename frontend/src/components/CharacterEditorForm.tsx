@@ -6,6 +6,7 @@ import type {
   AbilityScores,
   Character,
   DieType,
+  Feature,
   HitDice,
   HitPoints,
   Size,
@@ -14,6 +15,7 @@ import type {
   SrdLanguage,
   SrdRace,
   SrdSubclass,
+  Weapon,
 } from '@/lib/types';
 import { DIE_TYPES, SIZES } from '@/lib/types';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
@@ -22,6 +24,8 @@ import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
 import TokenListEditor from '@/components/TokenListEditor';
+import WeaponsEditor from '@/components/WeaponsEditor';
+import FeaturesEditor from '@/components/FeaturesEditor';
 
 // Editable shape of a character. Slice 1 covered identity/abilities/combat;
 // slice 2 (VEG-348) adds the SRD-grant fields below so picking a class/race/
@@ -60,6 +64,10 @@ export interface CharacterFormValues {
   flaws: string;
   backstory: string;
   avatarUrl: string;
+  // Weapons table + features/traits/feats (slice 5). Features are categorized on
+  // the sheet by `source` (class → Class Features, race → Species Traits, else Feats).
+  weapons: Weapon[];
+  features: Feature[];
 }
 
 const abilityKeys: (keyof AbilityScores)[] = [
@@ -116,6 +124,8 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     flaws: '',
     backstory: '',
     avatarUrl: '',
+    weapons: [],
+    features: [],
   };
 }
 
@@ -151,6 +161,8 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     flaws: c.flaws ?? '',
     backstory: c.backstory ?? '',
     avatarUrl: c.avatarUrl ?? '',
+    weapons: c.weapons ?? [],
+    features: c.features ?? [],
   };
 }
 
@@ -186,6 +198,8 @@ type CharacterWriteFields = Pick<
   | 'flaws'
   | 'backstory'
   | 'avatarUrl'
+  | 'weapons'
+  | 'features'
 >;
 
 /**
@@ -222,6 +236,9 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     flaws: v.flaws,
     backstory: v.backstory,
     avatarUrl: v.avatarUrl,
+    // Drop incomplete rows the user added but never named.
+    weapons: v.weapons.filter(w => w.name.trim() !== ''),
+    features: v.features.filter(f => f.name.trim() !== ''),
   };
 }
 
@@ -812,6 +829,17 @@ export default function CharacterEditorForm({
             onChange={e => set('hitDice', { ...values.hitDice, spent: Number(e.target.value) })}
           />
         </div>
+      </div>
+
+      {/* ── Weapons & Features ─────────────────────────────────── */}
+      <div className={cardClass}>
+        <h2 className={sectionHeading}>Weapons &amp; Features</h2>
+        <WeaponsEditor value={values.weapons} onChange={w => set('weapons', w)} />
+        <FeaturesEditor
+          value={values.features}
+          onChange={f => set('features', f)}
+          sourceSuggestions={[values.class, values.race]}
+        />
       </div>
 
       {/* ── Personality & Details ──────────────────────────────── */}

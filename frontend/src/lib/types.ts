@@ -39,6 +39,7 @@ export type {
   AttunedItem,
   Currency,
   Feature,
+  Weapon,
   Combatant,
   PartyCharacter,
   // Entity types
