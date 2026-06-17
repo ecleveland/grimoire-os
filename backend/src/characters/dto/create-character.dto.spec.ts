@@ -216,6 +216,50 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('inventory', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted)
+    // because the inventory CRUD controls (VEG-402) PATCH inventory with an
+    // optional catalog `itemId`; a plain validate() would silently accept an
+    // unwhitelisted nested field.
+    it('accepts an item with an optional catalog itemId (not rejected as unwhitelisted)', async () => {
+      const dto = toDto({
+        ...baseDto,
+        inventory: [
+          {
+            name: 'Ring of Evasion',
+            quantity: 1,
+            weight: 0,
+            equipped: false,
+            itemId: '123e4567-e89b-42d3-a456-426614174000',
+          },
+        ],
+      });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+    });
+
+    it('accepts an item with no itemId (catalog link is optional)', async () => {
+      const dto = toDto({
+        ...baseDto,
+        inventory: [{ name: 'Torch', quantity: 5, equipped: false }],
+      });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+    });
+
+    it('rejects a non-UUID itemId', async () => {
+      const dto = toDto({ ...baseDto, inventory: [{ name: 'X', itemId: 'not-a-uuid' }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'inventory')).toBeDefined();
+    });
+
+    it('rejects an item missing the required name', async () => {
+      const dto = toDto({ ...baseDto, inventory: [{ quantity: 1, equipped: true }] });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'inventory')).toBeDefined();
+    });
+  });
+
   describe('deathSaves', () => {
     // Validated under the app's real strictness (whitelist + forbidNonWhitelisted)
     // because the bug was an unwhitelisted field: the in-sheet play controls

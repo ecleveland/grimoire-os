@@ -121,6 +121,11 @@ class InventoryItemDto {
   @IsOptional()
   @IsStrictBoolean()
   equipped?: boolean;
+
+  @ApiPropertyOptional({ description: 'Optional link to the Item catalog row' })
+  @IsOptional()
+  @IsUUID()
+  itemId?: string;
 }
 
 class CurrencyDto {

@@ -15,7 +15,13 @@ import type { Character } from '@/lib/types';
 export type CharacterPatch = Partial<
   Pick<
     Character,
-    'hitPoints' | 'deathSaves' | 'hitDice' | 'heroicInspiration' | 'spellSlots' | 'currency'
+    | 'hitPoints'
+    | 'deathSaves'
+    | 'hitDice'
+    | 'heroicInspiration'
+    | 'spellSlots'
+    | 'currency'
+    | 'inventory'
   >
 >;
 

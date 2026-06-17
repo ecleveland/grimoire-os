@@ -4,6 +4,24 @@ import userEvent from '@testing-library/user-event';
 import InventorySection from '../InventorySection';
 import type { Character } from '@/lib/types';
 
+// Stub the catalog picker so these tests don't exercise the debounced network
+// search (covered in SrdItemSearch.test.tsx). The stub exposes a button that
+// fires onSelect with a fixed catalog item.
+const catalogItem = {
+  id: '123e4567-e89b-42d3-a456-426614174000',
+  name: 'Ring of Protection',
+  category: 'Ring',
+  weight: 0,
+  rarity: 'Rare',
+};
+vi.mock('@/components/SrdItemSearch', () => ({
+  default: ({ onSelect }: { onSelect: (item: typeof catalogItem) => void }) => (
+    <button type="button" onClick={() => onSelect(catalogItem)}>
+      stub-pick-catalog
+    </button>
+  ),
+}));
+
 const baseCharacter: Character = {
   id: 'char-1',
   userId: 'user-1',
@@ -317,6 +335,147 @@ describe('InventorySection', () => {
       render(<InventorySection character={baseCharacter} />);
       expect(screen.queryByRole('button', { name: /adjust/i })).toBeNull();
       expect(screen.getByText('150')).toBeInTheDocument();
+    });
+  });
+
+  describe('inventory editing (owner)', () => {
+    const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
+      const onPatch = vi.fn();
+      render(
+        <InventorySection
+          character={{ ...baseCharacter, ...over }}
+          editable
+          onPatch={onPatch}
+          isSaving={isSaving}
+        />
+      );
+      return onPatch;
+    };
+
+    it('shows the Equipment section and add form for an owner even with empty inventory', () => {
+      renderOwner({ inventory: [] });
+      expect(screen.getByText('Equipment')).toBeInTheDocument();
+      expect(screen.getByTestId('add-item-form')).toBeInTheDocument();
+    });
+
+    it('does not show edit/remove controls for a non-owner', () => {
+      render(<InventorySection character={baseCharacter} />);
+      expect(screen.queryByRole('button', { name: /^Edit / })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull();
+      expect(screen.queryByTestId('add-item-form')).toBeNull();
+    });
+
+    it('renders a carrying-capacity readout (STR 16 → 240 lb, carried 62)', () => {
+      // Chain Mail 55 + Longsword 3 + Handaxe 2×2=4 = 62; capacity 16×15 = 240.
+      renderOwner();
+      expect(screen.getByTestId('carrying-capacity')).toHaveTextContent('Carried 62 / 240 lb');
+    });
+
+    it('flags over-capacity when carried weight exceeds the limit', () => {
+      renderOwner({
+        abilityScores: { ...baseCharacter.abilityScores, strength: 3 }, // capacity 45
+      });
+      expect(screen.getByTestId('carrying-capacity')).toHaveTextContent('over capacity');
+    });
+
+    it('toggles a row equipped flag through patch', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Unequip Chain Mail' }));
+      const next = onPatch.mock.calls[0][0].inventory;
+      expect(next[0]).toMatchObject({ name: 'Chain Mail', equipped: false });
+    });
+
+    it('removes a row through patch', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Remove Handaxe' }));
+      const next = onPatch.mock.calls[0][0].inventory;
+      expect(next.map((i: { name: string }) => i.name)).toEqual([
+        'Chain Mail',
+        'Longsword',
+        'Rope (50ft)',
+      ]);
+    });
+
+    it('edits a row name/qty/weight and saves once', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Edit Handaxe' }));
+      fireEvent.change(screen.getByLabelText('Item name'), { target: { value: 'Throwing Axe' } });
+      fireEvent.change(screen.getByLabelText('Item quantity'), { target: { value: '3' } });
+      fireEvent.change(screen.getByLabelText('Item weight'), { target: { value: '2.5' } });
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      const next = onPatch.mock.calls[0][0].inventory;
+      expect(next[2]).toMatchObject({ name: 'Throwing Axe', quantity: 3, weight: 2.5 });
+    });
+
+    it('cancels an edit without patching', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Edit Handaxe' }));
+      fireEvent.change(screen.getByLabelText('Item name'), { target: { value: 'Nope' } });
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(onPatch).not.toHaveBeenCalled();
+      expect(screen.getByText('Handaxe')).toBeInTheDocument();
+    });
+
+    it('adds a free-typed item, clamping quantity to at least 1 and omitting blank weight', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      fireEvent.change(screen.getByLabelText('New item name'), { target: { value: 'Torch' } });
+      fireEvent.change(screen.getByLabelText('New item quantity'), { target: { value: '0' } });
+      await user.click(screen.getByRole('button', { name: 'Add item' }));
+      const next = onPatch.mock.calls[0][0].inventory;
+      const added = next[next.length - 1];
+      expect(added).toEqual({ name: 'Torch', quantity: 1, equipped: false });
+      expect(added).not.toHaveProperty('weight');
+      expect(added).not.toHaveProperty('itemId');
+    });
+
+    it('disables Add until a name is entered', async () => {
+      renderOwner({ inventory: [] });
+      expect(screen.getByRole('button', { name: 'Add item' })).toBeDisabled();
+      fireEvent.change(screen.getByLabelText('New item name'), { target: { value: 'Torch' } });
+      expect(screen.getByRole('button', { name: 'Add item' })).toBeEnabled();
+    });
+
+    it('autofills the add form and links the catalog item id when picked', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ inventory: [] });
+      await user.click(screen.getByRole('button', { name: 'stub-pick-catalog' }));
+      expect(screen.getByLabelText('New item name')).toHaveValue('Ring of Protection');
+      expect(screen.getByTestId('catalog-detail')).toHaveTextContent('Ring · Rare');
+      await user.click(screen.getByRole('button', { name: 'Add item' }));
+      const added = onPatch.mock.calls[0][0].inventory.at(-1);
+      expect(added).toMatchObject({
+        name: 'Ring of Protection',
+        weight: 0,
+        itemId: catalogItem.id,
+        equipped: false,
+      });
+    });
+
+    it('drops the catalog link if the name is hand-edited after a pick', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ inventory: [] });
+      await user.click(screen.getByRole('button', { name: 'stub-pick-catalog' }));
+      fireEvent.change(screen.getByLabelText('New item name'), {
+        target: { value: 'Custom Ring' },
+      });
+      expect(screen.queryByTestId('catalog-detail')).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Add item' }));
+      const added = onPatch.mock.calls[0][0].inventory.at(-1);
+      expect(added).not.toHaveProperty('itemId');
+      expect(added).toMatchObject({ name: 'Custom Ring' });
+    });
+
+    it('disables row actions while a write is in flight', () => {
+      renderOwner({}, true);
+      expect(screen.getByRole('button', { name: 'Edit Handaxe' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Remove Handaxe' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Add item' })).toBeDisabled();
     });
   });
 });
