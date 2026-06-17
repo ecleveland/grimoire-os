@@ -5,10 +5,12 @@ import { toast } from 'sonner';
 import type {
   AbilityScores,
   Character,
+  Currency,
   DieType,
   Feature,
   HitDice,
   HitPoints,
+  InventoryItem,
   Size,
   SrdBackground,
   SrdClass,
@@ -68,6 +70,16 @@ export interface CharacterFormValues {
   // the sheet by `source` (class → Class Features, race → Species Traits, else Feats).
   weapons: Weapon[];
   features: Feature[];
+  // Starting inventory + coin. Currently written only by the guided builder's
+  // Equipment step (VEG-382); the classic editor round-trips them untouched (no
+  // inventory editor yet), so loading and re-sending them is a no-op there.
+  inventory: InventoryItem[];
+  currency: Currency;
+}
+
+/** Zeroed coin purse — the SRD default for a fresh character. */
+export function emptyCurrency(): Currency {
+  return { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 }
 
 const abilityKeys: (keyof AbilityScores)[] = [
@@ -126,6 +138,8 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     avatarUrl: '',
     weapons: [],
     features: [],
+    inventory: [],
+    currency: emptyCurrency(),
   };
 }
 
@@ -163,6 +177,8 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     avatarUrl: c.avatarUrl ?? '',
     weapons: c.weapons ?? [],
     features: c.features ?? [],
+    inventory: c.inventory ?? [],
+    currency: c.currency ?? emptyCurrency(),
   };
 }
 
@@ -200,6 +216,8 @@ type CharacterWriteFields = Pick<
   | 'avatarUrl'
   | 'weapons'
   | 'features'
+  | 'inventory'
+  | 'currency'
 >;
 
 /**
@@ -239,6 +257,8 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     // Drop incomplete rows the user added but never named.
     weapons: v.weapons.filter(w => w.name.trim() !== ''),
     features: v.features.filter(f => f.name.trim() !== ''),
+    inventory: v.inventory.filter(i => i.name.trim() !== ''),
+    currency: v.currency,
   };
 }
 

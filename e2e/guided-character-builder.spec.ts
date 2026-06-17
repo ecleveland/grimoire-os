@@ -56,9 +56,23 @@ test.describe('guided character builder — class selection', () => {
     await expect(page.getByTestId('score-strength')).toHaveText('10');
     await expect(page.getByTestId('mod-strength')).toHaveText('+0');
 
-    // Advance through the remaining optional stub step to Review.
+    // Equipment step — take the class starting equipment: pick the first bundle in
+    // each choice group and confirm the resolution lands in the draft inventory.
     await next.click();
     await expect(page.getByRole('heading', { name: /equipment/i })).toBeVisible();
+    const choiceGroups = page.getByRole('group', { name: /equipment choice/i });
+    const groupCount = await choiceGroups.count();
+    for (let i = 0; i < groupCount; i++) {
+      await choiceGroups.nth(i).getByRole('radio').first().check();
+    }
+    const resolved = page.getByRole('region', { name: /resolved equipment/i });
+    await expect(resolved).toContainText(/chain mail/i);
+
+    // Switching to the gold alternative clears the items and fills the purse.
+    await page.getByRole('radio', { name: /take starting gold/i }).click();
+    await expect(resolved).not.toContainText(/chain mail/i);
+    await expect(page.getByTestId('starting-gp')).not.toHaveText('0');
+
     await next.click();
     await expect(page.getByRole('heading', { name: /review/i })).toBeVisible();
 
