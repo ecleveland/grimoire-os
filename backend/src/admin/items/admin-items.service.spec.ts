@@ -210,7 +210,12 @@ describe('AdminItemsService', () => {
   });
 
   describe('setBundleContents', () => {
-    const pack = { id: 'pack-1', contentSource: 'shared', createdById: 'admin-9' };
+    const pack = {
+      id: 'pack-1',
+      category: 'Equipment Pack',
+      contentSource: 'shared',
+      createdById: 'admin-9',
+    };
 
     beforeEach(() => {
       prisma.item.findUnique.mockResolvedValue(pack);
@@ -319,6 +324,43 @@ describe('AdminItemsService', () => {
       await expect(
         service.setBundleContents('pack-1', [{ itemId: 'c1', quantity: 1 }], PLAYER)
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects setting contents on a non-pack item', async () => {
+      prisma.item.findUnique.mockResolvedValue({
+        id: 'sword-1',
+        category: 'Martial Melee Weapon',
+        contentSource: 'shared',
+        createdById: 'admin-9',
+      });
+
+      await expect(
+        service.setBundleContents('sword-1', [{ itemId: 'c1', quantity: 1 }], ADMIN)
+      ).rejects.toThrow('Only equipment packs can have contents');
+      expect(prisma.itemBundleEntry.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it('maps an FK race (component deleted mid-write, P2003) to a friendly 400', async () => {
+      prisma.item.findMany.mockResolvedValue([{ id: 'c1', name: 'Candle' }]);
+      prisma.$transaction.mockRejectedValueOnce(
+        new Prisma.PrismaClientKnownRequestError('FK violation', {
+          code: 'P2003',
+          clientVersion: 'test',
+        })
+      );
+
+      await expect(
+        service.setBundleContents('pack-1', [{ itemId: 'c1', quantity: 1 }], ADMIN)
+      ).rejects.toThrow('One or more components were removed while saving; refresh and try again');
+    });
+
+    it('maps a duplicate-entry P2002 from the write through mapWriteError', async () => {
+      prisma.item.findMany.mockResolvedValue([{ id: 'c1', name: 'Candle' }]);
+      prisma.$transaction.mockRejectedValueOnce(p2002());
+
+      await expect(
+        service.setBundleContents('pack-1', [{ itemId: 'c1', quantity: 1 }], ADMIN)
+      ).rejects.toThrow(ConflictException);
     });
   });
 });

@@ -257,4 +257,38 @@ describe('AdminEquipmentPage', () => {
     });
     expect(mockToastSuccess).toHaveBeenCalledWith('Pack contents saved');
   });
+
+  it('toasts and re-enables the save button when saving contents fails', async () => {
+    mockApiFetch.mockImplementation((path: string, opts?: RequestInit) => {
+      if (path === '/admin/items/pack-1/contents' && opts?.method === 'PUT') {
+        return Promise.reject(new Error('save boom'));
+      }
+      if (path.startsWith('/admin/items?')) {
+        return Promise.resolve(
+          paginated([
+            makeItem({ id: 'pack-1', name: "Explorer's Pack", category: 'Equipment Pack' }),
+          ])
+        );
+      }
+      if (path.startsWith('/srd/items/')) {
+        return Promise.resolve({
+          id: 'pack-1',
+          contents: [{ itemId: 'c1', name: 'Bedroll', quantity: 1 }],
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<AdminEquipmentPage />);
+    await screen.findByText("Explorer's Pack");
+
+    await user.click(screen.getByRole('button', { name: /contents/i }));
+    await screen.findByLabelText('Bedroll quantity');
+    await user.click(screen.getByRole('button', { name: /save contents/i }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('save boom'));
+    // The dialog stays open and the button returns to enabled "Save contents".
+    const saveButton = await screen.findByRole('button', { name: /save contents/i });
+    expect(saveButton).toBeEnabled();
+  });
 });

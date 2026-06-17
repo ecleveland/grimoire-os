@@ -94,16 +94,22 @@ export class AdminItemsService {
   }
 
   /**
-   * Replace a pack's bundle contents with the given set (VEG-309). The whole
-   * desired set is sent; entries are rewritten delete-then-recreate so the
-   * operation is idempotent, exactly like the seed's second bundle pass. The
-   * pack must be a writable shared row; every component must resolve to a row in
-   * the global catalog (srd + shared) so all viewers of the pack can resolve its
-   * contents. Honors the DB CHECKs (quantity >= 1 via the DTO; bundleId <>
-   * componentId and uniqueness validated here for a friendly 400 over a 500).
+   * Replace an equipment pack's bundle contents with the given set (VEG-309).
+   * The whole desired set is sent; entries are rewritten delete-then-recreate so
+   * the operation is idempotent, exactly like the seed's second bundle pass. The
+   * pack must be a writable shared row of category "Equipment Pack"; every
+   * component must resolve to a row in the global catalog (srd + shared) so all
+   * viewers of the pack can resolve its contents. The application-level checks
+   * (self-reference, intra-pack duplicate, component existence) produce friendly
+   * 400s; the DB CHECKs (quantity >= 1 via the DTO, bundleId <> componentId,
+   * uniqueness) are a backstop, and a component deleted between the existence
+   * check and the write (an FK race) is mapped to a 400 rather than a raw 500.
    */
   async setBundleContents(id: string, entries: BundleContentEntryDto[], actor: ContentActor) {
     const bundle = await this.findWritableRow(id, actor);
+    if (bundle.category !== 'Equipment Pack') {
+      throw new BadRequestException('Only equipment packs can have contents');
+    }
 
     if (entries.some(e => e.itemId === id)) {
       throw new BadRequestException('A pack cannot contain itself');
@@ -125,18 +131,31 @@ export class AdminItemsService {
     }
     const nameById = new Map(components.map(c => [c.id, c.name]));
 
-    await this.prisma.$transaction(async tx => {
-      await tx.itemBundleEntry.deleteMany({ where: { bundleId: id } });
-      if (entries.length) {
-        await tx.itemBundleEntry.createMany({
-          data: entries.map(e => ({
-            bundleId: id,
-            componentId: e.itemId,
-            quantity: e.quantity,
-          })),
-        });
+    try {
+      await this.prisma.$transaction(async tx => {
+        await tx.itemBundleEntry.deleteMany({ where: { bundleId: id } });
+        if (entries.length) {
+          await tx.itemBundleEntry.createMany({
+            data: entries.map(e => ({
+              bundleId: id,
+              componentId: e.itemId,
+              quantity: e.quantity,
+            })),
+          });
+        }
+      });
+    } catch (err) {
+      // A component (or the pack) deleted between the visibility check above and
+      // the write trips a foreign-key violation (P2003). Surface it as an
+      // actionable 400 instead of an opaque 500; everything else (P2002/P2025)
+      // goes through the shared write-error mapping for consistent semantics.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        throw new BadRequestException(
+          'One or more components were removed while saving; refresh and try again'
+        );
       }
-    });
+      mapWriteError(err, 'shared', 'item');
+    }
 
     return {
       ...bundle,
