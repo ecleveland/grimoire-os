@@ -73,7 +73,8 @@ test.describe('character sheet — in-sheet play controls', () => {
     // Coins: select GP (starts at 0), add 25.
     await page.getByRole('button', { name: 'Adjust GP' }).click();
     await page.getByLabel('Amount').fill('25');
-    await page.getByRole('button', { name: 'Add' }).click();
+    // exact: the inventory editor on this tab now also has an "Add item" button.
+    await page.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Adjust GP' })).toContainText('25');
   });
 });
