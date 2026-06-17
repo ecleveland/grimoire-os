@@ -43,7 +43,10 @@ export default function InventorySection(props: InventorySectionProps) {
   const { editable, patch, isSaving } = resolvePlayControls(props);
   const inventory = character.inventory ?? [];
   const currency = character.currency ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
-  const attunedItems = (character.attunedItems ?? []).slice(0, ATTUNEMENT_SLOTS);
+  // Display caps at 3 slots, but the add/remove handlers mutate the full stored
+  // array so a (DTO-unreachable) >3 state can't silently drop the hidden tail.
+  const storedAttunedItems = character.attunedItems ?? [];
+  const attunedItems = storedAttunedItems.slice(0, ATTUNEMENT_SLOTS);
   const hasInventory = inventory.length > 0;
   const hasCurrency = Object.values(currency).some(v => v > 0);
   const hasAttunement = attunedItems.length > 0;
@@ -52,7 +55,7 @@ export default function InventorySection(props: InventorySectionProps) {
   const showInventory = hasInventory || editable;
   const showCurrency = hasCurrency || editable;
   const showAttunement = hasAttunement || editable;
-  const attunementFull = attunedItems.length >= ATTUNEMENT_SLOTS;
+  const attunementFull = storedAttunedItems.length >= ATTUNEMENT_SLOTS;
 
   // Coin adjuster: click a denomination to reveal an add/subtract amount box;
   // clicking it again (or another) closes/switches it.
@@ -178,13 +181,13 @@ export default function InventorySection(props: InventorySectionProps) {
     if (!name || attunementFull) return;
     const item: AttunedItem = { name };
     if (attuneItemId) item.itemId = attuneItemId;
-    patch({ attunedItems: addAttunedItem(attunedItems, item) });
+    patch({ attunedItems: addAttunedItem(storedAttunedItems, item) });
     setAttuneName('');
     setAttuneItemId(undefined);
   };
 
   const removeAttuned = (index: number) => {
-    patch({ attunedItems: removeAttunedItemAt(attunedItems, index) });
+    patch({ attunedItems: removeAttunedItemAt(storedAttunedItems, index) });
   };
 
   if (!showInventory && !showCurrency && !showAttunement) return null;
