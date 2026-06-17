@@ -1,8 +1,34 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SpellcastingSection from '../SpellcastingSection';
 import type { Character } from '@/lib/types';
+
+// Stub the catalog picker so these tests don't hit the debounced network search
+// (covered in SrdSpellSearch.test.tsx). The stub fires onSelect with a fixed
+// catalog spell when clicked.
+const catalogSpell = {
+  id: 'spell-x',
+  name: 'Counterspell',
+  level: 3,
+  school: 'Abjuration',
+  castingTime: '1 reaction',
+  range: '60 feet',
+  components: 'S',
+  duration: 'Instantaneous',
+  description: '',
+  classes: [],
+  ritual: false,
+  concentration: false,
+  source: 'SRD',
+};
+vi.mock('@/components/SrdSpellSearch', () => ({
+  default: ({ onSelect }: { onSelect: (spell: typeof catalogSpell) => void }) => (
+    <button type="button" onClick={() => onSelect(catalogSpell)}>
+      stub-pick-spell
+    </button>
+  ),
+}));
 
 const baseCharacter: Character = {
   id: 'char-1',
@@ -330,6 +356,133 @@ describe('SpellcastingSection', () => {
       const char = { ...baseCharacter, spells: [] };
       render(<SpellcastingSection character={char} />);
       expect(screen.queryByText('Cantrips & Prepared Spells')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('spell management (owner)', () => {
+    const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
+      const onPatch = vi.fn();
+      render(
+        <SpellcastingSection
+          character={{ ...baseCharacter, ...over }}
+          editable
+          onPatch={onPatch}
+          isSaving={isSaving}
+        />
+      );
+      return onPatch;
+    };
+
+    it('shows the spell panel and add form for an owner with no spells', () => {
+      renderOwner({ spells: [] });
+      expect(screen.getByText('Cantrips & Prepared Spells')).toBeInTheDocument();
+      expect(screen.getByTestId('add-spell-form')).toBeInTheDocument();
+    });
+
+    it('does not show spell remove/add/toggle controls for a non-owner', () => {
+      render(<SpellcastingSection character={baseCharacter} />);
+      expect(screen.queryByRole('button', { name: /^Remove / })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Toggle prepared/ })).toBeNull();
+      expect(screen.queryByTestId('add-spell-form')).toBeNull();
+    });
+
+    it('toggles prepared on the correct STORED entry despite the display sort', async () => {
+      const user = userEvent.setup();
+      // Stored order differs from the level/name display sort.
+      const onPatch = renderOwner({
+        spells: [
+          { level: 3, name: 'Fireball', prepared: true },
+          { level: 0, name: 'Fire Bolt' },
+          { level: 1, name: 'Shield', prepared: false },
+        ],
+      });
+      await user.click(screen.getByRole('button', { name: 'Toggle prepared Shield' }));
+      // Shield is stored at index 2; only it flips.
+      expect(onPatch).toHaveBeenCalledWith({
+        spells: [
+          { level: 3, name: 'Fireball', prepared: true },
+          { level: 0, name: 'Fire Bolt' },
+          { level: 1, name: 'Shield', prepared: true },
+        ],
+      });
+    });
+
+    it('removes the correct STORED entry despite the display sort', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({
+        spells: [
+          { level: 3, name: 'Fireball', prepared: true },
+          { level: 0, name: 'Fire Bolt' },
+          { level: 1, name: 'Shield' },
+        ],
+      });
+      await user.click(screen.getByRole('button', { name: 'Remove Fireball' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        spells: [
+          { level: 0, name: 'Fire Bolt' },
+          { level: 1, name: 'Shield' },
+        ],
+      });
+    });
+
+    it('does not render a prepared toggle for a cantrip', () => {
+      renderOwner({ spells: [{ level: 0, name: 'Fire Bolt' }] });
+      expect(screen.queryByRole('button', { name: 'Toggle prepared Fire Bolt' })).toBeNull();
+    });
+
+    it('adds a free-typed leveled spell (defaults to prepared)', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ spells: [] });
+      fireEvent.change(screen.getByLabelText('New spell name'), { target: { value: 'Bless' } });
+      fireEvent.change(screen.getByLabelText('New spell level'), { target: { value: '1' } });
+      await user.click(screen.getByRole('button', { name: 'Add spell' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        spells: [{ level: 1, name: 'Bless', prepared: true }],
+      });
+    });
+
+    it('clamps an added spell level to 9', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ spells: [] });
+      fireEvent.change(screen.getByLabelText('New spell name'), { target: { value: 'Wish' } });
+      fireEvent.change(screen.getByLabelText('New spell level'), { target: { value: '12' } });
+      await user.click(screen.getByRole('button', { name: 'Add spell' }));
+      expect(onPatch.mock.calls[0][0].spells[0].level).toBe(9);
+    });
+
+    it('disables Add until a name is entered', () => {
+      renderOwner({ spells: [] });
+      expect(screen.getByRole('button', { name: 'Add spell' })).toBeDisabled();
+      fireEvent.change(screen.getByLabelText('New spell name'), { target: { value: 'Bless' } });
+      expect(screen.getByRole('button', { name: 'Add spell' })).toBeEnabled();
+    });
+
+    it('adds a catalog spell mapped to a structured entry with C·R·M + spellId', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ spells: [] });
+      await user.click(screen.getByRole('button', { name: 'stub-pick-spell' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        spells: [
+          {
+            level: 3,
+            name: 'Counterspell',
+            prepared: true,
+            castingTime: '1 reaction',
+            range: '60 feet',
+            concentration: false,
+            ritual: false,
+            material: false,
+            spellId: 'spell-x',
+          },
+        ],
+      });
+    });
+
+    it('disables spell controls while a write is in flight', () => {
+      renderOwner({ spells: [{ level: 1, name: 'Shield', prepared: false }] }, true);
+      expect(screen.getByRole('button', { name: 'Remove Shield' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Toggle prepared Shield' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Add spell' })).toBeDisabled();
     });
   });
 });
