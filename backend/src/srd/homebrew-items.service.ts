@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Item, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContentAccessService, ContentActor } from './content-access.service';
-import { HOMEBREW_SOURCE_LABEL, mapWriteError } from './homebrew-write.helpers';
+import { HOMEBREW_SOURCE_LABEL, mapWriteError, toItemColumnData } from './homebrew-write.helpers';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 
@@ -26,7 +26,7 @@ export class HomebrewItemsService {
     try {
       return await this.prisma.item.create({
         data: {
-          ...this.toColumnData(dto),
+          ...toItemColumnData(dto),
           source: HOMEBREW_SOURCE_LABEL,
           contentSource: 'homebrew',
           createdById: actor.userId,
@@ -43,7 +43,7 @@ export class HomebrewItemsService {
     try {
       return await this.prisma.item.update({
         where: { id },
-        data: this.toColumnData(dto) as Prisma.ItemUpdateInput,
+        data: toItemColumnData(dto) as Prisma.ItemUpdateInput,
       });
     } catch (err) {
       mapWriteError(err, row.contentSource, 'item');
@@ -71,33 +71,5 @@ export class HomebrewItemsService {
     }
     this.contentAccess.assertWritable(row, actor);
     return row;
-  }
-
-  /**
-   * Map a DTO onto Prisma column data, dropping anything that is not a plain
-   * item column — ownership/tier/source fields can never be set by clients,
-   * even if a raw payload sneaks past DTO validation. `stealthDisadvantage`,
-   * `requiresAttunement`, and `isMagic` are non-nullable columns, so a null
-   * clear (the client's way of resetting an optional field, VEG-316) becomes
-   * their false default; `properties` likewise resets to its empty-array
-   * default. A blank `rarity` string (reachable only via raw API writes — the
-   * form already clears to null) normalizes to null so the rarity filter
-   * cannot mis-bucket it.
-   */
-  private toColumnData(dto: CreateItemDto | UpdateItemDto): Record<string, unknown> {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as Record<string, unknown>;
-    for (const flag of ['stealthDisadvantage', 'requiresAttunement', 'isMagic'] as const) {
-      if (flag in data && data[flag] === null) data[flag] = false;
-    }
-    if ('properties' in data && data.properties === null) data.properties = [];
-    if (typeof data.rarity === 'string' && !data.rarity.trim()) data.rarity = null;
-    return data;
   }
 }

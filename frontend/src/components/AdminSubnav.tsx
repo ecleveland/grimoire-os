@@ -7,6 +7,7 @@ const LINKS = [
   { href: '/admin/users', label: 'Users' },
   { href: '/admin/npc-data', label: 'NPC Data' },
   { href: '/admin/loot-odds', label: 'Loot Odds' },
+  { href: '/admin/equipment', label: 'Equipment' },
 ];
 
 export default function AdminSubnav() {

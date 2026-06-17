@@ -79,6 +79,7 @@ export type {
   SrdSpell,
   SrdMonster,
   SrdItem,
+  SrdItemBundleComponent,
   SrdClass,
   SrdRace,
   SrdSubclass,
