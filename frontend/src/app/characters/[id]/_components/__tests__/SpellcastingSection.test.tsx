@@ -197,6 +197,19 @@ describe('SpellcastingSection', () => {
       renderOwner({}, true);
       expect(screen.getByRole('button', { name: 'Level 1 slot 1' })).toBeDisabled();
     });
+
+    it('exposes used state to assistive tech via aria-pressed', () => {
+      // Level 1: total 4, used 2 → slots 1-2 pressed, 3-4 not.
+      renderOwner();
+      expect(screen.getByRole('button', { name: 'Level 1 slot 2' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      expect(screen.getByRole('button', { name: 'Level 1 slot 3' })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
+    });
   });
 
   describe('Cantrips & Prepared Spells', () => {

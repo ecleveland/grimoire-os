@@ -40,6 +40,9 @@ function renderMutation(character: Character, client: QueryClient = makeClient()
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockToastError.mockReset();
+  // The hook logs failures via console.error (project convention); silence it
+  // so the error-path tests don't spam output.
+  vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 describe('useCharacterMutation', () => {

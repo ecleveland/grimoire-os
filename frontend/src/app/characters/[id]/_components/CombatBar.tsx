@@ -75,6 +75,7 @@ export default function CombatBar({ character, isOwner, onPatch, isSaving }: Com
           type="button"
           data-testid={`${prefix}-${i}`}
           aria-label={`Toggle ${label} ${i + 1}`}
+          aria-pressed={isFilled}
           disabled={isSaving}
           onClick={() => toggleDeathSave(track, i)}
           className={`${className} disabled:opacity-50`}

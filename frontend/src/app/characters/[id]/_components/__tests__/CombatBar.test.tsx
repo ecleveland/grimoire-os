@@ -219,6 +219,14 @@ describe('CombatBar', () => {
       expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 32, temporary: 12 } });
     });
 
+    it('clears temp HP to 0 with an empty amount (Set Temp has no positive guard)', () => {
+      // Unlike Damage/Heal, Set Temp intentionally fires on an empty field so a
+      // player can zero out temp HP. Locks in that asymmetry.
+      const onPatch = renderOwner({ hitPoints: { max: 44, current: 32, temporary: 9 } });
+      fireEvent.click(screen.getByRole('button', { name: 'Set Temp' }));
+      expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 32, temporary: 0 } });
+    });
+
     it('ignores damage/heal with no positive amount', () => {
       const onPatch = renderOwner();
       fireEvent.click(screen.getByRole('button', { name: 'Damage' }));
@@ -230,6 +238,18 @@ describe('CombatBar', () => {
       const onPatch = renderOwner({ deathSaves: { successes: 0, failures: 0 } });
       await user.click(screen.getByRole('button', { name: 'Toggle failure 1' }));
       expect(onPatch).toHaveBeenCalledWith({ deathSaves: { successes: 0, failures: 1 } });
+    });
+
+    it('exposes filled state to assistive tech via aria-pressed', () => {
+      renderOwner({ deathSaves: { successes: 2, failures: 0 } });
+      expect(screen.getByRole('button', { name: 'Toggle success 1' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      expect(screen.getByRole('button', { name: 'Toggle success 3' })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
     });
 
     it('spends and restores a hit die (clamped)', async () => {

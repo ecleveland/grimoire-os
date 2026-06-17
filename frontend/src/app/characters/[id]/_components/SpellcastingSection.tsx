@@ -101,6 +101,7 @@ export default function SpellcastingSection({
                         type="button"
                         data-testid={testId}
                         aria-label={`Level ${slot.level} slot ${i + 1}`}
+                        aria-pressed={isUsed}
                         disabled={isSaving}
                         onClick={() => setSlotUsed(slot.level, togglePip(slot.used, i, slot.total))}
                         className={`${pipClass} disabled:opacity-50`}

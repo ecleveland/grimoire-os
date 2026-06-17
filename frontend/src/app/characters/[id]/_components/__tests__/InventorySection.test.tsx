@@ -234,6 +234,23 @@ describe('InventorySection', () => {
       expect(screen.getByLabelText('CP')).toHaveValue(10);
     });
 
+    it('re-seeds the coin draft when stored currency changes (post-write refetch)', () => {
+      const { rerender } = render(
+        <InventorySection character={baseCharacter} isOwner onPatch={vi.fn()} />
+      );
+      expect(screen.getByLabelText('GP')).toHaveValue(150);
+      // A successful write refetches and passes new currency down; the input
+      // must reflect the new stored value, not the stale typed-from value.
+      rerender(
+        <InventorySection
+          character={{ ...baseCharacter, currency: { cp: 10, sp: 25, ep: 0, gp: 200, pp: 5 } }}
+          isOwner
+          onPatch={vi.fn()}
+        />
+      );
+      expect(screen.getByLabelText('GP')).toHaveValue(200);
+    });
+
     it('shows the coin editor for an owner even when all coins are 0', () => {
       renderOwner({ inventory: [], currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 } });
       expect(screen.getByText('Coins')).toBeInTheDocument();

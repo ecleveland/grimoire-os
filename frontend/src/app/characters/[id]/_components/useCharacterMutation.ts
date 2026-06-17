@@ -57,12 +57,22 @@ export function useCharacterMutation(character: Character): CharacterMutation {
     {
       // The sheet reads this same `/characters/:id` query; refetch so the new
       // stored state and the bumped version flow back down before the next write.
-      onSuccess: () => void invalidateApiPath(queryClient, path),
+      // A failed reload would leave `character.version` stale (and trigger a
+      // spurious 409 on the next write), so surface it in the console.
+      onSuccess: () =>
+        void invalidateApiPath(queryClient, path).catch(err =>
+          console.error('Failed to refetch character after write:', err)
+        ),
       onError: err => {
+        // Log before toasting, matching the codebase's catch + console.error
+        // convention so a failed write leaves a diagnostic trail for self-hosters.
+        console.error('Failed to update character:', err);
         if (err instanceof ApiError && err.status === 409) {
           // Concurrent edit (VEG-137 optimistic lock): pull the latest so the
           // next click carries the new version, and tell the player to retry.
-          void invalidateApiPath(queryClient, path);
+          void invalidateApiPath(queryClient, path).catch(refetchErr =>
+            console.error('Failed to refetch character after conflict:', refetchErr)
+          );
           toast.error(
             'This character was changed elsewhere. Reloaded the latest version — try again.'
           );
