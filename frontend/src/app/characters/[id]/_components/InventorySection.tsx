@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Character, Currency, InventoryItem, SrdItem } from '@/lib/types';
+import type { AttunedItem, Character, Currency, InventoryItem, SrdItem } from '@/lib/types';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
 import {
@@ -12,6 +12,7 @@ import {
   totalInventoryWeight,
   updateInventoryItemAt,
 } from '@/lib/character-inventory';
+import { ATTUNEMENT_MAX, addAttunedItem, removeAttunedItemAt } from '@/lib/character-attunement';
 import SrdItemSearch from '@/components/SrdItemSearch';
 
 type InventorySectionProps = { character: Character } & PlayControlProps;
@@ -25,7 +26,7 @@ const DENOMINATION_LABELS: Record<string, string> = {
   pp: 'PP',
 };
 
-const ATTUNEMENT_SLOTS = 3;
+const ATTUNEMENT_SLOTS = ATTUNEMENT_MAX;
 
 const textInputClass =
   'px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white';
@@ -50,6 +51,8 @@ export default function InventorySection(props: InventorySectionProps) {
   // sees the content they actually hold.
   const showInventory = hasInventory || editable;
   const showCurrency = hasCurrency || editable;
+  const showAttunement = hasAttunement || editable;
+  const attunementFull = attunedItems.length >= ATTUNEMENT_SLOTS;
 
   // Coin adjuster: click a denomination to reveal an add/subtract amount box;
   // clicking it again (or another) closes/switches it.
@@ -78,6 +81,10 @@ export default function InventorySection(props: InventorySectionProps) {
   const [addWeight, setAddWeight] = useState('');
   const [addItemId, setAddItemId] = useState<string | undefined>(undefined);
   const [addDetail, setAddDetail] = useState<string | null>(null);
+
+  // Add-attunement form drafts (separate from the inventory add form).
+  const [attuneName, setAttuneName] = useState('');
+  const [attuneItemId, setAttuneItemId] = useState<string | undefined>(undefined);
 
   const selectCoin = (denom: keyof Currency) => {
     setSelectedCoin(prev => (prev === denom ? null : denom));
@@ -161,7 +168,26 @@ export default function InventorySection(props: InventorySectionProps) {
     resetAddForm();
   };
 
-  if (!showInventory && !showCurrency && !hasAttunement) return null;
+  const fillAttuneFromCatalog = (item: SrdItem) => {
+    setAttuneName(item.name);
+    setAttuneItemId(item.id);
+  };
+
+  const addAttuned = () => {
+    const name = attuneName.trim();
+    if (!name || attunementFull) return;
+    const item: AttunedItem = { name };
+    if (attuneItemId) item.itemId = attuneItemId;
+    patch({ attunedItems: addAttunedItem(attunedItems, item) });
+    setAttuneName('');
+    setAttuneItemId(undefined);
+  };
+
+  const removeAttuned = (index: number) => {
+    patch({ attunedItems: removeAttunedItemAt(attunedItems, index) });
+  };
+
+  if (!showInventory && !showCurrency && !showAttunement) return null;
 
   const capacity = carryingCapacity(character.abilityScores.strength, character.size);
   const carried = totalInventoryWeight(inventory);
@@ -417,7 +443,7 @@ export default function InventorySection(props: InventorySectionProps) {
       )}
 
       {/* Magic Item Attunement (up to 3) */}
-      {hasAttunement && (
+      {showAttunement && (
         <div>
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase text-center mb-3">
             Attunement
@@ -431,7 +457,18 @@ export default function InventorySection(props: InventorySectionProps) {
                   data-testid="attunement-slot-filled"
                   className="p-2 border border-indigo-300 dark:border-indigo-600 rounded text-sm font-medium text-gray-900 dark:text-gray-100"
                 >
-                  {item.name}
+                  <span>{item.name}</span>
+                  {editable && (
+                    <button
+                      type="button"
+                      aria-label={`Remove attunement ${item.name}`}
+                      onClick={() => removeAttuned(i)}
+                      disabled={isSaving}
+                      className="ml-1 text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                    >
+                      &times;
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div
@@ -444,6 +481,43 @@ export default function InventorySection(props: InventorySectionProps) {
               );
             })}
           </div>
+
+          {/* Attune-item form (owner only) */}
+          {editable &&
+            (attunementFull ? (
+              <p className="mt-3 text-xs text-gray-500 dark:text-gray-400 text-center">
+                Attunement slots full (max {ATTUNEMENT_SLOTS}).
+              </p>
+            ) : (
+              <div data-testid="add-attunement-form" className="mt-3 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    aria-label="New attunement name"
+                    placeholder="Magic item name"
+                    value={attuneName}
+                    disabled={isSaving}
+                    onChange={e => {
+                      setAttuneName(e.target.value);
+                      setAttuneItemId(undefined);
+                    }}
+                    className={`flex-1 min-w-[8rem] ${textInputClass}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={addAttuned}
+                    disabled={isSaving || attuneName.trim() === ''}
+                    className="px-3 py-1 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                  >
+                    Attune item
+                  </button>
+                </div>
+                <SrdItemSearch
+                  onSelect={fillAttuneFromCatalog}
+                  disabled={isSaving}
+                  placeholder="Search the catalog to attune…"
+                />
+              </div>
+            ))}
         </div>
       )}
 
