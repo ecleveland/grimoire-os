@@ -9,7 +9,9 @@ export function emptyCurrency(): Currency {
  * Average gp for a class starting-gold formula like `"2d4 x 10 gp"`. Returns the
  * deterministic PHB-standard average (avg of NdM is N·(M+1)/2) rather than a live
  * roll so the resolved purse is reproducible and unit-testable. Falls back to a
- * flat `"NN gp"` amount, and returns null when nothing parses.
+ * flat `"NN gp"` amount, and returns null when nothing parses — including a
+ * dice-shaped term that is present but invalid (so a malformed formula never
+ * silently scrapes its multiplier as if it were a flat amount).
  */
 export function parseStartingGold(formula: string): number | null {
   const dice = /(\d+)\s*d\s*(\d+)\s*(?:[x×*]\s*(\d+))?/i.exec(formula);
@@ -18,7 +20,11 @@ export function parseStartingGold(formula: string): number | null {
     const faces = Number(dice[2]);
     const mult = dice[3] ? Number(dice[3]) : 1;
     if (n > 0 && faces > 0) return Math.round(((n * (faces + 1)) / 2) * mult);
+    return null; // dice term present but invalid (e.g. "0d4 x 10")
   }
+  // A dice-shaped fragment that didn't match above (e.g. "d4 x 10", no count) is
+  // a malformed formula, not a flat amount — don't grab a stray number from it.
+  if (/d\s*\d/i.test(formula)) return null;
   const flat = /(\d+)\s*gp/i.exec(formula);
   return flat ? Number(flat[1]) : null;
 }
@@ -26,7 +32,7 @@ export function parseStartingGold(formula: string): number | null {
 /** One side (A or B) of a parsed background-equipment choice. */
 export interface ParsedEquipmentOption {
   items: InventoryItem[];
-  gp: number;
+  currency: Currency;
 }
 
 /** A background's free-text `equipment` parsed into its A/B alternatives. */
@@ -35,16 +41,26 @@ export interface ParsedBackgroundEquipment {
   b: ParsedEquipmentOption;
 }
 
-/** Classify one comma-separated token as either coin or an inventory item. */
+type CoinKey = keyof Currency;
+const COIN_KEYS: readonly CoinKey[] = ['cp', 'sp', 'ep', 'gp', 'pp'];
+
+/** Add every denomination of `src` into `target` in place. */
+function addCurrency(target: Currency, src: Currency): void {
+  for (const k of COIN_KEYS) target[k] += src[k];
+}
+
+/** Classify one comma-separated token as coin (any denomination) or an item. */
 function parseEquipmentList(str: string): ParsedEquipmentOption {
   const items: InventoryItem[] = [];
-  let gp = 0;
+  const currency = emptyCurrency();
   for (const raw of str.split(',')) {
     const token = raw.trim();
     if (!token) continue;
-    const gold = /^(\d+)\s*gp$/i.exec(token);
-    if (gold) {
-      gp += Number(gold[1]);
+    // "8 gp", "5 sp", "12 cp" — any coin denomination, tolerating trailing
+    // punctuation ("8 gp.") so it never falls through to the item branch.
+    const coin = /^(\d+)\s*(cp|sp|ep|gp|pp)\b\.?$/i.exec(token);
+    if (coin) {
+      currency[coin[2].toLowerCase() as CoinKey] += Number(coin[1]);
       continue;
     }
     // A leading integer is a quantity ("2 Daggers", "20 Arrows"); anything else
@@ -56,7 +72,7 @@ function parseEquipmentList(str: string): ParsedEquipmentOption {
       items.push({ name: token, quantity: 1, equipped: false });
     }
   }
-  return { items, gp };
+  return { items, currency };
 }
 
 /**
@@ -79,7 +95,9 @@ function toInventoryItem(item: EquipmentChoiceItem): InventoryItem {
  * Resolve a class's structured starting equipment into inventory lines: the
  * always-granted `guaranteed` items plus, for each choice group, the items in the
  * picked `from` bundles. `selections[i]` holds the chosen bundle indices for
- * choice group `i`; out-of-range indices are ignored.
+ * choice group `i`; out-of-range indices are ignored, duplicates collapse, and
+ * each group is clamped to its `choose` count — so the "pick `choose` bundles"
+ * rule holds here, not only in the UI that drives this resolver.
  */
 export function resolveClassEquipment(
   equip: StartingEquipment,
@@ -88,7 +106,8 @@ export function resolveClassEquipment(
   const items: InventoryItem[] = [];
   for (const g of equip.guaranteed ?? []) items.push(toInventoryItem(g));
   equip.choices.forEach((choice, groupIndex) => {
-    for (const bundleIndex of selections[groupIndex] ?? []) {
+    const picks = [...new Set(selections[groupIndex] ?? [])].slice(0, choice.choose);
+    for (const bundleIndex of picks) {
       const bundle = choice.from[bundleIndex];
       if (!bundle) continue;
       for (const it of bundle.items) items.push(toInventoryItem(it));
@@ -129,8 +148,8 @@ export interface EquipmentSelections {
  * sources accrues into one purse; same-named items are merged.
  */
 export function resolveEquipment(input: {
-  classEquip?: StartingEquipment | null;
-  background?: ParsedBackgroundEquipment | null;
+  classEquip: StartingEquipment | null;
+  background: ParsedBackgroundEquipment | null;
   selections: EquipmentSelections;
 }): { inventory: InventoryItem[]; currency: Currency } {
   const { classEquip, background, selections } = input;
@@ -141,15 +160,17 @@ export function resolveEquipment(input: {
     if (selections.classMode === 'equipment') {
       items.push(...resolveClassEquipment(classEquip, selections.choiceSelections));
     } else if (classEquip.startingGold) {
+      // `!= null` (not truthiness) so a legitimately-parsed 0 isn't conflated
+      // with a parse miss.
       const gp = parseStartingGold(classEquip.startingGold);
-      if (gp) currency.gp += gp;
+      if (gp != null) currency.gp += gp;
     }
   }
 
   if (background) {
     const opt = selections.bgMode === 'a' ? background.a : background.b;
     items.push(...opt.items);
-    currency.gp += opt.gp;
+    addCurrency(currency, opt.currency);
   }
 
   return { inventory: mergeInventory(items), currency };

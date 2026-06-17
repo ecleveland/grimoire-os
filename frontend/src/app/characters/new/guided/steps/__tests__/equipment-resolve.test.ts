@@ -60,6 +60,17 @@ describe('parseStartingGold', () => {
   it('returns null when the formula is unparseable', () => {
     expect(parseStartingGold('a fistful of nothing')).toBeNull();
   });
+
+  it('returns null for a malformed dice term instead of scraping the multiplier', () => {
+    // A dice term that is present but invalid must not fall through and grab the
+    // "x 10" multiplier as if it were a flat amount.
+    expect(parseStartingGold('0d4 x 10 gp')).toBeNull();
+    expect(parseStartingGold('d4 x 10 gp')).toBeNull();
+  });
+
+  it('parses a flat "0 gp" as 0 (not null)', () => {
+    expect(parseStartingGold('0 gp')).toBe(0);
+  });
 });
 
 describe('parseBackgroundEquipment', () => {
@@ -69,7 +80,7 @@ describe('parseBackgroundEquipment', () => {
   it('splits the A/B options into items and gold', () => {
     const parsed = parseBackgroundEquipment(raw);
     expect(parsed).not.toBeNull();
-    expect(parsed!.a.gp).toBe(8);
+    expect(parsed!.a.currency.gp).toBe(8);
     expect(parsed!.a.items.map(i => i.name)).toEqual([
       "Calligrapher's Supplies",
       'Book (prayers)',
@@ -80,7 +91,7 @@ describe('parseBackgroundEquipment', () => {
     expect(parsed!.a.items.every(i => i.quantity === 1 && i.equipped === false)).toBe(true);
     // Option B is the pure-gold alternative.
     expect(parsed!.b.items).toEqual([]);
-    expect(parsed!.b.gp).toBe(50);
+    expect(parsed!.b.currency.gp).toBe(50);
   });
 
   it('extracts a leading quantity from an item token', () => {
@@ -92,7 +103,18 @@ describe('parseBackgroundEquipment', () => {
       { name: 'Arrows', quantity: 20, equipped: false },
       { name: "Thieves' Tools", quantity: 1, equipped: false },
     ]);
-    expect(parsed!.a.gp).toBe(16);
+    expect(parsed!.a.currency.gp).toBe(16);
+  });
+
+  it('routes every coin denomination (with trailing punctuation) into currency', () => {
+    const parsed = parseBackgroundEquipment(
+      'Choose A or B: (A) Lamp, 5 sp, 12 cp, 8 gp.; or (B) 2 pp, 50 GP'
+    );
+    // Sub-gold coin and a trailing period must not become junk "sp"/"gp." items.
+    expect(parsed!.a.items.map(i => i.name)).toEqual(['Lamp']);
+    expect(parsed!.a.currency).toEqual({ cp: 12, sp: 5, ep: 0, gp: 8, pp: 0 });
+    expect(parsed!.b.items).toEqual([]);
+    expect(parsed!.b.currency).toEqual({ cp: 0, sp: 0, ep: 0, gp: 50, pp: 2 });
   });
 
   it('returns null for a string that is not in the "Choose A or B" shape', () => {
@@ -120,6 +142,16 @@ describe('resolveClassEquipment', () => {
 
   it('ignores out-of-range bundle indices', () => {
     expect(resolveClassEquipment({ choices: FIGHTER_EQUIP.choices }, [[9], []])).toEqual([]);
+  });
+
+  it('clamps a group to its choose count and dedups repeated picks', () => {
+    // First group is choose:1 — even if three indices arrive, only the first is
+    // honored; duplicates collapse. Enforces the invariant in the resolver, not
+    // just the UI.
+    expect(resolveClassEquipment(FIGHTER_EQUIP, [[0, 0, 1], []])).toEqual([
+      { name: "Explorer's pack", quantity: 1, equipped: false },
+      { name: 'Chain mail', quantity: 1, equipped: false },
+    ]);
   });
 });
 
@@ -186,5 +218,21 @@ describe('resolveEquipment — top-level equipment-vs-gold', () => {
       selections: { classMode: 'gold', choiceSelections: [], bgMode: 'b' },
     });
     expect(currency.gp).toBe(175); // 125 class + 50 background
+  });
+
+  it('merges a duplicate item granted by both class and background into one line', () => {
+    // Class group 2 bundle 0 grants Handaxe ×2; background option A also grants a
+    // Handaxe — they must collapse into a single summed line.
+    const bgHandaxe = parseBackgroundEquipment('Choose A or B: (A) Handaxe; or (B) 50 GP');
+    const { inventory } = resolveEquipment({
+      classEquip: FIGHTER_EQUIP,
+      background: bgHandaxe,
+      selections: { classMode: 'equipment', choiceSelections: [[0], [0]], bgMode: 'a' },
+    });
+    expect(inventory).toEqual([
+      { name: "Explorer's pack", quantity: 1, equipped: false },
+      { name: 'Chain mail', quantity: 1, equipped: false },
+      { name: 'Handaxe', quantity: 3, equipped: false },
+    ]);
   });
 });

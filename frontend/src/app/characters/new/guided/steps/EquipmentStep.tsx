@@ -16,10 +16,14 @@ function bundleLabel(items: EquipmentChoiceItem[]): string {
   return items.map(i => (i.quantity > 1 ? `${i.name} ×${i.quantity}` : i.name)).join(' + ');
 }
 
+const COIN_DISPLAY_ORDER = ['pp', 'gp', 'ep', 'sp', 'cp'] as const;
+
 /** "Holy Symbol, Book (prayers), 8 gp" — summarize a background A/B option. */
 function optionSummary(opt: ParsedEquipmentOption): string {
   const parts = opt.items.map(i => (i.quantity > 1 ? `${i.name} ×${i.quantity}` : i.name));
-  if (opt.gp) parts.push(`${opt.gp} gp`);
+  for (const k of COIN_DISPLAY_ORDER) {
+    if (opt.currency[k]) parts.push(`${opt.currency[k]} ${k}`);
+  }
   return parts.join(', ') || '—';
 }
 

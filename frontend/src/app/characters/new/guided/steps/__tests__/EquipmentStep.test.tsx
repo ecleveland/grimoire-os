@@ -152,6 +152,9 @@ describe('EquipmentStep — starting equipment vs gold', () => {
     renderStep({ class: 'Ranger' });
     await screen.findByRole('checkbox', { name: /shortsword/i });
 
+    // Ranger has no startingGold, so the gold alternative isn't offered.
+    expect(screen.queryByRole('radio', { name: /take starting gold/i })).toBeNull();
+
     await user.click(screen.getByRole('checkbox', { name: /shortsword/i }));
     await user.click(screen.getByRole('checkbox', { name: /handaxe/i }));
     await waitFor(() => expect(inventory()).toBe('Shortsword:1,Handaxe:1'));
@@ -161,6 +164,25 @@ describe('EquipmentStep — starting equipment vs gold', () => {
     await user.click(dagger);
     expect(dagger).not.toBeChecked();
     expect(inventory()).toBe('Shortsword:1,Handaxe:1');
+
+    // Un-checking a pick frees a slot and drops the item.
+    await user.click(screen.getByRole('checkbox', { name: /handaxe/i }));
+    await waitFor(() => expect(inventory()).toBe('Shortsword:1'));
+    await user.click(dagger);
+    expect(dagger).toBeChecked();
+    await waitFor(() => expect(inventory()).toBe('Shortsword:1,Dagger:1'));
+  });
+
+  it('shows a fallback and writes nothing when the class has no equipment data', async () => {
+    const noEquip: SrdClass = { ...FIGHTER, id: 'monk', name: 'Monk', equipmentChoices: undefined };
+    routeApiFetch([noEquip]);
+    renderStep({ class: 'Monk' });
+    await waitFor(() =>
+      expect(screen.getByText(/no starting-equipment data/i)).toBeInTheDocument()
+    );
+    expect(screen.queryByRole('radio', { name: /take starting equipment/i })).toBeNull();
+    expect(inventory()).toBe('');
+    expect(gp()).toBe('0');
   });
 
   it('switching to the gold alternative clears class items and fills currency', async () => {
