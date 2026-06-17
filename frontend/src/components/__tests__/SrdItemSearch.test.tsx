@@ -96,6 +96,30 @@ describe('SrdItemSearch', () => {
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
+  it('a late-resolving stale success response does not clobber newer results', async () => {
+    // Each fetch returns a deferred promise we resolve out of order.
+    const deferreds: Array<(v: unknown) => void> = [];
+    mockApiFetch.mockImplementation(() => new Promise(resolve => deferreds.push(resolve)));
+    const user = userEvent.setup();
+    setup();
+    const input = screen.getByLabelText(/search the item catalog/i);
+
+    // First query fires (still pending).
+    await user.type(input, 'dag');
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(1));
+    // Refine the query → second fetch fires (also pending).
+    await user.type(input, 'ger');
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+
+    // Resolve the NEWER query first, then the stale older one.
+    deferreds[1](makeResponse([quarterstaff]));
+    deferreds[0](makeResponse([dagger]));
+
+    // The newer results survive; the stale dagger never appears.
+    expect(await screen.findByRole('button', { name: /add quarterstaff/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
+  });
+
   it('disables the input when disabled', () => {
     const onSelect = vi.fn();
     render(<SrdItemSearch onSelect={onSelect} disabled />);

@@ -1,4 +1,4 @@
-import type { InventoryItem } from '@/lib/types';
+import type { InventoryItem, Size } from '@/lib/types';
 
 /**
  * Pure helpers for the sheet's inventory CRUD (VEG-402). The component mutates
@@ -12,7 +12,7 @@ import type { InventoryItem } from '@/lib/types';
  * game rule (`backend/src/seed/data/game-rules.ts`). A creature's capacity is
  * Strength × 15 × this multiplier.
  */
-export const SIZE_CARRY_MULTIPLIERS: Record<string, number> = {
+export const SIZE_CARRY_MULTIPLIERS: Record<Size, number> = {
   Tiny: 0.5,
   Small: 1,
   Medium: 1,
@@ -36,7 +36,10 @@ export function totalInventoryWeight(inventory: InventoryItem[]): number {
  * (5e). An unknown/absent size falls back to the Medium (×1) multiplier.
  */
 export function carryingCapacity(strength: number, size?: string): number {
-  const multiplier = size ? (SIZE_CARRY_MULTIPLIERS[size] ?? 1) : 1;
+  // `size` is free-text server-side, so guard membership before indexing the
+  // size-keyed map; an unknown/absent size falls back to Medium (×1).
+  const multiplier =
+    size && size in SIZE_CARRY_MULTIPLIERS ? SIZE_CARRY_MULTIPLIERS[size as Size] : 1;
   return strength * 15 * multiplier;
 }
 

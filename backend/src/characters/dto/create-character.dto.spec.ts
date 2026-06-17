@@ -247,16 +247,31 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
     });
 
-    it('rejects a non-UUID itemId', async () => {
+    it('rejects a non-UUID itemId with the isUuid constraint specifically', async () => {
       const dto = toDto({ ...baseDto, inventory: [{ name: 'X', itemId: 'not-a-uuid' }] });
       const errors = await validate(dto);
-      expect(errors.find(e => e.property === 'inventory')).toBeDefined();
+      const itemId = errors
+        .find(e => e.property === 'inventory')
+        ?.children?.[0]?.children?.find(c => c.property === 'itemId');
+      expect(itemId?.constraints).toHaveProperty('isUuid');
     });
 
-    it('rejects an item missing the required name', async () => {
+    it('rejects an item missing the required name with the isString constraint', async () => {
       const dto = toDto({ ...baseDto, inventory: [{ quantity: 1, equipped: true }] });
       const errors = await validate(dto);
-      expect(errors.find(e => e.property === 'inventory')).toBeDefined();
+      const name = errors
+        .find(e => e.property === 'inventory')
+        ?.children?.[0]?.children?.find(c => c.property === 'name');
+      expect(name?.constraints).toHaveProperty('isString');
+    });
+
+    it('rejects a non-numeric quantity', async () => {
+      const dto = toDto({ ...baseDto, inventory: [{ name: 'X', quantity: 'lots' }] });
+      const errors = await validate(dto);
+      const quantity = errors
+        .find(e => e.property === 'inventory')
+        ?.children?.[0]?.children?.find(c => c.property === 'quantity');
+      expect(quantity?.constraints).toHaveProperty('isNumber');
     });
   });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Character, Currency, InventoryItem, SrdItem } from '@/lib/types';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
@@ -57,10 +57,19 @@ export default function InventorySection(props: InventorySectionProps) {
   const [coinAmount, setCoinAmount] = useState('');
 
   // Inline row editor: the index being edited (or null) plus its draft fields.
+  // The index is positional, so any change that reorders/replaces `inventory`
+  // must close the editor or a Save would write the draft onto the wrong row.
   const [editIndex, setEditIndex] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editQty, setEditQty] = useState('');
   const [editWeight, setEditWeight] = useState('');
+
+  // Close any open editor when the character is refetched (a successful write,
+  // or a concurrent/409 reload via useCharacterMutation bumps `version`): the
+  // refetched inventory may have shifted, invalidating the positional editIndex.
+  useEffect(() => {
+    setEditIndex(null);
+  }, [character.version]);
 
   // Add-item form drafts. `addItemId` links to the catalog when filled from the
   // picker; `addDetail` is the catalog blurb shown after a pick.
@@ -99,18 +108,22 @@ export default function InventorySection(props: InventorySectionProps) {
   const saveEdit = (index: number) => {
     const name = editName.trim();
     if (!name) return;
-    patch({
-      inventory: updateInventoryItemAt(inventory, index, {
-        name,
-        quantity: Math.max(1, parseNonNegativeInt(editQty) || 1),
-        weight: parseWeight(editWeight),
-      }),
-    });
+    const fields: Partial<InventoryItem> = {
+      name,
+      quantity: Math.max(1, parseNonNegativeInt(editQty) || 1),
+    };
+    // A blank weight field keeps the item's current weight rather than silently
+    // zeroing it out — clearing the box to retype shouldn't drop carried weight.
+    const weight = parseWeight(editWeight);
+    if (weight != null) fields.weight = weight;
+    patch({ inventory: updateInventoryItemAt(inventory, index, fields) });
     setEditIndex(null);
   };
 
   const removeItem = (index: number) => {
-    if (editIndex === index) setEditIndex(null);
+    // Always close the editor: removing any row reindexes the array, so a still-
+    // open positional editIndex could otherwise Save onto the wrong item.
+    setEditIndex(null);
     patch({ inventory: removeInventoryItemAt(inventory, index) });
   };
 

@@ -477,5 +477,69 @@ describe('InventorySection', () => {
       expect(screen.getByRole('button', { name: 'Remove Handaxe' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Add item' })).toBeDisabled();
     });
+
+    it('does not patch when saving an edit with a blank name', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Edit Handaxe' }));
+      fireEvent.change(screen.getByLabelText('Item name'), { target: { value: '   ' } });
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('keeps the existing weight when the weight field is cleared on save', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Edit Chain Mail' })); // weight 55
+      fireEvent.change(screen.getByLabelText('Item weight'), { target: { value: '' } });
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+      expect(onPatch.mock.calls[0][0].inventory[0]).toMatchObject({
+        name: 'Chain Mail',
+        weight: 55,
+      });
+    });
+
+    it('closes an open editor when a different row is removed (no wrong-row overwrite)', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      // Edit the Handaxe, then remove a *lower-indexed* row (Chain Mail).
+      await user.click(screen.getByRole('button', { name: 'Edit Handaxe' }));
+      expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Remove Chain Mail' }));
+      // Editor is closed (no stale draft that could Save onto the shifted row)…
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+      // …and the only write was the removal.
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      expect(onPatch.mock.calls[0][0].inventory.map((i: { name: string }) => i.name)).toEqual([
+        'Longsword',
+        'Handaxe',
+        'Rope (50ft)',
+      ]);
+    });
+
+    it('closes an open editor when the character is refetched (version bumps)', async () => {
+      const user = userEvent.setup();
+      const onPatch = vi.fn();
+      const { rerender } = render(
+        <InventorySection
+          character={{ ...baseCharacter, version: 1 }}
+          editable
+          onPatch={onPatch}
+          isSaving={false}
+        />
+      );
+      await user.click(screen.getByRole('button', { name: 'Edit Handaxe' }));
+      expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+      // A refetch lands a new version with shifted inventory.
+      rerender(
+        <InventorySection
+          character={{ ...baseCharacter, version: 2, inventory: [baseCharacter.inventory[1]] }}
+          editable
+          onPatch={onPatch}
+          isSaving={false}
+        />
+      );
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    });
   });
 });
