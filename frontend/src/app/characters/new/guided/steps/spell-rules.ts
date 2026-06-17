@@ -1,5 +1,10 @@
-import type { AbilityScores, ClassSpellcasting, SpellEntry, SrdSpell } from '@/lib/types';
+import type { AbilityScores, ClassSpellcasting } from '@/lib/types';
 import { ABILITY_KEY_TO_NAME, abilityModifier } from '@/lib/ability-math';
+
+// `toSpellEntry` now lives in the shared lib so the character sheet (VEG-404)
+// and the guided builder use one catalog → SpellEntry mapper. Re-exported here
+// for back-compat with existing builder imports.
+export { toSpellEntry } from '@/lib/character-spells';
 
 /** Modifier for the ability identified by its full name (e.g. "Intelligence"). */
 export function abilityModForName(scores: AbilityScores, abilityName: string): number {
@@ -47,31 +52,4 @@ export function leveledSpellAllowance(
     return { count: Math.max(1, levelTerm + abilityMod), mode: 'prepared' };
   }
   return { count: 0, mode: 'known' };
-}
-
-/** True when the components string lists a material (M) component. */
-function hasMaterial(spell: SrdSpell): boolean {
-  if (spell.material) return true;
-  return spell.components.split(/[\s,]+/).includes('M');
-}
-
-/**
- * Build a sheet `SpellEntry` from a catalog `SrdSpell`, copying the C·R·M /
- * casting-time / range metadata and linking `spellId`. Leveled spells are written
- * `prepared: true` (a known caster's repertoire and a prepared caster's prepared
- * set are both castable at creation); cantrips are `prepared: false` (always
- * available — the sheet renders level 0 as "—" regardless).
- */
-export function toSpellEntry(spell: SrdSpell): SpellEntry {
-  return {
-    level: spell.level,
-    name: spell.name,
-    prepared: spell.level > 0,
-    castingTime: spell.castingTime,
-    range: spell.range,
-    concentration: spell.concentration,
-    ritual: spell.ritual,
-    material: hasMaterial(spell),
-    spellId: spell.id,
-  };
 }

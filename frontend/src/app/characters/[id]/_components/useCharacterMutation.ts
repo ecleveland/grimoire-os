@@ -20,6 +20,7 @@ export type CharacterPatch = Partial<
     | 'hitDice'
     | 'heroicInspiration'
     | 'spellSlots'
+    | 'spells'
     | 'currency'
     | 'inventory'
     | 'attunedItems'
