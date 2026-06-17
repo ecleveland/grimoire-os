@@ -15,6 +15,13 @@ import { Role } from '../common/enums';
 /** Display label stored in the legacy `source` column for user-authored rows. */
 export const HOMEBREW_SOURCE_LABEL = 'Homebrew';
 
+/**
+ * Display label stored in the legacy `source` column for admin-published
+ * `shared` rows (VEG-309). Distinct from the seed's "SRD 5.2.1" default so the
+ * provenance of an admin-authored catalog row is self-evident.
+ */
+export const SHARED_SOURCE_LABEL = 'Shared';
+
 /** Map the request's JWT user to the actor shape ContentAccessService expects. */
 export function toActor(user: JwtUser): ContentActor {
   return { userId: user.userId, isAdmin: user.role === Role.ADMIN };
