@@ -69,6 +69,9 @@ export interface InventoryItem {
   description?: string;
   weight?: number;
   equipped: boolean;
+  /** Optional link to the Item catalog row (srd/shared/homebrew); set when the
+   * item was added from the catalog picker, absent for free-typed items. */
+  itemId?: string;
 }
 
 export interface Currency {
