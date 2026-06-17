@@ -2,7 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Item, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ContentAccessService, ContentActor } from '../../srd/content-access.service';
-import { SHARED_SOURCE_LABEL, mapWriteError } from '../../srd/homebrew-write.helpers';
+import {
+  SHARED_SOURCE_LABEL,
+  mapWriteError,
+  toItemColumnData,
+} from '../../srd/homebrew-write.helpers';
 import { CreateItemDto } from '../../srd/dto/create-item.dto';
 import { UpdateItemDto } from '../../srd/dto/update-item.dto';
 import { buildPaginatedResponse } from '../../common/helpers/paginate';
@@ -61,7 +65,7 @@ export class AdminItemsService {
     try {
       return await this.prisma.item.create({
         data: {
-          ...this.toColumnData(dto),
+          ...toItemColumnData(dto),
           source: SHARED_SOURCE_LABEL,
           contentSource: 'shared',
           createdById: actor.userId,
@@ -77,7 +81,7 @@ export class AdminItemsService {
     try {
       return await this.prisma.item.update({
         where: { id },
-        data: this.toColumnData(dto) as Prisma.ItemUpdateInput,
+        data: toItemColumnData(dto) as Prisma.ItemUpdateInput,
       });
     } catch (err) {
       mapWriteError(err, row.contentSource, 'item');
@@ -179,27 +183,5 @@ export class AdminItemsService {
     }
     this.contentAccess.assertWritable(row, actor);
     return row;
-  }
-
-  /**
-   * Map a DTO onto Prisma column data, dropping ownership/tier/source fields a
-   * client must never set and coercing nullable-clears on the non-nullable
-   * columns — the same normalization {@link HomebrewItemsService} applies.
-   */
-  private toColumnData(dto: CreateItemDto | UpdateItemDto): Record<string, unknown> {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as Record<string, unknown>;
-    for (const flag of ['stealthDisadvantage', 'requiresAttunement', 'isMagic'] as const) {
-      if (flag in data && data[flag] === null) data[flag] = false;
-    }
-    if ('properties' in data && data.properties === null) data.properties = [];
-    if (typeof data.rarity === 'string' && !data.rarity.trim()) data.rarity = null;
-    return data;
   }
 }

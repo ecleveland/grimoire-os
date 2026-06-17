@@ -198,8 +198,22 @@ describe('AdminEquipmentPage', () => {
     expect(mockToastSuccess).toHaveBeenCalledWith('Item updated');
   });
 
-  it('deletes an item after confirmation and removes the row', async () => {
-    wireApi([makeItem({ category: 'Mount', name: 'Riding Horse' })]);
+  it('deletes an item after confirmation and refetches the list', async () => {
+    // Stateful: the post-delete refetch must reflect the removal, so the GET
+    // returns an empty list once the DELETE has run.
+    let deleted = false;
+    mockApiFetch.mockImplementation((path: string, opts?: RequestInit) => {
+      if (path === '/admin/items/item-1' && opts?.method === 'DELETE') {
+        deleted = true;
+        return Promise.resolve(undefined);
+      }
+      if (path.startsWith('/admin/items?')) {
+        return Promise.resolve(
+          paginated(deleted ? [] : [makeItem({ category: 'Mount', name: 'Riding Horse' })])
+        );
+      }
+      return Promise.resolve(undefined);
+    });
     const user = userEvent.setup();
     render(<AdminEquipmentPage />);
     await screen.findByText('Riding Horse');
@@ -212,7 +226,47 @@ describe('AdminEquipmentPage', () => {
       expect(mockApiFetch).toHaveBeenCalledWith('/admin/items/item-1', { method: 'DELETE' })
     );
     expect(mockToastSuccess).toHaveBeenCalledWith('Item deleted');
+    // The list re-fetched and the row is gone (not just optimistically hidden).
     await waitFor(() => expect(screen.queryByText('Riding Horse')).not.toBeInTheDocument());
+    expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?page=1&limit=20');
+  });
+
+  it('steps back a page when deleting the last row on a non-first page', async () => {
+    // Page 2 holds a single row; deleting it must not strand the admin on an
+    // empty page — the page steps back to 1 and refetches.
+    mockApiFetch.mockImplementation((path: string, opts?: RequestInit) => {
+      if (opts?.method === 'DELETE') return Promise.resolve(undefined);
+      if (path.includes('page=2')) {
+        return Promise.resolve({
+          data: [makeItem({ id: 'item-2', name: 'Lone Mount', category: 'Mount' })],
+          total: 21,
+          page: 2,
+          lastPage: 2,
+        });
+      }
+      if (path.startsWith('/admin/items?')) {
+        return Promise.resolve({
+          data: [makeItem({ name: 'First Mount', category: 'Mount' })],
+          total: 21,
+          page: 1,
+          lastPage: 2,
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<AdminEquipmentPage />);
+    await screen.findByText('First Mount');
+
+    // Go to page 2 (its single row), then delete it.
+    await user.click(screen.getByRole('button', { name: /next/i }));
+    await screen.findByText('Lone Mount');
+    await user.click(screen.getByRole('button', { name: /delete/i }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /delete/i }));
+
+    // Stepped back to page 1 and refetched, rather than showing an empty page 2.
+    await waitFor(() => expect(screen.getByText('First Mount')).toBeInTheDocument());
+    expect(screen.queryByText('Lone Mount')).not.toBeInTheDocument();
   });
 
   it('only shows the Contents action for equipment packs', async () => {

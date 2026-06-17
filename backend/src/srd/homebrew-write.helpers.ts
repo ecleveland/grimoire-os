@@ -27,6 +27,34 @@ export function toActor(user: JwtUser): ContentActor {
   return { userId: user.userId, isAdmin: user.role === Role.ADMIN };
 }
 
+/**
+ * Map an item DTO onto Prisma column data, shared by the homebrew (VEG-296) and
+ * admin shared-tier (VEG-309) item writers so the same `Item` entity normalizes
+ * identically in both. Drops ownership/tier/source fields a client must never
+ * set, even if a raw payload sneaks past DTO validation. `stealthDisadvantage`,
+ * `requiresAttunement`, and `isMagic` are non-nullable columns, so a null clear
+ * (the client's way of resetting an optional field, VEG-316) becomes their false
+ * default; `properties` likewise resets to its empty-array default. A blank
+ * `rarity` string (reachable only via raw API writes — the form already clears
+ * to null) normalizes to null so the rarity filter cannot mis-bucket it.
+ */
+export function toItemColumnData(dto: object): Record<string, unknown> {
+  const {
+    contentSource: _contentSource,
+    createdById: _createdById,
+    campaignId: _campaignId,
+    source: _source,
+    id: _id,
+    ...data
+  } = dto as Record<string, unknown>;
+  for (const flag of ['stealthDisadvantage', 'requiresAttunement', 'isMagic'] as const) {
+    if (flag in data && data[flag] === null) data[flag] = false;
+  }
+  if ('properties' in data && data.properties === null) data.properties = [];
+  if (typeof data.rarity === 'string' && !data.rarity.trim()) data.rarity = null;
+  return data;
+}
+
 function isPrismaError(err: unknown, code: string): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
 }

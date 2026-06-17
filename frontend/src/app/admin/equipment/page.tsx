@@ -119,9 +119,15 @@ export default function AdminEquipmentPage() {
     if (!pendingDelete) return;
     try {
       await apiFetch(`/admin/items/${pendingDelete.id}`, { method: 'DELETE' });
-      setItems(prev => prev.filter(i => i.id !== pendingDelete.id));
-      setTotal(prev => prev - 1);
       toast.success('Item deleted');
+      // Refetch authoritatively (keeps total/lastPage in sync) rather than
+      // mutating local counts. If we just removed the last row on a non-first
+      // page, step back so the admin doesn't land on a stranded empty page.
+      if (items.length === 1 && page > 1) {
+        setPage(p => p - 1);
+      } else {
+        reload();
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete item');
     }
