@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, within, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import CombatBar from '../CombatBar';
 import type { Character } from '@/lib/types';
 
@@ -149,6 +150,115 @@ describe('CombatBar', () => {
         expect(screen.getByTestId(`death-success-${i}`).className).not.toContain('bg-green');
         expect(screen.getByTestId(`death-failure-${i}`).className).not.toContain('bg-red');
       }
+    });
+  });
+
+  describe('heroic inspiration (read-only)', () => {
+    it('renders an inspiration block reflecting the stored flag', () => {
+      const on = render(<CombatBar character={{ ...mockCharacter, heroicInspiration: true }} />);
+      expect(on.getByTestId('inspiration-state').className).toContain('text-amber');
+      on.unmount();
+      const off = render(<CombatBar character={{ ...mockCharacter, heroicInspiration: false }} />);
+      expect(off.getByTestId('inspiration-state').className).not.toContain('text-amber');
+    });
+
+    it('shows no edit controls for a non-owner', () => {
+      render(<CombatBar character={mockCharacter} />);
+      expect(screen.queryByLabelText('HP amount')).toBeNull();
+      expect(screen.queryByRole('button', { name: /toggle heroic inspiration/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /spend hit die/i })).toBeNull();
+    });
+  });
+
+  describe('play controls (owner)', () => {
+    const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
+      const onPatch = vi.fn();
+      render(
+        <CombatBar
+          character={{ ...mockCharacter, ...over }}
+          isOwner
+          onPatch={onPatch}
+          isSaving={isSaving}
+        />
+      );
+      return onPatch;
+    };
+
+    it('applies damage (temp first, then current) through onPatch', () => {
+      // current 32, temp 5; 8 damage → temp 0, current 29
+      const onPatch = renderOwner();
+      fireEvent.change(screen.getByLabelText('HP amount'), { target: { value: '8' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Damage' }));
+      expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 29, temporary: 0 } });
+    });
+
+    it('heals clamped to max', () => {
+      const onPatch = renderOwner({ hitPoints: { max: 44, current: 40, temporary: 0 } });
+      fireEvent.change(screen.getByLabelText('HP amount'), { target: { value: '100' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Heal' }));
+      expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 44, temporary: 0 } });
+    });
+
+    it('clears death saves when healing a downed PC above 0', () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 0, temporary: 0 },
+        deathSaves: { successes: 1, failures: 2 },
+      });
+      fireEvent.change(screen.getByLabelText('HP amount'), { target: { value: '5' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Heal' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        hitPoints: { max: 44, current: 5, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+      });
+    });
+
+    it('sets temp HP directly', () => {
+      const onPatch = renderOwner({ hitPoints: { max: 44, current: 32, temporary: 5 } });
+      fireEvent.change(screen.getByLabelText('HP amount'), { target: { value: '12' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Set Temp' }));
+      expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 32, temporary: 12 } });
+    });
+
+    it('ignores damage/heal with no positive amount', () => {
+      const onPatch = renderOwner();
+      fireEvent.click(screen.getByRole('button', { name: 'Damage' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('toggles a death-save pip', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ deathSaves: { successes: 0, failures: 0 } });
+      await user.click(screen.getByRole('button', { name: 'Toggle failure 1' }));
+      expect(onPatch).toHaveBeenCalledWith({ deathSaves: { successes: 0, failures: 1 } });
+    });
+
+    it('spends and restores a hit die (clamped)', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ hitDice: { dieType: 'd10', total: 8, spent: 3 } });
+      await user.click(screen.getByRole('button', { name: 'Spend hit die' }));
+      expect(onPatch).toHaveBeenCalledWith({ hitDice: { dieType: 'd10', total: 8, spent: 4 } });
+      await user.click(screen.getByRole('button', { name: 'Restore hit die' }));
+      expect(onPatch).toHaveBeenCalledWith({ hitDice: { dieType: 'd10', total: 8, spent: 2 } });
+    });
+
+    it('disables spend at total and restore at 0', () => {
+      renderOwner({ hitDice: { dieType: 'd10', total: 8, spent: 8 } });
+      expect(screen.getByRole('button', { name: 'Spend hit die' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Restore hit die' })).toBeEnabled();
+    });
+
+    it('toggles heroic inspiration', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ heroicInspiration: false });
+      await user.click(screen.getByRole('button', { name: /toggle heroic inspiration/i }));
+      expect(onPatch).toHaveBeenCalledWith({ heroicInspiration: true });
+    });
+
+    it('disables all controls while a write is in flight', () => {
+      renderOwner({}, true);
+      expect(screen.getByRole('button', { name: 'Damage' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Spend hit die' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /toggle heroic inspiration/i })).toBeDisabled();
     });
   });
 });

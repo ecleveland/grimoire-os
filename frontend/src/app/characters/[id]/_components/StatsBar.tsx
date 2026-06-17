@@ -1,11 +1,17 @@
+'use client';
+
 import type { Character } from '@/lib/types';
 import { abilityModifier, formatModifier, proficiencyBonus, passivePerception } from './utils';
+import { useDiceRoll } from './useDiceRoll';
 
 interface StatsBarProps {
   character: Character;
+  /** When true, Initiative becomes a roll button (owner-only). */
+  canRoll?: boolean;
 }
 
-export default function StatsBar({ character }: StatsBarProps) {
+export default function StatsBar({ character, canRoll }: StatsBarProps) {
+  const { rollCheck } = useDiceRoll();
   const profBonus = proficiencyBonus(character.level);
   const dexMod = abilityModifier(character.abilityScores.dexterity);
   const isPerceptionProficient = character.skills.includes('Perception');
@@ -25,18 +31,32 @@ export default function StatsBar({ character }: StatsBarProps) {
 
   return (
     <div className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-6">
-      {stats.map(({ label, value, testId }) => (
-        <div
-          key={testId}
-          data-testid={testId}
-          className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-center"
-        >
-          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-            {label}
+      {stats.map(({ label, value, testId }) => {
+        const rollable = canRoll && testId === 'stat-initiative';
+        return (
+          <div
+            key={testId}
+            data-testid={testId}
+            className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 text-center"
+          >
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+              {label}
+            </div>
+            {rollable ? (
+              <button
+                type="button"
+                aria-label="Roll initiative"
+                onClick={() => rollCheck('Initiative', dexMod)}
+                className="text-xl font-bold text-gray-900 dark:text-white mt-1 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+              >
+                {value}
+              </button>
+            ) : (
+              <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{value}</div>
+            )}
           </div>
-          <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{value}</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

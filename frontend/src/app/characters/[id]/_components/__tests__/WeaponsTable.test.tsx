@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import WeaponsTable from '../WeaponsTable';
 import type { Character } from '@/lib/types';
+
+const mockMessage = vi.fn();
+vi.mock('sonner', () => ({ toast: { message: (...args: unknown[]) => mockMessage(...args) } }));
 
 const mockCharacter: Character = {
   id: 'char-1',
@@ -114,5 +118,36 @@ describe('WeaponsTable', () => {
     const char = { ...mockCharacter, weapons: [] };
     const { container } = render(<WeaponsTable character={char} />);
     expect(container.innerHTML).toBe('');
+  });
+
+  describe('dice rolls (canRoll)', () => {
+    beforeEach(() => mockMessage.mockReset());
+
+    it('renders no roll buttons when canRoll is falsy', () => {
+      render(<WeaponsTable character={mockCharacter} />);
+      expect(screen.queryByRole('button', { name: /roll longsword attack/i })).toBeNull();
+    });
+
+    it('rolls a weapon attack (d20 + parsed bonus)', async () => {
+      const user = userEvent.setup();
+      render(<WeaponsTable character={mockCharacter} canRoll />);
+      await user.click(screen.getByRole('button', { name: 'Roll Longsword attack' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longsword attack'));
+    });
+
+    it('rolls weapon damage from the damage expression', async () => {
+      const user = userEvent.setup();
+      render(<WeaponsTable character={mockCharacter} canRoll />);
+      await user.click(screen.getByRole('button', { name: 'Roll Longsword damage' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longsword damage'));
+    });
+
+    it('omits the attack button when the bonus is not a number (e.g. "DC 14")', () => {
+      render(<WeaponsTable character={mockCharacter} canRoll />);
+      // Fire Bolt has attackBonus "DC 14" — no leading modifier, so no Atk button…
+      expect(screen.queryByRole('button', { name: 'Roll Fire Bolt attack' })).toBeNull();
+      // …but its "2d10" damage is still rollable.
+      expect(screen.getByRole('button', { name: 'Roll Fire Bolt damage' })).toBeInTheDocument();
+    });
   });
 });

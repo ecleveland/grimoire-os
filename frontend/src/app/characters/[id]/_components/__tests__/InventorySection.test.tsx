@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import InventorySection from '../InventorySection';
 import type { Character } from '@/lib/types';
 
@@ -211,6 +211,66 @@ describe('InventorySection', () => {
       render(<InventorySection character={char} />);
       expect(screen.getByText('Equipment')).toBeInTheDocument();
       expect(screen.queryByText('Coins')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('currency quick-edit (owner)', () => {
+    const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
+      const onPatch = vi.fn();
+      render(
+        <InventorySection
+          character={{ ...baseCharacter, ...over }}
+          isOwner
+          onPatch={onPatch}
+          isSaving={isSaving}
+        />
+      );
+      return onPatch;
+    };
+
+    it('renders editable coin inputs seeded from stored values', () => {
+      renderOwner();
+      expect(screen.getByLabelText('GP')).toHaveValue(150);
+      expect(screen.getByLabelText('CP')).toHaveValue(10);
+    });
+
+    it('shows the coin editor for an owner even when all coins are 0', () => {
+      renderOwner({ inventory: [], currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 } });
+      expect(screen.getByText('Coins')).toBeInTheDocument();
+      expect(screen.getByLabelText('GP')).toHaveValue(0);
+    });
+
+    it('commits a changed coin value on blur (clamped to a non-negative integer)', () => {
+      const onPatch = renderOwner();
+      const gp = screen.getByLabelText('GP');
+      fireEvent.change(gp, { target: { value: '200' } });
+      fireEvent.blur(gp);
+      expect(onPatch).toHaveBeenCalledWith({
+        currency: { cp: 10, sp: 25, ep: 0, gp: 200, pp: 5 },
+      });
+    });
+
+    it('does not patch when the value is unchanged on blur', () => {
+      const onPatch = renderOwner();
+      const gp = screen.getByLabelText('GP');
+      fireEvent.focus(gp);
+      fireEvent.blur(gp);
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('clamps a negative entry to 0', () => {
+      const onPatch = renderOwner();
+      const cp = screen.getByLabelText('CP');
+      fireEvent.change(cp, { target: { value: '-5' } });
+      fireEvent.blur(cp);
+      expect(onPatch).toHaveBeenCalledWith({
+        currency: { cp: 0, sp: 25, ep: 0, gp: 150, pp: 5 },
+      });
+    });
+
+    it('disables coin inputs while a write is in flight', () => {
+      renderOwner({}, true);
+      expect(screen.getByLabelText('GP')).toBeDisabled();
     });
   });
 });
