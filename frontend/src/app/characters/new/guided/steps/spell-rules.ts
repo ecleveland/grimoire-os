@@ -16,11 +16,22 @@ export function cantripCount(sc: ClassSpellcasting, level: number): number {
 /** How a class gets its leveled spells: a fixed known list vs a prepared count. */
 export type SpellMode = 'known' | 'prepared';
 
+/** Does the class have any spell slots at this level per its progression table? */
+function castsAtLevel(sc: ClassSpellcasting, level: number): boolean {
+  // Absent progression data → assume it casts (don't zero out a caster we lack
+  // slot data for); present-but-empty (half-casters at level 1) → it does not.
+  if (!sc.spellSlotProgression) return true;
+  return Object.keys(sc.spellSlotProgression[level] ?? {}).length > 0;
+}
+
 /**
  * Leveled-spell allowance at `level`. Known casters (Bard/Ranger/Sorcerer/
  * Warlock) read the spells-known table verbatim; prepared casters (Cleric/Druid/
  * Paladin/Wizard) evaluate `preparedFormula` (`level [/ 2] + <ability> modifier`)
- * with the spellcasting-ability `abilityMod`, clamped to a minimum of 1.
+ * with the spellcasting-ability `abilityMod`, clamped to a minimum of 1 — but only
+ * once the class actually casts. A half-caster with no slots yet (e.g. a level-1
+ * Paladin) prepares 0, since the min-1 clamp must not invent spells for a class
+ * that can't cast at this level.
  */
 export function leveledSpellAllowance(
   sc: ClassSpellcasting,
@@ -31,15 +42,11 @@ export function leveledSpellAllowance(
     return { count: sc.spellsKnown[level] ?? 0, mode: 'known' };
   }
   if (sc.preparedFormula) {
+    if (!castsAtLevel(sc, level)) return { count: 0, mode: 'prepared' };
     const levelTerm = /level\s*\/\s*2/i.test(sc.preparedFormula) ? Math.floor(level / 2) : level;
     return { count: Math.max(1, levelTerm + abilityMod), mode: 'prepared' };
   }
   return { count: 0, mode: 'known' };
-}
-
-/** Highest spell level a full caster can cast at `level` (ceil(level/2), max 9). */
-export function maxSpellLevel(level: number): number {
-  return Math.min(9, Math.ceil(level / 2));
 }
 
 /** True when the components string lists a material (M) component. */

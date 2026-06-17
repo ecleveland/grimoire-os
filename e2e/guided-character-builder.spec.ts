@@ -127,7 +127,9 @@ test.describe('guided character builder — class selection', () => {
     await page.getByRole('textbox', { name: /name/i }).fill('Mialee Spellweave');
     await page.getByRole('button', { name: /create character/i }).click();
 
-    // Lands on the sheet, and the chosen spells appear in the spell table.
+    // Lands on the sheet; the chosen spells reach the spell table (Spells tab).
     await expect(page.getByRole('heading', { name: 'Mialee Spellweave' })).toBeVisible();
+    await page.getByRole('tab', { name: /spells & details/i }).click();
+    await expect(page.getByText(/cantrips & prepared spells/i)).toBeVisible();
   });
 });

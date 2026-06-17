@@ -14,6 +14,7 @@ const mockApiFetch = vi.fn();
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 const SC_BASE = {
   id: 'base',
@@ -134,19 +135,31 @@ function renderStep(initial?: Partial<CharacterFormValues>) {
 
 const spells = () => screen.getByTestId('draft-spells').textContent;
 
+function scores(int: number) {
+  return {
+    strength: 10,
+    dexterity: 10,
+    constitution: 10,
+    intelligence: int,
+    wisdom: 10,
+    charisma: 10,
+  };
+}
+
 // A wizard with INT 16 (+3) prepares 1 + 3 = 4 level-1 spells.
 const wizardDraft: Partial<CharacterFormValues> = {
   class: 'Wizard',
   spellcastingAbility: 'Intelligence',
   level: 1,
-  abilityScores: {
-    strength: 10,
-    dexterity: 10,
-    constitution: 10,
-    intelligence: 16,
-    wisdom: 10,
-    charisma: 10,
-  },
+  abilityScores: scores(16),
+};
+
+// INT 12 (+1) → prepares 1 + 1 = 2 level-1 spells (cap below the 4 fixtures).
+const wizardLowDraft: Partial<CharacterFormValues> = {
+  class: 'Wizard',
+  spellcastingAbility: 'Intelligence',
+  level: 1,
+  abilityScores: scores(12),
 };
 
 beforeEach(() => {
@@ -245,5 +258,85 @@ describe('SpellsStep — spell selection', () => {
     expect(await screen.findByText(/learns no spells at level 1/i)).toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(spells()).toBe('');
+  });
+
+  it('enforces the leveled-spell cap and frees a slot on deselect', async () => {
+    routeApiFetch([WIZARD]);
+    const user = userEvent.setup();
+    renderStep(wizardLowDraft); // 2 prepared allowed, 4 options
+    await screen.findByRole('checkbox', { name: 'Magic Missile' });
+
+    await user.click(screen.getByRole('checkbox', { name: 'Magic Missile' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Shield' }));
+    await waitFor(() => expect(spells()).toBe('1:Magic Missile:true,1:Shield:true'));
+
+    // Third leveled pick is blocked at the cap of 2.
+    const third = screen.getByRole('checkbox', { name: 'Burning Hands' });
+    expect(third).toBeDisabled();
+
+    // Deselecting frees a slot and drops it from the draft.
+    await user.click(screen.getByRole('checkbox', { name: 'Magic Missile' }));
+    await waitFor(() => expect(spells()).toBe('1:Shield:true'));
+    expect(screen.getByRole('checkbox', { name: 'Burning Hands' })).toBeEnabled();
+  });
+
+  it('reports completion via onValidChange once both allowances are met', async () => {
+    // Minimal caster: 1 cantrip + 1 known spell (kept on the Wizard list so the
+    // fixtures match the server class filter).
+    const minimal: SrdClass = {
+      ...SC_BASE,
+      id: 'min',
+      name: 'Wizard',
+      spellcasting: { ability: 'Intelligence', cantripsKnown: { 1: 1 }, spellsKnown: { 1: 1 } },
+    };
+    routeApiFetch([minimal]);
+    const user = userEvent.setup();
+    const onValidChange = vi.fn();
+    const value = {
+      ...emptyCharacterFormValues(),
+      class: 'Wizard',
+      spellcastingAbility: 'Intelligence',
+      level: 1,
+    };
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SpellsStep value={value} onChange={() => {}} onValidChange={onValidChange} />
+      </QueryClientProvider>
+    );
+    await screen.findByRole('checkbox', { name: 'Fire Bolt' });
+    await waitFor(() => expect(onValidChange).toHaveBeenLastCalledWith(false));
+
+    await user.click(screen.getByRole('checkbox', { name: 'Fire Bolt' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Magic Missile' }));
+    await waitFor(() => expect(onValidChange).toHaveBeenLastCalledWith(true));
+  });
+
+  it('restores prior picks from the draft on (re)mount without clobbering them', async () => {
+    routeApiFetch([WIZARD]);
+    const fireBolt = SPELLS.find(s => s.name === 'Fire Bolt')!;
+    const magicMissile = SPELLS.find(s => s.name === 'Magic Missile')!;
+    renderStep({
+      ...wizardDraft,
+      spells: [
+        { level: 0, name: 'Fire Bolt', prepared: false, spellId: fireBolt.id },
+        { level: 1, name: 'Magic Missile', prepared: true, spellId: magicMissile.id },
+      ],
+    });
+    // The catalog loads and the restored ids light up their checkboxes…
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Fire Bolt' })).toBeChecked());
+    expect(screen.getByRole('checkbox', { name: 'Magic Missile' })).toBeChecked();
+    // …and the draft still holds them (the mount write didn't reset to []).
+    expect(spells()).toContain('Fire Bolt');
+    expect(spells()).toContain('Magic Missile');
+  });
+
+  it('surfaces an error state when the spell catalog fails to load', async () => {
+    mockApiFetch.mockImplementation((path?: string) => {
+      if (path === '/srd/classes') return Promise.resolve([WIZARD]);
+      return Promise.reject(new Error('boom'));
+    });
+    renderStep(wizardDraft);
+    expect(await screen.findByText(/couldn.t load spell options/i)).toBeInTheDocument();
   });
 });

@@ -4,7 +4,6 @@ import {
   abilityModForName,
   cantripCount,
   leveledSpellAllowance,
-  maxSpellLevel,
   toSpellEntry,
 } from '../spell-rules';
 
@@ -20,9 +19,11 @@ const SORCERER_SC: ClassSpellcasting = {
   spellsKnown: { 1: 2, 2: 3 },
 };
 
+// Half-caster: no slots at level 1, slots from level 2 (mirrors HALF_CASTER_SLOTS).
 const PALADIN_SC: ClassSpellcasting = {
   ability: 'Charisma',
   preparedFormula: 'level / 2 + charisma modifier',
+  spellSlotProgression: { 1: {}, 2: { 1: 2 } },
 };
 
 const baseScores = {
@@ -67,14 +68,32 @@ describe('leveledSpellAllowance', () => {
     expect(leveledSpellAllowance(WIZARD_SC, 1, 3)).toEqual({ count: 4, mode: 'prepared' });
   });
 
-  it('evaluates "level / 2 + ability modifier" (floored) for half-casters', () => {
-    // L1 paladin, CHA +2 → floor(1/2)=0 + 2 = 2 prepared.
-    expect(leveledSpellAllowance(PALADIN_SC, 1, 2)).toEqual({ count: 2, mode: 'prepared' });
+  it('gives a half-caster no prepared spells until it gains slots', () => {
+    // L1 paladin: no slots yet → 0, despite the min-1 clamp.
+    expect(leveledSpellAllowance(PALADIN_SC, 1, 2)).toEqual({ count: 0, mode: 'prepared' });
+    // L2 paladin, CHA +2 → floor(2/2)=1 + 2 = 3 prepared.
+    expect(leveledSpellAllowance(PALADIN_SC, 2, 2)).toEqual({ count: 3, mode: 'prepared' });
   });
 
-  it('clamps a prepared count to a minimum of 1', () => {
-    // L1 paladin, CHA +0 → 0 + 0 = 0 → clamped to 1.
-    expect(leveledSpellAllowance(PALADIN_SC, 1, 0)).toEqual({ count: 1, mode: 'prepared' });
+  it('clamps a casting prepared caster to a minimum of 1', () => {
+    // Full caster with slots but a negative mod → 1 + (-1) = 0 → clamped to 1.
+    const lowMod: ClassSpellcasting = {
+      ability: 'Wisdom',
+      preparedFormula: 'level + wisdom modifier',
+      spellSlotProgression: { 1: { 1: 2 } },
+    };
+    expect(leveledSpellAllowance(lowMod, 1, -1)).toEqual({ count: 1, mode: 'prepared' });
+  });
+
+  it('assumes a prepared caster with no slot data casts (min 1)', () => {
+    // No spellSlotProgression → don't zero out; fall back to the formula (min 1).
+    expect(
+      leveledSpellAllowance(
+        { ability: 'Intelligence', preparedFormula: 'level + intelligence modifier' },
+        1,
+        0
+      )
+    ).toEqual({ count: 1, mode: 'prepared' });
   });
 
   it('known count is taken verbatim (can be 0, e.g. L1 ranger)', () => {
@@ -82,14 +101,6 @@ describe('leveledSpellAllowance', () => {
       count: 0,
       mode: 'known',
     });
-  });
-});
-
-describe('maxSpellLevel', () => {
-  it('follows full-caster progression (ceil(level/2), capped at 9)', () => {
-    expect(maxSpellLevel(1)).toBe(1);
-    expect(maxSpellLevel(3)).toBe(2);
-    expect(maxSpellLevel(20)).toBe(9);
   });
 });
 

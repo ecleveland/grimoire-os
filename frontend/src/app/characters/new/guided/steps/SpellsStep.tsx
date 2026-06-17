@@ -111,17 +111,24 @@ export default function SpellsStep({ value, onChange, onValidChange }: WizardSte
   const classParam = encodeURIComponent(value.class);
   const cantripsQuery = useApiQuery<PaginatedResponse<SrdSpell>>(
     `/srd/spells?class=${classParam}&level=0&limit=100`,
-    { enabled: !!value.class && cantripAllowed > 0 }
+    { enabled: !!value.class && cantripAllowed > 0, errorToast: 'Could not load cantrips.' }
   );
   const leveledQuery = useApiQuery<PaginatedResponse<SrdSpell>>(
     `/srd/spells?class=${classParam}&level=1&limit=100`,
-    { enabled: !!value.class && leveled.count > 0 }
+    { enabled: !!value.class && leveled.count > 0, errorToast: 'Could not load spells.' }
   );
   const cantripOptions = useMemo(() => cantripsQuery.data?.data ?? [], [cantripsQuery.data]);
   const leveledOptions = useMemo(() => leveledQuery.data?.data ?? [], [leveledQuery.data]);
 
-  const [cantripIds, setCantripIds] = useState<string[]>([]);
-  const [leveledIds, setLeveledIds] = useState<string[]>([]);
+  // Restore prior picks on remount (the shell unmounts inactive steps) by matching
+  // the draft's already-resolved spells back to their catalog ids — so navigating
+  // away and back doesn't silently wipe the selection.
+  const [cantripIds, setCantripIds] = useState<string[]>(() =>
+    value.spells.filter(s => s.level === 0 && s.spellId).map(s => s.spellId as string)
+  );
+  const [leveledIds, setLeveledIds] = useState<string[]>(() =>
+    value.spells.filter(s => s.level > 0 && s.spellId).map(s => s.spellId as string)
+  );
 
   const byId = useMemo(
     () => new Map([...cantripOptions, ...leveledOptions].map(s => [s.id, s])),
@@ -131,8 +138,12 @@ export default function SpellsStep({ value, onChange, onValidChange }: WizardSte
   // This step owns the draft's `spells`, so it rewrites the resolved list (and
   // re-affirms the spellcasting ability) whenever a selection or the catalog
   // changes. The ref dedups so an unrelated re-render can't re-fire onChange.
+  // Skip while the catalog is still loading: ids can't resolve through an empty
+  // `byId` yet, so writing now would clobber the restored draft selection with [].
+  const catalogLoading = cantripsQuery.isLoading || leveledQuery.isLoading;
   const lastWritten = useRef('');
   useEffect(() => {
+    if (catalogLoading) return;
     const spells = [...cantripIds, ...leveledIds]
       .map(id => byId.get(id))
       .filter((s): s is SrdSpell => !!s)
@@ -143,7 +154,7 @@ export default function SpellsStep({ value, onChange, onValidChange }: WizardSte
       lastWritten.current = key;
       onChange(next);
     }
-  }, [cantripIds, leveledIds, byId, value.spellcastingAbility, onChange]);
+  }, [catalogLoading, cantripIds, leveledIds, byId, value.spellcastingAbility, onChange]);
 
   // Cosmetic completion: both allowances exactly met (0/0 counts as complete).
   const complete = cantripIds.length === cantripAllowed && leveledIds.length === leveled.count;
@@ -161,6 +172,7 @@ export default function SpellsStep({ value, onChange, onValidChange }: WizardSte
   const leveledLabel =
     leveled.mode === 'prepared' ? 'Prepared spells (level 1)' : 'Spells known (level 1)';
   const nothingToPick = cantripAllowed === 0 && leveled.count === 0;
+  const loadFailed = classesQuery.isError || cantripsQuery.isError || leveledQuery.isError;
 
   return (
     <section aria-labelledby="step-spells-heading" className="space-y-4">
@@ -178,7 +190,17 @@ export default function SpellsStep({ value, onChange, onValidChange }: WizardSte
         </p>
       )}
 
-      {nothingToPick ? (
+      {loadFailed ? (
+        <p className={`${cardClass} text-sm text-red-600 dark:text-red-400`}>
+          Couldn’t load spell options. Check your connection and try again.
+        </p>
+      ) : classesQuery.isLoading ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+      ) : !spellcasting ? (
+        <p className={`${cardClass} text-sm text-gray-600 dark:text-gray-300`}>
+          Spell options aren’t available for this class.
+        </p>
+      ) : nothingToPick ? (
         <p className={`${cardClass} text-sm text-gray-600 dark:text-gray-300`}>
           Your class learns no spells at level 1 — you’ll gain them as you level up.
         </p>
