@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import InventorySection from '../InventorySection';
 import type { Character } from '@/lib/types';
 
@@ -214,7 +215,7 @@ describe('InventorySection', () => {
     });
   });
 
-  describe('currency quick-edit (owner)', () => {
+  describe('currency adjuster (owner)', () => {
     const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
       const onPatch = vi.fn();
       render(
@@ -228,67 +229,94 @@ describe('InventorySection', () => {
       return onPatch;
     };
 
-    it('renders editable coin inputs seeded from stored values', () => {
+    const selectCoin = async (user: ReturnType<typeof userEvent.setup>, label: string) =>
+      user.click(screen.getByRole('button', { name: `Adjust ${label}` }));
+
+    it('renders selectable coin tiles for an owner, with no adjuster shown initially', () => {
       renderOwner();
-      expect(screen.getByLabelText('GP')).toHaveValue(150);
-      expect(screen.getByLabelText('CP')).toHaveValue(10);
+      expect(screen.getByRole('button', { name: 'Adjust GP' })).toBeInTheDocument();
+      expect(screen.queryByTestId('coin-adjuster')).toBeNull();
     });
 
-    it('re-seeds the coin draft when stored currency changes (post-write refetch)', () => {
-      const { rerender } = render(
-        <InventorySection character={baseCharacter} editable onPatch={vi.fn()} isSaving={false} />
-      );
-      expect(screen.getByLabelText('GP')).toHaveValue(150);
-      // A successful write refetches and passes new currency down; the input
-      // must reflect the new stored value, not the stale typed-from value.
-      rerender(
-        <InventorySection
-          character={{ ...baseCharacter, currency: { cp: 10, sp: 25, ep: 0, gp: 200, pp: 5 } }}
-          editable
-          onPatch={vi.fn()}
-          isSaving={false}
-        />
-      );
-      expect(screen.getByLabelText('GP')).toHaveValue(200);
-    });
-
-    it('shows the coin editor for an owner even when all coins are 0', () => {
+    it('shows the coin tiles for an owner even when all coins are 0', () => {
       renderOwner({ inventory: [], currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 } });
       expect(screen.getByText('Coins')).toBeInTheDocument();
-      expect(screen.getByLabelText('GP')).toHaveValue(0);
+      expect(screen.getByRole('button', { name: 'Adjust GP' })).toBeInTheDocument();
     });
 
-    it('commits a changed coin value on blur (clamped to a non-negative integer)', () => {
+    it('reveals the adjuster for the selected denomination on click', async () => {
+      const user = userEvent.setup();
+      renderOwner();
+      await selectCoin(user, 'GP');
+      expect(screen.getByTestId('coin-adjuster')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Adjust GP' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+    });
+
+    it('closes the adjuster when the selected coin is clicked again', async () => {
+      const user = userEvent.setup();
+      renderOwner();
+      await selectCoin(user, 'GP');
+      await selectCoin(user, 'GP');
+      expect(screen.queryByTestId('coin-adjuster')).toBeNull();
+    });
+
+    it('adds the entered amount to the selected coin', async () => {
+      const user = userEvent.setup();
       const onPatch = renderOwner();
-      const gp = screen.getByLabelText('GP');
-      fireEvent.change(gp, { target: { value: '200' } });
-      fireEvent.blur(gp);
+      await selectCoin(user, 'GP'); // GP starts at 150
+      fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '50' } });
+      await user.click(screen.getByRole('button', { name: 'Add' }));
       expect(onPatch).toHaveBeenCalledWith({
         currency: { cp: 10, sp: 25, ep: 0, gp: 200, pp: 5 },
       });
     });
 
-    it('does not patch when the value is unchanged on blur', () => {
+    it('subtracts the entered amount from the selected coin', async () => {
+      const user = userEvent.setup();
       const onPatch = renderOwner();
-      const gp = screen.getByLabelText('GP');
-      fireEvent.focus(gp);
-      fireEvent.blur(gp);
-      expect(onPatch).not.toHaveBeenCalled();
+      await selectCoin(user, 'GP'); // 150
+      fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '30' } });
+      await user.click(screen.getByRole('button', { name: 'Subtract' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        currency: { cp: 10, sp: 25, ep: 0, gp: 120, pp: 5 },
+      });
     });
 
-    it('clamps a negative entry to 0', () => {
+    it('clamps a subtraction at 0 (never goes negative)', async () => {
+      const user = userEvent.setup();
       const onPatch = renderOwner();
-      const cp = screen.getByLabelText('CP');
-      fireEvent.change(cp, { target: { value: '-5' } });
-      fireEvent.blur(cp);
+      await selectCoin(user, 'CP'); // CP starts at 10
+      fireEvent.change(screen.getByLabelText('Amount'), { target: { value: '999' } });
+      await user.click(screen.getByRole('button', { name: 'Subtract' }));
       expect(onPatch).toHaveBeenCalledWith({
         currency: { cp: 0, sp: 25, ep: 0, gp: 150, pp: 5 },
       });
     });
 
-    it('disables coin inputs while a write is in flight', () => {
+    it('does not patch when the amount is empty or zero', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner();
+      await selectCoin(user, 'GP');
+      await user.click(screen.getByRole('button', { name: 'Add' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('disables the adjuster controls while a write is in flight', async () => {
+      const user = userEvent.setup();
       renderOwner({}, true);
-      expect(screen.getByLabelText('GP')).toBeDisabled();
+      await selectCoin(user, 'GP');
+      expect(screen.getByLabelText('Amount')).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Subtract' })).toBeDisabled();
+    });
+
+    it('shows static coin values (no tiles) for a non-owner', () => {
+      render(<InventorySection character={baseCharacter} />);
+      expect(screen.queryByRole('button', { name: /adjust/i })).toBeNull();
+      expect(screen.getByText('150')).toBeInTheDocument();
     });
   });
 });

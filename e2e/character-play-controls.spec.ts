@@ -70,10 +70,10 @@ test.describe('character sheet — in-sheet play controls', () => {
       page.getByTestId('spell-slots-level-1').locator('[data-testid="slot-filled"]')
     ).toHaveCount(1);
 
-    // Coins: set GP to 25.
-    const gp = page.getByLabel('GP');
-    await gp.fill('25');
-    await gp.blur();
-    await expect(gp).toHaveValue('25');
+    // Coins: select GP (starts at 0), add 25.
+    await page.getByRole('button', { name: 'Adjust GP' }).click();
+    await page.getByLabel('Amount').fill('25');
+    await page.getByRole('button', { name: 'Add' }).click();
+    await expect(page.getByRole('button', { name: 'Adjust GP' })).toContainText('25');
   });
 });

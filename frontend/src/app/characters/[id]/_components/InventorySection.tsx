@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Character, Currency } from '@/lib/types';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
@@ -31,18 +31,25 @@ export default function InventorySection(props: InventorySectionProps) {
   // a viewer only sees coins they actually hold.
   const showCurrency = hasCurrency || editable;
 
-  // Draft mirrors the stored coins; re-seeded whenever a write refetches them.
-  const [draft, setDraft] = useState<Record<string, string>>(() =>
-    Object.fromEntries(DENOMINATIONS.map(d => [d, String(currency[d])]))
-  );
-  useEffect(() => {
-    setDraft(Object.fromEntries(DENOMINATIONS.map(d => [d, String(currency[d])])));
-  }, [currency.cp, currency.sp, currency.ep, currency.gp, currency.pp]);
+  // Coin adjuster: click a denomination to reveal an add/subtract amount box;
+  // clicking it again (or another) closes/switches it.
+  const [selectedCoin, setSelectedCoin] = useState<keyof Currency | null>(null);
+  const [coinAmount, setCoinAmount] = useState('');
 
-  const commitCoin = (denom: keyof Currency) => {
-    const parsed = parseNonNegativeInt(draft[denom]);
-    if (parsed === currency[denom]) return; // no-op: don't burn a version on a no-change blur
-    patch({ currency: { ...currency, [denom]: parsed } });
+  const selectCoin = (denom: keyof Currency) => {
+    setSelectedCoin(prev => (prev === denom ? null : denom));
+    setCoinAmount('');
+  };
+
+  const adjustCoin = (sign: 1 | -1) => {
+    if (!selectedCoin) return;
+    const amt = parseNonNegativeInt(coinAmount);
+    if (amt <= 0) return; // nothing to add/subtract
+    const next = Math.max(0, currency[selectedCoin] + sign * amt);
+    if (next !== currency[selectedCoin]) {
+      patch({ currency: { ...currency, [selectedCoin]: next } });
+    }
+    setCoinAmount('');
   };
 
   if (!hasInventory && !showCurrency && !hasAttunement) return null;
@@ -144,33 +151,86 @@ export default function InventorySection(props: InventorySectionProps) {
             Coins
           </h3>
           <div className="grid grid-cols-5 gap-2 text-center">
-            {DENOMINATIONS.map(denom => (
-              <div key={denom} className="p-2 border border-gray-200 dark:border-gray-600 rounded">
-                {editable ? (
-                  <input
-                    type="number"
-                    min={0}
-                    aria-label={DENOMINATION_LABELS[denom]}
-                    value={draft[denom]}
-                    disabled={isSaving}
-                    onChange={e => setDraft(d => ({ ...d, [denom]: e.target.value }))}
-                    onBlur={() => commitCoin(denom)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                    }}
-                    className="w-full text-sm font-bold text-center bg-transparent text-gray-900 dark:text-gray-100 disabled:opacity-50"
-                  />
-                ) : (
+            {DENOMINATIONS.map(denom => {
+              const tileBody = (
+                <>
                   <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
                     {currency[denom]}
                   </div>
-                )}
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {DENOMINATION_LABELS[denom]}
-                </div>
-              </div>
-            ))}
+                  <div className="text-xs text-gray-500 dark:text-gray-400">
+                    {DENOMINATION_LABELS[denom]}
+                  </div>
+                </>
+              );
+              if (!editable) {
+                return (
+                  <div
+                    key={denom}
+                    className="p-2 border border-gray-200 dark:border-gray-600 rounded"
+                  >
+                    {tileBody}
+                  </div>
+                );
+              }
+              const isSelected = selectedCoin === denom;
+              return (
+                <button
+                  key={denom}
+                  type="button"
+                  aria-label={`Adjust ${DENOMINATION_LABELS[denom]}`}
+                  aria-pressed={isSelected}
+                  onClick={() => selectCoin(denom)}
+                  className={`p-2 border rounded transition-colors ${
+                    isSelected
+                      ? 'border-indigo-500 ring-1 ring-indigo-500 dark:border-indigo-400'
+                      : 'border-gray-200 dark:border-gray-600 hover:border-indigo-400'
+                  }`}
+                >
+                  {tileBody}
+                </button>
+              );
+            })}
           </div>
+
+          {editable && selectedCoin && (
+            <div
+              data-testid="coin-adjuster"
+              className="mt-3 flex items-center justify-center gap-2"
+            >
+              <label
+                htmlFor="coin-amount"
+                className="text-xs font-semibold text-gray-500 dark:text-gray-400 w-8 text-right"
+              >
+                {DENOMINATION_LABELS[selectedCoin]}
+              </label>
+              <input
+                id="coin-amount"
+                type="number"
+                min={0}
+                aria-label="Amount"
+                value={coinAmount}
+                disabled={isSaving}
+                onChange={e => setCoinAmount(e.target.value)}
+                className="w-20 px-2 py-1 text-sm text-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => adjustCoin(1)}
+                disabled={isSaving}
+                className="px-2 py-1 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                Add
+              </button>
+              <button
+                type="button"
+                onClick={() => adjustCoin(-1)}
+                disabled={isSaving}
+                className="px-2 py-1 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                Subtract
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
