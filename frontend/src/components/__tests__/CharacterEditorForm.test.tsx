@@ -177,6 +177,8 @@ describe('pure helpers', () => {
     expect(v.savingThrows).toEqual([]);
     expect(v.proficiencies).toEqual([]);
     expect(v.spellcastingAbility).toBe('');
+    expect(v.inventory).toEqual([]);
+    expect(v.currency).toEqual({ cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 });
   });
 
   it('characterToFormValues seeds grant lists from the character', () => {
@@ -229,6 +231,29 @@ describe('pure helpers', () => {
       { name: 'Rapier', attackBonus: '+5', damage: '1d8', damageType: 'piercing', notes: '' },
     ]);
     expect(payload.features).toEqual([{ name: 'Second Wind', source: 'Fighter', description: '' }]);
+  });
+
+  it('characterFormPayload carries inventory/currency and drops unnamed items', () => {
+    const v = emptyCharacterFormValues();
+    v.inventory = [
+      { name: 'Longsword', quantity: 1, equipped: true },
+      { name: '  ', quantity: 1, equipped: false },
+    ];
+    v.currency = { cp: 0, sp: 0, ep: 0, gp: 50, pp: 0 };
+    const payload = characterFormPayload(v);
+    expect(payload.inventory).toEqual([{ name: 'Longsword', quantity: 1, equipped: true }]);
+    expect(payload.currency).toEqual({ cp: 0, sp: 0, ep: 0, gp: 50, pp: 0 });
+  });
+
+  it('characterToFormValues seeds inventory/currency, defaulting an absent purse', () => {
+    const withCoin = characterToFormValues(
+      makeCharacter({
+        inventory: [{ name: 'Torch', quantity: 5, equipped: false }],
+        currency: { cp: 0, sp: 0, ep: 0, gp: 12, pp: 0 },
+      })
+    );
+    expect(withCoin.inventory).toEqual([{ name: 'Torch', quantity: 5, equipped: false }]);
+    expect(withCoin.currency.gp).toBe(12);
   });
 });
 
