@@ -4,6 +4,9 @@ import userEvent from '@testing-library/user-event';
 import CharacterSheet from '../CharacterSheet';
 import type { Character } from '@/lib/types';
 
+vi.mock('../useCharacterMutation', () => ({
+  useCharacterMutation: () => ({ patch: vi.fn(), isSaving: false }),
+}));
 vi.mock('../CharacterSheetHeader', () => ({
   default: ({ character, isOwner }: { character: Character; isOwner: boolean }) => (
     <div data-testid="CharacterSheetHeader" data-owner={isOwner}>

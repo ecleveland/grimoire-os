@@ -90,34 +90,26 @@ describe('EquipmentTraining', () => {
   });
 
   describe('Heroic Inspiration', () => {
-    it('renders filled indicator when heroicInspiration is true', () => {
+    it('no longer renders heroic inspiration here (it lives on the CombatBar)', () => {
       render(<EquipmentTraining character={mockCharacter} />);
-      const indicator = screen.getByTestId('heroic-inspiration');
-      expect(indicator.className).toContain('bg-indigo-600');
-    });
-
-    it('renders empty indicator when heroicInspiration is false', () => {
-      const char = { ...mockCharacter, heroicInspiration: false };
-      render(<EquipmentTraining character={char} />);
-      const indicator = screen.getByTestId('heroic-inspiration');
-      expect(indicator.className).toContain('bg-gray-300');
-    });
-
-    it('renders empty indicator when heroicInspiration is undefined', () => {
-      const char = { ...mockCharacter, heroicInspiration: undefined };
-      render(<EquipmentTraining character={char} />);
-      const indicator = screen.getByTestId('heroic-inspiration');
-      expect(indicator.className).toContain('bg-gray-300');
+      expect(screen.queryByTestId('heroic-inspiration')).toBeNull();
+      expect(screen.queryByText('Heroic Inspiration')).toBeNull();
     });
   });
 
   describe('conditional rendering', () => {
-    it('renders nothing when no proficiencies, armor training, or heroic inspiration', () => {
+    it('renders nothing when there are no proficiencies or armor training', () => {
+      const char = { ...mockCharacter, proficiencies: [], armorTraining: undefined };
+      const { container } = render(<EquipmentTraining character={char} />);
+      expect(container.innerHTML).toBe('');
+    });
+
+    it('renders nothing when only heroic inspiration is set (no armor/proficiencies)', () => {
       const char = {
         ...mockCharacter,
         proficiencies: [],
         armorTraining: undefined,
-        heroicInspiration: undefined,
+        heroicInspiration: true,
       };
       const { container } = render(<EquipmentTraining character={char} />);
       expect(container.innerHTML).toBe('');

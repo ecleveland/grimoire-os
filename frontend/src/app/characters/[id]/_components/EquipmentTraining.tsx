@@ -8,28 +8,14 @@ interface EquipmentTrainingProps {
 export default function EquipmentTraining({ character }: EquipmentTrainingProps) {
   const armorTraining = character.armorTraining ?? [];
   const proficiencies = character.proficiencies ?? [];
-  const hasContent =
-    armorTraining.length > 0 || proficiencies.length > 0 || character.heroicInspiration;
+  // Heroic inspiration is shown/toggled on the CombatBar (VEG-349), so it's no
+  // longer mirrored here.
+  const hasContent = armorTraining.length > 0 || proficiencies.length > 0;
 
   if (!hasContent) return null;
 
   return (
     <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
-      {/* Heroic Inspiration */}
-      <div className="flex items-center gap-2">
-        <span
-          data-testid="heroic-inspiration"
-          className={`inline-block w-4 h-4 rounded ${
-            character.heroicInspiration
-              ? 'bg-indigo-600 dark:bg-indigo-400'
-              : 'bg-gray-300 dark:bg-gray-600'
-          }`}
-        />
-        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-          Heroic Inspiration
-        </span>
-      </div>
-
       {/* Armor Training */}
       <div>
         <h3 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-2">

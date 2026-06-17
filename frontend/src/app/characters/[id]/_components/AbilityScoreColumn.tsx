@@ -1,3 +1,5 @@
+'use client';
+
 import type { Character } from '@/lib/types';
 import {
   abilityModifier,
@@ -8,16 +10,22 @@ import {
   ABILITY_KEY_TO_NAME,
   ABILITY_SKILLS_MAP,
 } from './utils';
+import { useDiceRoll } from './useDiceRoll';
+import RollableStat from './RollableStat';
 
 interface AbilityScoreColumnProps {
   character: Character;
+  /** When true, modifiers become roll buttons (owner-only at-the-table rolls). */
+  canRoll?: boolean;
 }
 
 function toTestId(name: string): string {
   return name.toLowerCase().replace(/ /g, '-');
 }
 
-export default function AbilityScoreColumn({ character }: AbilityScoreColumnProps) {
+export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreColumnProps) {
+  const { rollCheck } = useDiceRoll();
+
   return (
     <div className="flex flex-col gap-4">
       {ABILITY_KEYS.map(key => {
@@ -38,12 +46,15 @@ export default function AbilityScoreColumn({ character }: AbilityScoreColumnProp
               {ABILITY_LABELS[key]}
             </h3>
 
-            <div
-              data-testid={`modifier-${key}`}
-              className="text-3xl font-bold text-center text-gray-900 dark:text-white"
+            <RollableStat
+              canRoll={canRoll}
+              testId={`modifier-${key}`}
+              label={`Roll ${abilityName} check`}
+              onRoll={() => rollCheck(`${abilityName} check`, mod)}
+              className="block w-full text-3xl font-bold text-center text-gray-900 dark:text-white"
             >
               {formatModifier(mod)}
-            </div>
+            </RollableStat>
 
             <div
               data-testid={`score-${key}`}
@@ -64,9 +75,14 @@ export default function AbilityScoreColumn({ character }: AbilityScoreColumnProp
                 }`}
               />
               <span className="text-gray-700 dark:text-gray-300 flex-1">Saving Throw</span>
-              <span className="font-medium text-gray-900 dark:text-white">
+              <RollableStat
+                canRoll={canRoll}
+                label={`Roll ${abilityName} save`}
+                onRoll={() => rollCheck(`${abilityName} save`, saveBonus)}
+                className="font-medium text-gray-900 dark:text-white"
+              >
                 {formatModifier(saveBonus)}
-              </span>
+              </RollableStat>
             </div>
 
             {skills.map(skillName => {
@@ -87,9 +103,14 @@ export default function AbilityScoreColumn({ character }: AbilityScoreColumnProp
                     }`}
                   />
                   <span className="text-gray-700 dark:text-gray-300 flex-1">{skillName}</span>
-                  <span className="font-medium text-gray-900 dark:text-white">
+                  <RollableStat
+                    canRoll={canRoll}
+                    label={`Roll ${skillName}`}
+                    onRoll={() => rollCheck(`${skillName} check`, bonus)}
+                    className="font-medium text-gray-900 dark:text-white"
+                  >
                     {formatModifier(bonus)}
-                  </span>
+                  </RollableStat>
                 </div>
               );
             })}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Character } from '@/lib/types';
+import { useCharacterMutation, type PlayControlProps } from './useCharacterMutation';
 import CharacterSheetHeader from './CharacterSheetHeader';
 import CombatBar from './CombatBar';
 import StatsBar from './StatsBar';
@@ -29,6 +30,11 @@ const TABS: { key: Tab; label: string }[] = [
 
 export default function CharacterSheet({ character, isOwner }: CharacterSheetProps) {
   const [activeTab, setActiveTab] = useState<Tab>('character');
+  const { patch, isSaving } = useCharacterMutation(character);
+  // One editable/read-only descriptor spread into every play-control section.
+  const controls: PlayControlProps = isOwner
+    ? { editable: true, onPatch: patch, isSaving }
+    : { editable: false };
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -53,15 +59,15 @@ export default function CharacterSheet({ character, isOwner }: CharacterSheetPro
       {activeTab === 'character' && (
         <div className="space-y-6">
           <CharacterSheetHeader character={character} isOwner={isOwner} />
-          <CombatBar character={character} />
-          <StatsBar character={character} />
+          <CombatBar character={character} {...controls} />
+          <StatsBar character={character} canRoll={isOwner} />
           <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
             <div className="space-y-6">
-              <AbilityScoreColumn character={character} />
+              <AbilityScoreColumn character={character} canRoll={isOwner} />
               <EquipmentTraining character={character} />
             </div>
             <div className="space-y-6">
-              <WeaponsTable character={character} />
+              <WeaponsTable character={character} canRoll={isOwner} />
               <ClassFeatures character={character} />
               <SpeciesTraitsAndFeats character={character} />
             </div>
@@ -71,11 +77,11 @@ export default function CharacterSheet({ character, isOwner }: CharacterSheetPro
 
       {activeTab === 'spells' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <SpellcastingSection character={character} />
+          <SpellcastingSection character={character} {...controls} />
           <div className="space-y-6">
             <PersonalitySection character={character} />
             <LanguagesSection character={character} />
-            <InventorySection character={character} />
+            <InventorySection character={character} {...controls} />
           </div>
         </div>
       )}

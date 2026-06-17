@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import SpellcastingSection from '../SpellcastingSection';
 import type { Character } from '@/lib/types';
 
@@ -145,6 +146,69 @@ describe('SpellcastingSection', () => {
       const char = { ...baseCharacter, spellSlots: [] };
       render(<SpellcastingSection character={char} />);
       expect(screen.queryByText('Spell Slots')).not.toBeInTheDocument();
+    });
+
+    it('renders non-interactive pips for a non-owner', () => {
+      render(<SpellcastingSection character={baseCharacter} />);
+      expect(screen.queryByRole('button', { name: /level 1 slot/i })).toBeNull();
+    });
+  });
+
+  describe('spell slot controls (owner)', () => {
+    const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
+      const onPatch = vi.fn();
+      render(
+        <SpellcastingSection
+          character={{ ...baseCharacter, ...over }}
+          editable
+          onPatch={onPatch}
+          isSaving={isSaving}
+        />
+      );
+      return onPatch;
+    };
+
+    it('expends an empty slot (sets used up to the clicked pip)', async () => {
+      const user = userEvent.setup();
+      // Level 3: total 2, used 0 — click the first pip → used 1.
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Level 3 slot 1' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        spellSlots: [
+          { level: 1, total: 4, used: 2 },
+          { level: 2, total: 3, used: 1 },
+          { level: 3, total: 2, used: 1 },
+        ],
+      });
+    });
+
+    it('restores the highest used slot when its pip is re-clicked', async () => {
+      const user = userEvent.setup();
+      // Level 2: total 3, used 1 — re-clicking pip 1 (the highest filled) → used 0.
+      const onPatch = renderOwner();
+      await user.click(screen.getByRole('button', { name: 'Level 2 slot 1' }));
+      const patched = onPatch.mock.calls[0][0].spellSlots.find(
+        (s: { level: number }) => s.level === 2
+      );
+      expect(patched.used).toBe(0);
+    });
+
+    it('disables pips while a write is in flight', () => {
+      renderOwner({}, true);
+      expect(screen.getByRole('button', { name: 'Level 1 slot 1' })).toBeDisabled();
+    });
+
+    it('exposes used state to assistive tech via aria-pressed', () => {
+      // Level 1: total 4, used 2 → slots 1-2 pressed, 3-4 not.
+      renderOwner();
+      expect(screen.getByRole('button', { name: 'Level 1 slot 2' })).toHaveAttribute(
+        'aria-pressed',
+        'true'
+      );
+      expect(screen.getByRole('button', { name: 'Level 1 slot 3' })).toHaveAttribute(
+        'aria-pressed',
+        'false'
+      );
     });
   });
 

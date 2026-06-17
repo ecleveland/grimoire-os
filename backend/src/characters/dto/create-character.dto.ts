@@ -65,6 +65,22 @@ class HitPointsDto {
   temporary?: number;
 }
 
+class DeathSavesDto {
+  @ApiPropertyOptional({ example: 0, minimum: 0, maximum: 3 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(3)
+  successes?: number;
+
+  @ApiPropertyOptional({ example: 0, minimum: 0, maximum: 3 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(3)
+  failures?: number;
+}
+
 class SpellSlotDto {
   @ApiProperty({ example: 1 })
   @IsNumber()
@@ -301,6 +317,12 @@ export class CreateCharacterDto {
   @ValidateNested()
   @Type(() => HitPointsDto)
   hitPoints?: HitPointsDto;
+
+  @ApiPropertyOptional({ type: DeathSavesDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DeathSavesDto)
+  deathSaves?: DeathSavesDto;
 
   @ApiPropertyOptional({ example: 16 })
   @IsOptional()

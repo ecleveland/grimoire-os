@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import AbilityScoreColumn from '../AbilityScoreColumn';
 import type { Character } from '@/lib/types';
+
+const mockMessage = vi.fn();
+vi.mock('sonner', () => ({ toast: { message: (...args: unknown[]) => mockMessage(...args) } }));
 
 const mockCharacter: Character = {
   id: 'char-1',
@@ -186,6 +190,29 @@ describe('AbilityScoreColumn', () => {
 
       const arcanaDot = screen.getByTestId('skill-dot-arcana');
       expect(arcanaDot.className).toContain('bg-gray-300');
+    });
+  });
+
+  describe('dice rolls (canRoll)', () => {
+    beforeEach(() => mockMessage.mockReset());
+
+    it('renders no roll buttons when canRoll is falsy', () => {
+      render(<AbilityScoreColumn character={mockCharacter} />);
+      expect(screen.queryByRole('button', { name: /roll strength check/i })).toBeNull();
+    });
+
+    it('rolls an ability check, saving throw, and skill', async () => {
+      const user = userEvent.setup();
+      render(<AbilityScoreColumn character={mockCharacter} canRoll />);
+
+      await user.click(screen.getByRole('button', { name: 'Roll Strength check' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Strength check'));
+
+      await user.click(screen.getByRole('button', { name: 'Roll Strength save' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Strength save'));
+
+      await user.click(screen.getByRole('button', { name: 'Roll Athletics' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Athletics check'));
     });
   });
 

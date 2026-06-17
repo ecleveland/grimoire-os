@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import StatsBar from '../StatsBar';
 import type { Character } from '@/lib/types';
+
+const mockMessage = vi.fn();
+vi.mock('sonner', () => ({ toast: { message: (...args: unknown[]) => mockMessage(...args) } }));
 
 const mockCharacter: Character = {
   id: 'char-1',
@@ -103,6 +107,22 @@ describe('StatsBar', () => {
       render(<StatsBar character={char} />);
       const block = screen.getByTestId('stat-passive-perception');
       expect(within(block).getByText('12')).toBeInTheDocument();
+    });
+  });
+
+  describe('initiative roll (canRoll)', () => {
+    beforeEach(() => mockMessage.mockReset());
+
+    it('does not render a roll button when canRoll is falsy', () => {
+      render(<StatsBar character={mockCharacter} />);
+      expect(screen.queryByRole('button', { name: /roll initiative/i })).toBeNull();
+    });
+
+    it('rolls initiative (d20 + DEX mod) and toasts the result', async () => {
+      const user = userEvent.setup();
+      render(<StatsBar character={mockCharacter} canRoll />);
+      await user.click(screen.getByRole('button', { name: 'Roll initiative' }));
+      expect(mockMessage).toHaveBeenCalledWith(expect.stringContaining('Initiative'));
     });
   });
 

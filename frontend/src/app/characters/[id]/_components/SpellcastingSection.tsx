@@ -1,10 +1,12 @@
+'use client';
+
 import type { Character } from '@/lib/types';
 import { abilityModifier, formatModifier, ABILITY_KEY_TO_NAME } from './utils';
 import type { AbilityScores } from '@/lib/types';
+import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
+import { togglePip } from '@/lib/character-play';
 
-interface SpellcastingSectionProps {
-  character: Character;
-}
+type SpellcastingSectionProps = { character: Character } & PlayControlProps;
 
 function getAbilityScore(abilityScores: AbilityScores, abilityName: string): number {
   const entry = Object.entries(ABILITY_KEY_TO_NAME).find(([, name]) => name === abilityName);
@@ -12,12 +14,18 @@ function getAbilityScore(abilityScores: AbilityScores, abilityName: string): num
   return abilityScores[entry[0] as keyof AbilityScores];
 }
 
-export default function SpellcastingSection({ character }: SpellcastingSectionProps) {
+export default function SpellcastingSection(props: SpellcastingSectionProps) {
+  const { character } = props;
+  const { editable, patch, isSaving } = resolvePlayControls(props);
   if (!character.spellcastingAbility) return null;
 
   const abilityScore = getAbilityScore(character.abilityScores, character.spellcastingAbility);
   const modifier = abilityModifier(abilityScore);
   const spellSlots = character.spellSlots ?? [];
+
+  const setSlotUsed = (level: number, used: number) => {
+    patch({ spellSlots: spellSlots.map(s => (s.level === level ? { ...s, used } : s)) });
+  };
   // Sort by level (cantrips first), then name, mirroring the 2024 sheet table.
   const spells = [...(character.spells ?? [])].sort(
     (a, b) => a.level - b.level || a.name.localeCompare(b.name)
@@ -74,17 +82,29 @@ export default function SpellcastingSection({ character }: SpellcastingSectionPr
                   Level {slot.level}
                 </span>
                 <div className="flex gap-1">
-                  {Array.from({ length: slot.total }, (_, i) => (
-                    <span
-                      key={i}
-                      data-testid={i < slot.used ? 'slot-filled' : 'slot-empty'}
-                      className={`inline-block w-3 h-3 rotate-45 ${
-                        i < slot.used
-                          ? 'bg-indigo-600 dark:bg-indigo-400'
-                          : 'border border-gray-400 dark:border-gray-500'
-                      }`}
-                    />
-                  ))}
+                  {Array.from({ length: slot.total }, (_, i) => {
+                    const isUsed = i < slot.used;
+                    const testId = isUsed ? 'slot-filled' : 'slot-empty';
+                    const pipClass = `inline-block w-3 h-3 rotate-45 ${
+                      isUsed
+                        ? 'bg-indigo-600 dark:bg-indigo-400'
+                        : 'border border-gray-400 dark:border-gray-500'
+                    }`;
+                    return editable ? (
+                      <button
+                        key={i}
+                        type="button"
+                        data-testid={testId}
+                        aria-label={`Level ${slot.level} slot ${i + 1}`}
+                        aria-pressed={isUsed}
+                        disabled={isSaving}
+                        onClick={() => setSlotUsed(slot.level, togglePip(slot.used, i, slot.total))}
+                        className={`${pipClass} disabled:opacity-50`}
+                      />
+                    ) : (
+                      <span key={i} data-testid={testId} className={pipClass} />
+                    );
+                  })}
                 </div>
               </div>
             ))}

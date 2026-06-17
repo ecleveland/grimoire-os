@@ -1,6 +1,7 @@
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { CreateCharacterDto } from './create-character.dto';
+import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 
 describe('CreateCharacterDto — 2024 sheet fields', () => {
   const baseDto = { name: 'Test Character' };
@@ -212,6 +213,29 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       const dto = toDto({ ...baseDto, attunedItems: [{ name: 'X', itemId: 'nope' }] });
       const errors = await validate(dto);
       expect(errors.find(e => e.property === 'attunedItems')).toBeDefined();
+    });
+  });
+
+  describe('deathSaves', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted)
+    // because the bug was an unwhitelisted field: the in-sheet play controls
+    // (VEG-349) PATCH deathSaves, which a plain validate() would silently accept.
+    it('accepts a valid DeathSaves object (not rejected as unwhitelisted)', async () => {
+      const dto = toDto({ ...baseDto, deathSaves: { successes: 1, failures: 2 } });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'deathSaves')).toHaveLength(0);
+    });
+
+    it('rejects a non-numeric successes value', async () => {
+      const dto = toDto({ ...baseDto, deathSaves: { successes: 'x', failures: 0 } });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'deathSaves')).toBeDefined();
+    });
+
+    it('rejects successes/failures out of the 0–3 range', async () => {
+      const dto = toDto({ ...baseDto, deathSaves: { successes: 5, failures: -1 } });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'deathSaves')).toBeDefined();
     });
   });
 
