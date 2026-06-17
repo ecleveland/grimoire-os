@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InventorySection from '../InventorySection';
 import type { Character } from '@/lib/types';
@@ -444,7 +444,8 @@ describe('InventorySection', () => {
     it('autofills the add form and links the catalog item id when picked', async () => {
       const user = userEvent.setup();
       const onPatch = renderOwner({ inventory: [] });
-      await user.click(screen.getByRole('button', { name: 'stub-pick-catalog' }));
+      const form = screen.getByTestId('add-item-form');
+      await user.click(within(form).getByRole('button', { name: 'stub-pick-catalog' }));
       expect(screen.getByLabelText('New item name')).toHaveValue('Ring of Protection');
       expect(screen.getByTestId('catalog-detail')).toHaveTextContent('Ring · Rare');
       await user.click(screen.getByRole('button', { name: 'Add item' }));
@@ -460,7 +461,8 @@ describe('InventorySection', () => {
     it('drops the catalog link if the name is hand-edited after a pick', async () => {
       const user = userEvent.setup();
       const onPatch = renderOwner({ inventory: [] });
-      await user.click(screen.getByRole('button', { name: 'stub-pick-catalog' }));
+      const form = screen.getByTestId('add-item-form');
+      await user.click(within(form).getByRole('button', { name: 'stub-pick-catalog' }));
       fireEvent.change(screen.getByLabelText('New item name'), {
         target: { value: 'Custom Ring' },
       });
@@ -540,6 +542,86 @@ describe('InventorySection', () => {
         />
       );
       expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+    });
+  });
+
+  describe('attunement editing (owner)', () => {
+    const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
+      const onPatch = vi.fn();
+      render(
+        <InventorySection
+          character={{ ...baseCharacter, ...over }}
+          editable
+          onPatch={onPatch}
+          isSaving={isSaving}
+        />
+      );
+      return onPatch;
+    };
+
+    it('shows the Attunement section and add form for an owner with no attuned items', () => {
+      renderOwner({ attunedItems: [] });
+      expect(screen.getByText('Attunement')).toBeInTheDocument();
+      expect(screen.getByTestId('add-attunement-form')).toBeInTheDocument();
+    });
+
+    it('does not show attunement remove/add controls for a non-owner', () => {
+      render(
+        <InventorySection
+          character={{ ...baseCharacter, attunedItems: [{ name: 'Cloak of Protection' }] }}
+        />
+      );
+      expect(screen.queryByRole('button', { name: /^Remove attunement/ })).toBeNull();
+      expect(screen.queryByTestId('add-attunement-form')).toBeNull();
+    });
+
+    it('adds a free-typed attuned item through patch', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ attunedItems: [] });
+      fireEvent.change(screen.getByLabelText('New attunement name'), {
+        target: { value: 'Boots of Speed' },
+      });
+      await user.click(screen.getByRole('button', { name: 'Attune item' }));
+      expect(onPatch).toHaveBeenCalledWith({ attunedItems: [{ name: 'Boots of Speed' }] });
+    });
+
+    it('adds a catalog-linked attuned item carrying itemId', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({ attunedItems: [] });
+      const form = screen.getByTestId('add-attunement-form');
+      await user.click(within(form).getByRole('button', { name: 'stub-pick-catalog' }));
+      expect(screen.getByLabelText('New attunement name')).toHaveValue('Ring of Protection');
+      await user.click(screen.getByRole('button', { name: 'Attune item' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        attunedItems: [{ name: 'Ring of Protection', itemId: catalogItem.id }],
+      });
+    });
+
+    it('removes an attuned item through patch', async () => {
+      const user = userEvent.setup();
+      const onPatch = renderOwner({
+        attunedItems: [{ name: 'Cloak of Protection' }, { name: 'Ring of Evasion' }],
+      });
+      await user.click(
+        screen.getByRole('button', { name: 'Remove attunement Cloak of Protection' })
+      );
+      expect(onPatch).toHaveBeenCalledWith({ attunedItems: [{ name: 'Ring of Evasion' }] });
+    });
+
+    it('hides the add form and shows a full message when 3 items are attuned', () => {
+      renderOwner({ attunedItems: [{ name: 'A' }, { name: 'B' }, { name: 'C' }] });
+      expect(screen.queryByTestId('add-attunement-form')).toBeNull();
+      expect(screen.getByText(/slots full/i)).toBeInTheDocument();
+      // Remove controls remain available for each filled slot.
+      expect(screen.getAllByRole('button', { name: /^Remove attunement/ })).toHaveLength(3);
+    });
+
+    it('disables attunement controls while a write is in flight', () => {
+      renderOwner({ attunedItems: [{ name: 'Cloak of Protection' }] }, true);
+      expect(
+        screen.getByRole('button', { name: 'Remove attunement Cloak of Protection' })
+      ).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Attune item' })).toBeDisabled();
     });
   });
 });

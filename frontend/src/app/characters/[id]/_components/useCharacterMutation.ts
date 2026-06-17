@@ -22,6 +22,7 @@ export type CharacterPatch = Partial<
     | 'spellSlots'
     | 'currency'
     | 'inventory'
+    | 'attunedItems'
   >
 >;
 
