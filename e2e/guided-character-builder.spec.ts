@@ -45,11 +45,20 @@ test.describe('guided character builder — class selection', () => {
     await page.getByRole('option').first().click();
     await expect(page.getByRole('group', { name: /species grants/i })).toBeVisible();
 
-    // Advance through the remaining optional stub steps to Review.
-    for (const heading of [/abilities/i, /equipment/i]) {
-      await next.click();
-      await expect(page.getByRole('heading', { name: heading })).toBeVisible();
-    }
+    // Abilities step — use point-buy and spend a couple points; the live preview
+    // reflects the change.
+    await next.click();
+    await expect(page.getByRole('heading', { name: /abilities/i })).toBeVisible();
+    await page.getByRole('radio', { name: /point buy/i }).click();
+    await expect(page.getByTestId('points-remaining')).toHaveText('27');
+    await page.getByRole('button', { name: /increase strength/i }).click();
+    await page.getByRole('button', { name: /increase strength/i }).click();
+    await expect(page.getByTestId('score-strength')).toHaveText('10');
+    await expect(page.getByTestId('mod-strength')).toHaveText('+0');
+
+    // Advance through the remaining optional stub step to Review.
+    await next.click();
+    await expect(page.getByRole('heading', { name: /equipment/i })).toBeVisible();
     await next.click();
     await expect(page.getByRole('heading', { name: /review/i })).toBeVisible();
 
