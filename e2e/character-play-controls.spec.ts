@@ -53,6 +53,14 @@ test.describe('character sheet — in-sheet play controls', () => {
     await page.getByRole('button', { name: 'Spend hit die' }).click();
     await expect(page.getByTestId('hd-block').getByText('1/5')).toBeVisible();
 
+    // Death saves: toggle a failure pip — exercises the deathSaves PATCH field
+    // (the backend whitelist must accept it), persisted across the refetch.
+    await page.getByRole('button', { name: 'Toggle failure 1' }).click();
+    await expect(page.getByRole('button', { name: 'Toggle failure 1' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+
     // Spell slots live on the Spells & Details tab.
     await page.getByRole('tab', { name: 'Spells & Details' }).click();
 
