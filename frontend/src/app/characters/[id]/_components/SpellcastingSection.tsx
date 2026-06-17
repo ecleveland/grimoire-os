@@ -3,7 +3,7 @@
 import type { Character } from '@/lib/types';
 import { abilityModifier, formatModifier, ABILITY_KEY_TO_NAME } from './utils';
 import type { AbilityScores } from '@/lib/types';
-import type { PlayControlProps } from './useCharacterMutation';
+import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { togglePip } from '@/lib/character-play';
 
 type SpellcastingSectionProps = { character: Character } & PlayControlProps;
@@ -14,22 +14,17 @@ function getAbilityScore(abilityScores: AbilityScores, abilityName: string): num
   return abilityScores[entry[0] as keyof AbilityScores];
 }
 
-export default function SpellcastingSection({
-  character,
-  isOwner,
-  onPatch,
-  isSaving,
-}: SpellcastingSectionProps) {
+export default function SpellcastingSection(props: SpellcastingSectionProps) {
+  const { character } = props;
+  const { editable, patch, isSaving } = resolvePlayControls(props);
   if (!character.spellcastingAbility) return null;
 
   const abilityScore = getAbilityScore(character.abilityScores, character.spellcastingAbility);
   const modifier = abilityModifier(abilityScore);
   const spellSlots = character.spellSlots ?? [];
-  const editable = !!isOwner && !!onPatch;
 
   const setSlotUsed = (level: number, used: number) => {
-    if (!onPatch) return;
-    onPatch({ spellSlots: spellSlots.map(s => (s.level === level ? { ...s, used } : s)) });
+    patch({ spellSlots: spellSlots.map(s => (s.level === level ? { ...s, used } : s)) });
   };
   // Sort by level (cantrips first), then name, mirroring the 2024 sheet table.
   const spells = [...(character.spells ?? [])].sort(

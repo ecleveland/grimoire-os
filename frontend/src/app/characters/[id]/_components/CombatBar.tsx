@@ -2,14 +2,15 @@
 
 import { useState } from 'react';
 import type { Character } from '@/lib/types';
-import type { PlayControlProps } from './useCharacterMutation';
+import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import {
   damageHitPoints,
   healHitPoints,
   setTempHitPoints,
   togglePip,
   adjustHitDiceSpent,
-  CLEARED_DEATH_SAVES,
+  deathSavesAfterRevive,
+  parseNonNegativeInt,
 } from '@/lib/character-play';
 
 type CombatBarProps = { character: Character } & PlayControlProps;
@@ -21,43 +22,41 @@ function hpBarColor(current: number, max: number): string {
   return 'bg-red-500';
 }
 
-export default function CombatBar({ character, isOwner, onPatch, isSaving }: CombatBarProps) {
+export default function CombatBar(props: CombatBarProps) {
+  const { character } = props;
+  const { editable, patch, isSaving } = resolvePlayControls(props);
   const { hitPoints, hitDice } = character;
   const deathSaves = character.deathSaves ?? { successes: 0, failures: 0 };
   const hpPct = hitPoints.max > 0 ? (hitPoints.current / hitPoints.max) * 100 : 0;
-  const editable = !!isOwner && !!onPatch;
   const [amount, setAmount] = useState('');
 
-  const amountValue = Math.max(0, Math.floor(Number(amount) || 0));
+  const amountValue = parseNonNegativeInt(amount);
 
   const applyDamage = () => {
-    if (!onPatch || amountValue <= 0) return;
-    onPatch({ hitPoints: damageHitPoints(hitPoints, amountValue) });
+    if (amountValue <= 0) return;
+    patch({ hitPoints: damageHitPoints(hitPoints, amountValue) });
     setAmount('');
   };
   const applyHeal = () => {
-    if (!onPatch || amountValue <= 0) return;
+    if (amountValue <= 0) return;
     const next = healHitPoints(hitPoints, amountValue);
-    // Revive: a downed PC healed above 0 clears its death saves (5e).
-    const reviving =
-      hitPoints.current <= 0 && next.current > 0 && (deathSaves.successes || deathSaves.failures);
-    onPatch({ hitPoints: next, ...(reviving ? { deathSaves: { ...CLEARED_DEATH_SAVES } } : {}) });
+    // A downed PC healed above 0 clears its death saves (5e).
+    const cleared = deathSavesAfterRevive(next.current, deathSaves);
+    patch({ hitPoints: next, ...(cleared ? { deathSaves: cleared } : {}) });
     setAmount('');
   };
   const applySetTemp = () => {
-    if (!onPatch) return;
-    onPatch({ hitPoints: setTempHitPoints(hitPoints, amountValue) });
+    patch({ hitPoints: setTempHitPoints(hitPoints, amountValue) });
     setAmount('');
   };
 
   const toggleDeathSave = (track: 'successes' | 'failures', index: number) => {
-    if (!onPatch) return;
-    onPatch({ deathSaves: { ...deathSaves, [track]: togglePip(deathSaves[track], index, 3) } });
+    patch({ deathSaves: { ...deathSaves, [track]: togglePip(deathSaves[track], index, 3) } });
   };
 
   const spendHitDie = (delta: number) => {
-    if (!onPatch || !hitDice) return;
-    onPatch({ hitDice: adjustHitDiceSpent(hitDice, delta) });
+    if (!hitDice) return;
+    patch({ hitDice: adjustHitDiceSpent(hitDice, delta) });
   };
 
   const renderPips = (track: 'successes' | 'failures', filledClass: string) => {
@@ -224,7 +223,7 @@ export default function CombatBar({ character, isOwner, onPatch, isSaving }: Com
             aria-label="Toggle heroic inspiration"
             aria-pressed={!!character.heroicInspiration}
             disabled={isSaving}
-            onClick={() => onPatch?.({ heroicInspiration: !character.heroicInspiration })}
+            onClick={() => patch({ heroicInspiration: !character.heroicInspiration })}
             className={`mt-2 text-3xl leading-none disabled:opacity-50 ${
               character.heroicInspiration ? 'text-amber-500' : 'text-gray-300 dark:text-gray-600'
             }`}

@@ -3,6 +3,7 @@
 import type { Character } from '@/lib/types';
 import { abilityModifier, formatModifier, proficiencyBonus, passivePerception } from './utils';
 import { useDiceRoll } from './useDiceRoll';
+import RollableStat from './RollableStat';
 
 interface StatsBarProps {
   character: Character;
@@ -42,18 +43,14 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
             <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
               {label}
             </div>
-            {rollable ? (
-              <button
-                type="button"
-                aria-label="Roll initiative"
-                onClick={() => rollCheck('Initiative', dexMod)}
-                className="text-xl font-bold text-gray-900 dark:text-white mt-1 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-              >
-                {value}
-              </button>
-            ) : (
-              <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{value}</div>
-            )}
+            <RollableStat
+              canRoll={rollable}
+              label="Roll initiative"
+              onRoll={() => rollCheck('Initiative', dexMod)}
+              className="block text-xl font-bold text-gray-900 dark:text-white mt-1"
+            >
+              {value}
+            </RollableStat>
           </div>
         );
       })}

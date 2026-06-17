@@ -27,14 +27,30 @@ export interface CharacterMutation {
 }
 
 /**
- * Props an editable sheet section accepts. All optional so a section renders
- * read-only (its prior behavior) when omitted — only the owner-facing sheet
- * threads them in.
+ * Props an editable sheet section accepts, as a discriminated union so illegal
+ * states are unrepresentable: a read-only section carries no write path, and an
+ * editable one *must* carry both `onPatch` and `isSaving`. Omitting the props
+ * entirely (`{}`) is read-only — the section's prior behavior.
  */
-export interface PlayControlProps {
-  isOwner?: boolean;
-  onPatch?: (fields: CharacterPatch) => void;
-  isSaving?: boolean;
+export type PlayControlProps =
+  | { editable?: false }
+  | { editable: true; onPatch: (fields: CharacterPatch) => void; isSaving: boolean };
+
+export interface ResolvedPlayControls {
+  editable: boolean;
+  /** Always callable: a no-op when the section is read-only, so consumers call
+   * `patch(...)` without per-handler guards and gate only their rendering. */
+  patch: (fields: CharacterPatch) => void;
+  isSaving: boolean;
+}
+
+const NOOP_PATCH = () => {};
+
+/** Normalize the editable/read-only prop union into always-safe values. */
+export function resolvePlayControls(props: PlayControlProps): ResolvedPlayControls {
+  return props.editable
+    ? { editable: true, patch: props.onPatch, isSaving: props.isSaving }
+    : { editable: false, patch: NOOP_PATCH, isSaving: false };
 }
 
 /**

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { useCharacterMutation } from '../useCharacterMutation';
+import { useCharacterMutation, resolvePlayControls } from '../useCharacterMutation';
 import type { Character } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
@@ -101,6 +101,25 @@ describe('useCharacterMutation', () => {
     act(() => result.current.patch({ heroicInspiration: false }));
 
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to update character'));
+  });
+
+  describe('resolvePlayControls', () => {
+    it('exposes the write path when editable', () => {
+      const onPatch = vi.fn();
+      const resolved = resolvePlayControls({ editable: true, onPatch, isSaving: true });
+      expect(resolved.editable).toBe(true);
+      expect(resolved.isSaving).toBe(true);
+      resolved.patch({ heroicInspiration: true });
+      expect(onPatch).toHaveBeenCalledWith({ heroicInspiration: true });
+    });
+
+    it('returns a safe no-op patch when read-only', () => {
+      const resolved = resolvePlayControls({});
+      expect(resolved.editable).toBe(false);
+      expect(resolved.isSaving).toBe(false);
+      // Must not throw — consumers call patch() without guarding.
+      expect(() => resolved.patch({ heroicInspiration: true })).not.toThrow();
+    });
   });
 
   it('reports isSaving while a write is in flight', async () => {

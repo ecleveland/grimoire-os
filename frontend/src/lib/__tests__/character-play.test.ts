@@ -5,6 +5,8 @@ import {
   setTempHitPoints,
   togglePip,
   adjustHitDiceSpent,
+  deathSavesAfterRevive,
+  parseNonNegativeInt,
   CLEARED_DEATH_SAVES,
 } from '../character-play';
 
@@ -110,5 +112,41 @@ describe('adjustHitDiceSpent', () => {
 describe('CLEARED_DEATH_SAVES', () => {
   it('is a zeroed track for revive-above-0', () => {
     expect(CLEARED_DEATH_SAVES).toEqual({ successes: 0, failures: 0 });
+  });
+});
+
+describe('deathSavesAfterRevive', () => {
+  it('returns a zeroed track when healed above 0 with saves present', () => {
+    expect(deathSavesAfterRevive(5, { successes: 1, failures: 2 })).toEqual({
+      successes: 0,
+      failures: 0,
+    });
+  });
+
+  it('returns null when still at 0 (no revive)', () => {
+    expect(deathSavesAfterRevive(0, { successes: 1, failures: 2 })).toBeNull();
+  });
+
+  it('returns null when there are no saves to clear', () => {
+    expect(deathSavesAfterRevive(5, { successes: 0, failures: 0 })).toBeNull();
+  });
+});
+
+describe('parseNonNegativeInt', () => {
+  it('parses a positive integer', () => {
+    expect(parseNonNegativeInt('12')).toBe(12);
+  });
+
+  it('floors fractional input', () => {
+    expect(parseNonNegativeInt('4.7')).toBe(4);
+  });
+
+  it('clamps negatives to 0', () => {
+    expect(parseNonNegativeInt('-5')).toBe(0);
+  });
+
+  it('treats blank/non-numeric as 0', () => {
+    expect(parseNonNegativeInt('')).toBe(0);
+    expect(parseNonNegativeInt('abc')).toBe(0);
   });
 });

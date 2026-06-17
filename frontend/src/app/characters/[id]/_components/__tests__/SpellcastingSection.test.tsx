@@ -160,7 +160,7 @@ describe('SpellcastingSection', () => {
       render(
         <SpellcastingSection
           character={{ ...baseCharacter, ...over }}
-          isOwner
+          editable
           onPatch={onPatch}
           isSaving={isSaving}
         />

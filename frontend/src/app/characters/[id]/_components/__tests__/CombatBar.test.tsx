@@ -176,7 +176,7 @@ describe('CombatBar', () => {
       render(
         <CombatBar
           character={{ ...mockCharacter, ...over }}
-          isOwner
+          editable
           onPatch={onPatch}
           isSaving={isSaving}
         />
@@ -192,8 +192,11 @@ describe('CombatBar', () => {
       expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 29, temporary: 0 } });
     });
 
-    it('heals clamped to max', () => {
-      const onPatch = renderOwner({ hitPoints: { max: 44, current: 40, temporary: 0 } });
+    it('heals clamped to max (no death-save change for a PC already above 0)', () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 40, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+      });
       fireEvent.change(screen.getByLabelText('HP amount'), { target: { value: '100' } });
       fireEvent.click(screen.getByRole('button', { name: 'Heal' }));
       expect(onPatch).toHaveBeenCalledWith({ hitPoints: { max: 44, current: 44, temporary: 0 } });

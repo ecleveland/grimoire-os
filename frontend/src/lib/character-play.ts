@@ -1,4 +1,4 @@
-import type { HitPoints, HitDice } from '@/lib/types';
+import type { HitPoints, HitDice, DeathSaves } from '@/lib/types';
 import { applyDamage, applyHeal } from './combatant-hp';
 
 /**
@@ -34,8 +34,31 @@ export function setTempHitPoints(hp: HitPoints, amount: number): HitPoints {
   return { ...hp, temporary: Math.max(0, Math.floor(amount)) };
 }
 
-/** Death/spell-slot pip toggle: cleared death saves on every revive above 0. */
+/** A zeroed death-save track — what a revive above 0 HP resets to. */
 export const CLEARED_DEATH_SAVES = { successes: 0, failures: 0 } as const;
+
+/**
+ * Death saves only apply while a PC is down: reviving above 0 HP clears them
+ * (5e). Mirrors the encounter tracker's `clearDeathSavesIfRevived`
+ * (`lib/death-saves.ts`) rule, but for the character sheet's zeroed-object
+ * shape (the sheet always renders `deathSaves`, so it resets to 0/0 rather than
+ * deleting the field). Returns the cleared track when a heal lands the PC above
+ * 0 with saves on the sheet, else `null` (nothing to change).
+ */
+export function deathSavesAfterRevive(nextCurrent: number, saves: DeathSaves): DeathSaves | null {
+  const hasSaves = saves.successes > 0 || saves.failures > 0;
+  return nextCurrent > 0 && hasSaves ? { ...CLEARED_DEATH_SAVES } : null;
+}
+
+/**
+ * Parse a numeric form field to a non-negative integer (blank/NaN → 0). Shared
+ * by the HP-amount and coin inputs so the "reject negatives, floor to int"
+ * decision lives in one place. (Distinct from `parseIntField`, which truncates
+ * but allows negatives, used by the encounter dialogs.)
+ */
+export function parseNonNegativeInt(value: string): number {
+  return Math.max(0, Math.floor(Number(value) || 0));
+}
 
 /**
  * Toggle a pip track to `index`. Clicking the highest filled pip clears it

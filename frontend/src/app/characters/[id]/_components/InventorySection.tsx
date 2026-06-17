@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import type { Character, Currency } from '@/lib/types';
-import type { PlayControlProps } from './useCharacterMutation';
+import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
+import { parseNonNegativeInt } from '@/lib/character-play';
 
 type InventorySectionProps = { character: Character } & PlayControlProps;
 
@@ -17,16 +18,12 @@ const DENOMINATION_LABELS: Record<string, string> = {
 
 const ATTUNEMENT_SLOTS = 3;
 
-export default function InventorySection({
-  character,
-  isOwner,
-  onPatch,
-  isSaving,
-}: InventorySectionProps) {
+export default function InventorySection(props: InventorySectionProps) {
+  const { character } = props;
+  const { editable, patch, isSaving } = resolvePlayControls(props);
   const inventory = character.inventory ?? [];
   const currency = character.currency ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
   const attunedItems = (character.attunedItems ?? []).slice(0, ATTUNEMENT_SLOTS);
-  const editable = !!isOwner && !!onPatch;
   const hasInventory = inventory.length > 0;
   const hasCurrency = Object.values(currency).some(v => v > 0);
   const hasAttunement = attunedItems.length > 0;
@@ -43,9 +40,9 @@ export default function InventorySection({
   }, [currency.cp, currency.sp, currency.ep, currency.gp, currency.pp]);
 
   const commitCoin = (denom: keyof Currency) => {
-    const parsed = Math.max(0, Math.floor(Number(draft[denom]) || 0));
+    const parsed = parseNonNegativeInt(draft[denom]);
     if (parsed === currency[denom]) return; // no-op: don't burn a version on a no-change blur
-    onPatch?.({ currency: { ...currency, [denom]: parsed } });
+    patch({ currency: { ...currency, [denom]: parsed } });
   };
 
   if (!hasInventory && !showCurrency && !hasAttunement) return null;

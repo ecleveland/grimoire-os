@@ -220,7 +220,7 @@ describe('InventorySection', () => {
       render(
         <InventorySection
           character={{ ...baseCharacter, ...over }}
-          isOwner
+          editable
           onPatch={onPatch}
           isSaving={isSaving}
         />
@@ -236,7 +236,7 @@ describe('InventorySection', () => {
 
     it('re-seeds the coin draft when stored currency changes (post-write refetch)', () => {
       const { rerender } = render(
-        <InventorySection character={baseCharacter} isOwner onPatch={vi.fn()} />
+        <InventorySection character={baseCharacter} editable onPatch={vi.fn()} isSaving={false} />
       );
       expect(screen.getByLabelText('GP')).toHaveValue(150);
       // A successful write refetches and passes new currency down; the input
@@ -244,8 +244,9 @@ describe('InventorySection', () => {
       rerender(
         <InventorySection
           character={{ ...baseCharacter, currency: { cp: 10, sp: 25, ep: 0, gp: 200, pp: 5 } }}
-          isOwner
+          editable
           onPatch={vi.fn()}
+          isSaving={false}
         />
       );
       expect(screen.getByLabelText('GP')).toHaveValue(200);

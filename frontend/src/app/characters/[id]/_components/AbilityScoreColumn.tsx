@@ -11,6 +11,7 @@ import {
   ABILITY_SKILLS_MAP,
 } from './utils';
 import { useDiceRoll } from './useDiceRoll';
+import RollableStat from './RollableStat';
 
 interface AbilityScoreColumnProps {
   character: Character;
@@ -45,24 +46,15 @@ export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreC
               {ABILITY_LABELS[key]}
             </h3>
 
-            {canRoll ? (
-              <button
-                type="button"
-                data-testid={`modifier-${key}`}
-                aria-label={`Roll ${abilityName} check`}
-                onClick={() => rollCheck(`${abilityName} check`, mod)}
-                className="w-full text-3xl font-bold text-center text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-              >
-                {formatModifier(mod)}
-              </button>
-            ) : (
-              <div
-                data-testid={`modifier-${key}`}
-                className="text-3xl font-bold text-center text-gray-900 dark:text-white"
-              >
-                {formatModifier(mod)}
-              </div>
-            )}
+            <RollableStat
+              canRoll={canRoll}
+              testId={`modifier-${key}`}
+              label={`Roll ${abilityName} check`}
+              onRoll={() => rollCheck(`${abilityName} check`, mod)}
+              className="block w-full text-3xl font-bold text-center text-gray-900 dark:text-white"
+            >
+              {formatModifier(mod)}
+            </RollableStat>
 
             <div
               data-testid={`score-${key}`}
@@ -83,20 +75,14 @@ export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreC
                 }`}
               />
               <span className="text-gray-700 dark:text-gray-300 flex-1">Saving Throw</span>
-              {canRoll ? (
-                <button
-                  type="button"
-                  aria-label={`Roll ${abilityName} save`}
-                  onClick={() => rollCheck(`${abilityName} save`, saveBonus)}
-                  className="font-medium text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400"
-                >
-                  {formatModifier(saveBonus)}
-                </button>
-              ) : (
-                <span className="font-medium text-gray-900 dark:text-white">
-                  {formatModifier(saveBonus)}
-                </span>
-              )}
+              <RollableStat
+                canRoll={canRoll}
+                label={`Roll ${abilityName} save`}
+                onRoll={() => rollCheck(`${abilityName} save`, saveBonus)}
+                className="font-medium text-gray-900 dark:text-white"
+              >
+                {formatModifier(saveBonus)}
+              </RollableStat>
             </div>
 
             {skills.map(skillName => {
@@ -117,20 +103,14 @@ export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreC
                     }`}
                   />
                   <span className="text-gray-700 dark:text-gray-300 flex-1">{skillName}</span>
-                  {canRoll ? (
-                    <button
-                      type="button"
-                      aria-label={`Roll ${skillName}`}
-                      onClick={() => rollCheck(`${skillName} check`, bonus)}
-                      className="font-medium text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400"
-                    >
-                      {formatModifier(bonus)}
-                    </button>
-                  ) : (
-                    <span className="font-medium text-gray-900 dark:text-white">
-                      {formatModifier(bonus)}
-                    </span>
-                  )}
+                  <RollableStat
+                    canRoll={canRoll}
+                    label={`Roll ${skillName}`}
+                    onRoll={() => rollCheck(`${skillName} check`, bonus)}
+                    className="font-medium text-gray-900 dark:text-white"
+                  >
+                    {formatModifier(bonus)}
+                  </RollableStat>
                 </div>
               );
             })}
