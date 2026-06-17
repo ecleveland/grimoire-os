@@ -12,6 +12,7 @@ import type {
   HitPoints,
   InventoryItem,
   Size,
+  SpellEntry,
   SrdBackground,
   SrdClass,
   SrdLanguage,
@@ -75,6 +76,10 @@ export interface CharacterFormValues {
   // inventory editor yet), so loading and re-sending them is a no-op there.
   inventory: InventoryItem[];
   currency: Currency;
+  // Structured spell list (VEG-347). Written by the guided builder's Spells step
+  // (VEG-383); the classic editor round-trips them untouched (no spell editor in
+  // this form yet), so loading and re-sending them is a no-op there.
+  spells: SpellEntry[];
 }
 
 /** Zeroed coin purse — the SRD default for a fresh character. */
@@ -140,6 +145,7 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     features: [],
     inventory: [],
     currency: emptyCurrency(),
+    spells: [],
   };
 }
 
@@ -179,6 +185,7 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     features: c.features ?? [],
     inventory: c.inventory ?? [],
     currency: c.currency ?? emptyCurrency(),
+    spells: c.spells ?? [],
   };
 }
 
@@ -218,6 +225,7 @@ type CharacterWriteFields = Pick<
   | 'features'
   | 'inventory'
   | 'currency'
+  | 'spells'
 >;
 
 /**
@@ -259,6 +267,7 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     features: v.features.filter(f => f.name.trim() !== ''),
     inventory: v.inventory.filter(i => i.name.trim() !== ''),
     currency: v.currency,
+    spells: v.spells.filter(s => s.name.trim() !== ''),
   };
 }
 
