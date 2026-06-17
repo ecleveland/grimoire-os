@@ -179,6 +179,7 @@ describe('pure helpers', () => {
     expect(v.spellcastingAbility).toBe('');
     expect(v.inventory).toEqual([]);
     expect(v.currency).toEqual({ cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 });
+    expect(v.spells).toEqual([]);
   });
 
   it('characterToFormValues seeds grant lists from the character', () => {
@@ -243,6 +244,20 @@ describe('pure helpers', () => {
     const payload = characterFormPayload(v);
     expect(payload.inventory).toEqual([{ name: 'Longsword', quantity: 1, equipped: true }]);
     expect(payload.currency).toEqual({ cp: 0, sp: 0, ep: 0, gp: 50, pp: 0 });
+  });
+
+  it('characterFormPayload carries spells and drops unnamed entries', () => {
+    const v = emptyCharacterFormValues();
+    v.spells = [
+      { level: 0, name: 'Fire Bolt', prepared: false },
+      { level: 1, name: 'Magic Missile', prepared: true },
+      { level: 1, name: '  ', prepared: true },
+    ];
+    const payload = characterFormPayload(v);
+    expect(payload.spells).toEqual([
+      { level: 0, name: 'Fire Bolt', prepared: false },
+      { level: 1, name: 'Magic Missile', prepared: true },
+    ]);
   });
 
   it('characterToFormValues seeds inventory/currency, defaulting an absent purse', () => {

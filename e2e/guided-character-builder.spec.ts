@@ -85,4 +85,51 @@ test.describe('guided character builder — class selection', () => {
 
     await expect(page.getByRole('heading', { name: 'Borin Quickblade' })).toBeVisible();
   });
+
+  // VEG-383 Spells step: a caster class surfaces the otherwise-hidden Spells step
+  // and lets the user pick cantrips + level-1 spells, which land on the sheet.
+  test('shows the Spells step for a caster and records the selections', async ({ page }) => {
+    await registerAndLogin(page, 'guided-caster');
+
+    await page.goto('/characters/new/guided');
+    await expect(page.getByRole('heading', { name: /guided character build/i })).toBeVisible();
+
+    // Class — Wizard (a caster). Satisfy the skill-count gate.
+    const classInput = page.getByRole('combobox', { name: /^class/i });
+    await classInput.click();
+    await classInput.fill('Wizard');
+    await page.getByRole('option', { name: 'Wizard' }).click();
+    const skillChips = page.getByRole('group', { name: /skills/i }).getByRole('button');
+    await skillChips.nth(0).click();
+    await skillChips.nth(1).click();
+
+    const next = page.getByRole('button', { name: /^next$/i });
+    // Advance through Origin, Abilities, Equipment to the Spells step.
+    await next.click(); // Origin
+    await next.click(); // Abilities
+    await next.click(); // Equipment
+    await next.click(); // Spells
+
+    await expect(page.getByRole('heading', { name: /spells/i })).toBeVisible();
+
+    // Wizard at level 1 with default INT (10): 3 cantrips, 1 prepared spell.
+    const cantrips = page.getByRole('group', { name: /cantrips/i });
+    const cantripBoxes = cantrips.getByRole('checkbox');
+    await cantripBoxes.nth(0).check();
+    await cantripBoxes.nth(1).check();
+    await cantripBoxes.nth(2).check();
+
+    const prepared = page.getByRole('group', { name: /prepared spells/i });
+    await prepared.getByRole('checkbox').first().check();
+
+    await next.click();
+    await expect(page.getByRole('heading', { name: /review/i })).toBeVisible();
+    await page.getByRole('textbox', { name: /name/i }).fill('Mialee Spellweave');
+    await page.getByRole('button', { name: /create character/i }).click();
+
+    // Lands on the sheet; the chosen spells reach the spell table (Spells tab).
+    await expect(page.getByRole('heading', { name: 'Mialee Spellweave' })).toBeVisible();
+    await page.getByRole('tab', { name: /spells & details/i }).click();
+    await expect(page.getByText(/cantrips & prepared spells/i)).toBeVisible();
+  });
 });
