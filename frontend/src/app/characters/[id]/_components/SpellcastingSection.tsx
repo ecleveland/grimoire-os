@@ -1,16 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import type { AbilityScores, Character, SpellEntry, SrdSpell } from '@/lib/types';
+import type { AbilityScores, Character, SpellEntry, SrdClass, SrdSpell } from '@/lib/types';
 import { abilityModifier, formatModifier, ABILITY_KEY_TO_NAME } from './utils';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt, togglePip } from '@/lib/character-play';
 import {
   addSpellEntry,
   removeSpellEntryAt,
+  spellPreparationSummary,
   togglePreparedAt,
   toSpellEntry,
 } from '@/lib/character-spells';
+import { useApiQuery } from '@/lib/query';
 import SrdSpellSearch from '@/components/SrdSpellSearch';
 
 type SpellcastingSectionProps = { character: Character } & PlayControlProps;
@@ -34,6 +36,14 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   const [addName, setAddName] = useState('');
   const [addLevel, setAddLevel] = useState('1');
 
+  // Resolve the class's spellcasting progression to show the prepared/known
+  // budget (VEG-405). The list is cached and shared with the guided builder;
+  // skip the fetch entirely for non-casters. Called before the early return to
+  // keep the hook order stable.
+  const classesQuery = useApiQuery<SrdClass[]>('/srd/classes', {
+    enabled: !!character.spellcastingAbility,
+  });
+
   if (!character.spellcastingAbility) return null;
 
   const abilityScore = getAbilityScore(character.abilityScores, character.spellcastingAbility);
@@ -50,9 +60,19 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   const rows = storedSpells
     .map((spell, index) => ({ spell, index }))
     .sort((a, b) => a.spell.level - b.spell.level || a.spell.name.localeCompare(b.spell.name));
+  // Prepared/known budget for this class+level (VEG-405). Null until the class
+  // list resolves or for a class with no spellcasting data — the indicator is
+  // simply omitted then.
+  const spellcasting = classesQuery.data?.find(c => c.name === character.class)?.spellcasting;
+  const prepSummary = spellcasting
+    ? spellPreparationSummary(spellcasting, character.level, modifier, storedSpells)
+    : null;
+
   const hasSpellSlots = spellSlots.length > 0;
   const hasSpells = storedSpells.length > 0;
-  const showSpells = hasSpells || editable;
+  // Show the spells card when there are spells, the owner can add them, or there
+  // is a budget to surface (so a read-only caster with no spells still sees it).
+  const showSpells = hasSpells || editable || prepSummary !== null;
 
   const removeSpell = (index: number) => patch({ spells: removeSpellEntryAt(storedSpells, index) });
   const togglePrepared = (index: number) =>
@@ -157,6 +177,43 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
           <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase text-center mb-3">
             Cantrips & Prepared Spells
           </h3>
+          {prepSummary && (
+            <div
+              data-testid="prep-summary"
+              className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 mb-3 text-xs"
+            >
+              <span
+                data-testid="cantrip-summary"
+                className={
+                  prepSummary.cantrips.over
+                    ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                    : 'text-gray-500 dark:text-gray-400'
+                }
+              >
+                Cantrips {prepSummary.cantrips.count} / {prepSummary.cantrips.allowed}
+              </span>
+              <span
+                data-testid="leveled-summary"
+                className={
+                  prepSummary.leveled.over
+                    ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                    : 'text-gray-500 dark:text-gray-400'
+                }
+              >
+                {prepSummary.leveled.mode === 'prepared' ? 'Prepared' : 'Known'}{' '}
+                {prepSummary.leveled.count} / {prepSummary.leveled.allowed}
+              </span>
+              {(prepSummary.cantrips.over || prepSummary.leveled.over) && (
+                <span
+                  data-testid="prep-over-warning"
+                  role="status"
+                  className="text-amber-600 dark:text-amber-400"
+                >
+                  Over your limit
+                </span>
+              )}
+            </div>
+          )}
           {hasSpells && (
             <table className="w-full text-sm">
               <thead>

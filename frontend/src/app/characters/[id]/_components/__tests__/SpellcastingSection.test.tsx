@@ -1,8 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SpellcastingSection from '../SpellcastingSection';
 import type { Character } from '@/lib/types';
+
+// The section fetches /srd/classes to resolve the prepared/known allowance
+// (VEG-405). Mock just useApiQuery, leaving the rest of the query layer (used by
+// useCharacterMutation) intact. Default to "no class data" so the existing,
+// pre-indicator tests are unaffected; the indicator tests opt in per case.
+const mockUseApiQuery = vi.fn();
+vi.mock('@/lib/query', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/query')>()),
+  useApiQuery: (path: string) => mockUseApiQuery(path),
+}));
 
 // Stub the catalog picker so these tests don't hit the debounced network search
 // (covered in SrdSpellSearch.test.tsx). The stub fires onSelect with a fixed
@@ -90,6 +100,84 @@ const baseCharacter: Character = {
 };
 
 describe('SpellcastingSection', () => {
+  beforeEach(() => {
+    // Default: class list not yet resolved → no allowance indicator.
+    mockUseApiQuery.mockReturnValue({ data: undefined });
+  });
+
+  describe('preparation limit indicator (VEG-405)', () => {
+    const WIZARD_CLASS = {
+      id: 'wizard',
+      name: 'Wizard',
+      spellcasting: {
+        ability: 'Intelligence',
+        cantripsKnown: { 5: 4 },
+        preparedFormula: 'level + intelligence modifier',
+      },
+    };
+
+    it('shows cantrip and prepared counts against the class allowance', () => {
+      mockUseApiQuery.mockReturnValue({ data: [WIZARD_CLASS] });
+      render(<SpellcastingSection character={baseCharacter} />);
+      // L5 wizard, INT 18 (+4) → prepared allowance 9, cantrips allowed 4.
+      // baseCharacter: 2 cantrips; prepared leveled = Magic Missile, Detect Magic, Fireball = 3.
+      expect(screen.getByTestId('cantrip-summary')).toHaveTextContent('2 / 4');
+      expect(screen.getByTestId('leveled-summary')).toHaveTextContent('Prepared 3 / 9');
+      expect(screen.queryByTestId('prep-over-warning')).toBeNull();
+    });
+
+    it('warns (non-blocking) when the prepared/known count exceeds the allowance', () => {
+      mockUseApiQuery.mockReturnValue({
+        data: [
+          {
+            ...WIZARD_CLASS,
+            spellcasting: { ...WIZARD_CLASS.spellcasting, cantripsKnown: { 5: 1 } },
+          },
+        ],
+      });
+      render(<SpellcastingSection character={baseCharacter} />);
+      // cantrips allowed 1, character has 2 → over.
+      expect(screen.getByTestId('cantrip-summary')).toHaveTextContent('2 / 1');
+      expect(screen.getByTestId('prep-over-warning')).toBeInTheDocument();
+    });
+
+    it('labels the budget "Known" for known casters', () => {
+      mockUseApiQuery.mockReturnValue({
+        data: [
+          {
+            id: 'sorcerer',
+            name: 'Sorcerer',
+            spellcasting: {
+              ability: 'Charisma',
+              cantripsKnown: { 5: 5 },
+              spellsKnown: { 5: 6 },
+            },
+          },
+        ],
+      });
+      const sorcerer = { ...baseCharacter, class: 'Sorcerer', spellcastingAbility: 'Charisma' };
+      render(<SpellcastingSection character={sorcerer} />);
+      // Leveled spells listed (level>0) = Magic Missile, Shield, Detect Magic, Fireball = 4.
+      expect(screen.getByTestId('leveled-summary')).toHaveTextContent('Known 4 / 6');
+    });
+
+    it('does not render the indicator when class spellcasting data is unavailable', () => {
+      mockUseApiQuery.mockReturnValue({ data: undefined });
+      render(<SpellcastingSection character={baseCharacter} />);
+      expect(screen.queryByTestId('prep-summary')).toBeNull();
+    });
+
+    it('surfaces the budget for a read-only caster even with no spells yet', () => {
+      mockUseApiQuery.mockReturnValue({ data: [WIZARD_CLASS] });
+      // No `editable` → read-only; empty spell list. The card (and indicator)
+      // must still render so the budget is visible.
+      render(<SpellcastingSection character={{ ...baseCharacter, spells: [] }} />);
+      expect(screen.getByTestId('prep-summary')).toBeInTheDocument();
+      expect(screen.getByTestId('cantrip-summary')).toHaveTextContent('0 / 4');
+      expect(screen.getByTestId('leveled-summary')).toHaveTextContent('Prepared 0 / 9');
+    });
+  });
+
   describe('conditional rendering', () => {
     it('renders nothing when spellcastingAbility is undefined', () => {
       const char = { ...baseCharacter, spellcastingAbility: undefined };
