@@ -1,4 +1,4 @@
-import type { HitPoints, HitDice, DeathSaves, SpellSlot, Character } from '@/lib/types';
+import type { HitPoints, HitDice, DeathSaves, SpellSlot } from '@/lib/types';
 import { applyDamage, applyHeal } from './combatant-hp';
 
 /**
@@ -104,9 +104,14 @@ export interface LongRestPatch {
  * capped at spent), and death saves cleared. Composes the per-field rules so the
  * UI and tests share one source of truth — the sheet just dispatches the result.
  */
-export function applyLongRest(
-  character: Pick<Character, 'hitPoints' | 'spellSlots' | 'hitDice'>
-): LongRestPatch {
+export function applyLongRest(character: {
+  hitPoints: HitPoints;
+  // Typed loosely on purpose: although `Character` declares these non-optional,
+  // the API returns `null` for a non-caster's `spellSlots` and can omit
+  // `hitDice` — guard for both so a real character can't crash the rest.
+  hitDice?: HitDice | null;
+  spellSlots?: SpellSlot[] | null;
+}): LongRestPatch {
   const { hitPoints, spellSlots, hitDice } = character;
   const patch: LongRestPatch = {
     hitPoints: { ...hitPoints, current: hitPoints.max, temporary: 0 },
@@ -116,7 +121,7 @@ export function applyLongRest(
     const regained = hitDiceRegainedOnLongRest(hitDice.total);
     patch.hitDice = { ...hitDice, spent: Math.max(0, hitDice.spent - regained) };
   }
-  if (spellSlots.length > 0) {
+  if (spellSlots && spellSlots.length > 0) {
     patch.spellSlots = spellSlots.map(slot => ({ ...slot, used: 0 }));
   }
   return patch;

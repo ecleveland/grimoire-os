@@ -65,4 +65,38 @@ test.describe('character sheet — Long Rest', () => {
       page.getByTestId('spell-slots-level-1').locator('[data-testid="slot-filled"]')
     ).toHaveCount(0);
   });
+
+  test('owner long-rests a non-caster whose spellSlots persist as null', async ({ page }) => {
+    // Regression for the manual-test crash: a martial character created with no
+    // spellcastingAbility/spellSlots has spellSlots === null, and Long Rest must
+    // not throw on it.
+    await registerAndLogin(page, 'long-rest-martial', 'Rester Two');
+    const headers = await csrfHeaders(page);
+
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Brom Stoutshield',
+        class: 'Fighter',
+        level: 4,
+        abilityScores: { strength: 16, dexterity: 12, constitution: 15 },
+        hitPoints: { max: 36, current: 11, temporary: 0 },
+        // total 4 → regain max(1, floor(4/2)) = 2; spent 3 → 1 remaining.
+        hitDice: { dieType: 'd10', total: 4, spent: 3 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        // No spellcastingAbility and no spellSlots → spellSlots persists as null.
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Brom Stoutshield' })).toBeVisible();
+
+    const hpBlock = page.getByTestId('hp-block');
+    await hpBlock.getByRole('button', { name: 'Long Rest' }).click();
+
+    await expect(hpBlock.getByText('36/36')).toBeVisible();
+    await expect(page.getByTestId('hd-block').getByText('1/4')).toBeVisible();
+  });
 });

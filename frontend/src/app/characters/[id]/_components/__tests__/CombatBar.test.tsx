@@ -315,6 +315,23 @@ describe('CombatBar', () => {
       });
     });
 
+    it('long rests a non-caster whose spellSlots came back null without crashing', () => {
+      // Regression (VEG-407): the API returns null spellSlots for non-casters
+      // even though the Character type says non-optional. Clicking Long Rest
+      // used to throw "Cannot read properties of null (reading 'length')".
+      const onPatch = renderOwner({
+        hitPoints: { max: 30, current: 4, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+        hitDice: undefined,
+        spellSlots: null as unknown as Character['spellSlots'],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        hitPoints: { max: 30, current: 30, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+      });
+    });
+
     it('disables Long Rest while a write is in flight', () => {
       renderOwner({}, true);
       expect(screen.getByRole('button', { name: 'Long Rest' })).toBeDisabled();

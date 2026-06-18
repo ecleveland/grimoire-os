@@ -199,6 +199,19 @@ describe('applyLongRest', () => {
   it('omits spellSlots from the patch for a non-caster (no slots)', () => {
     expect('spellSlots' in applyLongRest(base)).toBe(false);
   });
+
+  it('tolerates a null spellSlots (the API returns null for non-casters)', () => {
+    // Regression: Character types spellSlots as non-optional, but real data has
+    // null — `.length` on it threw at runtime (VEG-407 manual test).
+    const patch = applyLongRest({ ...base, spellSlots: null });
+    expect('spellSlots' in patch).toBe(false);
+    expect(patch.hitPoints).toEqual({ max: 44, current: 44, temporary: 0 });
+  });
+
+  it('tolerates a null hitDice', () => {
+    const patch = applyLongRest({ ...base, hitDice: null });
+    expect('hitDice' in patch).toBe(false);
+  });
 });
 
 describe('parseNonNegativeInt', () => {
