@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Prisma } from '@prisma/client';
@@ -29,6 +29,22 @@ import { monsterLootTemplates } from './data/monster-loot-templates';
 import { npcAlignmentPriors } from './data/npc-alignment-priors';
 import { trinkets } from './data/trinkets';
 
+// Source discriminator for the NPC-generator reference tables. Rows the seed
+// owns are tagged 'curated'; anything else (user-added) is left untouched on
+// reseed. Hoisted so the literal isn't duplicated across every replaceCurated.
+const CURATED = 'curated';
+
+// Explicit timeout for the one big interactive seed transaction. The SRD passes
+// do hundreds of per-row findFirst→create/update round-trips, which can exceed
+// Prisma's 5s interactive-transaction default on slower hosts.
+const SEED_TX_TIMEOUT_MS = 120_000;
+
+// Dev-only admin credentials (non-production). Hoisted out of the method body so
+// the magic values live in one obvious place.
+const DEV_ADMIN_USERNAME = 'admin';
+const DEV_ADMIN_PASSWORD = 'admin';
+const BCRYPT_COST = 12;
+
 // Minimal structural view of a Prisma delegate for SRD reference tables that
 // carry a `contentSource` discriminator (spells/monsters/items/feats). The seed
 // only needs these three operations; the real delegates are cast to this shape.
@@ -41,49 +57,100 @@ interface SrdSeedDelegate {
   create(args: { data: Record<string, unknown> }): Promise<unknown>;
 }
 
+// Minimal view of a delegate whose rows are resolved by name to their ids —
+// used to wire up FK relations for child feature/trait tables.
+interface NameLookupDelegate {
+  findMany(args: {
+    where: { name: { in: string[] } };
+    select: { id: true; name: true };
+  }): Promise<{ id: string; name: string }[]>;
+}
+
+// Minimal view of a delegate seeded via the clear-curated-then-recreate pattern.
+interface CuratedDelegate {
+  deleteMany(args: { where: Record<string, unknown> }): Promise<{ count: number }>;
+  createMany(args: { data: unknown[]; skipDuplicates?: boolean }): Promise<{ count: number }>;
+}
+
+// Prisma's generated delegate types don't structurally assign to the narrow,
+// hand-written shapes above (overload-heavy signatures), so a cast is
+// unavoidable. Centralize each one behind a named helper rather than scattering
+// `as unknown as` across the call sites.
+const srdDelegate = (delegate: unknown): SrdSeedDelegate => delegate as SrdSeedDelegate;
+const nameLookupDelegate = (delegate: unknown): NameLookupDelegate =>
+  delegate as NameLookupDelegate;
+const curatedDelegate = (delegate: unknown): CuratedDelegate => delegate as CuratedDelegate;
+
+// All SRD data, loaded and transformed into Prisma input shapes, ready to write.
+interface SeedData {
+  spells: Prisma.SpellCreateManyInput[];
+  monsters: Prisma.MonsterCreateManyInput[];
+  items: Prisma.ItemCreateManyInput[];
+  equipment: ReturnType<typeof loadEquipmentFromJson>;
+  races: ReturnType<typeof loadSpeciesAsRacesFromJson>;
+  backgrounds: Prisma.BackgroundCreateManyInput[];
+  feats: Prisma.FeatCreateManyInput[];
+}
+
 @Injectable()
 export class SeedService {
+  private readonly logger = new Logger(SeedService.name);
+
   constructor(
     private prisma: PrismaService,
     @Inject(CACHE_MANAGER) private cache: Cache
   ) {}
 
-  // Idempotently (re-)seed SRD reference rows keyed on (name, contentSource='srd').
-  //
-  // Uses findFirst→update/create rather than upsert-by-name because `name` is no
-  // longer globally unique (homebrew rows may reuse SRD names — VEG-292); the
-  // remaining name uniqueness is the partial index scoped to contentSource='srd'.
-  // Scoping every read and write to contentSource='srd' guarantees a re-seed can
-  // never read, update, or delete a user's homebrew row. Corrected SRD data still
-  // propagates to existing rows on re-seed, preserving ids/FKs.
-  private async seedSrdByName(
-    delegate: SrdSeedDelegate,
-    rows: { name: string }[],
-    kind: string
-  ): Promise<void> {
-    // Upserting by name makes duplicate names a silent last-write-wins clobber;
-    // every dataset fed to this mechanism is dedup-checked here so a future
-    // second source can't skip the guard (the cross-source item check in seed()
-    // additionally attributes collisions to their files).
-    assertUniqueSeedNames(kind, { [kind]: rows.map(r => r.name) });
-    for (const row of rows) {
-      const data = { ...row, contentSource: 'srd' as const };
-      const existing = await delegate.findFirst({
-        where: { name: row.name, contentSource: 'srd' },
-        select: { id: true },
-      });
-      if (existing) {
-        await delegate.update({ where: { id: existing.id }, data });
-      } else {
-        await delegate.create({ data });
-      }
+  async seed(): Promise<void> {
+    this.logger.log('Loading SRD data from extracted JSON files...');
+    const data = this.loadSeedData();
+
+    this.logger.log('Seeding SRD data...');
+    await this.prisma.$transaction(
+      async tx => {
+        // SRD content (spells/monsters/items/feats) is seeded by name within the
+        // contentSource='srd' partition so corrected SRD data — e.g. the VEG-261
+        // field-bleed fixes and the VEG-271 spell description/table fixes —
+        // propagates to existing rows on re-seed (preserving ids/FKs) while
+        // leaving any user homebrew rows in the same tables untouched (VEG-292).
+        await this.seedSpells(tx, data);
+        await this.seedMonsters(tx, data);
+        await this.seedItems(tx, data);
+        await this.seedEquipmentBundles(tx, data);
+        await this.seedBackgrounds(tx, data);
+        await this.seedFeats(tx, data);
+        await this.seedSimpleReferenceTables(tx);
+        await this.seedClasses(tx);
+        await this.seedRaces(tx, data);
+        await this.seedClassFeatures(tx);
+        await this.seedRaceTraits(tx, data);
+        await this.seedBackgroundFeatures(tx);
+        await this.seedSubclasses(tx);
+        await this.seedNpcReferenceData(tx);
+        await this.seedSubraces(tx);
+      },
+      { timeout: SEED_TX_TIMEOUT_MS }
+    );
+
+    this.logger.log('SRD seed complete.');
+
+    // ── Dev-only admin user ────────────────────────────
+    if (process.env.NODE_ENV !== 'production') {
+      await this.seedDevAdmin();
     }
+
+    // Drop any cached SRD reads. With the default in-memory store the seed
+    // runs in its own Nest context (see run-seed.ts), so this only clears the
+    // seed process's local cache — the running backend's cache is independent
+    // and falls back to the CacheModule's 24h TTL. Swap in a shared Keyv
+    // adapter (Redis, etc.) in app.module.ts to make this cross-process.
+    await this.cache.clear();
   }
 
-  async seed(): Promise<void> {
-    // ── Load data from JSON files ──────────────────────
-    console.log('Loading SRD data from extracted JSON files...');
-
+  // Load every SRD dataset and transform it into the Prisma input shapes the
+  // write passes consume. This is the single boundary where the loader outputs
+  // are cast to the generated Prisma `*CreateManyInput` types.
+  private loadSeedData(): SeedData {
     const spells = loadSpellsFromJson() as unknown as Prisma.SpellCreateManyInput[];
     const monsters = loadMonstersFromJson() as unknown as Prisma.MonsterCreateManyInput[];
     const magicItems = loadMagicItemsFromJson() as unknown as Prisma.ItemCreateManyInput[];
@@ -119,376 +186,407 @@ export class SeedService {
       repeatable: f.repeatable ?? false,
     }));
 
-    // ── Write to database ──────────────────────────────
-    console.log('Seeding SRD data...');
+    return { spells, monsters, items, equipment, races, backgrounds, feats };
+  }
 
-    await this.prisma.$transaction(async tx => {
-      // SRD content (spells/monsters/items/feats) is seeded by name within the
-      // contentSource='srd' partition so corrected SRD data — e.g. the VEG-261
-      // field-bleed fixes and the VEG-271 spell description/table fixes —
-      // propagates to existing rows on re-seed (preserving ids/FKs) while leaving
-      // any user homebrew rows in the same tables untouched (VEG-292).
-      await this.seedSrdByName(tx.spell as unknown as SrdSeedDelegate, spells, 'spell');
-      console.log(`  Spells: ${spells.length} entries`);
+  // ── Shared write helpers ─────────────────────────────
 
-      await this.seedSrdByName(tx.monster as unknown as SrdSeedDelegate, monsters, 'monster');
-      console.log(`  Monsters: ${monsters.length} entries`);
-
-      // Item names are unique across the equipment and magic-item JSON sources
-      // (assertUniqueSeedNames above); the contentSource='srd' partial unique
-      // index enforces it at the database level.
-      await this.seedSrdByName(tx.item as unknown as SrdSeedDelegate, items, 'item');
-      console.log(`  Items: ${items.length} entries`);
-
-      // Retire srd rows that no longer exist in any source — e.g. the old
-      // 5-item hand-authored stub's "Rope, Hempen (50 feet)" and the mundane
-      // "Potion of Healing" copy (canonical entry: the "Potions of Healing"
-      // magic item). Scoped to contentSource='srd', so homebrew/shared rows
-      // are untouchable; ItemBundleEntry rows cascade. This is the seed's only
-      // destructive step, so the count is always logged.
-      const itemNames = items.map(i => i.name);
-      const retired = await tx.item.deleteMany({
-        where: { contentSource: 'srd', name: { notIn: itemNames } },
+  // Idempotently (re-)seed SRD reference rows keyed on (name, contentSource='srd').
+  //
+  // Uses findFirst→update/create rather than upsert-by-name because `name` is no
+  // longer globally unique (homebrew rows may reuse SRD names — VEG-292); the
+  // remaining name uniqueness is the partial index scoped to contentSource='srd'.
+  // Scoping every read and write to contentSource='srd' guarantees a re-seed can
+  // never read, update, or delete a user's homebrew row. Corrected SRD data still
+  // propagates to existing rows on re-seed, preserving ids/FKs.
+  private async seedSrdByName(
+    delegate: SrdSeedDelegate,
+    rows: { name: string }[],
+    kind: string
+  ): Promise<void> {
+    // Upserting by name makes duplicate names a silent last-write-wins clobber;
+    // every dataset fed to this mechanism is dedup-checked here so a future
+    // second source can't skip the guard (the cross-source item check in
+    // loadSeedData() additionally attributes collisions to their files).
+    assertUniqueSeedNames(kind, { [kind]: rows.map(r => r.name) });
+    for (const row of rows) {
+      const data = { ...row, contentSource: 'srd' as const };
+      const existing = await delegate.findFirst({
+        where: { name: row.name, contentSource: 'srd' },
+        select: { id: true },
       });
-      console.log(`  Items retired: ${retired.count}`);
+      if (existing) {
+        await delegate.update({ where: { id: existing.id }, data });
+      } else {
+        await delegate.create({ data });
+      }
+    }
+  }
 
-      // Equipment packs, second pass: with all item rows in place, resolve the
-      // pack and component ids by name and rewrite each pack's bundle entries
-      // (delete + recreate keeps re-seeding idempotent).
-      const bundleNames = [
-        ...new Set(
-          equipment.bundles.flatMap(b => [b.bundleName, ...b.components.map(c => c.name)])
-        ),
-      ];
-      const bundleRows = await tx.item.findMany({
-        where: { contentSource: 'srd', name: { in: bundleNames } },
-        select: { id: true, name: true },
+  // Resolve a set of rows by name to a name→id map, used to wire FK relations for
+  // child feature/trait tables.
+  private async resolveIdsByName(
+    delegate: NameLookupDelegate,
+    names: string[]
+  ): Promise<Map<string, string>> {
+    const rows = await delegate.findMany({
+      where: { name: { in: names } },
+      select: { id: true, name: true },
+    });
+    return new Map(rows.map(r => [r.name, r.id]));
+  }
+
+  // Seed a curated reference table idempotently: clear the rows the seed owns
+  // (matched by `where`) and re-create them. User-added rows that fall outside
+  // `where` survive the reseed. `skipDuplicates` is opt-in because some of these
+  // tables have no unique constraint, where it would be inert and misleading.
+  private async replaceCurated(
+    delegate: CuratedDelegate,
+    where: Record<string, unknown>,
+    rows: unknown[],
+    options: { skipDuplicates?: boolean } = {}
+  ): Promise<void> {
+    await delegate.deleteMany({ where });
+    await delegate.createMany(
+      options.skipDuplicates ? { data: rows, skipDuplicates: true } : { data: rows }
+    );
+  }
+
+  // ── SRD content (contentSource-partitioned) ──────────
+
+  private async seedSpells(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    await this.seedSrdByName(srdDelegate(tx.spell), data.spells, 'spell');
+    this.logger.log(`  Spells: ${data.spells.length} entries`);
+  }
+
+  private async seedMonsters(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    await this.seedSrdByName(srdDelegate(tx.monster), data.monsters, 'monster');
+    this.logger.log(`  Monsters: ${data.monsters.length} entries`);
+  }
+
+  private async seedItems(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    // Item names are unique across the equipment and magic-item JSON sources
+    // (assertUniqueSeedNames in loadSeedData); the contentSource='srd' partial
+    // unique index enforces it at the database level.
+    await this.seedSrdByName(srdDelegate(tx.item), data.items, 'item');
+    this.logger.log(`  Items: ${data.items.length} entries`);
+
+    // Retire srd rows that no longer exist in any source — e.g. the old
+    // 5-item hand-authored stub's "Rope, Hempen (50 feet)" and the mundane
+    // "Potion of Healing" copy (canonical entry: the "Potions of Healing"
+    // magic item). Scoped to contentSource='srd', so homebrew/shared rows
+    // are untouchable; ItemBundleEntry rows cascade. This is the seed's only
+    // destructive step, so the count is always logged.
+    const itemNames = data.items.map(i => i.name);
+    const retired = await tx.item.deleteMany({
+      where: { contentSource: 'srd', name: { notIn: itemNames } },
+    });
+    this.logger.log(`  Items retired: ${retired.count}`);
+  }
+
+  // Equipment packs, second pass: with all item rows in place, resolve the pack
+  // and component ids by name and rewrite each pack's bundle entries (delete +
+  // recreate keeps re-seeding idempotent).
+  private async seedEquipmentBundles(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    const { bundles } = data.equipment;
+    const bundleNames = [
+      ...new Set(bundles.flatMap(b => [b.bundleName, ...b.components.map(c => c.name)])),
+    ];
+    const bundleRows = await tx.item.findMany({
+      where: { contentSource: 'srd', name: { in: bundleNames } },
+      select: { id: true, name: true },
+    });
+    const idByName = new Map(bundleRows.map(r => [r.name, r.id]));
+    const resolveId = (name: string): string => {
+      const id = idByName.get(name);
+      if (!id) throw new Error(`Seed aborted: bundle item "${name}" did not resolve to a row`);
+      return id;
+    };
+    for (const bundle of bundles) {
+      const bundleId = resolveId(bundle.bundleName);
+      await tx.itemBundleEntry.deleteMany({ where: { bundleId } });
+      await tx.itemBundleEntry.createMany({
+        data: bundle.components.map(c => ({
+          bundleId,
+          componentId: resolveId(c.name),
+          quantity: c.quantity,
+        })),
       });
-      const idByName = new Map(bundleRows.map(r => [r.name, r.id]));
-      const resolveId = (name: string): string => {
-        const id = idByName.get(name);
-        if (!id) throw new Error(`Seed aborted: bundle item "${name}" did not resolve to a row`);
-        return id;
-      };
-      for (const bundle of equipment.bundles) {
-        const bundleId = resolveId(bundle.bundleName);
-        await tx.itemBundleEntry.deleteMany({ where: { bundleId } });
-        await tx.itemBundleEntry.createMany({
-          data: bundle.components.map(c => ({
-            bundleId,
-            componentId: resolveId(c.name),
-            quantity: c.quantity,
-          })),
-        });
-      }
-      console.log(`  Equipment packs: ${equipment.bundles.length} bundles`);
+    }
+    this.logger.log(`  Equipment packs: ${bundles.length} bundles`);
+  }
 
-      if (backgrounds.length) {
-        for (const background of backgrounds) {
-          await tx.background.upsert({
-            where: { name: background.name },
-            create: background,
-            update: background,
-          });
-        }
-        console.log(`  Backgrounds: ${backgrounds.length} entries`);
-      }
-
-      if (feats.length) {
-        await this.seedSrdByName(tx.feat as unknown as SrdSeedDelegate, feats, 'feat');
-        console.log(`  Feats: ${feats.length} entries`);
-      }
-
-      await tx.condition.createMany({
-        data: srdConditions,
-        skipDuplicates: true,
+  private async seedBackgrounds(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    if (!data.backgrounds.length) return;
+    for (const background of data.backgrounds) {
+      await tx.background.upsert({
+        where: { name: background.name },
+        create: background,
+        update: background,
       });
-      console.log(`  Conditions: ${srdConditions.length} entries`);
+    }
+    this.logger.log(`  Backgrounds: ${data.backgrounds.length} entries`);
+  }
 
-      await tx.skill.createMany({ data: srdSkills, skipDuplicates: true });
-      console.log(`  Skills: ${srdSkills.length} entries`);
+  private async seedFeats(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    if (!data.feats.length) return;
+    await this.seedSrdByName(srdDelegate(tx.feat), data.feats, 'feat');
+    this.logger.log(`  Feats: ${data.feats.length} entries`);
+  }
 
-      await tx.language.createMany({
-        data: srdLanguages,
-        skipDuplicates: true,
-      });
-      console.log(`  Languages: ${srdLanguages.length} entries`);
+  // ── Simple reference tables (createMany / skipDuplicates) ──
 
-      await tx.gameRule.createMany({
-        data: srdGameRules,
-        skipDuplicates: true,
-      });
-      console.log(`  Game Rules: ${srdGameRules.length} entries`);
+  private async seedSimpleReferenceTables(tx: Prisma.TransactionClient): Promise<void> {
+    await tx.condition.createMany({ data: srdConditions, skipDuplicates: true });
+    this.logger.log(`  Conditions: ${srdConditions.length} entries`);
 
-      // Parent tables for FK relations — strip embedded feature/trait arrays
-      // before insert; those now live in their own tables (created below).
-      const classRows = srdClasses.map(({ features: _features, ...rest }) => rest);
-      await tx.srdClass.createMany({ data: classRows, skipDuplicates: true });
-      console.log(`  Classes: ${classRows.length} entries`);
+    await tx.skill.createMany({ data: srdSkills, skipDuplicates: true });
+    this.logger.log(`  Skills: ${srdSkills.length} entries`);
 
-      const raceRows = races.map(({ traits: _traits, ...rest }) => rest);
-      await tx.race.createMany({ data: raceRows, skipDuplicates: true });
-      console.log(`  Races: ${raceRows.length} entries`);
+    await tx.language.createMany({ data: srdLanguages, skipDuplicates: true });
+    this.logger.log(`  Languages: ${srdLanguages.length} entries`);
 
-      // ── Class features ───────────────────────────────
-      const classNames = srdClasses.map(c => c.name);
-      const classRecords = await tx.srdClass.findMany({
-        where: { name: { in: classNames } },
-        select: { id: true, name: true },
-      });
-      const classIdByName = new Map(classRecords.map(c => [c.name, c.id]));
-      const classFeatureRows: Prisma.ClassFeatureCreateManyInput[] = [];
-      for (const cls of srdClasses) {
-        const classId = classIdByName.get(cls.name);
-        if (!classId) continue;
-        for (const f of cls.features ?? []) {
-          classFeatureRows.push({
-            classId,
-            name: f.name,
-            level: f.level,
-            description: f.description,
-          });
-        }
-      }
-      if (classFeatureRows.length) {
-        await tx.classFeature.createMany({
-          data: classFeatureRows,
-          skipDuplicates: true,
-        });
-      }
-      console.log(`  Class Features: ${classFeatureRows.length} entries`);
+    await tx.gameRule.createMany({ data: srdGameRules, skipDuplicates: true });
+    this.logger.log(`  Game Rules: ${srdGameRules.length} entries`);
+  }
 
-      // ── Race traits ──────────────────────────────────
-      const raceNames = races.map(r => r.name);
-      const raceRecords = await tx.race.findMany({
-        where: { name: { in: raceNames } },
-        select: { id: true, name: true },
-      });
-      const raceIdByName = new Map(raceRecords.map(r => [r.name, r.id]));
-      // Upsert (not createMany/skipDuplicates), keyed on the [raceId, name] unique, so
-      // corrected SRD trait text — e.g. the VEG-273 lineage/ancestry option tables embedded
-      // in the description — propagates to existing rows on re-seed, preserving ids/FKs.
-      let raceTraitCount = 0;
-      for (const race of races) {
-        const raceId = raceIdByName.get(race.name);
-        if (!raceId) continue;
-        for (const t of race.traits ?? []) {
-          await tx.raceTrait.upsert({
-            where: { raceId_name: { raceId, name: t.name } },
-            create: { raceId, name: t.name, description: t.description },
-            update: { description: t.description },
-          });
-          raceTraitCount++;
-        }
-      }
-      console.log(`  Race Traits: ${raceTraitCount} entries`);
+  // ── Classes / races (parents) and their child tables ──
 
-      // ── Background features ──────────────────────────
-      const backgroundNames = srdBackgrounds.map(b => b.name);
-      const backgroundRecords = await tx.background.findMany({
-        where: { name: { in: backgroundNames } },
-        select: { id: true, name: true },
-      });
-      const backgroundIdByName = new Map(backgroundRecords.map(b => [b.name, b.id]));
-      const backgroundFeatureRows: Prisma.BackgroundFeatureCreateManyInput[] = [];
-      for (const bg of srdBackgrounds) {
-        const feature = bg.feature as { name: string; description: string } | null;
-        if (!feature) continue;
-        const backgroundId = backgroundIdByName.get(bg.name);
-        if (!backgroundId) continue;
-        backgroundFeatureRows.push({
-          backgroundId,
-          name: feature.name,
-          description: feature.description,
-        });
-      }
-      if (backgroundFeatureRows.length) {
-        await tx.backgroundFeature.createMany({
-          data: backgroundFeatureRows,
-          skipDuplicates: true,
-        });
-      }
-      console.log(`  Background Features: ${backgroundFeatureRows.length} entries`);
+  private async seedClasses(tx: Prisma.TransactionClient): Promise<void> {
+    // Strip embedded feature arrays before insert; those live in their own
+    // table, seeded by seedClassFeatures().
+    const classRows = srdClasses.map(({ features: _features, ...rest }) => rest);
+    await tx.srdClass.createMany({ data: classRows, skipDuplicates: true });
+    this.logger.log(`  Classes: ${classRows.length} entries`);
+  }
 
-      // ── Subclasses + their features ──────────────────
-      let subclassFeatureCount = 0;
-      for (const sc of srdSubclasses) {
-        const parent = await tx.srdClass.findUnique({
-          where: { name: sc.className },
-        });
-        if (!parent) {
-          console.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
-          continue;
-        }
-        const subclass = await tx.subclass.upsert({
-          where: { name: sc.name },
-          create: {
-            name: sc.name,
-            classId: parent.id,
-            description: sc.description,
-            spellList: sc.spellList,
-            spellcasting: sc.spellcasting,
-          },
-          update: {
-            classId: parent.id,
-            description: sc.description,
-            spellList: sc.spellList,
-            spellcasting: sc.spellcasting,
-          },
-        });
-        const features: Prisma.SubclassFeatureCreateManyInput[] = (sc.features ?? []).map(f => ({
-          subclassId: subclass.id,
+  private async seedRaces(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    // Strip embedded trait arrays before insert; those live in their own table,
+    // seeded by seedRaceTraits().
+    const raceRows = data.races.map(({ traits: _traits, ...rest }) => rest);
+    await tx.race.createMany({ data: raceRows, skipDuplicates: true });
+    this.logger.log(`  Races: ${raceRows.length} entries`);
+  }
+
+  private async seedClassFeatures(tx: Prisma.TransactionClient): Promise<void> {
+    const classIdByName = await this.resolveIdsByName(
+      nameLookupDelegate(tx.srdClass),
+      srdClasses.map(c => c.name)
+    );
+    const classFeatureRows: Prisma.ClassFeatureCreateManyInput[] = [];
+    for (const cls of srdClasses) {
+      const classId = classIdByName.get(cls.name);
+      if (!classId) continue;
+      for (const f of cls.features ?? []) {
+        classFeatureRows.push({
+          classId,
           name: f.name,
           level: f.level,
           description: f.description,
-        }));
-        if (features.length) {
-          await tx.subclassFeature.createMany({
-            data: features,
-            skipDuplicates: true,
-          });
-          subclassFeatureCount += features.length;
-        }
-      }
-      console.log(`  Subclasses: ${srdSubclasses.length} entries`);
-      console.log(`  Subclass Features: ${subclassFeatureCount} entries`);
-
-      // ── NPC Generator reference data ─────────────────
-      // Curated tables: clear curated rows and re-create. User-added rows
-      // (source !== 'curated') survive reseed.
-      await tx.npcNamePool.deleteMany({ where: { source: 'curated' } });
-      await tx.npcNamePool.createMany({
-        data: npcNamePools.map(n => ({
-          race: n.race,
-          gender: n.gender,
-          kind: n.kind,
-          value: n.value,
-        })),
-        skipDuplicates: true,
-      });
-      console.log(`  NPC Name Pools: ${npcNamePools.length} entries`);
-
-      await tx.npcAppearanceTrait.deleteMany({ where: { source: 'curated' } });
-      await tx.npcAppearanceTrait.createMany({
-        data: npcAppearanceTraits.map(t => ({
-          race: t.race,
-          category: t.category,
-          trait: t.trait,
-        })),
-        skipDuplicates: true,
-      });
-      console.log(`  NPC Appearance Traits: ${npcAppearanceTraits.length} entries`);
-
-      // Each loot-template family clears and re-creates only its own curated
-      // rows, so neither block silently load-bears for the other. The table
-      // has no unique constraint, so skipDuplicates would be inert here —
-      // idempotency comes from these scoped deletes.
-      await tx.npcLootTemplate.deleteMany({ where: { source: 'curated', category: 'npc' } });
-      await tx.npcLootTemplate.createMany({
-        data: npcLootTemplates.map(t => ({
-          category: 'npc' as const,
-          profession: t.profession,
-          crBucket: t.crBucket,
-          coinage: t.coinage as unknown as Prisma.InputJsonValue,
-          items: t.items as unknown as Prisma.InputJsonValue,
-        })),
-      });
-      console.log(`  NPC Loot Templates: ${npcLootTemplates.length} entries`);
-
-      await tx.npcLootTemplate.deleteMany({
-        where: { source: 'curated', category: 'monster' },
-      });
-      await tx.npcLootTemplate.createMany({
-        data: monsterLootTemplates.map(t => ({
-          category: 'monster' as const,
-          profession: t.type,
-          crBucket: t.crBucket,
-          coinage: t.coinage as unknown as Prisma.InputJsonValue,
-          items: t.items as unknown as Prisma.InputJsonValue,
-        })),
-      });
-      console.log(`  Monster Loot Templates: ${monsterLootTemplates.length} entries`);
-
-      // Alignment priors carry nullable `background` (default rows), and
-      // Prisma compound uniques don't accept null. Drop curated rows and
-      // re-create instead of upserting.
-      await tx.npcAlignmentPrior.deleteMany({ where: { source: 'curated' } });
-      await tx.npcAlignmentPrior.createMany({
-        data: npcAlignmentPriors.map(p => ({
-          race: p.race,
-          background: p.background,
-          weights: p.weights,
-        })),
-        skipDuplicates: true,
-      });
-      console.log(`  NPC Alignment Priors: ${npcAlignmentPriors.length} entries`);
-
-      await tx.trinket.deleteMany({
-        where: { source: { in: ['curated', 'srd-5.0'] } },
-      });
-      await tx.trinket.createMany({
-        data: trinkets.map(t => ({
-          description: t.description,
-          source: t.source,
-        })),
-        skipDuplicates: true,
-      });
-      console.log(`  Trinkets: ${trinkets.length} entries`);
-
-      for (const sr of srdSubraces) {
-        const parent = await tx.race.findUnique({
-          where: { name: sr.raceName },
-        });
-        if (!parent) {
-          console.warn(`  WARNING: Race "${sr.raceName}" not found for subrace "${sr.name}"`);
-          continue;
-        }
-        await tx.subrace.upsert({
-          where: { name: sr.name },
-          create: {
-            name: sr.name,
-            raceId: parent.id,
-            description: sr.description,
-            abilityBonuses: sr.abilityBonuses,
-            traits: sr.traits,
-          },
-          update: {
-            raceId: parent.id,
-            description: sr.description,
-            abilityBonuses: sr.abilityBonuses,
-            traits: sr.traits,
-          },
         });
       }
-      console.log(`  Subraces: ${srdSubraces.length} entries`);
-    });
-
-    console.log('SRD seed complete.');
-
-    // ── Dev-only admin user ────────────────────────────
-    if (process.env.NODE_ENV !== 'production') {
-      await this.seedDevAdmin();
     }
+    if (classFeatureRows.length) {
+      await tx.classFeature.createMany({ data: classFeatureRows, skipDuplicates: true });
+    }
+    this.logger.log(`  Class Features: ${classFeatureRows.length} entries`);
+  }
 
-    // Drop any cached SRD reads. With the default in-memory store the seed
-    // runs in its own Nest context (see run-seed.ts), so this only clears the
-    // seed process's local cache — the running backend's cache is independent
-    // and falls back to the CacheModule's 24h TTL. Swap in a shared Keyv
-    // adapter (Redis, etc.) in app.module.ts to make this cross-process.
-    await this.cache.clear();
+  private async seedRaceTraits(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    const raceIdByName = await this.resolveIdsByName(
+      nameLookupDelegate(tx.race),
+      data.races.map(r => r.name)
+    );
+    // Upsert (not createMany/skipDuplicates), keyed on the [raceId, name] unique, so
+    // corrected SRD trait text — e.g. the VEG-273 lineage/ancestry option tables embedded
+    // in the description — propagates to existing rows on re-seed, preserving ids/FKs.
+    let raceTraitCount = 0;
+    for (const race of data.races) {
+      const raceId = raceIdByName.get(race.name);
+      if (!raceId) continue;
+      for (const t of race.traits ?? []) {
+        await tx.raceTrait.upsert({
+          where: { raceId_name: { raceId, name: t.name } },
+          create: { raceId, name: t.name, description: t.description },
+          update: { description: t.description },
+        });
+        raceTraitCount++;
+      }
+    }
+    this.logger.log(`  Race Traits: ${raceTraitCount} entries`);
+  }
+
+  private async seedBackgroundFeatures(tx: Prisma.TransactionClient): Promise<void> {
+    const backgroundIdByName = await this.resolveIdsByName(
+      nameLookupDelegate(tx.background),
+      srdBackgrounds.map(b => b.name)
+    );
+    const backgroundFeatureRows: Prisma.BackgroundFeatureCreateManyInput[] = [];
+    for (const bg of srdBackgrounds) {
+      const feature = bg.feature as { name: string; description: string } | null;
+      if (!feature) continue;
+      const backgroundId = backgroundIdByName.get(bg.name);
+      if (!backgroundId) continue;
+      backgroundFeatureRows.push({
+        backgroundId,
+        name: feature.name,
+        description: feature.description,
+      });
+    }
+    if (backgroundFeatureRows.length) {
+      await tx.backgroundFeature.createMany({
+        data: backgroundFeatureRows,
+        skipDuplicates: true,
+      });
+    }
+    this.logger.log(`  Background Features: ${backgroundFeatureRows.length} entries`);
+  }
+
+  private async seedSubclasses(tx: Prisma.TransactionClient): Promise<void> {
+    let subclassFeatureCount = 0;
+    for (const sc of srdSubclasses) {
+      const parent = await tx.srdClass.findUnique({ where: { name: sc.className } });
+      if (!parent) {
+        this.logger.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
+        continue;
+      }
+      const subclass = await tx.subclass.upsert({
+        where: { name: sc.name },
+        create: {
+          name: sc.name,
+          classId: parent.id,
+          description: sc.description,
+          spellList: sc.spellList,
+          spellcasting: sc.spellcasting,
+        },
+        update: {
+          classId: parent.id,
+          description: sc.description,
+          spellList: sc.spellList,
+          spellcasting: sc.spellcasting,
+        },
+      });
+      const features: Prisma.SubclassFeatureCreateManyInput[] = (sc.features ?? []).map(f => ({
+        subclassId: subclass.id,
+        name: f.name,
+        level: f.level,
+        description: f.description,
+      }));
+      if (features.length) {
+        await tx.subclassFeature.createMany({ data: features, skipDuplicates: true });
+        subclassFeatureCount += features.length;
+      }
+    }
+    this.logger.log(`  Subclasses: ${srdSubclasses.length} entries`);
+    this.logger.log(`  Subclass Features: ${subclassFeatureCount} entries`);
+  }
+
+  // ── NPC Generator reference data ─────────────────────
+  // Curated tables: clear curated rows and re-create. User-added rows
+  // (source !== 'curated') survive reseed.
+  private async seedNpcReferenceData(tx: Prisma.TransactionClient): Promise<void> {
+    await this.replaceCurated(
+      curatedDelegate(tx.npcNamePool),
+      { source: CURATED },
+      npcNamePools.map(n => ({ race: n.race, gender: n.gender, kind: n.kind, value: n.value })),
+      { skipDuplicates: true }
+    );
+    this.logger.log(`  NPC Name Pools: ${npcNamePools.length} entries`);
+
+    await this.replaceCurated(
+      curatedDelegate(tx.npcAppearanceTrait),
+      { source: CURATED },
+      npcAppearanceTraits.map(t => ({ race: t.race, category: t.category, trait: t.trait })),
+      { skipDuplicates: true }
+    );
+    this.logger.log(`  NPC Appearance Traits: ${npcAppearanceTraits.length} entries`);
+
+    // Each loot-template family clears and re-creates only its own curated rows,
+    // so neither block silently load-bears for the other. The table has no
+    // unique constraint, so skipDuplicates would be inert here — idempotency
+    // comes from these scoped deletes.
+    await this.replaceCurated(
+      curatedDelegate(tx.npcLootTemplate),
+      { source: CURATED, category: 'npc' },
+      npcLootTemplates.map(t => ({
+        category: 'npc' as const,
+        profession: t.profession,
+        crBucket: t.crBucket,
+        coinage: t.coinage as unknown as Prisma.InputJsonValue,
+        items: t.items as unknown as Prisma.InputJsonValue,
+      }))
+    );
+    this.logger.log(`  NPC Loot Templates: ${npcLootTemplates.length} entries`);
+
+    await this.replaceCurated(
+      curatedDelegate(tx.npcLootTemplate),
+      { source: CURATED, category: 'monster' },
+      monsterLootTemplates.map(t => ({
+        category: 'monster' as const,
+        profession: t.type,
+        crBucket: t.crBucket,
+        coinage: t.coinage as unknown as Prisma.InputJsonValue,
+        items: t.items as unknown as Prisma.InputJsonValue,
+      }))
+    );
+    this.logger.log(`  Monster Loot Templates: ${monsterLootTemplates.length} entries`);
+
+    // Alignment priors carry nullable `background` (default rows), and Prisma
+    // compound uniques don't accept null. Drop curated rows and re-create
+    // instead of upserting.
+    await this.replaceCurated(
+      curatedDelegate(tx.npcAlignmentPrior),
+      { source: CURATED },
+      npcAlignmentPriors.map(p => ({ race: p.race, background: p.background, weights: p.weights })),
+      { skipDuplicates: true }
+    );
+    this.logger.log(`  NPC Alignment Priors: ${npcAlignmentPriors.length} entries`);
+
+    await this.replaceCurated(
+      curatedDelegate(tx.trinket),
+      { source: { in: [CURATED, 'srd-5.0'] } },
+      trinkets.map(t => ({ description: t.description, source: t.source })),
+      { skipDuplicates: true }
+    );
+    this.logger.log(`  Trinkets: ${trinkets.length} entries`);
+  }
+
+  private async seedSubraces(tx: Prisma.TransactionClient): Promise<void> {
+    for (const sr of srdSubraces) {
+      const parent = await tx.race.findUnique({ where: { name: sr.raceName } });
+      if (!parent) {
+        this.logger.warn(`  WARNING: Race "${sr.raceName}" not found for subrace "${sr.name}"`);
+        continue;
+      }
+      await tx.subrace.upsert({
+        where: { name: sr.name },
+        create: {
+          name: sr.name,
+          raceId: parent.id,
+          description: sr.description,
+          abilityBonuses: sr.abilityBonuses,
+          traits: sr.traits,
+        },
+        update: {
+          raceId: parent.id,
+          description: sr.description,
+          abilityBonuses: sr.abilityBonuses,
+          traits: sr.traits,
+        },
+      });
+    }
+    this.logger.log(`  Subraces: ${srdSubraces.length} entries`);
   }
 
   private async seedDevAdmin(): Promise<void> {
-    const username = 'admin';
-    const existing = await this.prisma.user.findUnique({
-      where: { username },
-    });
+    const username = DEV_ADMIN_USERNAME;
+    const existing = await this.prisma.user.findUnique({ where: { username } });
     if (existing) {
-      console.log('Dev admin user already exists, skipping.');
+      this.logger.log('Dev admin user already exists, skipping.');
       return;
     }
 
-    const passwordHash = await bcrypt.hash('admin', 12);
+    const passwordHash = await bcrypt.hash(DEV_ADMIN_PASSWORD, BCRYPT_COST);
     await this.prisma.user.create({
       data: {
         username,
@@ -497,6 +595,8 @@ export class SeedService {
         role: Role.ADMIN,
       },
     });
-    console.log('Dev admin user created (username: "admin", password: "admin").');
+    this.logger.log(
+      `Dev admin user created (username: "${DEV_ADMIN_USERNAME}", password: "${DEV_ADMIN_PASSWORD}").`
+    );
   }
 }

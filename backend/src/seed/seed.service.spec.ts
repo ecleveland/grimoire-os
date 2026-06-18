@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -49,9 +50,9 @@ describe('SeedService', () => {
     service = module.get<SeedService>(SeedService);
     prisma = module.get<MockPrismaService>(PrismaService as any);
 
-    // Silence console output during tests
-    jest.spyOn(console, 'log').mockImplementation();
-    jest.spyOn(console, 'warn').mockImplementation();
+    // Silence Nest Logger output during tests (SeedService logs via Logger).
+    jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
 
     // SRD reference tables (spell/monster/item/feat) are now seeded via
     // findFirst→create/update scoped to contentSource='srd' (VEG-292). Default
@@ -355,7 +356,7 @@ describe('SeedService', () => {
 
   it('logs how many stale srd items the cleanup retired', async () => {
     prisma.item.deleteMany.mockResolvedValue({ count: 2 });
-    const log = jest.spyOn(console, 'log').mockImplementation();
+    const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
 
     await service.seed();
 
