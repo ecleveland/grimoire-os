@@ -105,6 +105,19 @@ describe('grants registry', () => {
       expect(compileGrantFields(reg).proficiencies).toEqual(['Martial weapons', 'Gaming Set']);
     });
 
+    it('keeps a thrice-granted value (with its first position) when one source is cleared', () => {
+      // Three sources grant "Common"; clearing the first holder must keep the
+      // value and not shift it out of its stable SOURCE_ORDER position.
+      let reg = setSourceSlice({}, 'class', { languages: ['Common'] });
+      reg = setSourceSlice(reg, 'background', { languages: ['Common'] });
+      reg = setSourceSlice(reg, 'species', { languages: ['Common', 'Elvish'] });
+      expect(compileGrantFields(reg).languages).toEqual(['Common', 'Elvish']);
+      reg = clearSource(reg, 'class');
+      // Still present (background + species hold it), now first-occurring at
+      // background's slot — still position 0.
+      expect(compileGrantFields(reg).languages).toEqual(['Common', 'Elvish']);
+    });
+
     it('is idempotent: applying the same source slice twice equals applying it once', () => {
       const once = setSourceSlice({}, 'species', { languages: ['Common', 'Elvish'] });
       const twice = setSourceSlice(once, 'species', { languages: ['Common', 'Elvish'] });

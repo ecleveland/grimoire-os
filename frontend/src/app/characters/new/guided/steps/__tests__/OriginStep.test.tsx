@@ -147,6 +147,21 @@ describe('OriginStep — background + species', () => {
     expect(screen.getByRole('group', { name: /background grants/i })).toBeInTheDocument();
   });
 
+  it('merges background and species grants together when both are picked in one visit', async () => {
+    const user = userEvent.setup();
+    renderStep([ELF], [makeBackground()]);
+
+    await pickBackground(user, 'Acolyte');
+    await pickSpecies(user, 'Elf');
+
+    // Both source effects apply in the same visit without clobbering each other:
+    // background skills/tools and species languages/traits all coexist.
+    await waitFor(() => expect(screen.getByTestId('features')).toHaveTextContent('Darkvision:Elf'));
+    expect(screen.getByTestId('skills')).toHaveTextContent('Insight,Religion');
+    expect(screen.getByTestId('profs')).toHaveTextContent("Calligrapher's Supplies");
+    expect(screen.getByTestId('languages')).toHaveTextContent('Common,Elvish');
+  });
+
   it('de-duplicates skills already granted by the class', async () => {
     const user = userEvent.setup();
     // Insight is a class skill pick; the Acolyte background also grants it.

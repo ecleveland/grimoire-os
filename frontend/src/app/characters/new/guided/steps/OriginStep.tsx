@@ -84,6 +84,9 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
           }
         : {}
     );
+    // Keyed on the resolved background identity; reading selectedBackground.* is
+    // current when the effect runs on an id change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBackground?.id, reconcileSource]);
 
   return (

@@ -13,9 +13,11 @@ import type { CharacterFormValues } from '@/components/CharacterEditorForm';
  * and the flat arrays are recompiled by union-deduping across sources. Clearing
  * or switching a source touches exactly that source's contribution.
  *
- * Only the three grant fields live here. Single-source fields (saving throws,
- * armor, speed, size, features) stay on the plain draft via `onChange` — they
- * have no cross-source collision to reconcile.
+ * Only the three colliding grant fields live here. Single-source scalar/array
+ * fields (saving throws, armor, speed, size) stay on the plain draft via
+ * `onChange`. `features` are also multi-source but reconcile via their own
+ * inline `source` tag in OriginStep (so the sheet can group them) rather than
+ * through this registry — the two mechanisms are intentionally parallel.
  */
 export type GrantSource = 'class' | 'background' | 'species';
 
@@ -40,7 +42,13 @@ export function setSourceSlice(
   return { ...reg, [source]: slice };
 }
 
-/** Update a single field of a source's slice, preserving its other fields. */
+/**
+ * Update a single field of a source's slice, preserving its other fields. Used
+ * to *refine* a slice a source has already established via `setSourceSlice`
+ * (e.g. the class skill-pool toggles updating the `class` slice's `skills`); it
+ * does not register an applied identity, so a source is normally reconciled
+ * first and refined second.
+ */
 export function setSourceField(
   reg: GrantRegistry,
   source: GrantSource,

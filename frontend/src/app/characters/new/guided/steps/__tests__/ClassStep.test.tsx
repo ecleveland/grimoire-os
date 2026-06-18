@@ -5,7 +5,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode } from 'react';
 import ClassStep from '../ClassStep';
 import { DraftProvider, useCharacterDraft } from '../../useCharacterDraft';
+import type { GrantRegistry } from '../../grants';
+import type { CharacterFormValues } from '@/components/CharacterEditorForm';
 import type { SrdClass, SrdSubclass } from '@/lib/types';
+
+type Seed = { base?: Partial<CharacterFormValues>; grants?: GrantRegistry };
 
 const mockApiFetch = vi.fn();
 vi.mock('@/lib/api', () => ({
@@ -73,8 +77,8 @@ function routeApiFetch(classes: SrdClass[], subclasses: SrdSubclass[] = []) {
 // Stateful harness: ClassStep is controlled and reads the grant registry from
 // context, so we drive the real useCharacterDraft hook (the production store) and
 // wrap in DraftProvider — tests then exercise the real compile/reconcile path.
-function Harness({ onValid }: { onValid: (valid: boolean) => void }) {
-  const api = useCharacterDraft();
+function Harness({ onValid, seed }: { onValid: (valid: boolean) => void; seed?: Seed }) {
+  const api = useCharacterDraft(seed);
   return (
     <DraftProvider api={api}>
       <ClassStep value={api.draft} onChange={api.onChange} onValidChange={onValid} />
@@ -86,7 +90,7 @@ function Harness({ onValid }: { onValid: (valid: boolean) => void }) {
   );
 }
 
-function renderStep(classes: SrdClass[], subclasses: SrdSubclass[] = []) {
+function renderStep(classes: SrdClass[], subclasses: SrdSubclass[] = [], seed?: Seed) {
   routeApiFetch(classes, subclasses);
   const onValid = vi.fn();
   const client = new QueryClient({
@@ -95,7 +99,7 @@ function renderStep(classes: SrdClass[], subclasses: SrdSubclass[] = []) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  render(<Harness onValid={onValid} />, { wrapper });
+  render(<Harness onValid={onValid} seed={seed} />, { wrapper });
   return { onValid };
 }
 
@@ -229,6 +233,49 @@ describe('ClassStep — SRD class selection', () => {
     await waitFor(() => expect(onValid).toHaveBeenLastCalledWith(false));
     expect(screen.getByTestId('draft-skills')).toHaveTextContent('');
     expect(screen.getByTestId('draft-subclass')).toHaveTextContent('');
+  });
+
+  it('keeps a deselected class skill that a background still grants, drops a class-exclusive one', async () => {
+    const user = userEvent.setup();
+    // A background already granted Insight (seeded as the 'background' slice).
+    renderStep([makeClass()], [], { grants: { background: { skills: ['Insight'] } } });
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    // Pick Insight (also a background grant) and Athletics (class-exclusive).
+    await user.click(within(skills).getByRole('button', { name: /^insight$/i }));
+    await user.click(within(skills).getByRole('button', { name: /^athletics$/i }));
+    await waitFor(() => expect(screen.getByTestId('draft-skills')).toHaveTextContent('Athletics'));
+
+    // Deselect both class picks.
+    await user.click(within(skills).getByRole('button', { name: /^insight$/i }));
+    await user.click(within(skills).getByRole('button', { name: /^athletics$/i }));
+
+    // Athletics (class-only) is gone; Insight survives via the background slice.
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-skills')).not.toHaveTextContent('Athletics')
+    );
+    expect(screen.getByTestId('draft-skills')).toHaveTextContent('Insight');
+  });
+
+  it('re-resets the skill picks when returning to a previously chosen class (A→B→A)', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([CLERIC, WIZARD]);
+
+    await pickClass(user, 'Cleric');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    await user.click(within(skills).getByRole('button', { name: /history/i }));
+    await user.click(within(skills).getByRole('button', { name: /insight/i }));
+    expect(onValid).toHaveBeenLastCalledWith(true);
+
+    await pickClass(user, 'Wizard');
+    await waitFor(() => expect(screen.getByTestId('draft-skills')).toHaveTextContent(''));
+
+    // Returning to Cleric re-applies its empty skill slice — the prior picks are
+    // not resurrected (the identity guard sees cleric≠wizard and re-resets).
+    await pickClass(user, 'Cleric');
+    await waitFor(() => expect(onValid).toHaveBeenLastCalledWith(false));
+    expect(screen.getByTestId('draft-skills')).toHaveTextContent('');
   });
 
   it('records the selected subclass name on the draft', async () => {
