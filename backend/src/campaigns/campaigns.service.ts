@@ -271,7 +271,7 @@ export class CampaignsService {
       if (ownedCharacterIds.size > 0) {
         const encounters = await tx.encounter.findMany({
           where: { campaignId },
-          select: { id: true, combatants: true },
+          select: { id: true, combatants: true, currentTurn: true },
         });
         for (const encounter of encounters) {
           const { combatants, removed } = stripCombatantsForCharacters(
@@ -279,11 +279,17 @@ export class CampaignsService {
             ownedCharacterIds
           );
           if (removed > 0) {
+            // Re-clamp the turn pointer into the shortened list, the same
+            // invariant the in-app remove-combatant path enforces (VEG-284): a
+            // mid-combat removal must never leave currentTurn addressing a row
+            // that no longer exists. Only included in the write when it moved.
+            const currentTurn = Math.max(0, Math.min(encounter.currentTurn, combatants.length - 1));
             await tx.encounter.update({
               where: { id: encounter.id },
               data: {
                 combatants: combatants as unknown as Prisma.InputJsonValue,
                 version: { increment: 1 },
+                ...(currentTurn !== encounter.currentTurn && { currentTurn }),
               },
             });
           }

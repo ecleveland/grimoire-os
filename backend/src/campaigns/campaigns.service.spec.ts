@@ -672,6 +672,8 @@ describe('CampaignsService', () => {
       prisma.encounter.findMany.mockResolvedValue([
         {
           id: 'enc-with-pc',
+          // currentTurn still valid after the strip (Goblin remains at index 0).
+          currentTurn: 0,
           combatants: [
             { name: 'Aria', isNpc: false, characterId: 'char-1' },
             { name: 'Goblin', isNpc: true },
@@ -680,6 +682,7 @@ describe('CampaignsService', () => {
         {
           // No combatant linked to the removed player → must NOT be rewritten.
           id: 'enc-without-pc',
+          currentTurn: 0,
           combatants: [{ name: 'Bron', isNpc: false, characterId: 'char-other' }],
         },
       ]);
@@ -694,16 +697,51 @@ describe('CampaignsService', () => {
       });
       expect(prisma.encounter.findMany).toHaveBeenCalledWith({
         where: { campaignId: CAMPAIGN_ID },
-        select: { id: true, combatants: true },
+        select: { id: true, combatants: true, currentTurn: true },
       });
 
       // Only the matching encounter is rewritten — trimmed array + version bump.
+      // currentTurn stays in range here, so it isn't part of the write.
       expect(prisma.encounter.update).toHaveBeenCalledTimes(1);
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: 'enc-with-pc' },
         data: {
           combatants: [{ name: 'Goblin', isNpc: true }],
           version: { increment: 1 },
+        },
+      });
+    });
+
+    it('clamps currentTurn when stripping a combatant pushes it past the end of the list (VEG-256)', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([{ id: 'char-1' }]);
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+      prisma.note.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.encounter.findMany.mockResolvedValue([
+        {
+          id: 'enc-live',
+          // Mid-combat on the last combatant, which is the departing PC.
+          currentTurn: 1,
+          combatants: [
+            { name: 'Goblin', isNpc: true },
+            { name: 'Aria', isNpc: false, characterId: 'char-1' },
+          ],
+        },
+      ]);
+      prisma.encounter.update.mockResolvedValue({});
+      prisma.campaignPlayer.delete.mockResolvedValue({});
+
+      await service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID);
+
+      // The trimmed list has one entry, so currentTurn (1) is re-clamped to 0 in
+      // the same write — the turn pointer can never address a missing row.
+      expect(prisma.encounter.update).toHaveBeenCalledWith({
+        where: { id: 'enc-live' },
+        data: {
+          combatants: [{ name: 'Goblin', isNpc: true }],
+          version: { increment: 1 },
+          currentTurn: 0,
         },
       });
     });
