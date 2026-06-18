@@ -11,7 +11,7 @@ import {
   ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiFetch } from './api';
+import { apiFetch, endDeadSession } from './api';
 import { Role } from './types';
 import type { User } from './types';
 
@@ -135,9 +135,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
           }
         }
-        if (!cancelled && res.ok) {
+        if (cancelled) return;
+        if (res.ok) {
           const profile = (await res.json()) as User & { id: string };
           setUser(toUserInfo(profile));
+        } else if (res.status === 401 && getSessionCookieSnapshot()) {
+          // The access cookie is present-but-invalid and a refresh couldn't
+          // restore it (expired/revoked, or a 429-throttled refresh). The
+          // `session_present` cookie tells us a session existed — so this is a
+          // dead session, not an anonymous public-page visitor. Clear the stale
+          // httpOnly cookies and land on /login once, instead of leaving the
+          // middleware to bounce /login ↔ / forever (VEG-419).
+          await endDeadSession();
         }
       } catch {
         // Network errors stay logged out.
