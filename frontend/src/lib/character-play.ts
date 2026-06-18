@@ -1,4 +1,4 @@
-import type { HitPoints, HitDice, DeathSaves } from '@/lib/types';
+import type { HitPoints, HitDice, DeathSaves, SpellSlot } from '@/lib/types';
 import { applyDamage, applyHeal } from './combatant-hp';
 
 /**
@@ -74,4 +74,55 @@ export function togglePip(current: number, index: number, max: number): number {
 /** Adjust hit dice spent by `delta` (+1 spend, -1 restore); clamped to 0..total. */
 export function adjustHitDiceSpent(hitDice: HitDice, delta: number): HitDice {
   return { ...hitDice, spent: Math.max(0, Math.min(hitDice.total, hitDice.spent + delta)) };
+}
+
+/**
+ * Number of spent hit dice a long rest restores: half your total, rounded down,
+ * but never fewer than one (5e PHB "minimum of one die"). The actual restore is
+ * still capped by how many were spent — see `applyLongRest`.
+ */
+export function hitDiceRegainedOnLongRest(total: number): number {
+  return Math.max(1, Math.floor(total / 2));
+}
+
+/**
+ * The single composite write a long rest produces (VEG-407), structurally a
+ * `CharacterPatch` so it flows straight through `useCharacterMutation`. `hitDice`
+ * and `spellSlots` are omitted when the character has none, so a non-caster or a
+ * hit-dice-less sheet doesn't get spurious empty-array/undefined writes.
+ */
+export interface LongRestPatch {
+  hitPoints: HitPoints;
+  deathSaves: DeathSaves;
+  hitDice?: HitDice;
+  spellSlots?: SpellSlot[];
+}
+
+/**
+ * Long rest (5e): HP to max, temp HP cleared, every spell slot reset to
+ * `used: 0`, spent hit dice regained up to half total (rounded down, min 1,
+ * capped at spent), and death saves cleared. Composes the per-field rules so the
+ * UI and tests share one source of truth — the sheet just dispatches the result.
+ */
+export function applyLongRest(character: {
+  hitPoints: HitPoints;
+  // Typed loosely on purpose: although `Character` declares these non-optional,
+  // the API returns `null` for a non-caster's `spellSlots` and can omit
+  // `hitDice` — guard for both so a real character can't crash the rest.
+  hitDice?: HitDice | null;
+  spellSlots?: SpellSlot[] | null;
+}): LongRestPatch {
+  const { hitPoints, spellSlots, hitDice } = character;
+  const patch: LongRestPatch = {
+    hitPoints: { ...hitPoints, current: hitPoints.max, temporary: 0 },
+    deathSaves: { ...CLEARED_DEATH_SAVES },
+  };
+  if (hitDice) {
+    const regained = hitDiceRegainedOnLongRest(hitDice.total);
+    patch.hitDice = { ...hitDice, spent: Math.max(0, hitDice.spent - regained) };
+  }
+  if (spellSlots && spellSlots.length > 0) {
+    patch.spellSlots = spellSlots.map(slot => ({ ...slot, used: 0 }));
+  }
+  return patch;
 }

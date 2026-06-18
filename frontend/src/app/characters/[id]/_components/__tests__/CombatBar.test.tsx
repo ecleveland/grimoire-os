@@ -283,5 +283,63 @@ describe('CombatBar', () => {
       expect(screen.getByRole('button', { name: 'Spend hit die' })).toBeDisabled();
       expect(screen.getByRole('button', { name: /toggle heroic inspiration/i })).toBeDisabled();
     });
+
+    it('performs a long rest as one composite patch (HP, hit dice, slots, death saves)', () => {
+      // total 8 hit dice → regain 4; spent 6 → 2 remaining.
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 10, temporary: 7 },
+        deathSaves: { successes: 1, failures: 2 },
+        hitDice: { dieType: 'd10', total: 8, spent: 6 },
+        spellSlots: [{ level: 1, total: 4, used: 4 }],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+        hitDice: { dieType: 'd10', total: 8, spent: 2 },
+        spellSlots: [{ level: 1, total: 4, used: 0 }],
+      });
+    });
+
+    it('long rest omits hit dice and slots for a character without them', () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 30, current: 5, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+        hitDice: undefined,
+        spellSlots: [],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        hitPoints: { max: 30, current: 30, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+      });
+    });
+
+    it('long rests a non-caster whose spellSlots came back null without crashing', () => {
+      // Regression (VEG-407): the API returns null spellSlots for non-casters
+      // even though the Character type says non-optional. Clicking Long Rest
+      // used to throw "Cannot read properties of null (reading 'length')".
+      const onPatch = renderOwner({
+        hitPoints: { max: 30, current: 4, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+        hitDice: undefined,
+        spellSlots: null as unknown as Character['spellSlots'],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        hitPoints: { max: 30, current: 30, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+      });
+    });
+
+    it('disables Long Rest while a write is in flight', () => {
+      renderOwner({}, true);
+      expect(screen.getByRole('button', { name: 'Long Rest' })).toBeDisabled();
+    });
+  });
+
+  it('hides the Long Rest button for a non-owner', () => {
+    render(<CombatBar character={mockCharacter} />);
+    expect(screen.queryByRole('button', { name: 'Long Rest' })).toBeNull();
   });
 });
