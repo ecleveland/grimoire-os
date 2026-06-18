@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { ClassSpellcasting, SrdSpell } from '@/lib/types';
+import type { ClassSpellcasting, SpellEntry, SrdSpell } from '@/lib/types';
 import {
   abilityModForName,
   cantripCount,
   leveledSpellAllowance,
+  spellPreparationSummary,
   toSpellEntry,
 } from '../spell-rules';
 
@@ -100,6 +101,69 @@ describe('leveledSpellAllowance', () => {
     expect(leveledSpellAllowance({ ability: 'Wisdom', spellsKnown: { 1: 0 } }, 1, 3)).toEqual({
       count: 0,
       mode: 'known',
+    });
+  });
+});
+
+describe('spellPreparationSummary', () => {
+  const wizardSpells: SpellEntry[] = [
+    { level: 0, name: 'Fire Bolt' },
+    { level: 0, name: 'Mage Hand' },
+    { level: 1, name: 'Magic Missile', prepared: true },
+    { level: 1, name: 'Shield', prepared: false },
+    { level: 3, name: 'Fireball', prepared: true },
+  ];
+
+  it('counts cantrips by level-0 entries and leveled by *prepared* count for prepared casters', () => {
+    // Wizard L1, INT +3 → leveled allowance 4 (prepared); cantrips allowed 3.
+    // prepared leveled = Magic Missile + Fireball = 2; cantrips present = 2.
+    expect(spellPreparationSummary(WIZARD_SC, 1, 3, wizardSpells)).toEqual({
+      cantrips: { count: 2, allowed: 3, over: false },
+      leveled: { count: 2, allowed: 4, mode: 'prepared', over: false },
+    });
+  });
+
+  it('flags leveled over-limit (non-blocking) when prepared exceeds the allowance', () => {
+    const sc: ClassSpellcasting = {
+      ability: 'Intelligence',
+      preparedFormula: 'level + intelligence modifier',
+      spellSlotProgression: { 1: { 1: 2 } },
+    };
+    // L1 + (-2) = -1 → clamped to 1 allowed; 2 prepared → over.
+    expect(spellPreparationSummary(sc, 1, -2, wizardSpells).leveled).toEqual({
+      count: 2,
+      allowed: 1,
+      mode: 'prepared',
+      over: true,
+    });
+  });
+
+  it('counts every leveled spell (not just prepared) for known casters', () => {
+    const knownSpells: SpellEntry[] = [
+      { level: 0, name: 'Fire Bolt' },
+      { level: 1, name: 'Mage Armor', prepared: false },
+      { level: 1, name: 'Magic Missile', prepared: true },
+      { level: 1, name: 'Shield', prepared: false },
+    ];
+    // Sorcerer L1 known = 2; 3 leveled spells listed → over (known is the list size).
+    expect(spellPreparationSummary(SORCERER_SC, 1, 0, knownSpells)).toEqual({
+      cantrips: { count: 1, allowed: 4, over: false },
+      leveled: { count: 3, allowed: 2, mode: 'known', over: true },
+    });
+  });
+
+  it('flags cantrips over the allowance independently of leveled spells', () => {
+    const cantrips: SpellEntry[] = [
+      { level: 0, name: 'A' },
+      { level: 0, name: 'B' },
+      { level: 0, name: 'C' },
+      { level: 0, name: 'D' },
+    ];
+    // Wizard cantrips allowed at L1 = 3; 4 present → over.
+    expect(spellPreparationSummary(WIZARD_SC, 1, 3, cantrips).cantrips).toEqual({
+      count: 4,
+      allowed: 3,
+      over: true,
     });
   });
 });
