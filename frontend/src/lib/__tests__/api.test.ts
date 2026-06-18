@@ -246,6 +246,24 @@ describe('apiFetch', () => {
       expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
+    it('clears the dead session and lands on /login when /auth/refresh is throttled (429)', async () => {
+      // VEG-419 429 amplifier: a throttled refresh must be treated like any
+      // failed refresh — clear the session and land on /login, never wedge.
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
+        .mockResolvedValueOnce(mockResponse(429) as unknown as Response) // refresh throttled
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/logout`,
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
     it('clears the dead session and lands on /login when /auth/refresh request itself throws', async () => {
       const fetchMock = vi.mocked(fetch);
       fetchMock
