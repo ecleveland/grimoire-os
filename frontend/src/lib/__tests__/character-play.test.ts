@@ -8,6 +8,8 @@ import {
   deathSavesAfterRevive,
   parseNonNegativeInt,
   CLEARED_DEATH_SAVES,
+  hitDiceRegainedOnLongRest,
+  applyLongRest,
 } from '../character-play';
 
 describe('character-play HP helpers', () => {
@@ -129,6 +131,73 @@ describe('deathSavesAfterRevive', () => {
 
   it('returns null when there are no saves to clear', () => {
     expect(deathSavesAfterRevive(5, { successes: 0, failures: 0 })).toBeNull();
+  });
+});
+
+describe('hitDiceRegainedOnLongRest', () => {
+  it('regains half the total hit dice, rounded down', () => {
+    expect(hitDiceRegainedOnLongRest(10)).toBe(5);
+    expect(hitDiceRegainedOnLongRest(5)).toBe(2);
+    expect(hitDiceRegainedOnLongRest(2)).toBe(1);
+  });
+
+  it('regains at least one die — the 5e minimum (a level-1 PC)', () => {
+    expect(hitDiceRegainedOnLongRest(1)).toBe(1);
+  });
+});
+
+describe('applyLongRest', () => {
+  const base = {
+    hitPoints: { max: 44, current: 12, temporary: 6 },
+    spellSlots: [],
+    hitDice: { dieType: 'd10' as const, total: 8, spent: 5 },
+  };
+
+  it('restores HP to max and clears temp HP', () => {
+    expect(applyLongRest(base).hitPoints).toEqual({ max: 44, current: 44, temporary: 0 });
+  });
+
+  it('clears death saves', () => {
+    expect(applyLongRest(base).deathSaves).toEqual({ successes: 0, failures: 0 });
+  });
+
+  it('regains half the total hit dice (rounded down), capped at the number spent', () => {
+    // total 8 → regain 4; spent 5 → 1 remaining spent
+    expect(applyLongRest(base).hitDice).toEqual({ dieType: 'd10', total: 8, spent: 1 });
+  });
+
+  it('never restores more hit dice than were spent', () => {
+    // total 8 → regain 4, but only 2 spent → floors at 0
+    const patch = applyLongRest({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 2 } });
+    expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 0 });
+  });
+
+  it('regains at least one hit die for a level-1 character', () => {
+    const patch = applyLongRest({ ...base, hitDice: { dieType: 'd8', total: 1, spent: 1 } });
+    expect(patch.hitDice).toEqual({ dieType: 'd8', total: 1, spent: 0 });
+  });
+
+  it('omits hitDice from the patch when the character has none', () => {
+    const patch = applyLongRest({ ...base, hitDice: undefined });
+    expect('hitDice' in patch).toBe(false);
+  });
+
+  it('resets every spell slot to used:0', () => {
+    const patch = applyLongRest({
+      ...base,
+      spellSlots: [
+        { level: 1, total: 4, used: 3 },
+        { level: 2, total: 3, used: 1 },
+      ],
+    });
+    expect(patch.spellSlots).toEqual([
+      { level: 1, total: 4, used: 0 },
+      { level: 2, total: 3, used: 0 },
+    ]);
+  });
+
+  it('omits spellSlots from the patch for a non-caster (no slots)', () => {
+    expect('spellSlots' in applyLongRest(base)).toBe(false);
   });
 });
 

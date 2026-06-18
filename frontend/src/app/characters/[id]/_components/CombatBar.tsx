@@ -11,6 +11,7 @@ import {
   adjustHitDiceSpent,
   deathSavesAfterRevive,
   parseNonNegativeInt,
+  applyLongRest,
 } from '@/lib/character-play';
 
 type CombatBarProps = { character: Character } & PlayControlProps;
@@ -58,6 +59,10 @@ export default function CombatBar(props: CombatBarProps) {
     if (!hitDice) return;
     patch({ hitDice: adjustHitDiceSpent(hitDice, delta) });
   };
+
+  // One-click long rest: HP to max, temp cleared, slots reset, hit dice regained,
+  // death saves cleared — a single optimistic-locked composite write (VEG-407).
+  const longRest = () => patch(applyLongRest(character));
 
   const renderPips = (track: 'successes' | 'failures', filledClass: string) => {
     const filled = deathSaves[track];
@@ -156,6 +161,14 @@ export default function CombatBar(props: CombatBarProps) {
                 Set Temp
               </button>
             </div>
+            <button
+              type="button"
+              onClick={longRest}
+              disabled={isSaving}
+              className="w-full px-1 py-1 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              Long Rest
+            </button>
           </div>
         )}
       </div>
