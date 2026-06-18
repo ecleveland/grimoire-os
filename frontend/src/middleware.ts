@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-
-const PUBLIC_PATHS = ['/login', '/register', '/srd'];
+import { PUBLIC_PATH_PREFIXES } from './lib/public-paths';
 
 export function middleware(request: NextRequest) {
   // Presence-only check — the backend remains the source of truth for the
@@ -10,7 +9,7 @@ export function middleware(request: NextRequest) {
   const hasAuthCookie = Boolean(request.cookies.get('access_token'));
   const { pathname } = request.nextUrl;
 
-  const isPublicPath = PUBLIC_PATHS.some(p => pathname.startsWith(p));
+  const isPublicPath = PUBLIC_PATH_PREFIXES.some(p => pathname.startsWith(p));
 
   if (!hasAuthCookie && !isPublicPath) {
     return NextResponse.redirect(new URL('/login', request.url));

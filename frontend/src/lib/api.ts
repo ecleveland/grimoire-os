@@ -1,3 +1,5 @@
+import { PUBLIC_PATH_PREFIXES } from './public-paths';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 /**
@@ -32,10 +34,52 @@ const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 // they share one refresh round-trip instead of each kicking off their own.
 let inflightRefresh: Promise<boolean> | null = null;
 
-function redirectToLogin() {
-  if (typeof window !== 'undefined') {
-    window.location.href = '/login';
+// In-flight dead-session teardown — same dedup idea as inflightRefresh: a burst
+// of terminal 401s must collapse into a single logout + navigation, not a
+// logout-per-request storm (VEG-419).
+let inflightEndSession: Promise<void> | null = null;
+
+function isOnPublicPath(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { pathname } = window.location;
+  return PUBLIC_PATH_PREFIXES.some(prefix => pathname.startsWith(prefix));
+}
+
+/**
+ * Resolve an unrestorable session to a clean logged-out state (VEG-419).
+ *
+ * The access/refresh cookies are httpOnly, so client JS can't clear them via
+ * `document.cookie` — only the server can. We POST `/auth/logout` (which works
+ * even with an invalid/absent session and clears all four auth cookies), then
+ * navigate to `/login`. Clearing the cookies is the crux: it stops the
+ * middleware's presence-only check from disagreeing with the dead session and
+ * ping-ponging `/login` ↔ `/`.
+ *
+ * Deduped via `inflightEndSession` so concurrent terminal 401s trigger exactly
+ * one logout + one navigation. The logout failure is swallowed: the redirect
+ * must escape the loop regardless. Navigation is skipped on public paths (no
+ * protected route to leave) — `replace`, not `href`, so the dead route doesn't
+ * linger in history.
+ */
+export function endDeadSession(): Promise<void> {
+  if (!inflightEndSession) {
+    inflightEndSession = (async () => {
+      try {
+        await fetch(`${API_URL}/auth/logout`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+      } catch {
+        // Best-effort: navigate even if the logout round-trip fails.
+      }
+      if (typeof window !== 'undefined' && !isOnPublicPath()) {
+        window.location.replace('/login');
+      }
+    })().finally(() => {
+      inflightEndSession = null;
+    });
   }
+  return inflightEndSession;
 }
 
 function readCookie(name: string): string | null {
@@ -122,13 +166,13 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     } else if (res.status === 403) {
       // CSRF rejection and the session can't be refreshed: same terminal
       // state as a failed 401 refresh — the user has to log in again.
-      redirectToLogin();
+      await endDeadSession();
       throw new Error('Unauthorized');
     }
   }
 
   if (res.status === 401) {
-    redirectToLogin();
+    await endDeadSession();
     throw new Error('Unauthorized');
   }
 

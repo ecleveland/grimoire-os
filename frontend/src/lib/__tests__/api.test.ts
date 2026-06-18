@@ -26,7 +26,10 @@ describe('apiFetch', () => {
     vi.stubGlobal('fetch', vi.fn());
     Object.defineProperty(window, 'location', {
       writable: true,
-      value: { ...originalLocation, href: '' },
+      // `replace` is a Location prototype method, so the spread above doesn't
+      // copy it — stub it explicitly so endDeadSession's navigation is a no-op
+      // we can assert on. Default pathname '/' is a protected (non-public) path.
+      value: { ...originalLocation, href: '', pathname: '/', replace: vi.fn() },
     });
     setCookie('');
   });
@@ -224,44 +227,132 @@ describe('apiFetch', () => {
       );
     });
 
-    it('redirects to /login when /auth/refresh also returns 401', async () => {
+    it('clears the dead session and lands on /login when /auth/refresh also returns 401', async () => {
+      // VEG-419: a terminal 401 must clear the stale (httpOnly) cookies via
+      // POST /auth/logout before navigating, so the middleware's presence check
+      // stops disagreeing with reality and can't bounce /login back to /.
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
-        .mockResolvedValueOnce(mockResponse(401) as unknown as Response); // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
-      expect(window.location.href).toBe('/login');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/logout`,
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
-    it('redirects to /login when /auth/refresh request itself throws', async () => {
+    it('clears the dead session and lands on /login when /auth/refresh is throttled (429)', async () => {
+      // VEG-419 429 amplifier: a throttled refresh must be treated like any
+      // failed refresh — clear the session and land on /login, never wedge.
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
+        .mockResolvedValueOnce(mockResponse(429) as unknown as Response) // refresh throttled
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/logout`,
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('clears the dead session and lands on /login when /auth/refresh request itself throws', async () => {
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
-        .mockRejectedValueOnce(new Error('network down'));
+        .mockRejectedValueOnce(new Error('network down'))
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
-      expect(window.location.href).toBe('/login');
+
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('still navigates to /login even when the /auth/logout cleanup call fails', async () => {
+      // The clear-and-redirect must escape the loop regardless of whether the
+      // logout round-trip itself succeeds.
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockRejectedValueOnce(new Error('network down')); // logout fails
+
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
     it('does not refresh on 401 from the refresh endpoint itself (no recursion)', async () => {
       const fetchMock = vi.mocked(fetch);
-      fetchMock.mockResolvedValueOnce(mockResponse(401) as unknown as Response);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /auth/refresh
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout cleanup
 
       await expect(apiFetch('/auth/refresh', { method: 'POST' })).rejects.toThrow('Unauthorized');
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(window.location.href).toBe('/login');
+      // One call for the refresh request, one for the logout cleanup — never a
+      // recursive refresh-on-refresh.
+      const refreshCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/refresh`);
+      expect(refreshCalls).toHaveLength(1);
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
-    it('throws when retry after refresh still returns 401 and redirects', async () => {
+    it('throws and clears the session when the retry after refresh still returns 401', async () => {
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
         .mockResolvedValueOnce(mockResponse(200) as unknown as Response)
-        .mockResolvedValueOnce(mockResponse(401) as unknown as Response);
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
-      expect(window.location.href).toBe('/login');
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('clears the session once under a burst of concurrent 401s (no logout/redirect storm)', async () => {
+      // VEG-419 AC: a single dead-session detection must not fan out into a
+      // logout-per-request storm. The inflight dedup collapses N terminal 401s
+      // into one /auth/logout and one navigation.
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockImplementation(async (url: string | URL | Request) => {
+        if (typeof url === 'string' && url.endsWith('/auth/logout')) {
+          return mockResponse(204) as unknown as Response;
+        }
+        return mockResponse(401) as unknown as Response; // every request + refresh 401s
+      });
+
+      const results = await Promise.allSettled([apiFetch('/a'), apiFetch('/b'), apiFetch('/c')]);
+      expect(results.every(r => r.status === 'rejected')).toBe(true);
+
+      const logoutCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
+      expect(logoutCalls).toHaveLength(1);
+      expect(window.location.replace).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the dead session but does NOT navigate when already on a public path', async () => {
+      // No /-↔-/login bounce if the user is already on /login: clear cookies,
+      // but don't re-navigate.
+      (window.location as unknown as { pathname: string }).pathname = '/login';
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/logout`,
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(window.location.replace).not.toHaveBeenCalled();
     });
   });
 
@@ -338,19 +429,23 @@ describe('apiFetch', () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
-    it('redirects to /login when the refresh after a CSRF 403 fails (session is gone)', async () => {
+    it('clears the dead session and lands on /login when the refresh after a CSRF 403 fails', async () => {
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(
           mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
         )
-        .mockResolvedValueOnce(mockResponse(401) as unknown as Response); // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/srd/cards', { method: 'POST', body: '{}' })).rejects.toThrow(
         'Unauthorized'
       );
-      expect(window.location.href).toBe('/login');
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${API_URL}/auth/logout`,
+        expect.objectContaining({ method: 'POST', credentials: 'include' })
+      );
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
     it('throws the CSRF error without looping when the retry is rejected again', async () => {

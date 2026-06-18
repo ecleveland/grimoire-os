@@ -9,8 +9,10 @@ vi.mock('next/navigation', () => ({
 }));
 
 const mockApiFetch = vi.fn();
+const mockEndDeadSession = vi.fn();
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+  endDeadSession: (...args: unknown[]) => mockEndDeadSession(...args),
 }));
 
 const TEST_PROFILE = {
@@ -73,6 +75,7 @@ describe('AuthProvider', () => {
     vi.stubGlobal('fetch', vi.fn());
     mockPush.mockReset();
     mockApiFetch.mockReset();
+    mockEndDeadSession.mockReset();
   });
 
   afterEach(() => {
@@ -207,6 +210,88 @@ describe('AuthProvider', () => {
         expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
       });
       expect(mockPush).not.toHaveBeenCalledWith('/login');
+    });
+
+    it('makes at most one /auth/refresh attempt on a failed hydration (no refresh storm)', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+      });
+      const refreshCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(c => String(c[0]).match(/\/auth\/refresh$/));
+      expect(refreshCalls).toHaveLength(1);
+    });
+
+    describe('present-but-invalid session (VEG-419)', () => {
+      // A leftover session_present cookie means a session existed; when /users/me
+      // 401s and the single refresh can't restore it, the session is dead. The
+      // stale httpOnly access cookie must be cleared (via endDeadSession →
+      // POST /auth/logout) so the middleware stops bouncing /login ↔ /.
+
+      it('ends the dead session when refresh also 401s and a session_present cookie is set', async () => {
+        document.cookie = 'session_present=1';
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access dead
+          .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh — refresh dead
+
+        renderWithProvider();
+
+        await waitFor(() => {
+          expect(mockEndDeadSession).toHaveBeenCalledTimes(1);
+        });
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+
+      it('ends the dead session when refresh is throttled (429) — does not wedge', async () => {
+        document.cookie = 'session_present=1';
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
+          .mockResolvedValueOnce(mockFetchResponse(429)); // /auth/refresh throttled
+
+        renderWithProvider();
+
+        await waitFor(() => {
+          expect(mockEndDeadSession).toHaveBeenCalledTimes(1);
+        });
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+
+      it('does NOT end the session for an anonymous visitor (no session_present cookie)', async () => {
+        // Public-page visitors (/srd, /login) have no session to clear — they
+        // must not be logged out or redirected.
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
+          .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh
+
+        renderWithProvider();
+
+        await waitFor(() => {
+          expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+        });
+        expect(mockEndDeadSession).not.toHaveBeenCalled();
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+
+      it('does NOT end the session when a refresh restores it', async () => {
+        document.cookie = 'session_present=1';
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
+          .mockResolvedValueOnce(mockFetchResponse(200)) // /auth/refresh ok
+          .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)); // /users/me retry
+
+        renderWithProvider();
+
+        await waitFor(() => {
+          expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+        });
+        expect(mockEndDeadSession).not.toHaveBeenCalled();
+      });
     });
   });
 
