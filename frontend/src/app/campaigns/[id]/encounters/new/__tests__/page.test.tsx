@@ -334,8 +334,26 @@ describe('NewEncounterPage', () => {
       expect(body.name).toBe('Big Fight');
       expect(body.combatants).toEqual([
         { name: 'Bandit', initiative: 5, hp: 11, maxHp: 11, ac: 12, isNpc: true },
-        { name: 'Aragorn', initiative: 10, hp: 40, maxHp: 45, ac: 16, isNpc: false, level: 5 },
-        { name: 'Legolas', initiative: 10, hp: 38, maxHp: 38, ac: 15, isNpc: false, level: 5 },
+        {
+          name: 'Aragorn',
+          initiative: 10,
+          hp: 40,
+          maxHp: 45,
+          ac: 16,
+          isNpc: false,
+          characterId: 'pc-1',
+          level: 5,
+        },
+        {
+          name: 'Legolas',
+          initiative: 10,
+          hp: 38,
+          maxHp: 38,
+          ac: 15,
+          isNpc: false,
+          characterId: 'pc-2',
+          level: 5,
+        },
         {
           name: 'Goblin',
           initiative: 12,
@@ -384,7 +402,16 @@ describe('NewEncounterPage', () => {
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Encounter created!'));
       const body = getPostBody();
       expect(body.combatants).toEqual([
-        { name: 'Aragorn', initiative: 10, hp: 40, maxHp: 45, ac: 16, isNpc: false, level: 5 },
+        {
+          name: 'Aragorn',
+          initiative: 10,
+          hp: 40,
+          maxHp: 45,
+          ac: 16,
+          isNpc: false,
+          characterId: 'pc-1',
+          level: 5,
+        },
       ]);
     });
 

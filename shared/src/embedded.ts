@@ -177,6 +177,14 @@ export interface Combatant {
    * combatants omit it.
    */
   monsterId?: string;
+  /**
+   * Optional link to the character this PC combatant represents (VEG-256), set
+   * when added from the party roster. Gives a stable key (names are mutable and
+   * non-unique) so a departing player's combatants can be cleaned out of every
+   * encounter on removal. Absent on monsters, hand-typed combatants, and legacy
+   * rows added before this field existed — those are never auto-cleaned.
+   */
+  characterId?: string;
   /** Loot rolled from the source monster (VEG-300); absent until rolled. */
   loot?: CombatantLoot;
   /** Active SRD conditions (VEG-287); absent or empty means none. */

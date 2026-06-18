@@ -101,8 +101,10 @@ export interface PartyCombatantEntry {
  * HP are an add-time snapshot of the sheet (missing values fall back to 10,
  * current HP clamps into [0, max] in case the sheet is stale, and zero temp HP
  * is omitted like the rest of the tracker does), names auto-number against the
- * encounter and within the batch, and `isNpc` is always false. No
- * `characterId` linkage yet — gated on VEG-256.
+ * encounter and within the batch, and `isNpc` is always false. Each combatant
+ * carries the source `characterId` (VEG-256) so a departing player's PCs can be
+ * cleaned out of every encounter on removal — a stable key, since names are
+ * mutable and non-unique.
  */
 export function buildPartyCombatants(
   entries: PartyCombatantEntry[],
@@ -133,6 +135,7 @@ export function buildPartyCombatants(
       ...(tempHp > 0 ? { tempHp } : {}),
       ac: character.armorClass ?? 10,
       isNpc: false,
+      characterId: character.id,
       ...(level !== undefined ? { level } : {}),
     };
   });
