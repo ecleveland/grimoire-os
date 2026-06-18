@@ -2,12 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import ClassStep from '../ClassStep';
-import {
-  emptyCharacterFormValues,
-  type CharacterFormValues,
-} from '@/components/CharacterEditorForm';
+import { DraftProvider, useCharacterDraft } from '../../useCharacterDraft';
 import type { SrdClass, SrdSubclass } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
@@ -73,22 +70,19 @@ function routeApiFetch(classes: SrdClass[], subclasses: SrdSubclass[] = []) {
   });
 }
 
-// Stateful harness: ClassStep is controlled, so we hold the draft and forward
-// onChange, and capture the latest reported validity.
+// Stateful harness: ClassStep is controlled and reads the grant registry from
+// context, so we drive the real useCharacterDraft hook (the production store) and
+// wrap in DraftProvider — tests then exercise the real compile/reconcile path.
 function Harness({ onValid }: { onValid: (valid: boolean) => void }) {
-  const [draft, setDraft] = useState<CharacterFormValues>(() => emptyCharacterFormValues());
+  const api = useCharacterDraft();
   return (
-    <>
-      <ClassStep
-        value={draft}
-        onChange={patch => setDraft(d => ({ ...d, ...patch }))}
-        onValidChange={onValid}
-      />
+    <DraftProvider api={api}>
+      <ClassStep value={api.draft} onChange={api.onChange} onValidChange={onValid} />
       {/* Readouts so tests can assert draft writes/resets directly. */}
-      <div data-testid="draft-skills">{draft.skills.join(',')}</div>
-      <div data-testid="draft-subclass">{draft.subclass}</div>
-      <div data-testid="draft-spell">{draft.spellcastingAbility}</div>
-    </>
+      <div data-testid="draft-skills">{api.draft.skills.join(',')}</div>
+      <div data-testid="draft-subclass">{api.draft.subclass}</div>
+      <div data-testid="draft-spell">{api.draft.spellcastingAbility}</div>
+    </DraftProvider>
   );
 }
 

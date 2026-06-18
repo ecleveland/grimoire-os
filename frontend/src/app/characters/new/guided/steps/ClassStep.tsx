@@ -1,36 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useApiQuery } from '@/lib/query';
 import { DIE_TYPES, type DieType, type SrdClass, type SrdSubclass } from '@/lib/types';
-import {
-  normalizeArmorProficiencies,
-  type CharacterFormValues,
-} from '@/components/CharacterEditorForm';
+import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
+import { useDraftGrants } from '../useCharacterDraft';
 import type { WizardStepProps } from './types';
-
-/** Class grants are authoritative in the guided flow: selecting a class replaces
- * the class-derived fields (saves, armor, weapon/tool profs, hit die,
- * spellcasting ability) and resets the choose-N skills + subclass for the new
- * class. This differs from the editor's additive `applyClassGrants` merge, which
- * is right for hand-editing an existing sheet but wrong for a fresh build where
- * switching class shouldn't leave the previous class's traits behind. */
-function classGrants(c: SrdClass, prev: CharacterFormValues): Partial<CharacterFormValues> {
-  const dieType = (DIE_TYPES as readonly string[]).includes(c.hitDie)
-    ? (c.hitDie as DieType)
-    : prev.hitDice.dieType;
-  return {
-    class: c.name,
-    level: 1,
-    savingThrows: [...c.savingThrows],
-    armorTraining: normalizeArmorProficiencies(c.armorProficiencies),
-    proficiencies: [...c.weaponProficiencies, ...c.toolProficiencies],
-    hitDice: { ...prev.hitDice, dieType },
-    spellcastingAbility: c.spellcasting?.ability ?? '',
-    skills: [],
-    subclass: '',
-  };
-}
 
 /**
  * Step 1 — Class (VEG-379). Searchable SRD class picker; on selection it folds
@@ -40,6 +15,7 @@ function classGrants(c: SrdClass, prev: CharacterFormValues): Partial<CharacterF
  * shell can show/hide the later Spells step.
  */
 export default function ClassStep({ value, onChange, onValidChange }: WizardStepProps) {
+  const { grants, reconcileSource, setSourceField } = useDraftGrants();
   const classesQuery = useApiQuery<SrdClass[]>('/srd/classes');
   const classes = classesQuery.data ?? [];
   const selectedClass = classes.find(c => c.name === value.class);
@@ -55,32 +31,44 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
 
   const skillPool = selectedClass?.skillChoices ?? [];
   const numSkillChoices = selectedClass?.numSkillChoices ?? 0;
-  const chosenPoolSkills = value.skills.filter(s => skillPool.includes(s));
+  // The class owns the choose-N skill picks as its own grant slice, so they
+  // survive a background switch and don't double-count a background-granted skill
+  // that happens to be in the pool.
+  const classSkills = grants.class?.skills ?? [];
+  const chosenPoolSkills = classSkills.filter(s => skillPool.includes(s));
 
   // Reconcile the class-derived grants whenever the resolved SRD class changes —
   // whether the user clicked an option or typed the name exactly. Keyed off the
-  // applied class id so we apply once per class (and don't clobber skill picks on
-  // every render). When the name no longer matches an SRD class (custom/homebrew
-  // entry), drop the previous class's grants so nothing stale lingers.
-  const appliedClassId = useRef<string | null>(null);
+  // resolved class id; the registry's identity guard applies once per class (and
+  // survives this step remounting on navigation, so revisiting Class no longer
+  // wipes the picked skills/subclass). When the name no longer matches an SRD
+  // class (custom/homebrew entry), drop the previous class's grants.
   useEffect(() => {
     if (selectedClass) {
-      if (appliedClassId.current !== selectedClass.id) {
-        appliedClassId.current = selectedClass.id;
-        onChange(classGrants(selectedClass, value));
-      }
-    } else if (appliedClassId.current !== null) {
-      appliedClassId.current = null;
-      onChange({
-        savingThrows: [],
-        armorTraining: [],
-        proficiencies: [],
-        spellcastingAbility: '',
+      const changed = reconcileSource('class', selectedClass.id, {
+        proficiencies: [...selectedClass.weaponProficiencies, ...selectedClass.toolProficiencies],
         skills: [],
-        subclass: '',
       });
+      if (changed) {
+        const dieType = (DIE_TYPES as readonly string[]).includes(selectedClass.hitDie)
+          ? (selectedClass.hitDie as DieType)
+          : value.hitDice.dieType;
+        onChange({
+          level: 1,
+          savingThrows: [...selectedClass.savingThrows],
+          armorTraining: normalizeArmorProficiencies(selectedClass.armorProficiencies),
+          hitDice: { ...value.hitDice, dieType },
+          spellcastingAbility: selectedClass.spellcasting?.ability ?? '',
+          subclass: '',
+        });
+      }
+    } else if (reconcileSource('class', '', {})) {
+      onChange({ savingThrows: [], armorTraining: [], spellcastingAbility: '', subclass: '' });
     }
-  }, [selectedClass, onChange, value]);
+    // Keyed on the resolved class identity only; reading value.* here is
+    // intentional (it is current when the effect runs on an identity change).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClass?.id, reconcileSource, onChange]);
 
   // The class-name gate lives in the step def's isValid; this reports the extra
   // SRD-derived rule: an unrecognized class has no pool (count trivially met),
@@ -91,9 +79,10 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
   }, [skillsComplete, onValidChange]);
 
   const toggleSkill = (next: string[]) => {
+    const picks = next.filter(s => skillPool.includes(s));
     // Cap at the allowed count: ignore a pick that would exceed numSkillChoices.
-    if (next.filter(s => skillPool.includes(s)).length > numSkillChoices) return;
-    onChange({ skills: next });
+    if (picks.length > numSkillChoices) return;
+    setSourceField('class', 'skills', picks);
   };
 
   return (
@@ -149,7 +138,7 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
             <ToggleChips
               label="Skills"
               options={skillPool}
-              value={value.skills}
+              value={classSkills}
               onChange={toggleSkill}
               highlight={skillPool}
               helperText={`Choose ${numSkillChoices}: ${chosenPoolSkills.length} of ${numSkillChoices} chosen`}

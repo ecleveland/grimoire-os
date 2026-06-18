@@ -1,19 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useApiQuery } from '@/lib/query';
 import { SIZES, type Feature, type Size, type SrdBackground, type SrdRace } from '@/lib/types';
 import SrdCombobox from '@/components/SrdCombobox';
+import { useDraftGrants } from '../useCharacterDraft';
 import type { WizardStepProps } from './types';
-
-/** Append additions not already present; report which were newly added (so a
- * later switch can remove exactly this source's contribution). */
-function mergeUnique(
-  current: string[],
-  additions: string[]
-): { merged: string[]; added: string[] } {
-  const have = new Set(current);
-  const added = additions.filter(a => !have.has(a));
-  return { merged: added.length ? [...current, ...added] : current, added };
-}
 
 const summaryCard =
   'grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-gray-200 p-3 text-sm dark:border-gray-700';
@@ -22,23 +12,21 @@ const summaryCard =
  * Step 2 — Origin (VEG-380): background + species pickers. Selecting a background
  * folds its skill/tool proficiencies into the draft; selecting a species records
  * its name, speed, size, languages, and traits (as species-sourced features).
- * Grants from class + background + species are union-merged and de-duplicated,
- * and each picker tracks its own contribution so switching a pick cleanly
- * replaces it (class skill picks and the other source's grants are preserved).
+ *
+ * Skills/proficiencies/languages are source-tagged grants (VEG-393): each picker
+ * replaces only its own source slice via `reconcileSource`, so the compiled draft
+ * fields reconcile by source — switching or clearing a background/species removes
+ * exactly that source's grants (a class skill pick or the other source's grants
+ * survive), and the identity guard makes re-entering the step idempotent without
+ * step-local refs. Species traits are reconciled by their `source` tag the same
+ * way they always have been (so the sheet groups them under Species Traits).
  *
  * Deferred by design: the background ability-score increase (no seeded data; the
  * Abilities step owns "+ background increases", VEG-381), starting equipment
  * (VEG-382), and the background feat / personality suggestions.
- *
- * Known cross-step limitation: skills/proficiencies/languages are flat, un-sourced
- * string lists merged by several steps, so a few cross-step orderings reconcile
- * imperfectly — e.g. switching a background after also picking one of its skills
- * as a class skill can over-remove that skill, and ClassStep re-applying its
- * grants (which replace `proficiencies`) after Origin can drop a background's tool
- * proficiency. Fully fixing this needs source-tagged grants shared across steps
- * (a later pass). Features avoid it here via their `source` tag.
  */
 export default function OriginStep({ value, onChange }: WizardStepProps) {
+  const { reconcileSource } = useDraftGrants();
   const racesQuery = useApiQuery<SrdRace[]>('/srd/races');
   const backgroundsQuery = useApiQuery<SrdBackground[]>('/srd/backgrounds');
   const races = racesQuery.data ?? [];
@@ -46,22 +34,17 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
   const selectedRace = races.find(r => r.name === value.race);
   const selectedBackground = backgrounds.find(b => b.name === value.background);
 
-  // Species reconciliation. Features are reconciled by source — dropping every
-  // species-sourced feature (source ∈ the race catalog) and re-adding the
-  // current species' traits — so it's idempotent: re-entering the step (the draft
-  // survives unmounts, but this ref does not) can't duplicate traits. Languages
-  // use the ref to remove the previous species' contribution on a switch.
-  const appliedRace = useRef<{ name: string; langs: string[] } | null>(null);
+  // Species reconciliation. Languages are a source slice; the species' traits are
+  // single-source features reconciled by their `source` tag (drop every
+  // species-sourced feature, re-add the current species'), gated on a genuine
+  // species change so a remount/re-render can't duplicate them.
   useEffect(() => {
     const raceNames = new Set(races.map(r => r.name));
     if (selectedRace) {
-      if (appliedRace.current?.name !== selectedRace.name) {
-        const prev = appliedRace.current;
-        const baseLangs = prev
-          ? value.languages.filter(l => !prev.langs.includes(l))
-          : value.languages;
-        const langs = mergeUnique(baseLangs, selectedRace.languages);
-        const baseFeatures = value.features.filter(f => !raceNames.has(f.source ?? ''));
+      const changed = reconcileSource('species', selectedRace.name, {
+        languages: selectedRace.languages,
+      });
+      if (changed) {
         const traitFeatures: Feature[] = selectedRace.traits.map(t => ({
           name: t.name,
           description: t.description,
@@ -70,49 +53,38 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
         const size = (SIZES as readonly string[]).includes(selectedRace.size)
           ? (selectedRace.size as Size)
           : value.size;
-        appliedRace.current = { name: selectedRace.name, langs: langs.added };
         onChange({
-          languages: langs.merged,
-          features: [...baseFeatures, ...traitFeatures],
+          features: [
+            ...value.features.filter(f => !raceNames.has(f.source ?? '')),
+            ...traitFeatures,
+          ],
           speed: selectedRace.speed,
           size,
         });
       }
-    } else if (appliedRace.current) {
-      const prev = appliedRace.current;
-      appliedRace.current = null;
-      onChange({
-        languages: value.languages.filter(l => !prev.langs.includes(l)),
-        features: value.features.filter(f => !raceNames.has(f.source ?? '')),
-      });
+    } else if (reconcileSource('species', '', {})) {
+      onChange({ features: value.features.filter(f => !raceNames.has(f.source ?? '')) });
     }
-  }, [selectedRace, races, value, onChange]);
+    // Keyed on the resolved species identity (and the race catalog it resolves
+    // against); reading value.* here is intentional (current at run time).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRace?.name, races, reconcileSource, onChange]);
 
-  // Background reconciliation. Track the skills/proficiencies this background
-  // added so a switch removes exactly those (class skill picks survive).
-  const appliedBg = useRef<{ id: string; skills: string[]; profs: string[] } | null>(null);
+  // Background reconciliation: replace the background source slice with its
+  // skill/tool proficiencies. Clearing/switching removes exactly this source's
+  // grants; class skill picks (the 'class' slice) survive.
   useEffect(() => {
-    if (selectedBackground) {
-      if (appliedBg.current?.id !== selectedBackground.id) {
-        const prev = appliedBg.current;
-        const baseSkills = prev ? value.skills.filter(s => !prev.skills.includes(s)) : value.skills;
-        const baseProfs = prev
-          ? value.proficiencies.filter(p => !prev.profs.includes(p))
-          : value.proficiencies;
-        const skills = mergeUnique(baseSkills, selectedBackground.skillProficiencies);
-        const profs = mergeUnique(baseProfs, selectedBackground.toolProficiencies);
-        appliedBg.current = { id: selectedBackground.id, skills: skills.added, profs: profs.added };
-        onChange({ skills: skills.merged, proficiencies: profs.merged });
-      }
-    } else if (appliedBg.current) {
-      const prev = appliedBg.current;
-      appliedBg.current = null;
-      onChange({
-        skills: value.skills.filter(s => !prev.skills.includes(s)),
-        proficiencies: value.proficiencies.filter(p => !prev.profs.includes(p)),
-      });
-    }
-  }, [selectedBackground, value, onChange]);
+    reconcileSource(
+      'background',
+      selectedBackground?.id ?? '',
+      selectedBackground
+        ? {
+            skills: selectedBackground.skillProficiencies,
+            proficiencies: selectedBackground.toolProficiencies,
+          }
+        : {}
+    );
+  }, [selectedBackground?.id, reconcileSource]);
 
   return (
     <section aria-labelledby="step-origin-heading" className="space-y-4">

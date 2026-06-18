@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import GuidedCharacterPage from '../page';
-import type { Character, SrdClass } from '@/lib/types';
+import type { Character, SrdBackground, SrdClass, SrdRace } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -341,5 +341,212 @@ describe('GuidedCharacterPage — wizard shell', () => {
     await user.click(within(skills).getByRole('button', { name: /arcana/i }));
     await user.click(within(skills).getByRole('button', { name: /history/i }));
     await waitFor(() => expect(next).toBeEnabled());
+  });
+});
+
+// ── VEG-393: source-tagged grants reconcile across step orderings ──────────────
+describe('GuidedCharacterPage — cross-step grant reconciliation', () => {
+  const FIGHTER: SrdClass = {
+    id: 'fighter',
+    name: 'Fighter',
+    hitDie: 'd10',
+    primaryAbilities: ['Strength'],
+    savingThrows: ['Strength', 'Constitution'],
+    armorProficiencies: ['All armor', 'Shields'],
+    weaponProficiencies: ['Simple weapons', 'Martial weapons'],
+    skillChoices: ['Acrobatics', 'Athletics', 'History', 'Insight', 'Perception', 'Survival'],
+    toolProficiencies: [],
+    numSkillChoices: 2,
+    features: [],
+    subclassLevel: 3,
+    source: 'SRD',
+  };
+
+  const ELF: SrdRace = {
+    id: 'elf',
+    name: 'Elf',
+    speed: 30,
+    size: 'Medium',
+    abilityBonuses: {},
+    traits: [{ name: 'Darkvision', description: 'See in the dark.' }],
+    languages: ['Common', 'Elvish'],
+    source: 'SRD',
+  };
+  const DWARF: SrdRace = {
+    id: 'dwarf',
+    name: 'Dwarf',
+    speed: 25,
+    size: 'Medium',
+    abilityBonuses: {},
+    traits: [{ name: 'Dwarven Resilience', description: 'Advantage vs poison.' }],
+    languages: ['Common', 'Dwarvish'],
+    source: 'SRD',
+  };
+
+  function makeBg(over: Partial<SrdBackground>): SrdBackground {
+    return {
+      id: 'acolyte',
+      name: 'Acolyte',
+      skillProficiencies: ['Insight', 'Religion'],
+      toolProficiencies: [],
+      languages: 0,
+      personalityTraits: [],
+      ideals: [],
+      bonds: [],
+      flaws: [],
+      source: 'SRD',
+      ...over,
+    };
+  }
+  const ACOLYTE = makeBg({});
+  const SOLDIER = makeBg({
+    id: 'soldier',
+    name: 'Soldier',
+    skillProficiencies: ['Athletics', 'Intimidation'],
+    toolProficiencies: ['Gaming Set'],
+  });
+
+  function routeSrd({
+    classes = [],
+    races = [],
+    backgrounds = [],
+  }: { classes?: SrdClass[]; races?: SrdRace[]; backgrounds?: SrdBackground[] } = {}) {
+    mockApiFetch.mockImplementation((path?: string, options?: { method?: string }) => {
+      if (options?.method === 'POST') return Promise.resolve({ id: 'char-new' } as Character);
+      if (path === '/srd/classes') return Promise.resolve(classes);
+      if (path === '/srd/races') return Promise.resolve(races);
+      if (path === '/srd/backgrounds') return Promise.resolve(backgrounds);
+      return Promise.resolve([]);
+    });
+  }
+
+  const next = () => screen.getByRole('button', { name: /^next$/i });
+
+  async function pickClassSkill(user: ReturnType<typeof userEvent.setup>, name: string) {
+    const skills = screen.getByRole('group', { name: /skills/i });
+    await user.click(within(skills).getByRole('button', { name: new RegExp(`^${name}$`, 'i') }));
+  }
+
+  async function pickOrigin(user: ReturnType<typeof userEvent.setup>, label: RegExp, name: string) {
+    const input = screen.getByRole('combobox', { name: label });
+    await user.clear(input);
+    await user.type(input, name);
+    await user.click(await screen.findByRole('option', { name }));
+  }
+
+  async function walkToReviewAndSubmit(user: ReturnType<typeof userEvent.setup>) {
+    for (let i = 0; i < 8 && !screen.queryByRole('heading', { name: /review/i }); i++) {
+      await user.click(next());
+    }
+    await screen.findByRole('heading', { name: /review/i });
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+  }
+
+  it('keeps a class-picked skill when a background that also granted it is switched away (bug 1)', async () => {
+    routeSrd({ classes: [FIGHTER], races: [], backgrounds: [ACOLYTE, SOLDIER] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Fighter');
+    await pickClassSkill(user, 'Insight'); // also granted by Acolyte
+    await pickClassSkill(user, 'Perception');
+    await waitFor(() => expect(next()).toBeEnabled());
+    await user.click(next());
+
+    // Origin: take Acolyte (grants Insight + Religion), then switch to Soldier.
+    await pickOrigin(user, /background/i, 'Acolyte');
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: /background grants/i })).toBeInTheDocument()
+    );
+    await pickOrigin(user, /background/i, 'Soldier');
+
+    await walkToReviewAndSubmit(user);
+    const skills = lastPostBody().skills as string[];
+    // The class pick survives the Acolyte→Soldier switch; Acolyte's exclusive
+    // Religion is gone.
+    expect(skills).toContain('Insight');
+    expect(skills).not.toContain('Religion');
+  });
+
+  it('does not drop a background tool proficiency when revisiting the Class step (bug 2)', async () => {
+    routeSrd({ classes: [FIGHTER], races: [], backgrounds: [SOLDIER] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Fighter');
+    await pickClassSkill(user, 'Athletics');
+    await pickClassSkill(user, 'Perception');
+    await user.click(next());
+
+    await pickOrigin(user, /background/i, 'Soldier'); // grants the "Gaming Set" tool prof
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: /background grants/i })).toBeInTheDocument()
+    );
+
+    // Go back to Class (ClassStep remounts; its grants re-apply). Before the fix,
+    // the wholesale proficiency replace clobbered the background's tool prof.
+    await user.click(screen.getByRole('button', { name: /^back$/i }));
+    expect(screen.getByRole('heading', { name: /class/i })).toBeInTheDocument();
+
+    await walkToReviewAndSubmit(user);
+    const profs = lastPostBody().proficiencies as string[];
+    expect(profs).toContain('Gaming Set'); // background's tool prof survived
+    expect(profs).toContain('Martial weapons'); // class profs still present
+  });
+
+  it('removes the previous species languages when switching species after a remount (bug 3)', async () => {
+    routeSrd({ classes: [FIGHTER], races: [ELF, DWARF], backgrounds: [] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Fighter');
+    await pickClassSkill(user, 'Athletics');
+    await pickClassSkill(user, 'Perception');
+    await user.click(next());
+
+    await pickOrigin(user, /species/i, 'Elf');
+    const elfSummary = await screen.findByRole('group', { name: /species grants/i });
+    expect(within(elfSummary).getByText(/Common, Elvish/)).toBeInTheDocument();
+
+    // Leave Origin and come back (OriginStep remounts — the old ref-based code
+    // lost the previous species' contribution here).
+    await user.click(next());
+    expect(screen.getByRole('heading', { name: /abilities/i })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /^back$/i }));
+
+    await pickOrigin(user, /species/i, 'Dwarf');
+    const dwarfSummary = await screen.findByRole('group', { name: /species grants/i });
+    await waitFor(() =>
+      expect(within(dwarfSummary).getByText(/Common, Dwarvish/)).toBeInTheDocument()
+    );
+    expect(within(dwarfSummary).queryByText(/Elvish/)).toBeNull();
+  });
+
+  it('keeps the class skill picks when navigating back to the Class step (revisit idempotency)', async () => {
+    routeSrd({ classes: [FIGHTER], races: [], backgrounds: [] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Fighter');
+    await pickClassSkill(user, 'Athletics');
+    await pickClassSkill(user, 'Insight');
+    await waitFor(() => expect(next()).toBeEnabled());
+    await user.click(next());
+    expect(screen.getByRole('heading', { name: /origin/i })).toBeInTheDocument();
+
+    // Back to Class: the picks must survive the remount (no skills: [] reset).
+    await user.click(screen.getByRole('button', { name: /^back$/i }));
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(within(skills).getByRole('button', { name: /^athletics$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    expect(within(skills).getByRole('button', { name: /^insight$/i })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    expect(next()).toBeEnabled();
   });
 });
