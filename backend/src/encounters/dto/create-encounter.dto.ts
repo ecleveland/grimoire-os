@@ -167,6 +167,14 @@ class CombatantDto {
   monsterId?: string;
 
   @ApiPropertyOptional({
+    description:
+      'Character this PC combatant represents (VEG-256), set when added from the party roster; the stable key for cleaning up a departing player’s combatants.',
+  })
+  @IsOptional()
+  @IsString()
+  characterId?: string;
+
+  @ApiPropertyOptional({
     description: 'Loot rolled from the source monster (VEG-300); set by POST /encounters/:id/loot.',
   })
   @IsOptional()

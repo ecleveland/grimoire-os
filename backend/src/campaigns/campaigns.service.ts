@@ -1,5 +1,6 @@
 import { ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import type { Combatant } from '@grimoire-os/shared';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -10,6 +11,7 @@ import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
 import { CampaignDto, CampaignListItemDto, PartyCharacterDto } from './dto/campaign-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
+import { stripCombatantsForCharacters } from './combatant-cleanup';
 
 const campaignInclude = {
   players: true,
@@ -232,12 +234,17 @@ export class CampaignsService {
 
     // Cascade the removed player's campaign-scoped cleanup atomically so a
     // partial failure rolls everything back (VEG-138).
-    //
-    // Encounter combatants (ticket step 3) are intentionally NOT cleaned up
-    // here: the embedded `Combatant` shape carries no characterId/userId, so
-    // there is no reliable key to identify the removed player's entries.
-    // Deferred to a follow-up once combatants gain a linkage field.
     await this.prisma.$transaction(async tx => {
+      // Collect the player's character ids up front (VEG-256): combatants
+      // snapshot a `characterId`, so this is the key for stripping their PC
+      // combatants in step 3. Detaching in step 1 only nulls campaignId — the
+      // rows survive — so the order relative to the detach doesn't matter.
+      const ownedCharacters = await tx.character.findMany({
+        where: { userId: playerId },
+        select: { id: true },
+      });
+      const ownedCharacterIds = new Set(ownedCharacters.map(c => c.id));
+
       // 1. Detach (do not delete) the player's characters from this campaign;
       //    characters belong to the user, so they survive but leave the campaign.
       await tx.character.updateMany({
@@ -254,6 +261,34 @@ export class CampaignsService {
           visibility: NoteVisibility.PRIVATE,
         },
       });
+
+      // 3. Strip the player's PC combatants from this campaign's encounters
+      //    (VEG-256). Only encounters that actually contain one are rewritten,
+      //    and `version` is bumped so a DM with the encounter open can't re-add
+      //    the departed PC via a stale combatants array (the optimistic-lock
+      //    blind spot — unguarded writes are invisible to later guarded ones,
+      //    VEG-137).
+      if (ownedCharacterIds.size > 0) {
+        const encounters = await tx.encounter.findMany({
+          where: { campaignId },
+          select: { id: true, combatants: true },
+        });
+        for (const encounter of encounters) {
+          const { combatants, removed } = stripCombatantsForCharacters(
+            encounter.combatants as unknown as Combatant[] | null,
+            ownedCharacterIds
+          );
+          if (removed > 0) {
+            await tx.encounter.update({
+              where: { id: encounter.id },
+              data: {
+                combatants: combatants as unknown as Prisma.InputJsonValue,
+                version: { increment: 1 },
+              },
+            });
+          }
+        }
+      }
 
       // 4. Delete the membership join row.
       await tx.campaignPlayer.delete({

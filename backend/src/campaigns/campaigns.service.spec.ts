@@ -619,6 +619,7 @@ describe('CampaignsService', () => {
     it('detaches the removed player characters, deletes their private notes, and deletes the join row in one transaction', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
+      prisma.character.findMany.mockResolvedValue([]); // no owned characters → no combatant cleanup
       prisma.character.updateMany.mockResolvedValue({ count: 1 });
       prisma.note.deleteMany.mockResolvedValue({ count: 2 });
       prisma.campaignPlayer.delete.mockResolvedValue({});
@@ -654,11 +655,62 @@ describe('CampaignsService', () => {
         },
       });
 
+      // No owned characters → no encounters are inspected or rewritten.
+      expect(prisma.encounter.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+
       expect(result).toEqual(serializedMockCampaign);
+    });
+
+    it("strips the removed player's PC combatants from encounters that contain them, bumping version, and leaves others untouched (VEG-256)", async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
+      // The player owns char-1; their combatant should be removed.
+      prisma.character.findMany.mockResolvedValue([{ id: 'char-1' }]);
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+      prisma.note.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.encounter.findMany.mockResolvedValue([
+        {
+          id: 'enc-with-pc',
+          combatants: [
+            { name: 'Aria', isNpc: false, characterId: 'char-1' },
+            { name: 'Goblin', isNpc: true },
+          ],
+        },
+        {
+          // No combatant linked to the removed player → must NOT be rewritten.
+          id: 'enc-without-pc',
+          combatants: [{ name: 'Bron', isNpc: false, characterId: 'char-other' }],
+        },
+      ]);
+      prisma.encounter.update.mockResolvedValue({});
+      prisma.campaignPlayer.delete.mockResolvedValue({});
+
+      await service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID);
+
+      expect(prisma.character.findMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID_2 },
+        select: { id: true },
+      });
+      expect(prisma.encounter.findMany).toHaveBeenCalledWith({
+        where: { campaignId: CAMPAIGN_ID },
+        select: { id: true, combatants: true },
+      });
+
+      // Only the matching encounter is rewritten — trimmed array + version bump.
+      expect(prisma.encounter.update).toHaveBeenCalledTimes(1);
+      expect(prisma.encounter.update).toHaveBeenCalledWith({
+        where: { id: 'enc-with-pc' },
+        data: {
+          combatants: [{ name: 'Goblin', isNpc: true }],
+          version: { increment: 1 },
+        },
+      });
     });
 
     it('propagates the error and does not re-fetch the campaign when a cleanup step fails (rollback)', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([]);
       prisma.character.updateMany.mockResolvedValue({ count: 1 });
       prisma.note.deleteMany.mockResolvedValue({ count: 0 });
       prisma.campaignPlayer.delete.mockRejectedValue(new Error('db exploded'));

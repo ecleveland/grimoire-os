@@ -269,8 +269,28 @@ describe('buildPartyCombatants', () => {
       ['Goblin']
     );
     expect(result).toEqual([
-      { name: 'Thia', initiative: 14, hp: 17, maxHp: 22, ac: 12, isNpc: false, level: 5 },
+      {
+        name: 'Thia',
+        initiative: 14,
+        hp: 17,
+        maxHp: 22,
+        ac: 12,
+        isNpc: false,
+        characterId: 'char-1',
+        level: 5,
+      },
     ]);
+  });
+
+  it('links each PC combatant to its source characterId (VEG-256)', () => {
+    const result = buildPartyCombatants(
+      [
+        { character: makePartyCharacter({ id: 'char-a' }), initiative: 14 },
+        { character: makePartyCharacter({ id: 'char-b', name: 'Bron' }), initiative: 9 },
+      ],
+      []
+    );
+    expect(result.map(c => c.characterId)).toEqual(['char-a', 'char-b']);
   });
 
   it('snapshots the sheet level (VEG-362)', () => {

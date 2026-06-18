@@ -263,6 +263,13 @@ describe('CombatantDto cr / xp / level snapshots (global validator strictness)',
     expect(accepts({ initiativeMod: -1 })).toEqual([]);
   });
 
+  // characterId (VEG-256) links a PC combatant to its character; it is echoed
+  // back on every PATCH, so it must be whitelisted or the next write 400s.
+  it('accepts a characterId and rejects a non-string', () => {
+    expect(accepts({ characterId: 'char-1111-2222-3333-444444444444' })).toEqual([]);
+    expect(accepts({ characterId: 123 })).not.toEqual([]);
+  });
+
   it('rejects a non-integer initiativeMod', () => {
     expect(accepts({ initiativeMod: 1.5 })).not.toEqual([]);
   });

@@ -951,7 +951,7 @@ describe('InitiativeTrackerPage', () => {
 
       expect(patchBody!.expectedVersion).toBe(5);
       // Both PCs appended after the existing three combatants: sheet snapshot,
-      // isNpc false, no monsterId/characterId.
+      // isNpc false, no monsterId, linked to the source characterId (VEG-256).
       expect(patchBody!.combatants).toHaveLength(5);
       expect(patchBody!.combatants[3]).toEqual({
         name: 'Thia',
@@ -960,6 +960,7 @@ describe('InitiativeTrackerPage', () => {
         maxHp: 22,
         ac: 12,
         isNpc: false,
+        characterId: 'char-1',
         level: 5,
       });
       expect(patchBody!.combatants[4]).toEqual({
@@ -969,6 +970,7 @@ describe('InitiativeTrackerPage', () => {
         maxHp: 18,
         ac: 14,
         isNpc: false,
+        characterId: 'char-2',
         level: 3,
       });
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
