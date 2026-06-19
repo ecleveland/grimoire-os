@@ -62,6 +62,10 @@ export type {
   NpcRerollField,
   GenerateNpcRequest,
   GeneratedNpcPreview,
+  // Shop (VEG-353)
+  Shop,
+  ShopListItem,
+  ShopLineItem,
   // Pagination
   PaginatedResponse,
   // Response types
