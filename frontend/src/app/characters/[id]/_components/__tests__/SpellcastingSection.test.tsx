@@ -573,4 +573,79 @@ describe('SpellcastingSection', () => {
       expect(screen.getByRole('button', { name: 'Add spell' })).toBeDisabled();
     });
   });
+
+  describe('spell-card popover (VEG-413)', () => {
+    const FIREBALL_ROW = {
+      id: 'sp-99',
+      name: 'Fireball',
+      level: 3,
+      school: 'Evocation',
+      castingTime: '1 action',
+      range: '150 feet',
+      components: 'V, S, M',
+      duration: 'Instantaneous',
+      description: 'A bright streak flashes from your pointing finger.',
+      classes: ['Wizard'],
+      ritual: false,
+      concentration: false,
+      source: 'SRD',
+      contentSource: 'srd',
+    };
+
+    // Resolve the catalog fetch for linked entries; everything else (the
+    // /srd/classes allowance query) keeps the default "no data" behaviour.
+    const mockCatalog = (row: unknown = FIREBALL_ROW) =>
+      mockUseApiQuery.mockImplementation((path: string) =>
+        path.startsWith('/srd/spells/')
+          ? { data: row, isLoading: false, isError: false }
+          : { data: undefined }
+      );
+
+    it('renders each spell name as a button and opens a free-typed card (read-only viewer)', async () => {
+      const user = userEvent.setup();
+      // Viewer: no `editable` prop. baseCharacter's spells are all free-typed.
+      render(<SpellcastingSection character={baseCharacter} />);
+
+      const trigger = screen.getByRole('button', { name: 'View Magic Missile details' });
+      await user.click(trigger);
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      // Free-typed entry → no catalog fetch, shows the not-linked hint.
+      expect(mockUseApiQuery).not.toHaveBeenCalledWith('/srd/spells/undefined');
+      expect(screen.getByTestId('not-linked-hint')).toBeInTheDocument();
+    });
+
+    it('fetches the catalog row and renders full detail for a linked entry', async () => {
+      const user = userEvent.setup();
+      mockCatalog();
+      render(
+        <SpellcastingSection
+          character={{
+            ...baseCharacter,
+            spells: [{ level: 3, name: 'Fireball', prepared: true, spellId: 'sp-99' }],
+          }}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: 'View Fireball details' }));
+
+      expect(mockUseApiQuery).toHaveBeenCalledWith('/srd/spells/sp-99');
+      expect(screen.getByText(/A bright streak flashes/)).toBeInTheDocument();
+      expect(screen.queryByTestId('not-linked-hint')).toBeNull();
+    });
+
+    it('lets the owner open the card too', async () => {
+      const user = userEvent.setup();
+      render(
+        <SpellcastingSection
+          character={{ ...baseCharacter, spells: [{ level: 1, name: 'Shield', prepared: true }] }}
+          editable
+          onPatch={vi.fn()}
+        />
+      );
+
+      await user.click(screen.getByRole('button', { name: 'View Shield details' }));
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
 });
