@@ -11,11 +11,13 @@ import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import { shopVisuals, visibleShops } from '@/lib/shop-display';
 import type {
   Campaign,
   NoteListItem,
   EncounterListItem,
   NpcListItem,
+  ShopListItem,
   PartyCharacter,
   PaginatedResponse,
   InviteCodeResponse,
@@ -27,7 +29,7 @@ const statusColors: Record<string, string> = {
   completed: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
 };
 
-type Tab = 'overview' | 'roster' | 'notes' | 'encounters' | 'npcs';
+type Tab = 'overview' | 'roster' | 'notes' | 'encounters' | 'npcs' | 'shops';
 
 const LIMIT = 20;
 
@@ -72,6 +74,10 @@ export default function CampaignDetailPage() {
     `/npcs?campaignId=${id}&page=1&limit=3`,
     { enabled: tab === 'npcs', errorToast: { message: 'Failed to load NPCs', id: 'load-npcs' } }
   );
+  const shopsQuery = useApiQuery<PaginatedResponse<ShopListItem>>(
+    `/shops?campaignId=${id}&page=1&limit=6`,
+    { enabled: tab === 'shops', errorToast: { message: 'Failed to load shops', id: 'load-shops' } }
+  );
   const rosterQuery = useApiQuery<PartyCharacter[]>(`/campaigns/${id}/characters`, {
     enabled: tab === 'roster',
     errorToast: { message: 'Failed to load roster', id: 'load-roster' },
@@ -86,6 +92,9 @@ export default function CampaignDetailPage() {
   const encountersLastPage = encountersQuery.data?.lastPage ?? 1;
   const recentNpcs = npcsQuery.data?.data ?? [];
   const npcsTotal = npcsQuery.data?.total ?? 0;
+  // Players only see open shops; the owner sees all (closed ones are badged).
+  const visibleShopList = visibleShops(shopsQuery.data?.data ?? [], Boolean(isOwner));
+  const shopsTotal = shopsQuery.data?.total ?? 0;
 
   // Self-heal: a fetched encounters page that comes back empty and out of range
   // (rows were deleted elsewhere) steps back to the real last page.
@@ -194,6 +203,7 @@ export default function CampaignDetailPage() {
     { key: 'notes', label: 'Notes' },
     { key: 'encounters', label: 'Encounters' },
     { key: 'npcs', label: 'NPCs' },
+    { key: 'shops', label: 'Shops' },
   ];
 
   return (
@@ -486,6 +496,69 @@ export default function CampaignDetailPage() {
                   </p>
                 </Link>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'shops' && (
+        <div>
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Shops</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {isOwner ? `${shopsTotal} total` : 'Browse the campaign’s shops'}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Link
+                href={`/campaigns/${id}/shops`}
+                className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                View all
+              </Link>
+              {isOwner && (
+                <Link
+                  href={`/campaigns/${id}/shops/new`}
+                  className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                  New Shop
+                </Link>
+              )}
+            </div>
+          </div>
+          {shopsQuery.isLoading ? (
+            <p className="text-gray-500 dark:text-gray-400">Loading shops…</p>
+          ) : visibleShopList.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400">No shops yet.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {visibleShopList.map(shop => {
+                const { icon, accent } = shopVisuals(shop);
+                return (
+                  <Link
+                    key={shop.id}
+                    href={`/campaigns/${id}/shops/${shop.id}`}
+                    style={{ borderLeftColor: accent }}
+                    className="block p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 border-l-4 hover:border-indigo-500 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span aria-hidden className="text-xl">
+                          {icon}
+                        </span>
+                        <h3 className="font-medium text-gray-900 dark:text-white truncate">
+                          {shop.name}
+                        </h3>
+                      </div>
+                      {isOwner && !shop.isOpen && <Badge variant="neutral">Closed</Badge>}
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 capitalize">
+                      {shop.theme}
+                    </p>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </div>

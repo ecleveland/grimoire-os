@@ -9,6 +9,7 @@ import type {
   Note,
   Encounter,
   Npc,
+  ShopListItem,
   PartyCharacter,
   PaginatedResponse,
 } from '@/lib/types';
@@ -129,6 +130,23 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
 
 function makeListResponse<T>(data: T[]): PaginatedResponse<T> {
   return { data, total: data.length, page: 1, lastPage: 1, limit: 20 };
+}
+
+function makeShopListItem(over: Partial<ShopListItem> = {}): ShopListItem {
+  return {
+    id: 'shop-1',
+    campaignId: 'camp-1',
+    createdById: 'user-1',
+    name: "Maelin's Apothecary",
+    theme: 'alchemist',
+    description: null,
+    icon: null,
+    accent: null,
+    isOpen: true,
+    createdAt: '',
+    updatedAt: '',
+    ...over,
+  };
 }
 
 beforeEach(() => {
@@ -315,6 +333,80 @@ describe('CampaignDetailPage', () => {
       'href',
       '/campaigns/camp-1/npcs'
     );
+  });
+
+  it('owner sees all shops (incl. closed, badged) plus a New Shop affordance', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeCampaign({ ownerId: 'user-1' }));
+    mockApiFetch.mockResolvedValueOnce(
+      makeListResponse([
+        makeShopListItem({ id: 'shop-a', name: 'Open Apothecary', isOpen: true }),
+        makeShopListItem({ id: 'shop-b', name: 'Shuttered Smithy', isOpen: false }),
+      ])
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /^shops$/i }));
+    await waitFor(() => expect(screen.getByText('Open Apothecary')).toBeInTheDocument());
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      expect.stringContaining('/shops?campaignId=camp-1&page=1&limit=6')
+    );
+    // Owner sees the closed shop, badged Closed, and the builder entry points.
+    expect(screen.getByText('Shuttered Smithy')).toBeInTheDocument();
+    expect(screen.getByText('Closed')).toBeInTheDocument();
+    // Owner subtitle shows the unfiltered server total (incl. the closed shop).
+    expect(screen.getByText('2 total')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /new shop/i })).toHaveAttribute(
+      'href',
+      '/campaigns/camp-1/shops/new'
+    );
+    expect(screen.getByRole('link', { name: /view all/i })).toHaveAttribute(
+      'href',
+      '/campaigns/camp-1/shops'
+    );
+  });
+
+  it('hides closed shops and the New Shop affordance from non-owner members', async () => {
+    mockUseAuth.mockReturnValue({ user: { userId: 'user-2', username: 'pc', role: 'player' } });
+    mockApiFetch.mockResolvedValueOnce(makeCampaign({ ownerId: 'user-1' }));
+    mockApiFetch.mockResolvedValueOnce(
+      makeListResponse([
+        makeShopListItem({ id: 'shop-a', name: 'Open Apothecary', isOpen: true }),
+        makeShopListItem({ id: 'shop-b', name: 'Shuttered Smithy', isOpen: false }),
+      ])
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /^shops$/i }));
+    await waitFor(() => expect(screen.getByText('Open Apothecary')).toBeInTheDocument());
+    expect(screen.queryByText('Shuttered Smithy')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /new shop/i })).not.toBeInTheDocument();
+    // Members get the generic subtitle, not the owner's count.
+    expect(screen.getByText(/browse the campaign/i)).toBeInTheDocument();
+  });
+
+  it('does not flash the empty state while shops are still loading', async () => {
+    let resolveShops!: (v: PaginatedResponse<ShopListItem>) => void;
+    mockApiFetch.mockResolvedValueOnce(makeCampaign());
+    mockApiFetch.mockImplementationOnce(
+      () => new Promise<PaginatedResponse<ShopListItem>>(resolve => (resolveShops = resolve))
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /^shops$/i }));
+    // While the request is in flight the "No shops yet." copy must not appear.
+    expect(screen.queryByText(/no shops yet/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/loading shops/i)).toBeInTheDocument();
+    resolveShops(makeListResponse<ShopListItem>([]));
+    await waitFor(() => expect(screen.getByText(/no shops yet/i)).toBeInTheDocument());
   });
 
   describe('invite code (owner)', () => {
