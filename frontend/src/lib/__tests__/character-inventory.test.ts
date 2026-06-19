@@ -3,6 +3,8 @@ import type { InventoryItem } from '@/lib/types';
 import {
   totalInventoryWeight,
   carryingCapacity,
+  sizeCarryMultiplier,
+  encumbranceStatus,
   addInventoryItem,
   removeInventoryItemAt,
   updateInventoryItemAt,
@@ -49,6 +51,59 @@ describe('carryingCapacity', () => {
 
   it('falls back to the Medium multiplier for an unknown size', () => {
     expect(carryingCapacity(12, 'Weird')).toBe(180);
+  });
+});
+
+describe('sizeCarryMultiplier', () => {
+  it('returns the size multiplier (Medium ×1, Large ×2, Tiny ×0.5)', () => {
+    expect(sizeCarryMultiplier('Medium')).toBe(1);
+    expect(sizeCarryMultiplier('Large')).toBe(2);
+    expect(sizeCarryMultiplier('Tiny')).toBe(0.5);
+  });
+
+  it('falls back to ×1 for an absent or unknown size', () => {
+    expect(sizeCarryMultiplier()).toBe(1);
+    expect(sizeCarryMultiplier('Weird')).toBe(1);
+  });
+});
+
+describe('encumbranceStatus', () => {
+  // STR 10, Medium: encumbered > 50, heavily encumbered > 100.
+  it('is unencumbered at or below Strength × 5', () => {
+    const s = encumbranceStatus(10, 'Medium', 50);
+    expect(s.tier).toBe('unencumbered');
+    expect(s.speedPenalty).toBe(0);
+    expect(s.hasDisadvantage).toBe(false);
+  });
+
+  it('is encumbered above Strength × 5 (−10 ft, no disadvantage)', () => {
+    const s = encumbranceStatus(10, 'Medium', 51);
+    expect(s.tier).toBe('encumbered');
+    expect(s.speedPenalty).toBe(10);
+    expect(s.hasDisadvantage).toBe(false);
+  });
+
+  it('stays encumbered up to and including Strength × 10', () => {
+    expect(encumbranceStatus(10, 'Medium', 100).tier).toBe('encumbered');
+  });
+
+  it('is heavily encumbered above Strength × 10 (−20 ft + disadvantage)', () => {
+    const s = encumbranceStatus(10, 'Medium', 101);
+    expect(s.tier).toBe('heavily-encumbered');
+    expect(s.speedPenalty).toBe(20);
+    expect(s.hasDisadvantage).toBe(true);
+  });
+
+  it('scales the thresholds by creature size', () => {
+    // STR 10, Large (×2): encumbered > 100, heavily > 200.
+    expect(encumbranceStatus(10, 'Large', 100).tier).toBe('unencumbered');
+    expect(encumbranceStatus(10, 'Large', 101).tier).toBe('encumbered');
+    expect(encumbranceStatus(10, 'Large', 200).tier).toBe('encumbered');
+    expect(encumbranceStatus(10, 'Large', 201).tier).toBe('heavily-encumbered');
+  });
+
+  it('defaults to the Medium multiplier for an absent size', () => {
+    expect(encumbranceStatus(10, undefined, 51).tier).toBe('encumbered');
   });
 });
 

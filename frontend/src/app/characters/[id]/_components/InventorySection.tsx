@@ -7,6 +7,7 @@ import { parseNonNegativeInt } from '@/lib/character-play';
 import {
   addInventoryItem,
   carryingCapacity,
+  encumbranceStatus,
   removeInventoryItemAt,
   toggleEquippedAt,
   totalInventoryWeight,
@@ -195,6 +196,12 @@ export default function InventorySection(props: InventorySectionProps) {
   const capacity = carryingCapacity(character.abilityScores.strength, character.size);
   const carried = totalInventoryWeight(inventory);
   const overCapacity = carried > capacity;
+  // 5e variant encumbrance tiers (VEG-406): surface the current tier and its
+  // movement penalty when carried weight crosses Str×5 / Str×10.
+  const encumbrance = encumbranceStatus(character.abilityScores.strength, character.size, carried);
+  const reducedSpeed = Math.max(0, character.speed - encumbrance.speedPenalty);
+  const encumbranceLabel =
+    encumbrance.tier === 'heavily-encumbered' ? 'Heavily encumbered' : 'Encumbered';
 
   return (
     <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
@@ -379,6 +386,23 @@ export default function InventorySection(props: InventorySectionProps) {
               }`}
             >
               Carried {carried} / {capacity} lb{overCapacity ? ' — over capacity' : ''}
+            </p>
+          )}
+
+          {/* Encumbrance tier + speed impact (VEG-406) */}
+          {hasInventory && encumbrance.tier !== 'unencumbered' && (
+            <p
+              data-testid="encumbrance-status"
+              role="status"
+              className={`mt-1 text-xs font-semibold ${
+                encumbrance.tier === 'heavily-encumbered'
+                  ? 'text-red-600 dark:text-red-400'
+                  : 'text-amber-600 dark:text-amber-400'
+              }`}
+            >
+              {encumbranceLabel} — speed {character.speed} → {reducedSpeed} ft
+              {encumbrance.hasDisadvantage &&
+                ', disadvantage on ability checks, attacks & STR/DEX/CON saves'}
             </p>
           )}
 

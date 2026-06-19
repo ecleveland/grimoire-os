@@ -378,6 +378,40 @@ describe('InventorySection', () => {
       expect(screen.getByTestId('carrying-capacity')).toHaveTextContent('over capacity');
     });
 
+    it('shows no encumbrance indicator when unencumbered (carried ≤ STR×5)', () => {
+      // STR 16 → encumbered above 80; carried 62 → unencumbered.
+      renderOwner();
+      expect(screen.queryByTestId('encumbrance-status')).toBeNull();
+    });
+
+    it('shows the encumbered tier and speed impact (−10 ft) above STR×5', () => {
+      // STR 10 → encumbered above 50; carried 62 → encumbered. Speed 25 → 15.
+      renderOwner({ abilityScores: { ...baseCharacter.abilityScores, strength: 10 } });
+      const status = screen.getByTestId('encumbrance-status');
+      expect(status).toHaveTextContent('Encumbered');
+      expect(status).toHaveTextContent('25 → 15 ft');
+      expect(status).not.toHaveTextContent(/disadvantage/i);
+    });
+
+    it('shows the heavily-encumbered tier with −20 ft and a disadvantage note above STR×10', () => {
+      // STR 6 → heavily encumbered above 60; carried 62 → heavily encumbered.
+      // Speed 25 → 5. Not over capacity (cap 90), so this isolates the tier.
+      renderOwner({ abilityScores: { ...baseCharacter.abilityScores, strength: 6 } });
+      const status = screen.getByTestId('encumbrance-status');
+      expect(status).toHaveTextContent('Heavily encumbered');
+      expect(status).toHaveTextContent('25 → 5 ft');
+      expect(status).toHaveTextContent(/disadvantage/i);
+    });
+
+    it('clamps the reduced speed at 0 rather than going negative', () => {
+      // STR 6 (heavily encumbered, −20) with a base speed below the penalty.
+      renderOwner({
+        abilityScores: { ...baseCharacter.abilityScores, strength: 6 },
+        speed: 15,
+      });
+      expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('15 → 0 ft');
+    });
+
     it('toggles a row equipped flag through patch', async () => {
       const user = userEvent.setup();
       const onPatch = renderOwner();
