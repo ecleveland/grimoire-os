@@ -59,6 +59,7 @@ export type MockPrismaService = {
     | 'backgroundFeature'
     | 'npc'
     | 'npcRelation'
+    | 'shop'
     | 'npcNamePool'
     | 'npcAppearanceTrait'
     | 'npcLootTemplate'
@@ -100,6 +101,7 @@ export function createMockPrismaService(): MockPrismaService {
     backgroundFeature: mockModel(),
     npc: mockModel(),
     npcRelation: mockModel(),
+    shop: mockModel(),
     npcNamePool: mockModel(),
     npcAppearanceTrait: mockModel(),
     npcLootTemplate: mockModel(),

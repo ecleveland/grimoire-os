@@ -13,6 +13,7 @@ import { CharactersModule } from './characters/characters.module';
 import { NotesModule } from './notes/notes.module';
 import { EncountersModule } from './encounters/encounters.module';
 import { NpcsModule } from './npcs/npcs.module';
+import { ShopsModule } from './shops/shops.module';
 import { SrdModule } from './srd/srd.module';
 import { AdminModule } from './admin/admin.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
@@ -64,6 +65,7 @@ const RUNTIME_DEFAULT_LIMIT = parseInt(process.env.THROTTLE_AUTHED_LIMIT ?? '120
     NotesModule,
     EncountersModule,
     NpcsModule,
+    ShopsModule,
     SrdModule,
     AdminModule,
     AuditLogModule,
