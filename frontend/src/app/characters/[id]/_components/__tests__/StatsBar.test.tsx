@@ -68,6 +68,25 @@ describe('StatsBar', () => {
       const block = screen.getByTestId('stat-initiative');
       expect(within(block).getByText('+1')).toBeInTheDocument();
     });
+
+    // The value renders through RollableStat. In the roll state it's a <button>,
+    // and a block-level form control uses intrinsic (fit-content) width — it does
+    // NOT stretch like a <span>, so it shrink-wraps to its label and pins to the
+    // left of the text-center card. It must be w-full to fill the card and then
+    // text-center to center the label (regression: rollable initiative left-aligned).
+    it('stretches and centers the value in the static (non-roll) state', () => {
+      render(<StatsBar character={mockCharacter} />);
+      const block = screen.getByTestId('stat-initiative');
+      expect(within(block).getByText('+1')).toHaveClass('w-full', 'text-center');
+    });
+
+    it('stretches and centers the value in the roll-button state', () => {
+      render(<StatsBar character={mockCharacter} canRoll />);
+      expect(screen.getByRole('button', { name: 'Roll initiative' })).toHaveClass(
+        'w-full',
+        'text-center'
+      );
+    });
   });
 
   describe('Speed', () => {

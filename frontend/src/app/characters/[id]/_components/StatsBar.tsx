@@ -47,7 +47,7 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
               canRoll={rollable}
               label="Roll initiative"
               onRoll={() => rollCheck('Initiative', dexMod)}
-              className="block text-xl font-bold text-gray-900 dark:text-white mt-1"
+              className="block w-full text-center text-xl font-bold text-gray-900 dark:text-white mt-1"
             >
               {value}
             </RollableStat>
