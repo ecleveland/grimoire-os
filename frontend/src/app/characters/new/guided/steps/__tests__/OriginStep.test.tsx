@@ -2,13 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import OriginStep from '../OriginStep';
-import {
-  emptyCharacterFormValues,
-  type CharacterFormValues,
-} from '@/components/CharacterEditorForm';
+import { DraftProvider, useCharacterDraft } from '../../useCharacterDraft';
+import type { GrantRegistry } from '../../grants';
+import type { CharacterFormValues } from '@/components/CharacterEditorForm';
 import type { SrdBackground, SrdRace } from '@/lib/types';
+
+type Seed = { base?: Partial<CharacterFormValues>; grants?: GrantRegistry };
 
 const mockApiFetch = vi.fn();
 vi.mock('@/lib/api', () => ({
@@ -71,36 +72,34 @@ function routeApiFetch(races: SrdRace[], backgrounds: SrdBackground[]) {
   });
 }
 
-function Harness({ initial }: { initial?: Partial<CharacterFormValues> }) {
-  const [draft, setDraft] = useState<CharacterFormValues>(() => ({
-    ...emptyCharacterFormValues(),
-    ...initial,
-  }));
+// Drive the real useCharacterDraft hook (the production store) so tests exercise
+// the real source-tagged compile/reconcile path. `grants` seeds source slices
+// (e.g. a class skill pick) that other steps would have written.
+function Harness({ seed }: { seed?: Seed }) {
+  const api = useCharacterDraft(seed);
   return (
-    <>
-      <OriginStep value={draft} onChange={patch => setDraft(d => ({ ...d, ...patch }))} />
-      <div data-testid="race">{draft.race}</div>
-      <div data-testid="speed">{draft.speed}</div>
-      <div data-testid="size">{draft.size}</div>
-      <div data-testid="languages">{draft.languages.join(',')}</div>
-      <div data-testid="skills">{draft.skills.join(',')}</div>
-      <div data-testid="profs">{draft.proficiencies.join(',')}</div>
-      <div data-testid="features">{draft.features.map(f => `${f.name}:${f.source}`).join(',')}</div>
-    </>
+    <DraftProvider api={api}>
+      <OriginStep value={api.draft} onChange={api.onChange} />
+      <div data-testid="race">{api.draft.race}</div>
+      <div data-testid="speed">{api.draft.speed}</div>
+      <div data-testid="size">{api.draft.size}</div>
+      <div data-testid="languages">{api.draft.languages.join(',')}</div>
+      <div data-testid="skills">{api.draft.skills.join(',')}</div>
+      <div data-testid="profs">{api.draft.proficiencies.join(',')}</div>
+      <div data-testid="features">
+        {api.draft.features.map(f => `${f.name}:${f.source}`).join(',')}
+      </div>
+    </DraftProvider>
   );
 }
 
-function renderStep(
-  races: SrdRace[],
-  backgrounds: SrdBackground[],
-  initial?: Partial<CharacterFormValues>
-) {
+function renderStep(races: SrdRace[], backgrounds: SrdBackground[], seed?: Seed) {
   routeApiFetch(races, backgrounds);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  render(<Harness initial={initial} />, { wrapper });
+  render(<Harness seed={seed} />, { wrapper });
 }
 
 async function pickFrom(user: ReturnType<typeof userEvent.setup>, label: RegExp, name: string) {
@@ -148,10 +147,25 @@ describe('OriginStep — background + species', () => {
     expect(screen.getByRole('group', { name: /background grants/i })).toBeInTheDocument();
   });
 
+  it('merges background and species grants together when both are picked in one visit', async () => {
+    const user = userEvent.setup();
+    renderStep([ELF], [makeBackground()]);
+
+    await pickBackground(user, 'Acolyte');
+    await pickSpecies(user, 'Elf');
+
+    // Both source effects apply in the same visit without clobbering each other:
+    // background skills/tools and species languages/traits all coexist.
+    await waitFor(() => expect(screen.getByTestId('features')).toHaveTextContent('Darkvision:Elf'));
+    expect(screen.getByTestId('skills')).toHaveTextContent('Insight,Religion');
+    expect(screen.getByTestId('profs')).toHaveTextContent("Calligrapher's Supplies");
+    expect(screen.getByTestId('languages')).toHaveTextContent('Common,Elvish');
+  });
+
   it('de-duplicates skills already granted by the class', async () => {
     const user = userEvent.setup();
     // Insight is a class skill pick; the Acolyte background also grants it.
-    renderStep([], [makeBackground()], { skills: ['Insight'] });
+    renderStep([], [makeBackground()], { grants: { class: { skills: ['Insight'] } } });
 
     await pickBackground(user, 'Acolyte');
 
@@ -161,7 +175,7 @@ describe('OriginStep — background + species', () => {
 
   it('replaces the previous background grants (keeping class skills) when switched', async () => {
     const user = userEvent.setup();
-    renderStep([], [makeBackground(), SOLDIER], { skills: ['Acrobatics'] });
+    renderStep([], [makeBackground(), SOLDIER], { grants: { class: { skills: ['Acrobatics'] } } });
 
     await pickBackground(user, 'Acolyte');
     await waitFor(() => expect(screen.getByTestId('skills')).toHaveTextContent('Religion'));
@@ -179,14 +193,16 @@ describe('OriginStep — background + species', () => {
     // Simulate a remount (Origin → later step → Back): the draft already carries
     // the Elf contribution, and OriginStep's refs start fresh.
     renderStep([ELF], [], {
-      race: 'Elf',
-      speed: 30,
-      size: 'Medium',
-      languages: ['Common', 'Elvish'],
-      features: [
-        { name: 'Darkvision', description: 'See in the dark.', source: 'Elf' },
-        { name: 'Fey Ancestry', description: 'Advantage vs charm.', source: 'Elf' },
-      ],
+      base: {
+        race: 'Elf',
+        speed: 30,
+        size: 'Medium',
+        features: [
+          { name: 'Darkvision', description: 'See in the dark.', source: 'Elf' },
+          { name: 'Fey Ancestry', description: 'Advantage vs charm.', source: 'Elf' },
+        ],
+      },
+      grants: { species: { languages: ['Common', 'Elvish'] } },
     });
 
     await waitFor(() =>
@@ -201,7 +217,7 @@ describe('OriginStep — background + species', () => {
 
   it('clears its species grants when the name is edited to a non-SRD value', async () => {
     const user = userEvent.setup();
-    renderStep([ELF], [], { skills: ['Acrobatics'] });
+    renderStep([ELF], [], { grants: { class: { skills: ['Acrobatics'] } } });
 
     await pickSpecies(user, 'Elf');
     await waitFor(() => expect(screen.getByTestId('features')).toHaveTextContent('Darkvision:Elf'));
@@ -217,7 +233,7 @@ describe('OriginStep — background + species', () => {
   it('keeps the current size when the species size is not a canonical value', async () => {
     const user = userEvent.setup();
     const KOBOLD: SrdRace = { ...ELF, id: 'kobold', name: 'Kobold', size: 'Medium or Small' };
-    renderStep([KOBOLD], [], { size: 'Small' });
+    renderStep([KOBOLD], [], { base: { size: 'Small' } });
 
     await pickSpecies(user, 'Kobold');
 
