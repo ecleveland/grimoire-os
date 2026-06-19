@@ -68,6 +68,21 @@ describe('StatsBar', () => {
       const block = screen.getByTestId('stat-initiative');
       expect(within(block).getByText('+1')).toBeInTheDocument();
     });
+
+    // The value renders through RollableStat as a block <span>/<button>; Tailwind
+    // Preflight doesn't reset button text-align, so the value must center itself
+    // rather than rely on the card's inherited text-center (regression: the
+    // rollable initiative button left-aligned its label).
+    it('centers the value in the static (non-roll) state', () => {
+      render(<StatsBar character={mockCharacter} />);
+      const block = screen.getByTestId('stat-initiative');
+      expect(within(block).getByText('+1')).toHaveClass('text-center');
+    });
+
+    it('centers the value in the roll-button state', () => {
+      render(<StatsBar character={mockCharacter} canRoll />);
+      expect(screen.getByRole('button', { name: 'Roll initiative' })).toHaveClass('text-center');
+    });
   });
 
   describe('Speed', () => {
