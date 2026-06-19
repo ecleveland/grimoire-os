@@ -356,6 +356,8 @@ describe('CampaignDetailPage', () => {
     // Owner sees the closed shop, badged Closed, and the builder entry points.
     expect(screen.getByText('Shuttered Smithy')).toBeInTheDocument();
     expect(screen.getByText('Closed')).toBeInTheDocument();
+    // Owner subtitle shows the unfiltered server total (incl. the closed shop).
+    expect(screen.getByText('2 total')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /new shop/i })).toHaveAttribute(
       'href',
       '/campaigns/camp-1/shops/new'
@@ -384,6 +386,27 @@ describe('CampaignDetailPage', () => {
     await waitFor(() => expect(screen.getByText('Open Apothecary')).toBeInTheDocument());
     expect(screen.queryByText('Shuttered Smithy')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /new shop/i })).not.toBeInTheDocument();
+    // Members get the generic subtitle, not the owner's count.
+    expect(screen.getByText(/browse the campaign/i)).toBeInTheDocument();
+  });
+
+  it('does not flash the empty state while shops are still loading', async () => {
+    let resolveShops!: (v: PaginatedResponse<ShopListItem>) => void;
+    mockApiFetch.mockResolvedValueOnce(makeCampaign());
+    mockApiFetch.mockImplementationOnce(
+      () => new Promise<PaginatedResponse<ShopListItem>>(resolve => (resolveShops = resolve))
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: /^shops$/i }));
+    // While the request is in flight the "No shops yet." copy must not appear.
+    expect(screen.queryByText(/no shops yet/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/loading shops/i)).toBeInTheDocument();
+    resolveShops(makeListResponse<ShopListItem>([]));
+    await waitFor(() => expect(screen.getByText(/no shops yet/i)).toBeInTheDocument());
   });
 
   describe('invite code (owner)', () => {
