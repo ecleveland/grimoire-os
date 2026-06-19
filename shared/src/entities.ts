@@ -10,6 +10,7 @@ import type {
   HitDice,
   HitPoints,
   InventoryItem,
+  ShopLineItem,
   SpellEntry,
   SpellSlot,
   Weapon,
@@ -252,6 +253,41 @@ export interface NpcListItem {
   race: string;
   profession?: string | null;
   alignment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A campaign shop (VEG-353): DM-authored, campaign-scoped, owner-gated for
+ * writes and member-readable so players can browse. `items` holds the stocked
+ * line items; `isOpen` hides a shop from players without deleting it.
+ */
+export interface Shop {
+  id: string;
+  campaignId: string;
+  createdById: string;
+  name: string;
+  theme: string;
+  description?: string | null;
+  icon?: string | null;
+  accent?: string | null;
+  items: ShopLineItem[];
+  isOpen: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Slim shop shape for list views — omits the heavy `items` array. */
+export interface ShopListItem {
+  id: string;
+  campaignId: string;
+  createdById: string;
+  name: string;
+  theme: string;
+  description?: string | null;
+  icon?: string | null;
+  accent?: string | null;
+  isOpen: boolean;
   createdAt: string;
   updatedAt: string;
 }

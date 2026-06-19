@@ -89,6 +89,22 @@ export interface Feature {
 }
 
 /**
+ * A single stocked line in a campaign shop (VEG-353). `itemId` links the global
+ * Item catalog when the line was added from the picker (null/absent for a
+ * free-typed entry); `name`/`category` are denormalized so a renamed or deleted
+ * catalog item still renders. `price` is a structured coin amount (see the coin
+ * utilities). `stock` is the remaining quantity, or `null` for unlimited stock.
+ */
+export interface ShopLineItem {
+  itemId?: string | null;
+  name: string;
+  category?: string;
+  price: Currency;
+  stock: number | null;
+  notes?: string;
+}
+
+/**
  * Where a rolled loot item came from. `profession`/`monster` tag items rolled
  * off an NPC- or monster-category template respectively; `trinket` and
  * `magic-item` come from the engine's bonus rolls (VEG-297/VEG-300).
