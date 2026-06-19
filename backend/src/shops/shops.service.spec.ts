@@ -237,10 +237,13 @@ describe('ShopsService', () => {
       expect(result).toBeInstanceOf(ShopDto);
     });
 
-    it('throws NotFoundException when the shop does not exist', async () => {
+    it('throws NotFoundException before consulting auth when the shop does not exist', async () => {
       prisma.shop.findUnique.mockResolvedValue(null);
 
       await expect(service.findOne('missing', USER_ID)).rejects.toThrow(NotFoundException);
+      // NotFound must short-circuit before the member check, so a non-member
+      // probing a missing id gets 404, not a 403 that would leak existence.
+      expect(campaignAuth.assertCampaignMember).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException for a non-member viewer', async () => {

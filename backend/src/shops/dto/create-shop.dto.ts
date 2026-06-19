@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsDefined,
   IsInt,
   IsOptional,
   IsString,
@@ -70,7 +71,11 @@ export class ShopLineItemDto {
   @IsString()
   category?: string;
 
+  // A line item must carry a price object (an empty/all-zero object means free).
+  // @ValidateNested alone passes on `undefined`, so @IsDefined makes the `price!`
+  // assertion honest at the boundary rather than relying on write-normalization.
   @ApiProperty({ type: CurrencyDto })
+  @IsDefined()
   @ValidateNested()
   @Type(() => CurrencyDto)
   price!: CurrencyDto;

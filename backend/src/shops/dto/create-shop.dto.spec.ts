@@ -57,6 +57,18 @@ describe('CreateShopDto', () => {
     expect(lineItemErrors(errors).length).toBeGreaterThan(0);
   });
 
+  it('accepts an empty price object (free item)', async () => {
+    const errors = await validate(
+      toDto({ ...base, items: [{ name: 'Wanted Poster', price: {}, stock: null }] })
+    );
+    expect(errors).toHaveLength(0);
+  });
+
+  it('rejects a line item with no price at all', async () => {
+    const errors = await validate(toDto({ ...base, items: [{ name: 'Mystery Box', stock: 1 }] }));
+    expect(lineItemErrors(errors).length).toBeGreaterThan(0);
+  });
+
   it('rejects a non-integer coin denomination', async () => {
     const errors = await validate(
       toDto({ ...base, items: [{ name: 'Gem', price: { gp: 1.5 }, stock: 1 }] })
