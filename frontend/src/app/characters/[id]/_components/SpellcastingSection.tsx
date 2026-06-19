@@ -14,6 +14,7 @@ import {
 } from '@/lib/character-spells';
 import { useApiQuery } from '@/lib/query';
 import SrdSpellSearch from '@/components/SrdSpellSearch';
+import SpellCardModal from './SpellCardModal';
 
 type SpellcastingSectionProps = { character: Character } & PlayControlProps;
 
@@ -35,6 +36,10 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   // Add-spell form drafts (a free-typed entry; the catalog picker adds directly).
   const [addName, setAddName] = useState('');
   const [addLevel, setAddLevel] = useState('1');
+
+  // Spell-card popover (VEG-413): the entry whose detail card is open, or null.
+  // Read-only — available to owner and viewer alike.
+  const [selectedSpell, setSelectedSpell] = useState<SpellEntry | null>(null);
 
   // Resolve the class's spellcasting progression to show the prepared/known
   // budget (VEG-405). The list is cached and shared with the guided builder;
@@ -272,7 +277,16 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
                       )}
                     </td>
                     <td className="text-center py-0.5">{spell.level}</td>
-                    <td className="py-0.5 font-medium">{spell.name}</td>
+                    <td className="py-0.5 font-medium">
+                      <button
+                        type="button"
+                        aria-label={`View ${spell.name} details`}
+                        onClick={() => setSelectedSpell(spell)}
+                        className="text-left text-indigo-600 dark:text-indigo-400 hover:underline focus:outline-none focus:ring-2 focus:ring-indigo-500 rounded-sm"
+                      >
+                        {spell.name}
+                      </button>
+                    </td>
                     <td className="py-0.5 text-gray-500 dark:text-gray-400">
                       {spell.castingTime ?? '—'}
                     </td>
@@ -365,6 +379,8 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
           )}
         </div>
       )}
+
+      <SpellCardModal entry={selectedSpell} onClose={() => setSelectedSpell(null)} />
     </div>
   );
 }
