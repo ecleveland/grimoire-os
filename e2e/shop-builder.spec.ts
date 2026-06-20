@@ -38,4 +38,36 @@ test.describe('Shop builder', () => {
     // Owner can re-enter the builder to manage it.
     await expect(page.getByRole('link', { name: /manage/i })).toBeVisible();
   });
+
+  // VEG-355 — themed presets: picking a theme and clicking "Suggest stock"
+  // pre-fills the editor with catalog-derived lines the DM then saves.
+  test('DM creates a shop from suggested theme stock', async ({ page }) => {
+    await registerAndLogin(page, 'shop-theme-dm');
+    const headers = await csrfHeaders(page);
+
+    const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
+      data: { name: `Theme Camp ${Date.now()}` },
+      headers,
+    });
+    expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
+    const campaignId = (await campRes.json()).id as string;
+
+    await page.goto(`/campaigns/${campaignId}/shops/new`);
+    await expect(page.getByRole('heading', { name: /new shop/i })).toBeVisible();
+
+    await page.getByLabel(/^name/i).fill("Maelin's Apothecary");
+    await page.getByLabel(/^theme/i).selectOption('alchemist');
+
+    // Suggest stock from the alchemist theme; the editor fills with catalog
+    // lines (e.g. Acid, a curated pool item priced from its catalog cost).
+    await page.getByRole('button', { name: /suggest stock for alchemist/i }).click();
+    await expect(page.getByText('Acid', { exact: true })).toBeVisible();
+
+    await page.getByRole('button', { name: /create shop/i }).click();
+
+    // The suggested item lands on the themed storefront with its default price.
+    await expect(page.getByRole('heading', { name: "Maelin's Apothecary" })).toBeVisible();
+    await expect(page.getByText('Acid', { exact: true })).toBeVisible();
+    await expect(page.getByText('25 gp')).toBeVisible();
+  });
 });

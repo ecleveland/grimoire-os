@@ -8,7 +8,7 @@ import { useApiQuery, useApiMutation, invalidateApiPath } from '@/lib/query';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import ShopForm, { EMPTY_SHOP_FORM, toShopBody, type ShopFormValues } from '@/components/ShopForm';
-import type { Campaign, Shop } from '@/lib/types';
+import type { Campaign, Shop, ShopLineItem } from '@/lib/types';
 
 export default function NewShopPage() {
   const { id: campaignId } = useParams<{ id: string }>();
@@ -36,6 +36,13 @@ export default function NewShopPage() {
       onError: err => toast.error(err instanceof Error ? err.message : 'Failed to create shop'),
     }
   );
+
+  // Theme→stock suggester for the builder (VEG-355). Returns the suggested
+  // line items; ShopForm appends them (deduped) so the DM can edit before save.
+  const suggestStock = (theme: string) =>
+    apiFetch<{ items: ShopLineItem[] }>(
+      `/shops/theme-suggestions?theme=${encodeURIComponent(theme)}`
+    ).then(res => res.items);
 
   const backLink = (
     <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
@@ -72,6 +79,7 @@ export default function NewShopPage() {
         submitLabel="Create shop"
         onSubmit={values => create.mutate(values)}
         onCancel={() => router.push(`/campaigns/${campaignId}/shops`)}
+        onSuggestStock={suggestStock}
       />
     </div>
   );

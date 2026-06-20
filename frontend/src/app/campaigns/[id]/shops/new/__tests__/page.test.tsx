@@ -15,7 +15,7 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'camp-1' }),
   useRouter: () => ({ push: mockPush, back: vi.fn() }),
 }));
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => mockUseAuth() }));
 
 function renderPage() {
@@ -183,5 +183,89 @@ describe('NewShopPage', () => {
         stock: null,
       },
     ]);
+  });
+
+  // VEG-355 — themed presets: the Suggest-stock button pre-fills the editor.
+  const suggestion = {
+    itemId: 'item-acid',
+    name: 'Acid',
+    category: 'Adventuring Gear',
+    price: { cp: 0, sp: 0, ep: 0, gp: 25, pp: 0 },
+    stock: null,
+  };
+
+  function routeWithSuggestions(items: (typeof suggestion)[]) {
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith('/campaigns/camp-1') && !init)
+        return Promise.resolve(makeCampaign({ ownerId: 'user-1' }));
+      if (path.startsWith('/shops/theme-suggestions')) return Promise.resolve({ items });
+      if (path === '/shops' && init?.method === 'POST')
+        return Promise.resolve({ id: 'shop-new', ...JSON.parse(init.body as string) });
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+  }
+
+  it('suggests stock from the theme and rides it along in the POST body', async () => {
+    routeWithSuggestions([suggestion]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('button', { name: /create shop/i });
+    await user.type(screen.getByLabelText(/^name/i), "Maelin's Apothecary");
+    await user.selectOptions(screen.getByLabelText(/^theme/i), 'alchemist');
+    await user.click(screen.getByRole('button', { name: /suggest stock for alchemist/i }));
+
+    // The suggested line appears in the editor.
+    await screen.findByText('Acid');
+    // It targeted the theme endpoint.
+    expect(
+      mockApiFetch.mock.calls.some(([p]) => p === '/shops/theme-suggestions?theme=alchemist')
+    ).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: /create shop/i }));
+    await waitFor(() => {
+      const post = mockApiFetch.mock.calls.find(([p, i]) => p === '/shops' && i?.method === 'POST');
+      expect(post).toBeDefined();
+    });
+    const post = mockApiFetch.mock.calls.find(([p, i]) => p === '/shops' && i?.method === 'POST')!;
+    const body = JSON.parse((post[1] as RequestInit).body as string);
+    expect(body.items).toEqual([suggestion]);
+  });
+
+  it('skips already-stocked suggestions on re-suggest (dedupe)', async () => {
+    const { toast } = await import('sonner');
+    routeWithSuggestions([suggestion]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('button', { name: /create shop/i });
+    await user.selectOptions(screen.getByLabelText(/^theme/i), 'alchemist');
+    const suggest = screen.getByRole('button', { name: /suggest stock for alchemist/i });
+    await user.click(suggest);
+    await screen.findByText('Acid');
+
+    // Re-suggesting the same theme adds nothing and informs the DM.
+    await user.click(suggest);
+    await waitFor(() => expect(toast.info).toHaveBeenCalled());
+    expect(screen.getAllByText('Acid')).toHaveLength(1);
+  });
+
+  it('toasts when the suggestion request fails', async () => {
+    const { toast } = await import('sonner');
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith('/campaigns/camp-1') && !init)
+        return Promise.resolve(makeCampaign({ ownerId: 'user-1' }));
+      if (path.startsWith('/shops/theme-suggestions'))
+        return Promise.reject(new Error('Suggest boom'));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('button', { name: /create shop/i });
+    await user.selectOptions(screen.getByLabelText(/^theme/i), 'alchemist');
+    await user.click(screen.getByRole('button', { name: /suggest stock for alchemist/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Suggest boom'));
   });
 });
