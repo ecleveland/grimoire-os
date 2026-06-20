@@ -17,9 +17,9 @@
 /** A theme's stock-suggestion sources: broad categories and/or curated names. */
 export interface ShopThemePreset {
   /** Exact `Item.category` values to pull in bulk (e.g. ['Potion']). */
-  categories: string[];
+  readonly categories: readonly string[];
   /** Exact `Item.name` values to always try to include (signature items). */
-  itemNames: string[];
+  readonly itemNames: readonly string[];
 }
 
 /**

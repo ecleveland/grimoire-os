@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { priceFromCost } from '@grimoire-os/shared';
 import type { ShopLineItem } from '@grimoire-os/shared';
@@ -61,6 +61,8 @@ export function resolveSuggestions(
  */
 @Injectable()
 export class ShopThemeService {
+  private readonly logger = new Logger(ShopThemeService.name);
+
   constructor(private prisma: PrismaService) {}
 
   async suggestStock(theme: string): Promise<ShopLineItem[]> {
@@ -68,8 +70,8 @@ export class ShopThemeService {
     if (!preset) return [];
 
     const or: Prisma.ItemWhereInput[] = [];
-    if (preset.categories.length > 0) or.push({ category: { in: preset.categories } });
-    if (preset.itemNames.length > 0) or.push({ name: { in: preset.itemNames } });
+    if (preset.categories.length > 0) or.push({ category: { in: [...preset.categories] } });
+    if (preset.itemNames.length > 0) or.push({ name: { in: [...preset.itemNames] } });
     if (or.length === 0) return [];
 
     const rows = await this.prisma.item.findMany({
@@ -77,6 +79,14 @@ export class ShopThemeService {
       select: { id: true, name: true, category: true, cost: true },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
+
+    // A known theme with real sources resolving to nothing means the item
+    // catalog is unseeded or its categories/names have drifted — the DM would
+    // just see "no suggestions". Surface it server-side so it's debuggable
+    // rather than looking like an empty-by-design theme.
+    if (rows.length === 0) {
+      this.logger.warn(`Theme "${theme}" matched no catalog items — is the item catalog seeded?`);
+    }
 
     return resolveSuggestions(rows, preset);
   }

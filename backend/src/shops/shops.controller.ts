@@ -47,6 +47,9 @@ export class ShopsController {
   }
 
   // Declared before `:id` so "theme-suggestions" isn't captured as a shop id.
+  // Returns only global item-catalog suggestions (no campaign-scoped data), so
+  // unlike the other shop routes it needs only JwtAuthGuard — no owner/member
+  // check, and no userId is threaded through.
   @Get('theme-suggestions')
   @ApiOperation({ summary: 'Suggested stock for a theme (DM builder helper)' })
   async suggestStock(@Query() query: ThemeSuggestionsQueryDto) {

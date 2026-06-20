@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Logger } from '@nestjs/common';
 import { ShopThemeService, resolveSuggestions, type SuggestionItemRow } from './shop-theme.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
@@ -39,6 +40,26 @@ describe('ShopThemeService', () => {
         { name: { in: expect.arrayContaining(['Acid', 'Antitoxin']) } },
       ]);
       expect(arg.select).toMatchObject({ id: true, name: true, category: true, cost: true });
+    });
+
+    it('queries names-only themes without a category clause', async () => {
+      prisma.item.findMany.mockResolvedValue([
+        { id: 'b', name: 'Bread (loaf)', category: 'Food, Drink, or Lodging', cost: '2 CP' },
+      ]);
+      await service.suggestStock('baker');
+
+      const arg = prisma.item.findMany.mock.calls[0][0];
+      expect(arg.where.OR).toEqual([{ name: { in: ['Bread (loaf)', 'Rations'] } }]);
+    });
+
+    it('warns server-side when a known theme matches no catalog items (unseeded/drift)', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      prisma.item.findMany.mockResolvedValue([]);
+
+      const result = await service.suggestStock('alchemist');
+      expect(result).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('alchemist'));
+      warn.mockRestore();
     });
 
     it('maps catalog rows to editable line items with default prices and unlimited stock', async () => {
@@ -90,6 +111,13 @@ describe('resolveSuggestions', () => {
     category: 'Cat',
     cost: null,
     ...over,
+  });
+
+  it('skips curated pool names that do not resolve, keeping category items (drift-safe)', () => {
+    const preset: ShopThemePreset = { categories: ['Potion'], itemNames: ['Nonexistent Item'] };
+    const rows = [row({ id: 'p', name: 'Potion of Healing', category: 'Potion', cost: '50 GP' })];
+    const result = resolveSuggestions(rows, preset);
+    expect(result.map(l => l.name)).toEqual(['Potion of Healing']);
   });
 
   it('places curated pool items before category items', () => {
