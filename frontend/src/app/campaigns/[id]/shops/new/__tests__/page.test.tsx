@@ -113,6 +113,26 @@ describe('NewShopPage', () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/camp-1/shops/shop-new'));
   });
 
+  it('toasts an error and stays on the form when create fails', async () => {
+    const { toast } = await import('sonner');
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith('/campaigns/camp-1') && !init)
+        return Promise.resolve(makeCampaign({ ownerId: 'user-1' }));
+      if (path === '/shops' && init?.method === 'POST')
+        return Promise.reject(new Error('Server boom'));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('button', { name: /create shop/i });
+    await user.type(screen.getByLabelText(/^name/i), 'Stall');
+    await user.click(screen.getByRole('button', { name: /create shop/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Server boom'));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
   it('disables submit until a name is entered', async () => {
     routeApi(makeCampaign({ ownerId: 'user-1' }));
     const user = userEvent.setup();

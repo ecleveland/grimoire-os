@@ -87,13 +87,23 @@ beforeEach(() => {
 });
 
 describe('EditShopPage', () => {
-  it('blocks a non-owner from the builder', async () => {
+  it('blocks a non-owner from the builder and hides its controls', async () => {
     mockUseAuth.mockReturnValue({ user: { userId: 'user-2', role: 'player' } });
     routeApi(makeCampaign({ ownerId: 'user-1' }), makeShop());
     renderPage();
     await waitFor(() =>
       expect(screen.getByText(/only the campaign owner can edit shops/i)).toBeInTheDocument()
     );
+    expect(screen.queryByRole('button', { name: /save changes/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete shop/i })).not.toBeInTheDocument();
+  });
+
+  it('waits for auth hydration before deciding ownership (no refusal flash)', async () => {
+    mockUseAuth.mockReturnValue({ user: null, isLoading: true });
+    routeApi(makeCampaign({ ownerId: 'user-1' }), makeShop());
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/^loading/i)).toBeInTheDocument());
+    expect(screen.queryByText(/only the campaign owner/i)).not.toBeInTheDocument();
   });
 
   it('pre-loads the shop into the form', async () => {
@@ -150,6 +160,51 @@ describe('EditShopPage', () => {
       expect(del).toBeDefined();
     });
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/camp-1/shops'));
+  });
+
+  it('toasts an error and stays on the form when save fails', async () => {
+    const { toast } = await import('sonner');
+    const shop = makeShop();
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith('/campaigns/camp-1') && !init)
+        return Promise.resolve(makeCampaign({ ownerId: 'user-1' }));
+      if (path === '/shops/shop-1' && !init) return Promise.resolve(shop);
+      if (path === '/shops/shop-1' && init?.method === 'PATCH')
+        return Promise.reject(new Error('Save boom'));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByLabelText(/^name/i)).toHaveValue("Maelin's Apothecary"));
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Save boom'));
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('toasts an error and does not navigate when delete fails', async () => {
+    const { toast } = await import('sonner');
+    const shop = makeShop();
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.startsWith('/campaigns/camp-1') && !init)
+        return Promise.resolve(makeCampaign({ ownerId: 'user-1' }));
+      if (path === '/shops/shop-1' && !init) return Promise.resolve(shop);
+      if (path === '/shops/shop-1' && init?.method === 'DELETE')
+        return Promise.reject(new Error('Delete boom'));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByLabelText(/^name/i)).toHaveValue("Maelin's Apothecary"));
+    await user.click(screen.getByRole('button', { name: /delete shop/i }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: /^delete$/i }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Delete boom'));
+    // A failed delete must NOT navigate the DM away from the shop.
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it('shows a not-found state when the shop fails to load', async () => {
