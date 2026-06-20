@@ -30,6 +30,24 @@ const THEME_PRESETS: Record<string, ThemePreset> = {
 
 const DEFAULT_PRESET: ThemePreset = { icon: '🏪', accent: '#4f46e5' };
 
+// Curated theme options offered by the builder's theme picker (VEG-354), in
+// display order. A subset of THEME_PRESETS' keys — `innkeeper`/`priest`/
+// `general-goods` are dropped as synonyms of tavern/temple/general to keep the
+// list tidy; the storefront still renders any stored theme via shopVisuals.
+export const SHOP_THEMES = [
+  'general',
+  'alchemist',
+  'herbalist',
+  'blacksmith',
+  'armorer',
+  'fletcher',
+  'tavern',
+  'baker',
+  'temple',
+  'magic',
+  'jeweler',
+] as const;
+
 /**
  * Resolve the icon glyph + accent colour to render for a shop. The shop's own
  * `icon`/`accent` take precedence; otherwise fall back to the theme preset, then
