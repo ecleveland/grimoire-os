@@ -1,6 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { shopVisuals, stockLabel, isInStock, visibleShops } from '@/lib/shop-display';
+import { shopVisuals, stockLabel, isInStock, visibleShops, SHOP_THEMES } from '@/lib/shop-display';
 import type { ShopListItem } from '@/lib/types';
+
+describe('SHOP_THEMES', () => {
+  it('offers a non-empty, de-duplicated list of theme keys for the builder picker', () => {
+    expect(SHOP_THEMES.length).toBeGreaterThan(0);
+    expect(new Set(SHOP_THEMES).size).toBe(SHOP_THEMES.length);
+  });
+
+  it('every offered theme resolves to a concrete (non-default) visual preset', () => {
+    const fallback = shopVisuals({ theme: '__unknown__', icon: null, accent: null });
+    for (const theme of SHOP_THEMES) {
+      const v = shopVisuals({ theme, icon: null, accent: null });
+      expect(v.icon).not.toBe(fallback.icon);
+    }
+  });
+});
 
 describe('shopVisuals', () => {
   it('prefers the shop’s own icon and accent over the theme preset', () => {
