@@ -95,6 +95,17 @@ export function parseCost(input: string): Currency | null {
 }
 
 /**
+ * Default a sale/line price from a free-text catalog `cost` string. Returns a
+ * full `Currency` with the parsed denomination filled in; non-fixed costs
+ * (`"Varies"`, rate suffixes, garbage, or `null`/`undefined`) fall back to
+ * all-zero (free) for a price to be entered by hand. Shared so the backend
+ * suggestion resolver and the frontend stock editor derive identical defaults.
+ */
+export function priceFromCost(cost: string | null | undefined): Currency {
+  return { ...ZERO, ...(parseCost(cost ?? '') ?? {}) };
+}
+
+/**
  * Format a coin amount as `"1 pp · 5 gp · 3 cp"`, showing only non-zero
  * denominations from highest to lowest. An all-zero balance renders as `"0 gp"`.
  */

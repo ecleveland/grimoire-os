@@ -16,16 +16,23 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { ShopsService } from './shops.service';
+import { ShopThemeService } from './shop-theme.service';
+import { toDto } from '../common/serialization/to-dto';
 import { CreateShopDto } from './dto/create-shop.dto';
 import { UpdateShopDto } from './dto/update-shop.dto';
 import { ShopQueryDto } from './dto/shop-query.dto';
+import { ThemeSuggestionsQueryDto } from './dto/theme-suggestions-query.dto';
+import { ThemeSuggestionsDto } from './dto/theme-suggestions-response.dto';
 
 @ApiTags('Shops')
 @ApiBearerAuth()
 @Controller('shops')
 @UseGuards(JwtAuthGuard)
 export class ShopsController {
-  constructor(private readonly shopsService: ShopsService) {}
+  constructor(
+    private readonly shopsService: ShopsService,
+    private readonly shopThemeService: ShopThemeService
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a shop (DM-only)' })
@@ -37,6 +44,14 @@ export class ShopsController {
   @ApiOperation({ summary: 'List shops for a campaign (paginated, members)' })
   findAll(@Query() query: ShopQueryDto, @Req() req: AuthenticatedRequest) {
     return this.shopsService.findAllForCampaign(query.campaignId, req.user.userId, query);
+  }
+
+  // Declared before `:id` so "theme-suggestions" isn't captured as a shop id.
+  @Get('theme-suggestions')
+  @ApiOperation({ summary: 'Suggested stock for a theme (DM builder helper)' })
+  async suggestStock(@Query() query: ThemeSuggestionsQueryDto) {
+    const items = await this.shopThemeService.suggestStock(query.theme);
+    return toDto(ThemeSuggestionsDto, { theme: query.theme, items });
   }
 
   @Get(':id')

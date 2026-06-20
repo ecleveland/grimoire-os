@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { parseCost } from '@grimoire-os/shared';
+import { priceFromCost } from '@grimoire-os/shared';
 import { apiFetch } from '@/lib/api';
 import type { Currency, PaginatedResponse, ShopLineItem, SrdItem } from '@/lib/types';
 
@@ -20,6 +20,10 @@ const DENOMS: { key: keyof Currency; label: string }[] = [
 
 const ZERO_PRICE: Currency = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 
+// priceFromCost (catalog cost → default sale price) lives in @grimoire-os/shared
+// so the backend theme-suggestion resolver and this editor derive identical
+// defaults (VEG-355).
+
 const numberInputClass =
   'w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
 
@@ -29,13 +33,6 @@ const textInputClass =
 interface Props {
   value: ShopLineItem[];
   onChange: (next: ShopLineItem[]) => void;
-}
-
-// Default a line's sale price from the catalog `cost` string ("500 gp",
-// "Free", "Varies"…). parseCost returns null for non-fixed prices, so those
-// fall back to free (all-zero) for the DM to fill in.
-function priceFromCost(cost: string | undefined): Currency {
-  return { ...ZERO_PRICE, ...(parseCost(cost ?? '') ?? {}) };
 }
 
 /**

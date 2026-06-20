@@ -9,6 +9,7 @@ import {
   toCopper,
   fromCopper,
   parseCost,
+  priceFromCost,
   formatCoin,
   addCoin,
   subtractCoin,
@@ -114,6 +115,21 @@ describe('parseCost', () => {
     expect(parseCost('gp')).toBeNull();
     expect(parseCost('5')).toBeNull();
     expect(parseCost('5-10 gp')).toBeNull();
+  });
+});
+
+describe('priceFromCost', () => {
+  it('returns a full Currency with the parsed denomination filled in', () => {
+    expect(priceFromCost('50 GP')).toEqual(coin({ gp: 50 }));
+    expect(priceFromCost('5 sp')).toEqual(coin({ sp: 5 }));
+  });
+
+  it('falls back to all-zero for free, non-fixed, or missing costs', () => {
+    expect(priceFromCost('Free')).toEqual(coin());
+    expect(priceFromCost('Varies')).toEqual(coin());
+    expect(priceFromCost(null)).toEqual(coin());
+    expect(priceFromCost(undefined)).toEqual(coin());
+    expect(priceFromCost('')).toEqual(coin());
   });
 });
 
