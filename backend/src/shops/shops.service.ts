@@ -68,12 +68,15 @@ export class ShopsService {
   }
 
   async findAllForCampaign(campaignId: string, userId: string, query: ShopFilterDto) {
-    await this.campaignAuth.assertCampaignMember(campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const where: Prisma.ShopWhereInput = { campaignId };
     if (query.theme) where.theme = query.theme;
     if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    // Non-owner members only ever see open shops; a closed shop may hide spoilers
+    // or a secret vendor. The owner (DM) sees all. (VEG-442)
+    if (campaign.ownerId !== userId) where.isOpen = true;
 
     const [data, total] = await Promise.all([
       this.prisma.shop.findMany({
@@ -91,7 +94,13 @@ export class ShopsService {
   async findOne(id: string, userId: string) {
     const shop = await this.prisma.shop.findUnique({ where: { id } });
     if (!shop) throw new NotFoundException(`Shop "${id}" not found`);
-    await this.campaignAuth.assertCampaignMember(shop.campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignMember(shop.campaignId, userId);
+    // A closed shop is invisible to non-owner members — surface it as a 404 (same
+    // message as a missing id) rather than a 403, so its existence and name aren't
+    // leaked. The owner (DM) still sees closed shops. (VEG-442)
+    if (!shop.isOpen && campaign.ownerId !== userId) {
+      throw new NotFoundException(`Shop "${id}" not found`);
+    }
     // Coalesce a null `items` column (legacy/externally-inserted row) to [] so
     // the response honors the non-optional `Shop.items` contract.
     return toDto(ShopDto, { ...shop, items: shop.items ?? [] });

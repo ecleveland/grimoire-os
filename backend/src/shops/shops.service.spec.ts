@@ -222,6 +222,33 @@ describe('ShopsService', () => {
         service.findAllForCampaign(CAMPAIGN_ID, USER_ID_2, { page: 1, limit: 20 })
       ).rejects.toThrow(ForbiddenException);
     });
+
+    it('restricts a non-owner member to open shops', async () => {
+      // Owner is USER_ID; the caller (USER_ID_2) is a non-owner member.
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.findMany.mockResolvedValue([]);
+      prisma.shop.count.mockResolvedValue(0);
+
+      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID_2, { page: 1, limit: 20 });
+
+      expect(prisma.shop.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { campaignId: CAMPAIGN_ID, isOpen: true } })
+      );
+      // The count must use the same filter, or pagination totals would over-report.
+      expect(prisma.shop.count).toHaveBeenCalledWith({
+        where: { campaignId: CAMPAIGN_ID, isOpen: true },
+      });
+    });
+
+    it('lets the owner see closed shops in the list (no isOpen filter)', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.findMany.mockResolvedValue([]);
+      prisma.shop.count.mockResolvedValue(0);
+
+      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID, { page: 1, limit: 20 });
+
+      expect(prisma.shop.findMany.mock.calls[0][0].where).not.toHaveProperty('isOpen');
+    });
   });
 
   describe('findOne', () => {
@@ -262,6 +289,33 @@ describe('ShopsService', () => {
       const result = await service.findOne(SHOP_ID, USER_ID);
 
       expect(result.items).toEqual([]);
+    });
+
+    it('returns an open shop to a non-owner member', async () => {
+      prisma.shop.findUnique.mockResolvedValue(mockShop); // isOpen: true
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+
+      const result = await service.findOne(SHOP_ID, USER_ID_2);
+
+      expect(result).toEqual(mockShop);
+    });
+
+    it('returns a closed shop to the owner', async () => {
+      prisma.shop.findUnique.mockResolvedValue({ ...mockShop, isOpen: false });
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+
+      const result = await service.findOne(SHOP_ID, USER_ID);
+
+      expect(result.isOpen).toBe(false);
+    });
+
+    it('hides a closed shop from a non-owner member as a 404 (no existence leak)', async () => {
+      prisma.shop.findUnique.mockResolvedValue({ ...mockShop, isOpen: false });
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+
+      // A closed shop must read as not-found to a non-owner, not a 403 that would
+      // confirm the shop exists (and leak its campaign id via the member check).
+      await expect(service.findOne(SHOP_ID, USER_ID_2)).rejects.toThrow(NotFoundException);
     });
   });
 
