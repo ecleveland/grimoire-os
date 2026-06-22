@@ -8,4 +8,5 @@ export * from './loot';
 export * from './pagination';
 export * from './printable';
 export * from './responses';
+export * from './shop-themes';
 export * from './srd';
