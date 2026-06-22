@@ -1,33 +1,16 @@
+import { SHOP_THEME_KEYS } from '@grimoire-os/shared';
 import {
-  SHOP_THEME_KEYS,
   SHOP_THEME_PRESETS,
   SHOP_SUGGESTION_CAP,
   SHOP_SUGGESTION_PER_CATEGORY,
   getThemePreset,
 } from './shop-theme-presets';
 
-// Mirror of the frontend `SHOP_THEMES` list (lib/shop-display.ts). Hardcoded
-// here so a divergence between the picker and the suggestion presets fails the
-// backend suite rather than silently shipping a theme with no suggestions.
-const FRONTEND_SHOP_THEMES = [
-  'general',
-  'alchemist',
-  'herbalist',
-  'blacksmith',
-  'armorer',
-  'fletcher',
-  'tavern',
-  'baker',
-  'temple',
-  'magic',
-  'jeweler',
-];
-
+// Parity between the curated theme keys (shared `SHOP_THEME_KEYS`, also driving
+// the frontend picker) and the suggestion presets is now a compile-time
+// guarantee: SHOP_THEME_PRESETS is typed `Record<ShopThemeKey, …>`. These tests
+// guard the remaining runtime invariants of the preset data itself.
 describe('shop-theme-presets', () => {
-  it('stays in lock-step with the frontend theme picker', () => {
-    expect([...SHOP_THEME_KEYS]).toEqual(FRONTEND_SHOP_THEMES);
-  });
-
   it('defines a preset for every theme key', () => {
     for (const key of SHOP_THEME_KEYS) {
       expect(SHOP_THEME_PRESETS[key]).toBeDefined();

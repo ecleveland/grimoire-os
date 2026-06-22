@@ -10,9 +10,11 @@
 // and categories still deliver suggestions — so a drifted name degrades the
 // flavor, never breaks the feature.
 //
-// Adding a theme is data-only: append its key to SHOP_THEME_KEYS (kept in lock-
-// step with the frontend picker `SHOP_THEMES` in `lib/shop-display.ts`) and an
-// entry to SHOP_THEME_PRESETS. No control flow changes.
+// Adding a theme: add its key + visual to the shared catalog
+// (`@grimoire-os/shared` `shop-themes.ts`), then add a matching entry here —
+// the `Record<ShopThemeKey, ShopThemePreset>` below won't compile until you do.
+
+import { type ShopThemeKey } from '@grimoire-os/shared';
 
 /** A theme's stock-suggestion sources: broad categories and/or curated names. */
 export interface ShopThemePreset {
@@ -21,26 +23,6 @@ export interface ShopThemePreset {
   /** Exact `Item.name` values to always try to include (signature items). */
   readonly itemNames: readonly string[];
 }
-
-/**
- * The curated theme keys, in display order. Mirrors `SHOP_THEMES` in the
- * frontend `lib/shop-display.ts`; the spec guards the two against drift.
- */
-export const SHOP_THEME_KEYS = [
-  'general',
-  'alchemist',
-  'herbalist',
-  'blacksmith',
-  'armorer',
-  'fletcher',
-  'tavern',
-  'baker',
-  'temple',
-  'magic',
-  'jeweler',
-] as const;
-
-export type ShopThemeKey = (typeof SHOP_THEME_KEYS)[number];
 
 // Per-category cap stops one broad category (e.g. 127 Wondrous Items for the
 // magic theme) from swamping the editor; the total cap keeps the pre-fill to a

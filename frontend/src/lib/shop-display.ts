@@ -2,6 +2,7 @@
 // and pure so they're unit-testable and shared between the storefront list,
 // the themed detail banner, and their specs.
 
+import { SHOP_THEME_CATALOG, SHOP_THEME_KEYS } from '@grimoire-os/shared';
 import type { Shop, ShopListItem } from '@/lib/types';
 
 interface ThemePreset {
@@ -11,42 +12,23 @@ interface ThemePreset {
 
 // Fallback icon (emoji glyph — no icon library is installed) + accent colour per
 // known theme. A shop's own `icon`/`accent` always win; this only fills the gaps.
+// The curated themes come from the shared catalog (VEG-443); the three synonym
+// aliases below are display tolerance for stored-but-unlisted themes, wired to
+// the shared visuals so they can't drift from their canonical counterparts.
 const THEME_PRESETS: Record<string, ThemePreset> = {
-  alchemist: { icon: '🧪', accent: '#16a34a' },
-  herbalist: { icon: '🌿', accent: '#15803d' },
-  blacksmith: { icon: '⚒️', accent: '#475569' },
-  armorer: { icon: '🛡️', accent: '#475569' },
-  fletcher: { icon: '🏹', accent: '#0d9488' },
-  tavern: { icon: '🍺', accent: '#d97706' },
-  innkeeper: { icon: '🍺', accent: '#d97706' },
-  baker: { icon: '🥖', accent: '#ca8a04' },
-  temple: { icon: '⛪', accent: '#7c3aed' },
-  priest: { icon: '⛪', accent: '#7c3aed' },
-  magic: { icon: '✨', accent: '#7c3aed' },
-  jeweler: { icon: '💎', accent: '#db2777' },
-  general: { icon: '📦', accent: '#4f46e5' },
-  'general-goods': { icon: '📦', accent: '#4f46e5' },
+  ...SHOP_THEME_CATALOG,
+  innkeeper: SHOP_THEME_CATALOG.tavern,
+  priest: SHOP_THEME_CATALOG.temple,
+  'general-goods': SHOP_THEME_CATALOG.general,
 };
 
 const DEFAULT_PRESET: ThemePreset = { icon: '🏪', accent: '#4f46e5' };
 
 // Curated theme options offered by the builder's theme picker (VEG-354), in
-// display order. A subset of THEME_PRESETS' keys — `innkeeper`/`priest`/
-// `general-goods` are dropped as synonyms of tavern/temple/general to keep the
-// list tidy; the storefront still renders any stored theme via shopVisuals.
-export const SHOP_THEMES = [
-  'general',
-  'alchemist',
-  'herbalist',
-  'blacksmith',
-  'armorer',
-  'fletcher',
-  'tavern',
-  'baker',
-  'temple',
-  'magic',
-  'jeweler',
-] as const;
+// display order — the shared single source of truth (VEG-443), also keyed by
+// the backend suggestion presets. The storefront still renders any stored theme
+// via shopVisuals (including the synonym aliases above).
+export const SHOP_THEMES = SHOP_THEME_KEYS;
 
 /**
  * Resolve the icon glyph + accent colour to render for a shop. The shop's own
