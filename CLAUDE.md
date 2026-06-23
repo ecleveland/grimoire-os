@@ -33,6 +33,8 @@ cd frontend && npm test           # Unit tests
 cd frontend && npm run test:cov   # Unit tests + coverage (enforces thresholds)
 ```
 
+> **Run tests from the right subdirectory.** Every command above is scoped to `backend/` or `frontend/`; the shell cwd does **not** persist between separate tool calls. A sudden Jest/Vitest "cannot find module" or "no test files found" error is almost always cwd drift (e.g. running a frontend spec from the repo root or `backend/`), not a real import bug — check the working directory before investigating the code.
+
 ## Testing & Coverage Thresholds
 
 Both projects enforce minimum coverage thresholds via their respective test runners. `test:cov` (backend Jest, frontend Vitest) will exit non-zero if any metric drops below the configured floor.
@@ -45,6 +47,8 @@ Both projects enforce minimum coverage thresholds via their respective test runn
 Backend thresholds match the targets agreed in VEG-204; current actual coverage exceeds them comfortably. Frontend thresholds were set ~1-2 points below the actual baseline (current: ~48.6/53.4/42.3/49.5%) to avoid flaky failures while still preventing regression.
 
 **Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
+
+**Green ≠ working for UI changes.** Passing unit tests have repeatedly shipped live crashes the suite never modelled — e.g. a null `spellSlots` render crash and layout/width regressions caught only by manual clicking. After the suite is green, manually exercise any UI-affecting change in the running app (`./dev.sh`): walk the real user path and hit the empty/null/error state, not just the happy structural assertion. Backfill a regression test for anything you find so the gap closes for next time.
 
 ## CI & pre-merge verification
 
