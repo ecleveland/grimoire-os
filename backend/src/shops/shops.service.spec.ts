@@ -36,6 +36,7 @@ describe('ShopsService', () => {
     accent: 'green',
     items: [lineItem],
     isOpen: true,
+    version: 0,
     createdAt: new Date('2026-06-01T00:00:00Z'),
     updatedAt: new Date('2026-06-01T00:00:00Z'),
   };

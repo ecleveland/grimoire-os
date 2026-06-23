@@ -697,6 +697,10 @@ model Shop {
   // Hide a shop from players without deleting it
   isOpen Boolean @default(true)
 
+  // Optimistic-locking counter (VEG-137 pattern); a guarded purchase decrements
+  // stock and increments this so concurrent buys can't oversell (VEG-357).
+  version Int @default(0)
+
   campaign  Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   createdBy User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
 

@@ -17,9 +17,11 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { ShopsService } from './shops.service';
 import { ShopThemeService } from './shop-theme.service';
+import { ShopPurchaseService } from './shop-purchase.service';
 import { toDto } from '../common/serialization/to-dto';
 import { CreateShopDto } from './dto/create-shop.dto';
 import { UpdateShopDto } from './dto/update-shop.dto';
+import { PurchaseDto } from './dto/purchase.dto';
 import { ShopQueryDto } from './dto/shop-query.dto';
 import { ThemeSuggestionsQueryDto } from './dto/theme-suggestions-query.dto';
 import { ThemeSuggestionsDto } from './dto/theme-suggestions-response.dto';
@@ -31,7 +33,8 @@ import { ThemeSuggestionsDto } from './dto/theme-suggestions-response.dto';
 export class ShopsController {
   constructor(
     private readonly shopsService: ShopsService,
-    private readonly shopThemeService: ShopThemeService
+    private readonly shopThemeService: ShopThemeService,
+    private readonly shopPurchaseService: ShopPurchaseService
   ) {}
 
   @Post()
@@ -61,6 +64,12 @@ export class ShopsController {
   @ApiOperation({ summary: 'Get a shop by id (members)' })
   findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.shopsService.findOne(id, req.user.userId);
+  }
+
+  @Post(':id/purchase')
+  @ApiOperation({ summary: 'Buy a line item from a shop (members)' })
+  purchase(@Param('id') id: string, @Req() req: AuthenticatedRequest, @Body() dto: PurchaseDto) {
+    return this.shopPurchaseService.purchase(req.user.userId, id, dto);
   }
 
   @Patch(':id')

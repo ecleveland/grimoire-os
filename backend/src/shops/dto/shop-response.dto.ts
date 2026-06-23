@@ -13,6 +13,9 @@ export class ShopDto {
   @Expose() accent!: string | null;
   @Expose() items!: ShopLineItem[];
   @Expose() isOpen!: boolean;
+  // Optimistic-lock counter (VEG-357) — a Buy client echoes it back as
+  // `expectedShopVersion` so a concurrent stock change is detected.
+  @Expose() version!: number;
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;
 }
