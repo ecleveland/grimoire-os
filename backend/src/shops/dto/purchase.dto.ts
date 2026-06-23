@@ -1,5 +1,9 @@
-import { IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+// A sane upper bound on a single purchase: large enough for any real bulk buy,
+// small enough that price × quantity can't approach number-precision limits.
+const MAX_PURCHASE_QUANTITY = 100_000;
 
 /**
  * Request body for `POST /shops/:id/purchase` (VEG-357). The buyer's character
@@ -18,9 +22,10 @@ export class PurchaseDto {
   @Min(0)
   itemIndex!: number;
 
-  @ApiProperty({ minimum: 1, default: 1 })
+  @ApiProperty({ minimum: 1, maximum: MAX_PURCHASE_QUANTITY, default: 1 })
   @IsInt()
   @Min(1)
+  @Max(MAX_PURCHASE_QUANTITY)
   quantity!: number;
 
   @ApiPropertyOptional({ description: 'Optimistic-lock guard for the shop' })

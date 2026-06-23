@@ -142,12 +142,33 @@ describe('ShopPurchaseService', () => {
         })
       );
 
-      await service.purchase(USER_ID_2, SHOP_ID, dto({ quantity: 1 }));
+      const receipt = await service.purchase(USER_ID_2, SHOP_ID, dto({ quantity: 1 }));
 
       const charArgs = prisma.character.updateMany.mock.calls[0][0];
       expect(charArgs.data.inventory).toEqual([
         { name: 'Potion of Healing', quantity: 3, equipped: true, itemId: 'cat-1' },
       ]);
+      // The receipt echoes the catalog id of the purchased line.
+      expect(receipt.item.itemId).toBe('cat-1');
+    });
+
+    it('targets the requested line in a multi-line shop, leaving others untouched', async () => {
+      const torch = lineItem({ name: 'Torch', price: gp(1), stock: 9 });
+      prisma.shop.findUnique.mockResolvedValue(buildShop({ items: [lineItem(), torch] }));
+
+      const receipt = await service.purchase(
+        USER_ID_2,
+        SHOP_ID,
+        dto({ itemIndex: 1, quantity: 2 })
+      );
+
+      const writtenItems = prisma.shop.updateMany.mock.calls[0][0].data.items as Array<{
+        stock: number;
+      }>;
+      expect(writtenItems[0].stock).toBe(5); // first line untouched
+      expect(writtenItems[1].stock).toBe(7); // Torch: 9 - 2
+      expect(receipt.item).toMatchObject({ name: 'Torch', quantity: 2 });
+      expect(receipt.remainingStock).toBe(7);
     });
 
     it('skips the shop write entirely for an unlimited-stock line', async () => {

@@ -44,6 +44,11 @@ describe('PurchaseDto', () => {
     expect(errorOn(errors, 'quantity')).toBeDefined();
   });
 
+  it('rejects a quantity above the cap', async () => {
+    const errors = await validate(toDto({ ...base, quantity: 100_001 }));
+    expect(errorOn(errors, 'quantity')).toBeDefined();
+  });
+
   it('rejects a negative expectedShopVersion', async () => {
     const errors = await validate(toDto({ ...base, expectedShopVersion: -1 }));
     expect(errorOn(errors, 'expectedShopVersion')).toBeDefined();

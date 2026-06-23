@@ -114,7 +114,10 @@ export class ShopsService {
     if (!shop) throw new NotFoundException(`Shop "${id}" not found`);
     await this.campaignAuth.assertCampaignOwner(shop.campaignId, userId);
     const { items, ...rest } = dto;
-    const data: Prisma.ShopUpdateInput = { ...rest };
+    // Bump the optimistic-lock counter on every edit so an in-flight purchase
+    // guarding on the version it read detects this change and conflicts rather
+    // than blind-overwriting the items JSON from a pre-edit snapshot (VEG-357).
+    const data: Prisma.ShopUpdateInput = { ...rest, version: { increment: 1 } };
     // Only touch `items` when the patch includes it; an explicit null clears the
     // stock to [] rather than writing a contract-violating null column.
     if (items !== undefined) {
