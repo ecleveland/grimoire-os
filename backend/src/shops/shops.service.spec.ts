@@ -36,6 +36,7 @@ describe('ShopsService', () => {
     accent: 'green',
     items: [lineItem],
     isOpen: true,
+    version: 0,
     createdAt: new Date('2026-06-01T00:00:00Z'),
     updatedAt: new Date('2026-06-01T00:00:00Z'),
   };
@@ -336,7 +337,7 @@ describe('ShopsService', () => {
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.shop.update).toHaveBeenCalledWith({
         where: { id: SHOP_ID },
-        data: { name: 'Renamed', items },
+        data: { name: 'Renamed', items, version: { increment: 1 } },
       });
       expect(result).toEqual(updated);
     });
@@ -350,9 +351,19 @@ describe('ShopsService', () => {
 
       expect(prisma.shop.update).toHaveBeenCalledWith({
         where: { id: SHOP_ID },
-        data: { isOpen: false },
+        data: { isOpen: false, version: { increment: 1 } },
       });
       expect(prisma.shop.update.mock.calls[0][0].data).not.toHaveProperty('items');
+    });
+
+    it('bumps the optimistic-lock version on every edit (purchase-safety)', async () => {
+      prisma.shop.findUnique.mockResolvedValue({ id: SHOP_ID, campaignId: CAMPAIGN_ID });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.update.mockResolvedValue({ ...mockShop, name: 'Renamed' });
+
+      await service.update(SHOP_ID, USER_ID, { name: 'Renamed' } as never);
+
+      expect(prisma.shop.update.mock.calls[0][0].data.version).toEqual({ increment: 1 });
     });
 
     it('clears items to [] (never null) when an explicit null is patched', async () => {
