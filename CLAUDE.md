@@ -41,10 +41,10 @@ Both projects enforce minimum coverage thresholds via their respective test runn
 
 | Project | Statements | Branches | Functions | Lines | Configured in |
 |---------|------------|----------|-----------|-------|---------------|
-| Backend (Jest) | 85% | 70% | 75% | 85% | `backend/package.json` (`jest.coverageThreshold.global`) |
-| Frontend (Vitest) | 47% | 52% | 41% | 48% | `frontend/vitest.config.ts` (`test.coverage.thresholds`) |
+| Backend (Jest) | 90% | 80% | 88% | 90% | `backend/package.json` (`jest.coverageThreshold.global`) |
+| Frontend (Vitest) | 88% | 82% | 86% | 90% | `frontend/vitest.config.ts` (`test.coverage.thresholds`) |
 
-Backend thresholds match the targets agreed in VEG-204; current actual coverage exceeds them comfortably. Frontend thresholds were set ~1-2 points below the actual baseline (current: ~48.6/53.4/42.3/49.5%) to avoid flaky failures while still preventing regression.
+Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0/91.2/95.4% backend, ~93.3/87.0/91.3/95.1% frontend) — enough margin to avoid flaky failures while still catching regression. The frontend floors were originally ~47–52% against a much smaller suite (VEG-204 era); the suite has since grown to ~150 spec files and the floors were ratcheted up to match.
 
 **Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
 
