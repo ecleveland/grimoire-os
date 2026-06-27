@@ -20,6 +20,11 @@ export default function GuidedCharacterPage() {
   const draftApi = useCharacterDraft();
   const { draft, onChange } = draftApi;
   const [rawStepIndex, setRawStepIndex] = useState(0);
+  // Furthest step index the user has navigated to. Drives the progress display:
+  // a step shows as completed only once it's both valid AND visited, so optional
+  // steps that are valid-by-default (Abilities/Equipment/Spells) don't render a
+  // check before the user reaches them.
+  const [maxVisited, setMaxVisited] = useState(0);
   // Validity reported by steps whose answer depends on more than the draft
   // (e.g. the Class step's SRD-derived skill-count rule). Overrides isValid.
   const [reported, setReported] = useState<Partial<Record<WizardStepId, boolean>>>({});
@@ -40,6 +45,11 @@ export default function GuidedCharacterPage() {
   );
 
   const completed = useMemo(() => visibleSteps.map(isComplete), [visibleSteps, isComplete]);
+  const completedAndVisited = useMemo(
+    () => completed.map((done, i) => done && i <= maxVisited),
+    [completed, maxVisited]
+  );
+
   const requiredComplete = useMemo(
     () => visibleSteps.every((step, i) => step.optional || completed[i]),
     [visibleSteps, completed]
@@ -81,11 +91,17 @@ export default function GuidedCharacterPage() {
     }
   );
 
+  // Navigate to a step and remember the furthest one reached (max never
+  // decreases, so stepping back keeps already-visited steps marked complete).
+  const goToStep = (index: number) => {
+    setRawStepIndex(index);
+    setMaxVisited(m => Math.max(m, index));
+  };
   const goNext = () => {
-    if (canAdvance && !isLast) setRawStepIndex(stepIndex + 1);
+    if (canAdvance && !isLast) goToStep(stepIndex + 1);
   };
   const goBack = () => {
-    if (!isFirst) setRawStepIndex(stepIndex - 1);
+    if (!isFirst) goToStep(stepIndex - 1);
   };
   const StepBody = step.Component;
 
@@ -107,10 +123,10 @@ export default function GuidedCharacterPage() {
         <WizardProgress
           steps={visibleSteps}
           currentIndex={stepIndex}
-          completed={completed}
+          completed={completedAndVisited}
           canJumpTo={canJumpTo}
           onJump={index => {
-            if (canJumpTo(index)) setRawStepIndex(index);
+            if (canJumpTo(index)) goToStep(index);
           }}
         />
 

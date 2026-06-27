@@ -18,6 +18,11 @@ test.describe('guided character builder — class selection', () => {
     const next = page.getByRole('button', { name: /^next$/i });
     await expect(next).toBeDisabled();
 
+    // Progress bar (VEG-446): steps the user hasn't reached are not pre-checked,
+    // even though optional steps are valid-by-default.
+    const progress = page.getByRole('navigation', { name: /progress/i });
+    await expect(progress.getByRole('button', { name: /abilities/i })).not.toContainText('✓');
+
     const classInput = page.getByRole('combobox', { name: /^class/i });
     await classInput.click();
     await classInput.fill('Fighter');
