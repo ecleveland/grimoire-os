@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import GuidedCharacterPage from '../page';
-import type { Character, SrdBackground, SrdClass, SrdRace } from '@/lib/types';
+import type { CampaignListItem, Character, SrdBackground, SrdClass, SrdRace } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -58,15 +58,31 @@ function renderPage(client: QueryClient = makeTestClient()) {
   return render(<GuidedCharacterPage />, { wrapper });
 }
 
-// The shell hits the API for the Class step's SRD catalog and the final POST.
+function makeCampaign(over: Partial<CampaignListItem> = {}): CampaignListItem {
+  return {
+    id: 'camp-1',
+    name: 'Curse of Strahd',
+    ownerId: 'user-1',
+    status: 'active',
+    playerIds: [],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  };
+}
+
+// The shell hits the API for the Class step's SRD catalog, the Review step's
+// campaign picker, and the final POST.
 function routeApiFetch({
   classes = [],
   created = {},
-}: { classes?: SrdClass[]; created?: Partial<Character> } = {}) {
+  campaigns = [],
+}: { classes?: SrdClass[]; created?: Partial<Character>; campaigns?: CampaignListItem[] } = {}) {
   mockApiFetch.mockImplementation((path?: string, options?: { method?: string }) => {
     if (options?.method === 'POST')
       return Promise.resolve({ id: 'char-new', ...created } as Character);
     if (path === '/srd/classes') return Promise.resolve(classes);
+    if (path?.startsWith('/campaigns')) return Promise.resolve({ data: campaigns });
     return Promise.resolve([]);
   });
 }
@@ -295,6 +311,55 @@ describe('GuidedCharacterPage — wizard shell', () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
     expect(lastPostBody()).toMatchObject({ name: 'Mialee', class: 'Fighter' });
     expect(mockToastSuccess).toHaveBeenCalledWith('Character created!');
+  });
+
+  it('omits campaignId from the payload when the user has no campaigns to attach', async () => {
+    routeApiFetch({ campaigns: [] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await advanceToReview(user, 'Fighter');
+    expect(screen.queryByRole('combobox', { name: /campaign/i })).toBeNull();
+
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+    expect(lastPostBody()).not.toHaveProperty('campaignId');
+  });
+
+  it('omits campaignId when campaigns exist but none is selected', async () => {
+    routeApiFetch({ campaigns: [makeCampaign({ id: 'camp-7', name: 'Strahd' })] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await advanceToReview(user, 'Fighter');
+    // Picker is present but left on the default "None".
+    await screen.findByRole('combobox', { name: /campaign/i });
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+    expect(lastPostBody()).not.toHaveProperty('campaignId');
+  });
+
+  it('attaches the chosen campaign to the create payload', async () => {
+    routeApiFetch({ campaigns: [makeCampaign({ id: 'camp-7', name: 'Strahd' })] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await advanceToReview(user, 'Fighter');
+    const select = await screen.findByRole('combobox', { name: /campaign/i });
+    await user.selectOptions(select, 'camp-7');
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+    expect(lastPostBody()).toMatchObject({
+      name: 'Mialee',
+      class: 'Fighter',
+      campaignId: 'camp-7',
+    });
   });
 
   it('toasts an error and stays on the Review step when creation fails', async () => {

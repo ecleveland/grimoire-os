@@ -11,6 +11,7 @@ import { characterFormPayload } from '@/components/CharacterEditorForm';
 import { STEPS, type WizardStepId } from './steps';
 import { DraftProvider, useCharacterDraft } from './useCharacterDraft';
 import WizardProgress from './_components/WizardProgress';
+import CampaignPicker from './_components/CampaignPicker';
 
 export default function GuidedCharacterPage() {
   const router = useRouter();
@@ -19,6 +20,10 @@ export default function GuidedCharacterPage() {
   // of the draft is plain state written via `onChange`.
   const draftApi = useCharacterDraft();
   const { draft, onChange } = draftApi;
+  // Optional campaign to attach the new character to (Review step). Held here,
+  // not in the draft, because `campaignId` is deliberately not a
+  // `CharacterFormValues` field — the create POST appends it like the classic form.
+  const [campaignId, setCampaignId] = useState('');
   const [rawStepIndex, setRawStepIndex] = useState(0);
   // Furthest step index the user has navigated to. Drives the progress display:
   // a step shows as completed only once it's both valid AND visited, so optional
@@ -78,7 +83,10 @@ export default function GuidedCharacterPage() {
     () =>
       apiFetch<Character>('/characters', {
         method: 'POST',
-        body: JSON.stringify(characterFormPayload(draft)),
+        body: JSON.stringify({
+          ...characterFormPayload(draft),
+          ...(campaignId ? { campaignId } : {}),
+        }),
       }),
     {
       onSuccess: character => {
@@ -132,6 +140,7 @@ export default function GuidedCharacterPage() {
 
         <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-700 dark:bg-gray-900">
           <StepBody value={draft} onChange={onChange} onValidChange={reportValidity} />
+          {isLast && <CampaignPicker value={campaignId} onChange={setCampaignId} />}
         </div>
 
         <div className="mt-6 flex items-center justify-between gap-3">
