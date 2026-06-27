@@ -3,7 +3,8 @@ import type { WizardStepDef } from '../steps';
 interface WizardProgressProps {
   steps: WizardStepDef[];
   currentIndex: number;
-  /** Whether each step is currently complete (its `isValid` against the draft). */
+  /** Whether each step should display as complete: valid against the draft AND
+   * already visited (so valid-by-default steps ahead of the user aren't checked). */
   completed: boolean[];
   /** Whether the user may jump directly to a given step index. */
   canJumpTo: (index: number) => boolean;

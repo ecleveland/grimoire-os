@@ -124,6 +124,37 @@ describe('GuidedCharacterPage — wizard shell', () => {
     expect(within(progress).queryByText('Spells')).toBeNull();
   });
 
+  it('does not check steps the user has not reached yet', () => {
+    routeApiFetch();
+    renderPage();
+
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+    // On the Class step, the later optional steps are valid-by-default but
+    // unvisited — they must show their number, not a completed check.
+    for (const title of ['Abilities', 'Equipment', 'Review']) {
+      expect(
+        within(progress).getByRole('button', { name: new RegExp(title, 'i') })
+      ).not.toHaveTextContent('✓');
+    }
+  });
+
+  it('checks a step only once the user has moved past it', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+
+    const progress = screen.getByRole('navigation', { name: /progress/i });
+    // Origin is valid-by-default; before visiting it shows no check.
+    expect(within(progress).getByRole('button', { name: /origin/i })).not.toHaveTextContent('✓');
+
+    await typeClass(user, 'Fighter');
+    await user.click(screen.getByRole('button', { name: /^next$/i })); // → Origin
+    await user.click(screen.getByRole('button', { name: /^skip$/i })); // → Abilities, past Origin
+
+    // Now that the user has moved past Origin (a completed step), it's checked.
+    expect(within(progress).getByRole('button', { name: /origin/i })).toHaveTextContent('✓');
+  });
+
   it('disables Back on the first step', () => {
     routeApiFetch();
     renderPage();
