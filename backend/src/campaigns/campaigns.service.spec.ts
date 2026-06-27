@@ -578,6 +578,90 @@ describe('CampaignsService', () => {
     });
   });
 
+  describe('findAttachableCharacters', () => {
+    // Owner is USER_ID; a separate player (USER_ID_2) is a member. The picker
+    // should offer characters owned by either, but only the unattached ones.
+    const ownerAndMemberCampaign = {
+      ...mockCampaign,
+      ownerId: USER_ID,
+      players: [{ id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() }],
+    };
+
+    const attachable = {
+      id: CHARACTER_ID,
+      userId: USER_ID_2,
+      name: 'Borin',
+      race: 'Dwarf',
+      class: 'Fighter',
+      level: 3,
+      armorClass: 16,
+      initiative: 1,
+      hitPoints: { max: 28, current: 28, temporary: 0 },
+      backstory: 'a closely guarded secret',
+      inventory: [{ name: 'Battleaxe' }],
+    };
+
+    it("owner-gates, then lists members' unattached characters in the slim projection", async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      prisma.character.findMany.mockResolvedValue([attachable]);
+
+      const result = await service.findAttachableCharacters(CAMPAIGN_ID, USER_ID);
+
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      // Filter: a campaign member's character (owner + players) that is not yet
+      // attached to any campaign. Projection mirrors the roster's slim shape.
+      expect(prisma.character.findMany).toHaveBeenCalledWith({
+        where: { userId: { in: [USER_ID, USER_ID_2] }, campaignId: null },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          userId: true,
+          name: true,
+          race: true,
+          class: true,
+          level: true,
+          armorClass: true,
+          initiative: true,
+          hitPoints: true,
+        },
+      });
+      expect(result).toEqual([
+        {
+          id: CHARACTER_ID,
+          userId: USER_ID_2,
+          name: 'Borin',
+          race: 'Dwarf',
+          class: 'Fighter',
+          level: 3,
+          armorClass: 16,
+          initiative: 1,
+          hitPoints: { max: 28, current: 28, temporary: 0 },
+        },
+      ]);
+    });
+
+    it('never leaks sheet fields beyond the roster projection', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      prisma.character.findMany.mockResolvedValue([attachable]);
+
+      const [row] = await service.findAttachableCharacters(CAMPAIGN_ID, USER_ID);
+
+      expect(row).not.toHaveProperty('backstory');
+      expect(row).not.toHaveProperty('inventory');
+    });
+
+    it('propagates ForbiddenException for non-owners without querying characters', async () => {
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
+
+      await expect(service.findAttachableCharacters(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('removeCharacter', () => {
     it('removes character from campaign when called by owner', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);

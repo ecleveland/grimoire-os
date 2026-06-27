@@ -43,6 +43,7 @@ export default function CampaignDetailPage() {
   const [encountersPage, setEncountersPage] = useState(1);
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
   const [characterToDetach, setCharacterToDetach] = useState<PartyCharacter | null>(null);
+  const [characterToAttach, setCharacterToAttach] = useState('');
   const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const rosterHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
@@ -83,6 +84,13 @@ export default function CampaignDetailPage() {
     errorToast: { message: 'Failed to load roster', id: 'load-roster' },
   });
   const roster = rosterQuery.data ?? [];
+  // Owner-only: members' unattached characters the DM can attach on their behalf
+  // (VEG-361). Gated on owner so non-owners never fetch or see the picker.
+  const attachableQuery = useApiQuery<PartyCharacter[]>(`/campaigns/${id}/attachable-characters`, {
+    enabled: tab === 'roster' && Boolean(isOwner),
+    errorToast: { message: 'Failed to load attachable characters', id: 'load-attachable' },
+  });
+  const attachable = attachableQuery.data ?? [];
 
   const notes = notesQuery.data?.data ?? [];
   const notesTotal = notesQuery.data?.total ?? 0;
@@ -177,11 +185,16 @@ export default function CampaignDetailPage() {
     {
       onSuccess: async () => {
         toast.success('Character removed from campaign');
-        // Re-sync the roster and the campaign (its characterIds count changes).
+        // Re-sync the roster and the campaign (its characterIds count changes),
+        // plus the attach picker — the detached character is now unattached, so
+        // it should re-enter the owner's "add a member's character" list.
         await queryClient.invalidateQueries({
           queryKey: apiQueryKey(`/campaigns/${id}/characters`),
         });
         queryClient.invalidateQueries({ queryKey: apiQueryKey(`/campaigns/${id}`) });
+        queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/attachable-characters`),
+        });
         // The removed row is unmounting; if focus dropped to <body>, land it on
         // the roster heading rather than leaving it stranded.
         if (document.activeElement === document.body) {
@@ -190,6 +203,27 @@ export default function CampaignDetailPage() {
       },
       onError: err =>
         toast.error(err instanceof Error ? err.message : 'Failed to remove character'),
+    }
+  );
+
+  const attachCharacter = useApiMutation(
+    (characterId: string) =>
+      apiFetch(`/campaigns/${id}/characters/${characterId}`, { method: 'POST' }),
+    {
+      onSuccess: async () => {
+        toast.success('Character added to campaign');
+        setCharacterToAttach('');
+        // Re-sync the roster, the campaign (characterIds count), and the
+        // attachable list (the just-added character should drop out of it).
+        await queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/characters`),
+        });
+        queryClient.invalidateQueries({ queryKey: apiQueryKey(`/campaigns/${id}`) });
+        queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/attachable-characters`),
+        });
+      },
+      onError: err => toast.error(err instanceof Error ? err.message : 'Failed to add character'),
     }
   );
 
@@ -343,9 +377,58 @@ export default function CampaignDetailPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
             Characters attached to this campaign.{' '}
             {isOwner
-              ? 'Remove a character to detach it from the campaign.'
+              ? 'Add a member’s character below, or remove one to detach it.'
               : 'Add your own characters from their character sheet.'}
           </p>
+          {isOwner &&
+            (attachable.length > 0 ? (
+              <div className="mb-4 flex items-end gap-2">
+                <div>
+                  <label
+                    htmlFor="attach-character"
+                    className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1"
+                  >
+                    Add a member&apos;s character
+                  </label>
+                  <select
+                    id="attach-character"
+                    value={characterToAttach}
+                    onChange={e => setCharacterToAttach(e.target.value)}
+                    className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  >
+                    <option value="">Select a character…</option>
+                    {attachable.map(c => {
+                      const meta = [c.race, c.class].filter(Boolean).join(' ');
+                      return (
+                        <option key={c.id} value={c.id}>
+                          {c.name} (Lvl {c.level}
+                          {meta && ` · ${meta}`})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (characterToAttach) attachCharacter.mutate(characterToAttach);
+                  }}
+                  disabled={!characterToAttach || attachCharacter.isPending}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {attachCharacter.isPending ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+            ) : (
+              // Only on a *successful* empty fetch — an errored load (toasted via
+              // errorToast) must not masquerade as "nobody to add".
+              attachableQuery.isSuccess && (
+                <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
+                  No member characters are available to add. Players join via an invite code, then
+                  their unattached characters appear here.
+                </p>
+              )
+            ))}
           {rosterQuery.isLoading ? (
             <p className="text-gray-500 dark:text-gray-400">Loading roster…</p>
           ) : roster.length === 0 ? (

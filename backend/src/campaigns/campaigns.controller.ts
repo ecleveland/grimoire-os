@@ -90,6 +90,14 @@ export class CampaignsController {
     return this.campaignsService.findCharactersForMember(id, req.user.userId);
   }
 
+  @Get(':id/attachable-characters')
+  @ApiOperation({
+    summary: "List members' characters that can be attached to the campaign (owner only)",
+  })
+  findAttachableCharacters(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.campaignsService.findAttachableCharacters(id, req.user.userId);
+  }
+
   @Post(':id/characters/:characterId')
   @ApiOperation({ summary: 'Add character to campaign' })
   addCharacter(
