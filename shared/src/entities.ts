@@ -273,6 +273,9 @@ export interface Shop {
   accent?: string | null;
   items: ShopLineItem[];
   isOpen: boolean;
+  /** Optimistic-locking counter (VEG-137 family); echoed as expectedShopVersion
+   * on a purchase so a concurrent stock/price edit is detected (VEG-357/445). */
+  version: number;
   createdAt: string;
   updatedAt: string;
 }

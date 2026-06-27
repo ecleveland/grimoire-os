@@ -16,6 +16,11 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/auth-context', () => ({ useAuth: () => mockUseAuth() }));
+// The purchase panel has its own co-located test; stub it here so the page
+// tests stay focused on banner/gating and don't pull in its data fetches.
+vi.mock('../_components/ShopPurchasePanel', () => ({
+  default: () => <div data-testid="purchase-panel" />,
+}));
 
 function renderPage() {
   const client = new QueryClient({
@@ -71,6 +76,7 @@ function makeShop(over: Partial<Shop> = {}): Shop {
       },
     ],
     isOpen: true,
+    version: 0,
     createdAt: '',
     updatedAt: '',
     ...over,
@@ -167,6 +173,21 @@ describe('ShopDetailPage', () => {
       expect(screen.getByRole('heading', { name: "Maelin's Apothecary" })).toBeInTheDocument()
     );
     expect(screen.getByText('Closed')).toBeInTheDocument();
+  });
+
+  it('renders the purchase panel for an open shop', async () => {
+    routeApi(makeCampaign(), makeShop());
+    renderPage();
+    expect(await screen.findByTestId('purchase-panel')).toBeInTheDocument();
+  });
+
+  it('does not render the purchase panel on a closed-shop owner preview', async () => {
+    routeApi(makeCampaign({ ownerId: 'user-1' }), makeShop({ isOpen: false }));
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: "Maelin's Apothecary" })).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('purchase-panel')).not.toBeInTheDocument();
   });
 
   it('does not flash "closed" to the owner while ownership is still resolving', async () => {

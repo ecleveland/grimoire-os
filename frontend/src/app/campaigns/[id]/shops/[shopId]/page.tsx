@@ -6,6 +6,7 @@ import { formatCoin } from '@grimoire-os/shared';
 import { useApiQuery } from '@/lib/query';
 import { useAuth } from '@/lib/auth-context';
 import Badge from '@/components/Badge';
+import ShopPurchasePanel from './_components/ShopPurchasePanel';
 import { shopVisuals, stockLabel, isInStock } from '@/lib/shop-display';
 import type { Campaign, Shop } from '@/lib/types';
 
@@ -153,6 +154,12 @@ export default function ShopDetailPage() {
                 );
               })}
             </ul>
+          )}
+
+          {/* Purchase controls — only for an open shop; a closed shop is a
+              DM-only preview (players never reach this render at all). */}
+          {shop.isOpen && (
+            <ShopPurchasePanel shop={shop} campaignId={campaignId} userId={user?.userId} />
           )}
         </div>
       </div>

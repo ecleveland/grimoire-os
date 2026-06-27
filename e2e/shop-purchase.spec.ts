@@ -136,4 +136,79 @@ test.describe('Shop purchase', () => {
 
     await playerCtx.close();
   });
+
+  test('a player buys from the storefront UI (VEG-445)', async ({ page, browser }) => {
+    // DM seeds a campaign, invite code, and an open shop with a stocked potion.
+    await registerAndLogin(page, 'buyui-dm');
+    const dmHeaders = await csrfHeaders(page);
+    const campaignId = (
+      await (
+        await page.request.post(`${BACKEND}/api/campaigns`, {
+          data: { name: `Buy UI Camp ${Date.now()}` },
+          headers: dmHeaders,
+        })
+      ).json()
+    ).id as string;
+    const inviteCode = (
+      await (
+        await page.request.post(`${BACKEND}/api/campaigns/${campaignId}/invite-code`, {
+          headers: dmHeaders,
+        })
+      ).json()
+    ).inviteCode as string;
+    const shopId = (
+      await (
+        await page.request.post(`${BACKEND}/api/shops`, {
+          data: {
+            campaignId,
+            name: "Maelin's Apothecary",
+            theme: 'alchemist',
+            items: [{ name: 'Potion of Healing', category: 'Potion', price: { gp: 50 }, stock: 3 }],
+          },
+          headers: dmHeaders,
+        })
+      ).json()
+    ).id as string;
+
+    // Player joins and creates a character (attached to the campaign) with coin.
+    const playerCtx = await browser.newContext();
+    const playerPage = await playerCtx.newPage();
+    await registerAndLogin(playerPage, 'buyui-player', 'E2E Buy UI');
+    const pHeaders = await csrfHeaders(playerPage);
+    await playerPage.request.post(`${BACKEND}/api/campaigns/join/${inviteCode}`, {
+      headers: pHeaders,
+    });
+    await playerPage.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Mialee Buyer',
+        campaignId,
+        currency: { gp: 150 },
+        abilityScores: {
+          strength: 10,
+          dexterity: 10,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+        },
+        hitPoints: { max: 10, current: 10, temporary: 0 },
+        armorClass: 10,
+        speed: 30,
+      },
+      headers: pHeaders,
+    });
+
+    // Drive the storefront UI: the single character auto-selects, balance shows.
+    await playerPage.goto(`/campaigns/${campaignId}/shops/${shopId}`);
+    await expect(playerPage.getByRole('heading', { name: /maelin/i })).toBeVisible();
+    await expect(playerPage.getByText(/buying as/i)).toContainText('Mialee Buyer');
+    await expect(playerPage.getByText(/150 gp/)).toBeVisible();
+
+    // Buy one potion; the success toast and the decremented stock both show.
+    await playerPage.getByRole('button', { name: /buy potion of healing/i }).click();
+    await expect(playerPage.getByText(/bought.*potion of healing/i)).toBeVisible();
+    await expect(playerPage.getByText('2 left')).toBeVisible();
+
+    await playerCtx.close();
+  });
 });
