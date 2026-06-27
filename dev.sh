@@ -37,6 +37,14 @@ until docker compose -f "$ROOT_DIR/docker-compose.yml" exec postgres pg_isready 
 done
 echo "PostgreSQL is ready."
 
+# Build the shared workspace package before the backend starts. Its compiled
+# output (shared/dist) is gitignored, so a branch switch or pull that changes
+# shared/src leaves a stale build — the backend then fails to compile against
+# @grimoire-os/shared (e.g. a missing newly-added type). Rebuilding here keeps
+# dist in sync with src on every dev start.
+echo "Building shared package..."
+cd "$ROOT_DIR/shared" && npm run build
+
 echo "Running Prisma migrations..."
 cd "$ROOT_DIR/backend" && npx prisma migrate dev --skip-generate
 
