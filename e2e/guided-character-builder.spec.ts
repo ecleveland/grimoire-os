@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { registerAndLogin } from './helpers';
+import { BACKEND, csrfHeaders, registerAndLogin } from './helpers';
 
 // VEG-378 shell + VEG-379 Class step. Golden path: reach the guided wizard, pick
 // an SRD class (Fighter — a non-caster, so the Spells step stays hidden), satisfy
@@ -97,6 +97,49 @@ test.describe('guided character builder — class selection', () => {
     const feats = page.getByRole('heading', { name: /^Feats$/ }).locator('..');
     await expect(feats).toContainText('Magic Initiate');
     await expect(feats).toContainText('(Cleric)');
+  });
+
+  // VEG-342 slice 2: the Review step's optional campaign picker pre-attaches the
+  // new character to one of the user's campaigns (parity with the classic form).
+  test('attaches the new character to a campaign chosen on the Review step', async ({ page }) => {
+    await registerAndLogin(page, 'guided-attach', 'E2E Guided DM');
+    const headers = await csrfHeaders(page);
+    const campaignName = `Guided-Attach ${Date.now()}`;
+    const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
+      data: { name: campaignName },
+      headers,
+    });
+    expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
+
+    await page.goto('/characters/new/guided');
+    await expect(page.getByRole('heading', { name: /guided character build/i })).toBeVisible();
+
+    // Class — Fighter (non-caster) + satisfy the skill gate.
+    const classInput = page.getByRole('combobox', { name: /^class/i });
+    await classInput.click();
+    await classInput.fill('Fighter');
+    await page.getByRole('option', { name: 'Fighter' }).click();
+    const skillChips = page.getByRole('group', { name: /skills/i }).getByRole('button');
+    await skillChips.nth(0).click();
+    await skillChips.nth(1).click();
+
+    // Skip the optional Origin/Abilities/Equipment steps straight to Review
+    // (Class → Origin → Abilities → Equipment → Review is four Next clicks).
+    const next = page.getByRole('button', { name: /^next$/i });
+    await next.click(); // → Origin
+    await next.click(); // → Abilities
+    await next.click(); // → Equipment
+    await next.click(); // → Review
+    await expect(page.getByRole('heading', { name: /review/i })).toBeVisible();
+
+    // Pick the campaign, name the character, create.
+    await page.getByLabel('Campaign').selectOption({ label: campaignName });
+    await page.getByRole('textbox', { name: /name/i }).fill('Borin Companyman');
+    await page.getByRole('button', { name: /create character/i }).click();
+
+    // Lands on the sheet, which links to the attached campaign.
+    await expect(page.getByRole('heading', { name: 'Borin Companyman' })).toBeVisible();
+    await expect(page.getByRole('link', { name: campaignName })).toBeVisible();
   });
 
   // VEG-383 Spells step: a caster class surfaces the otherwise-hidden Spells step
