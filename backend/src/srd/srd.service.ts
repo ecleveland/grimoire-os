@@ -508,13 +508,20 @@ export class SrdService {
         { description: { contains: query, mode: 'insensitive' } },
       ];
     }
-    return this.prisma.background.findMany({ where, orderBy: { name: 'asc' } });
+    return this.prisma.background.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      include: { originFeat: { select: { id: true, name: true } } },
+    });
   }
 
   async findBackground(id: string) {
     return this.prisma.background.findUnique({
       where: { id },
-      include: { features: { orderBy: NAME_ORDER } },
+      include: {
+        features: { orderBy: NAME_ORDER },
+        originFeat: { select: { id: true, name: true } },
+      },
     });
   }
 

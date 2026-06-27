@@ -32,7 +32,13 @@ export default async function BackgroundListPage() {
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{bg.name}</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Skills: {bg.skillProficiencies.join(', ')}
-                  {bg.feat && <> &middot; Feat: {bg.feat}</>}
+                  {bg.originFeat && (
+                    <>
+                      {' '}
+                      &middot; Feat: {bg.originFeat.name}
+                      {bg.originFeatOption && <> ({bg.originFeatOption})</>}
+                    </>
+                  )}
                 </p>
               </div>
             }

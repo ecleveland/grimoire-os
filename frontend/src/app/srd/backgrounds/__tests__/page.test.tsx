@@ -24,7 +24,8 @@ function makeBackground(over: Partial<SrdBackground> = {}): SrdBackground {
     skillProficiencies: ['Insight', 'Religion'],
     toolProficiencies: [],
     languages: 0,
-    feat: 'Magic Initiate (Cleric)',
+    originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+    originFeatOption: 'Cleric',
     personalityTraits: [],
     ideals: [],
     bonds: [],
@@ -57,7 +58,33 @@ describe('BackgroundListPage', () => {
       await renderPage();
       expect(screen.getByText('Acolyte')).toBeInTheDocument();
       expect(screen.getByText(/Skills: Insight, Religion/)).toBeInTheDocument();
+      expect(screen.getByText(/Feat: Magic Initiate \(Cleric\)/)).toBeInTheDocument();
       expect(mockFetchSrdList).toHaveBeenCalledWith('/srd/backgrounds');
+    });
+
+    it('renders the feat name without an option suffix when originFeatOption is null', async () => {
+      mockFetchSrdList.mockResolvedValue([
+        makeBackground({
+          name: 'Criminal',
+          originFeat: { id: 'feat-alert', name: 'Alert' },
+          originFeatOption: null,
+        }),
+      ]);
+
+      await renderPage();
+
+      expect(screen.getByText(/Feat: Alert/)).toBeInTheDocument();
+      expect(screen.queryByText(/Alert \(/)).not.toBeInTheDocument();
+    });
+
+    it('omits the feat line when a background has no origin feat', async () => {
+      mockFetchSrdList.mockResolvedValue([
+        makeBackground({ originFeat: null, originFeatOption: null }),
+      ]);
+
+      await renderPage();
+
+      expect(screen.queryByText(/Feat:/)).not.toBeInTheDocument();
     });
 
     it('renders an error state when the fetch rejects', async () => {

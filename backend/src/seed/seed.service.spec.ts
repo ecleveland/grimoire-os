@@ -103,6 +103,11 @@ describe('SeedService', () => {
       const names = (args?.where?.name?.in ?? []) as string[];
       return Promise.resolve(buildFkRows(names));
     });
+    // Feat FK resolution for background origin feats (VEG-429): id = `feat-<name>`.
+    prisma.feat.findMany.mockImplementation((args: any) => {
+      const names = (args?.where?.name?.in ?? []) as string[];
+      return Promise.resolve(names.map(name => ({ id: `feat-${name}`, name })));
+    });
 
     // Subclass/subrace FK resolution
     prisma.srdClass.findUnique.mockResolvedValue({
@@ -605,6 +610,43 @@ describe('SeedService', () => {
       expect(args.create).not.toHaveProperty('feature');
       expect(args.update).not.toHaveProperty('feature');
     }
+  });
+
+  // ── Background origin feats (VEG-429) ──────────────────
+
+  it('resolves background origin feats from the SRD feat partition (contentSource=srd)', async () => {
+    await service.seed();
+
+    expect(prisma.feat.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ contentSource: 'srd' }) })
+    );
+  });
+
+  it('writes the origin-feat FK into the same background upsert (Acolyte→Magic Initiate/Cleric, Criminal→Alert)', async () => {
+    await service.seed();
+
+    const upsertByName = new Map(
+      prisma.background.upsert.mock.calls.map((c: any) => [c[0].where.name, c[0]])
+    );
+
+    // The link is written to both create and update so reseed is idempotent.
+    for (const branch of ['create', 'update'] as const) {
+      expect(upsertByName.get('Acolyte')[branch]).toMatchObject({
+        originFeatId: 'feat-Magic Initiate',
+        originFeatOption: 'Cleric',
+      });
+      expect(upsertByName.get('Criminal')[branch]).toMatchObject({
+        originFeatId: 'feat-Alert',
+        originFeatOption: null,
+      });
+    }
+  });
+
+  it('aborts the seed when a background origin feat does not resolve', async () => {
+    // Force feat resolution to come back empty so no background can link.
+    prisma.feat.findMany.mockResolvedValue([]);
+
+    await expect(service.seed()).rejects.toThrow(/origin feat/i);
   });
 
   // ── NPC Generator reference tables ─────────────────────

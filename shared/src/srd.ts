@@ -250,6 +250,12 @@ export interface SrdBackgroundAbilityScores {
   options: string[];
 }
 
+/** A minimal id+name pointer to another SRD entity (e.g. a linked feat). */
+export interface SrdReference {
+  id: string;
+  name: string;
+}
+
 export interface SrdBackground {
   id: string;
   name: string;
@@ -259,7 +265,13 @@ export interface SrdBackground {
   languages: number;
   equipment?: string;
   feature?: BackgroundFeature | null;
-  feat?: string;
+  /**
+   * Canonical SRD origin feat, linked by FK at seed (VEG-429). `originFeatOption`
+   * carries the chosen parameter for repeatable feats (e.g. Magic Initiate
+   * "Cleric"); null for non-parameterized feats.
+   */
+  originFeat?: SrdReference | null;
+  originFeatOption?: string | null;
   abilityScores?: SrdBackgroundAbilityScores;
   personalityTraits: string[];
   ideals: string[];

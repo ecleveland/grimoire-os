@@ -489,8 +489,17 @@ model Background {
   flaws              String[]
   source             String   @default("SRD 5.2.1")
 
+  // Canonical SRD origin feat (VEG-429). The option captures the chosen
+  // parameter for repeatable feats (e.g. Magic Initiate "Cleric"); null for
+  // non-parameterized feats. SetNull so deleting a feat row never deletes the
+  // background — it just unlinks.
+  originFeatId     String?
+  originFeatOption String?
+  originFeat       Feat?   @relation("BackgroundOriginFeat", fields: [originFeatId], references: [id], onDelete: SetNull)
+
   features BackgroundFeature[]
 
+  @@index([originFeatId])
   @@map("backgrounds")
 }
 
@@ -570,6 +579,9 @@ model Feat {
   // deleted at the service layer (UsersService.remove) and backstopped by a
   // hand-authored DB CHECK: homebrew must always have a creator (VEG-317).
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  // Backgrounds whose canonical origin feat is this row (VEG-429).
+  originForBackgrounds Background[] @relation("BackgroundOriginFeat")
 
   // Name uniqueness is enforced by partial unique indexes (per-source) added by
   // hand in the add_homebrew_content_source migration; Prisma cannot model them.
