@@ -48,6 +48,8 @@ function makeBackground(over: Partial<SrdBackground> = {}): SrdBackground {
     skillProficiencies: ['Insight', 'Religion'],
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 0,
+    originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+    originFeatOption: 'Cleric',
     personalityTraits: [],
     ideals: [],
     bonds: [],
@@ -62,6 +64,8 @@ const SOLDIER = makeBackground({
   name: 'Soldier',
   skillProficiencies: ['Athletics', 'Intimidation'],
   toolProficiencies: ['Gaming Set'],
+  originFeat: { id: 'feat-sa', name: 'Savage Attacker' },
+  originFeatOption: null,
 });
 
 function routeApiFetch(races: SrdRace[], backgrounds: SrdBackground[]) {
@@ -88,6 +92,9 @@ function Harness({ seed }: { seed?: Seed }) {
       <div data-testid="profs">{api.draft.proficiencies.join(',')}</div>
       <div data-testid="features">
         {api.draft.features.map(f => `${f.name}:${f.source}`).join(',')}
+      </div>
+      <div data-testid="feats">
+        {api.draft.feats.map(f => `${f.name}|${f.option ?? ''}|${f.source}`).join(',')}
       </div>
     </DraftProvider>
   );
@@ -187,6 +194,53 @@ describe('OriginStep — background + species', () => {
     expect(skills).not.toHaveTextContent('Religion');
     expect(skills).toHaveTextContent('Acrobatics');
     expect(skills).toHaveTextContent('Intimidation');
+  });
+
+  it('grants the background origin feat (with its option) and shows it in the summary card', async () => {
+    const user = userEvent.setup();
+    renderStep([], [makeBackground()]);
+
+    await pickBackground(user, 'Acolyte');
+
+    // The structured feat carries name, option, and the background as its source.
+    await waitFor(() =>
+      expect(screen.getByTestId('feats')).toHaveTextContent('Magic Initiate|Cleric|Acolyte')
+    );
+    // And it's surfaced in the grants card.
+    const card = screen.getByRole('group', { name: /background grants/i });
+    expect(card).toHaveTextContent('Magic Initiate (Cleric)');
+  });
+
+  it('replaces the previous background feat when the background is switched', async () => {
+    const user = userEvent.setup();
+    renderStep([], [makeBackground(), SOLDIER]);
+
+    await pickBackground(user, 'Acolyte');
+    await waitFor(() => expect(screen.getByTestId('feats')).toHaveTextContent('Magic Initiate'));
+
+    await pickBackground(user, 'Soldier');
+    // Savage Attacker (no option) replaces Magic Initiate — no stale grant.
+    await waitFor(() =>
+      expect(screen.getByTestId('feats')).toHaveTextContent('Savage Attacker||Soldier')
+    );
+    expect(screen.getByTestId('feats')).not.toHaveTextContent('Magic Initiate');
+  });
+
+  it('grants no feat for a background that has no origin feat', async () => {
+    const user = userEvent.setup();
+    const featless = makeBackground({
+      id: 'hermit',
+      name: 'Hermit',
+      originFeat: null,
+      originFeatOption: null,
+    });
+    renderStep([], [featless]);
+
+    await pickBackground(user, 'Hermit');
+
+    await waitFor(() => expect(screen.getByTestId('skills')).toHaveTextContent('Insight'));
+    expect(screen.getByTestId('feats')).toBeEmptyDOMElement();
+    expect(screen.getByRole('group', { name: /background grants/i })).toHaveTextContent('Feat—');
   });
 
   it('does not duplicate species traits when re-entered with a race already set', async () => {

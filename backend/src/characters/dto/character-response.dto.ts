@@ -2,6 +2,7 @@ import { Expose } from 'class-transformer';
 import type {
   AbilityScores,
   AttunedItem,
+  CharacterFeat,
   ComputedStats,
   Currency,
   DeathSaves,
@@ -50,6 +51,7 @@ export class CharacterDto {
   @Expose() attunedItems!: AttunedItem[] | null;
   @Expose() currency!: Currency | null;
   @Expose() features!: Feature[] | null;
+  @Expose() feats!: CharacterFeat[] | null;
   @Expose() personalityTraits!: string | null;
   @Expose() ideals!: string | null;
   @Expose() bonds!: string | null;

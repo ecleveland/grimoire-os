@@ -2,6 +2,7 @@ import type { CampaignStatus, NoteVisibility, Role } from './enums';
 import type {
   AbilityScores,
   AttunedItem,
+  CharacterFeat,
   Combatant,
   CombatantLootItem,
   Currency,
@@ -75,6 +76,10 @@ export interface Character {
   attunedItems?: AttunedItem[];
   currency: Currency;
   features: Feature[];
+  // Granted feats (VEG-430), e.g. a background's origin feat. Optional: the
+  // backing JSONB column is nullable, so a character with no feats deserializes
+  // this as absent (consumers guard with `?? []`).
+  feats?: CharacterFeat[];
   personalityTraits?: string;
   ideals?: string;
   bonds?: string;

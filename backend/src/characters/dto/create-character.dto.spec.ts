@@ -264,6 +264,43 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         ?.children?.[0]?.children?.find(c => c.property === 'name');
       expect(name?.constraints).toHaveProperty('isString');
     });
+  });
+
+  describe('feats (VEG-430)', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted):
+    // the guided builder grants an origin feat carrying featId + option, and a
+    // plain validate() would silently accept it even if the DTO never whitelisted
+    // the field (the VEG-349 deathSaves trap).
+    it('accepts a structured origin feat with featId + option (not rejected as unwhitelisted)', async () => {
+      const dto = toDto({
+        ...baseDto,
+        feats: [
+          {
+            featId: '123e4567-e89b-42d3-a456-426614174000',
+            name: 'Magic Initiate',
+            option: 'Cleric',
+            source: 'Acolyte',
+          },
+        ],
+      });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'feats')).toHaveLength(0);
+    });
+
+    it('accepts a feat with only a name (featId/option optional)', async () => {
+      const dto = toDto({ ...baseDto, feats: [{ name: 'Alert' }] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'feats')).toHaveLength(0);
+    });
+
+    it('rejects a feat missing the required name with the isString constraint', async () => {
+      const dto = toDto({ ...baseDto, feats: [{ option: 'Cleric' }] });
+      const errors = await validate(dto);
+      const name = errors
+        .find(e => e.property === 'feats')
+        ?.children?.[0]?.children?.find(c => c.property === 'name');
+      expect(name?.constraints).toHaveProperty('isString');
+    });
 
     it('rejects a non-numeric quantity', async () => {
       const dto = toDto({ ...baseDto, inventory: [{ name: 'X', quantity: 'lots' }] });

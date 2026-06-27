@@ -171,6 +171,7 @@ model Character {
   attunedItems        Json?
   currency            Json?
   features            Json?
+  feats               Json?
   personalityTraits   String?
   ideals              String?
   bonds               String?

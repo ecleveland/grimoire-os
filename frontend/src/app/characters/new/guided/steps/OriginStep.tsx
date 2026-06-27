@@ -1,6 +1,13 @@
 import { useEffect } from 'react';
 import { useApiQuery } from '@/lib/query';
-import { SIZES, type Feature, type Size, type SrdBackground, type SrdRace } from '@/lib/types';
+import {
+  SIZES,
+  type CharacterFeat,
+  type Feature,
+  type Size,
+  type SrdBackground,
+  type SrdRace,
+} from '@/lib/types';
 import SrdCombobox from '@/components/SrdCombobox';
 import { useDraftGrants } from '../useCharacterDraft';
 import type { WizardStepProps } from './types';
@@ -21,9 +28,16 @@ const summaryCard =
  * step-local refs. Species traits are reconciled by their `source` tag the same
  * way they always have been (so the sheet groups them under Species Traits).
  *
+ * Background origin feat (VEG-430): selecting a background also grants its
+ * canonical origin feat (with the SRD option, e.g. Magic Initiate "Cleric") onto
+ * the draft as a structured `CharacterFeat`, reconciled by the background `source`
+ * tag the same way species traits are — switching or clearing the background
+ * removes exactly the prior background's feat. Applying the feat's downstream
+ * benefits (cantrips/spells/skills) is a deferred follow-up.
+ *
  * Deferred by design: the background ability-score increase (no seeded data; the
  * Abilities step owns "+ background increases", VEG-381), starting equipment
- * (VEG-382), and the background feat / personality suggestions.
+ * (VEG-382), and personality suggestions.
  */
 export default function OriginStep({ value, onChange }: WizardStepProps) {
   const { reconcileSource } = useDraftGrants();
@@ -71,10 +85,13 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
   }, [selectedRace?.name, races, reconcileSource, onChange]);
 
   // Background reconciliation: replace the background source slice with its
-  // skill/tool proficiencies. Clearing/switching removes exactly this source's
-  // grants; class skill picks (the 'class' slice) survive.
+  // skill/tool proficiencies, and grant its origin feat. Clearing/switching
+  // removes exactly this source's grants; class skill picks (the 'class' slice)
+  // survive. The feat is reconciled by its background `source` tag — gated on a
+  // genuine background change so a remount can't duplicate it (mirrors species
+  // traits).
   useEffect(() => {
-    reconcileSource(
+    const changed = reconcileSource(
       'background',
       selectedBackground?.id ?? '',
       selectedBackground
@@ -84,10 +101,26 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
           }
         : {}
     );
-    // Keyed on the resolved background identity; reading selectedBackground.* is
-    // current when the effect runs on an id change.
+    if (changed) {
+      const backgroundNames = new Set(backgrounds.map(b => b.name));
+      const withoutBackgroundFeats = value.feats.filter(f => !backgroundNames.has(f.source ?? ''));
+      const originFeat = selectedBackground?.originFeat;
+      const grantedFeats: CharacterFeat[] = originFeat
+        ? [
+            {
+              featId: originFeat.id,
+              name: originFeat.name,
+              option: selectedBackground?.originFeatOption ?? null,
+              source: selectedBackground?.name,
+            },
+          ]
+        : [];
+      onChange({ feats: [...withoutBackgroundFeats, ...grantedFeats] });
+    }
+    // Keyed on the resolved background identity (and the catalog it resolves
+    // against); reading value.* / selectedBackground.* is current at run time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBackground?.id, reconcileSource]);
+  }, [selectedBackground?.id, backgrounds, reconcileSource, onChange]);
 
   return (
     <section aria-labelledby="step-origin-heading" className="space-y-4">
@@ -117,6 +150,15 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
           <span className="text-gray-500 dark:text-gray-400">Tools</span>
           <span className="text-gray-900 dark:text-white">
             {selectedBackground.toolProficiencies.join(', ') || '—'}
+          </span>
+          <span className="text-gray-500 dark:text-gray-400">Feat</span>
+          <span className="text-gray-900 dark:text-white">
+            {selectedBackground.originFeat
+              ? selectedBackground.originFeat.name +
+                (selectedBackground.originFeatOption
+                  ? ` (${selectedBackground.originFeatOption})`
+                  : '')
+              : '—'}
           </span>
         </fieldset>
       )}

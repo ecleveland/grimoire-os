@@ -13,7 +13,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AttunedItem, DIE_TYPES, Feature, SpellEntry } from '@grimoire-os/shared';
+import { AttunedItem, CharacterFeat, DIE_TYPES, Feature, SpellEntry } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 class AbilityScoresDto {
@@ -206,6 +206,27 @@ class FeatureDto implements Feature {
   @IsOptional()
   @IsString()
   description?: string;
+}
+
+class CharacterFeatDto implements CharacterFeat {
+  @ApiPropertyOptional({ description: 'SRD/homebrew Feat id when granted from the catalog' })
+  @IsOptional()
+  @IsString()
+  featId?: string | null;
+
+  @ApiProperty({ example: 'Magic Initiate' })
+  @IsString()
+  name!: string;
+
+  @ApiPropertyOptional({ example: 'Cleric', description: 'Chosen option for a parameterized feat' })
+  @IsOptional()
+  @IsString()
+  option?: string | null;
+
+  @ApiPropertyOptional({ description: 'Where the grant came from, e.g. the background name' })
+  @IsOptional()
+  @IsString()
+  source?: string;
 }
 
 class SpellEntryDto implements SpellEntry {
@@ -424,6 +445,13 @@ export class CreateCharacterDto {
   @ValidateNested({ each: true })
   @Type(() => FeatureDto)
   features?: FeatureDto[];
+
+  @ApiPropertyOptional({ type: [CharacterFeatDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CharacterFeatDto)
+  feats?: CharacterFeatDto[];
 
   @ApiPropertyOptional()
   @IsOptional()

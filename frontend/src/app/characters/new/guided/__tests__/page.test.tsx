@@ -390,6 +390,8 @@ describe('GuidedCharacterPage — cross-step grant reconciliation', () => {
       skillProficiencies: ['Insight', 'Religion'],
       toolProficiencies: [],
       languages: 0,
+      originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+      originFeatOption: 'Cleric',
       personalityTraits: [],
       ideals: [],
       bonds: [],
@@ -404,6 +406,8 @@ describe('GuidedCharacterPage — cross-step grant reconciliation', () => {
     name: 'Soldier',
     skillProficiencies: ['Athletics', 'Intimidation'],
     toolProficiencies: ['Gaming Set'],
+    originFeat: { id: 'feat-sa', name: 'Savage Attacker' },
+    originFeatOption: null,
   });
 
   function routeSrd({
@@ -468,6 +472,54 @@ describe('GuidedCharacterPage — cross-step grant reconciliation', () => {
     // Religion is gone.
     expect(skills).toContain('Insight');
     expect(skills).not.toContain('Religion');
+  });
+
+  it('carries the granted origin feat (with its option) through to the create payload (VEG-430)', async () => {
+    routeSrd({ classes: [FIGHTER], races: [], backgrounds: [ACOLYTE, SOLDIER] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Fighter');
+    await pickClassSkill(user, 'Insight');
+    await pickClassSkill(user, 'Perception');
+    await waitFor(() => expect(next()).toBeEnabled());
+    await user.click(next());
+
+    await pickOrigin(user, /background/i, 'Acolyte');
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: /background grants/i })).toBeInTheDocument()
+    );
+
+    await walkToReviewAndSubmit(user);
+    const feats = lastPostBody().feats as Array<Record<string, unknown>>;
+    expect(feats).toEqual([
+      { featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' },
+    ]);
+  });
+
+  it('replaces the origin feat in the payload when the background is switched (VEG-430)', async () => {
+    routeSrd({ classes: [FIGHTER], races: [], backgrounds: [ACOLYTE, SOLDIER] });
+    const user = userEvent.setup();
+    renderPage();
+
+    await selectSrdClass(user, 'Fighter');
+    await pickClassSkill(user, 'Insight');
+    await pickClassSkill(user, 'Perception');
+    await waitFor(() => expect(next()).toBeEnabled());
+    await user.click(next());
+
+    await pickOrigin(user, /background/i, 'Acolyte');
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: /background grants/i })).toBeInTheDocument()
+    );
+    await pickOrigin(user, /background/i, 'Soldier');
+
+    await walkToReviewAndSubmit(user);
+    const feats = lastPostBody().feats as Array<Record<string, unknown>>;
+    // Only Soldier's feat remains — no stale Magic Initiate grant.
+    expect(feats).toEqual([
+      { featId: 'feat-sa', name: 'Savage Attacker', option: null, source: 'Soldier' },
+    ]);
   });
 
   it('does not drop a background tool proficiency when revisiting the Class step (bug 2)', async () => {
