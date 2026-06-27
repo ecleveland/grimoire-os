@@ -61,7 +61,7 @@ interface SrdSeedDelegate {
 // used to wire up FK relations for child feature/trait tables.
 interface NameLookupDelegate {
   findMany(args: {
-    where: { name: { in: string[] } };
+    where: { name: { in: string[] }; contentSource?: string };
     select: { id: true; name: true };
   }): Promise<{ id: string; name: string }[]>;
 }
@@ -80,6 +80,16 @@ const srdDelegate = (delegate: unknown): SrdSeedDelegate => delegate as SrdSeedD
 const nameLookupDelegate = (delegate: unknown): NameLookupDelegate =>
   delegate as NameLookupDelegate;
 const curatedDelegate = (delegate: unknown): CuratedDelegate => delegate as CuratedDelegate;
+
+// Split a background's origin-feat display string into the base feat name and
+// its parameterized option: "Magic Initiate (Cleric)" → { featName: "Magic
+// Initiate", option: "Cleric" }; "Alert" → { featName: "Alert", option: null }.
+function parseOriginFeat(display: string): { featName: string; option: string | null } {
+  const match = display.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  return match
+    ? { featName: match[1].trim(), option: match[2].trim() }
+    : { featName: display.trim(), option: null };
+}
 
 // All SRD data, loaded and transformed into Prisma input shapes, ready to write.
 interface SeedData {
@@ -117,8 +127,10 @@ export class SeedService {
         await this.seedMonsters(tx, data);
         await this.seedItems(tx, data);
         await this.seedEquipmentBundles(tx, data);
-        await this.seedBackgrounds(tx, data);
+        // Feats before backgrounds: seedBackgrounds resolves each background's
+        // origin feat (VEG-429) and writes the FK in the same upsert.
         await this.seedFeats(tx, data);
+        await this.seedBackgrounds(tx, data);
         await this.seedSimpleReferenceTables(tx);
         await this.seedClasses(tx);
         await this.seedRaces(tx, data);
@@ -227,10 +239,11 @@ export class SeedService {
   // child feature/trait tables.
   private async resolveIdsByName(
     delegate: NameLookupDelegate,
-    names: string[]
+    names: string[],
+    contentSource?: string
   ): Promise<Map<string, string>> {
     const rows = await delegate.findMany({
-      where: { name: { in: names } },
+      where: { name: { in: names }, ...(contentSource ? { contentSource } : {}) },
       select: { id: true, name: true },
     });
     return new Map(rows.map(r => [r.name, r.id]));
@@ -318,14 +331,52 @@ export class SeedService {
 
   private async seedBackgrounds(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
     if (!data.backgrounds.length) return;
+    // Resolve each background's canonical origin feat (VEG-429) and write the FK
+    // in the same upsert, so reseed both links new mappings and clears stale ones
+    // (a background that loses its `feat` upserts originFeatId back to null).
+    const originFeatByBackground = await this.resolveBackgroundOriginFeats(tx);
     for (const background of data.backgrounds) {
+      const origin = originFeatByBackground.get(background.name) ?? {
+        originFeatId: null,
+        originFeatOption: null,
+      };
+      const row = { ...background, ...origin };
       await tx.background.upsert({
         where: { name: background.name },
-        create: background,
-        update: background,
+        create: row,
+        update: row,
       });
     }
     this.logger.log(`  Backgrounds: ${data.backgrounds.length} entries`);
+  }
+
+  // Resolve every background's origin-feat display string (e.g. "Magic Initiate
+  // (Cleric)") to the canonical SRD `Feat` row (VEG-429): parse off the
+  // parenthetical option, match the base name against contentSource='srd' feats,
+  // and key the {id, option} by background name. Requires feats to be seeded
+  // first. Throws on any unresolved feat so missing/renamed data fails loudly
+  // rather than silently dropping the link.
+  private async resolveBackgroundOriginFeats(
+    tx: Prisma.TransactionClient
+  ): Promise<Map<string, { originFeatId: string; originFeatOption: string | null }>> {
+    const parsed = srdBackgrounds
+      .filter(b => b.feat)
+      .map(b => ({ background: b.name, ...parseOriginFeat(b.feat) }));
+
+    const featNames = [...new Set(parsed.map(p => p.featName))];
+    const featIdByName = await this.resolveIdsByName(nameLookupDelegate(tx.feat), featNames, 'srd');
+
+    const result = new Map<string, { originFeatId: string; originFeatOption: string | null }>();
+    for (const p of parsed) {
+      const originFeatId = featIdByName.get(p.featName);
+      if (!originFeatId) {
+        throw new Error(
+          `Seed aborted: background "${p.background}" origin feat "${p.featName}" did not resolve to an SRD feat row`
+        );
+      }
+      result.set(p.background, { originFeatId, originFeatOption: p.option });
+    }
+    return result;
   }
 
   private async seedFeats(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {

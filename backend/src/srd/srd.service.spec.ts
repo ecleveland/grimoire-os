@@ -755,7 +755,25 @@ describe('SrdService', () => {
       expect(prisma.background.findMany).toHaveBeenCalledWith({
         where: {},
         orderBy: { name: 'asc' },
+        include: { originFeat: { select: { id: true, name: true } } },
       });
+    });
+
+    it('surfaces the structured origin-feat reference (VEG-429)', async () => {
+      const rows = [
+        {
+          id: '1',
+          name: 'Acolyte',
+          originFeatId: 'feat-mi',
+          originFeatOption: 'Cleric',
+          originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+        },
+      ];
+      prisma.background.findMany.mockResolvedValue(rows);
+
+      const result = await service.searchBackgrounds();
+
+      expect(result).toEqual(rows);
     });
   });
 
@@ -1102,15 +1120,25 @@ describe('SrdService', () => {
   });
 
   describe('findBackground', () => {
-    it('returns background by id with features included', async () => {
-      const bg = { id: '1', name: 'Noble', features: [] };
+    it('returns background by id with features and origin feat included', async () => {
+      const bg = {
+        id: '1',
+        name: 'Acolyte',
+        features: [],
+        originFeatId: 'feat-mi',
+        originFeatOption: 'Cleric',
+        originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+      };
       prisma.background.findUnique.mockResolvedValue(bg);
 
       const result = await service.findBackground('1');
 
       expect(prisma.background.findUnique).toHaveBeenCalledWith({
         where: { id: '1' },
-        include: { features: { orderBy: { name: 'asc' } } },
+        include: {
+          features: { orderBy: { name: 'asc' } },
+          originFeat: { select: { id: true, name: true } },
+        },
       });
       expect(result).toEqual(bg);
     });
