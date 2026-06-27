@@ -39,9 +39,12 @@ const baseCharacter: Character = {
   features: [
     { name: 'Darkvision', source: 'Dwarf', description: 'See in dim light within 60 feet.' },
     { name: 'Dwarven Resilience', source: 'Dwarf', description: 'Advantage on poison saves.' },
-    { name: 'Great Weapon Master', source: 'Feat', description: 'Bonus attack on crit or kill.' },
-    { name: 'Sentinel', source: 'Feat', description: 'Opportunity attacks reduce speed to 0.' },
     { name: 'Second Wind', source: 'Fighter', description: 'Regain HP as a bonus action.' },
+  ],
+  // Feats are carried structured (VEG-430), not inferred from `features`.
+  feats: [
+    { featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' },
+    { featId: 'feat-sentinel', name: 'Sentinel', option: null, source: 'Soldier' },
   ],
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
@@ -73,30 +76,66 @@ describe('SpeciesTraitsAndFeats', () => {
       expect(screen.getByText('Feats')).toBeInTheDocument();
     });
 
-    it('renders features with source "Feat"', () => {
+    it('renders each granted feat from the structured feats field', () => {
       render(<SpeciesTraitsAndFeats character={baseCharacter} />);
-      expect(screen.getByText('Great Weapon Master')).toBeInTheDocument();
+      expect(screen.getByText('Magic Initiate')).toBeInTheDocument();
       expect(screen.getByText('Sentinel')).toBeInTheDocument();
     });
 
-    it('renders features with unknown source as feats', () => {
+    it('shows the chosen option for a parameterized feat', () => {
+      render(<SpeciesTraitsAndFeats character={baseCharacter} />);
+      expect(screen.getByText('(Cleric)')).toBeInTheDocument();
+    });
+
+    it('renders a plain feat without an option suffix', () => {
+      const char: Character = {
+        ...baseCharacter,
+        feats: [{ name: 'Alert', option: null, source: 'Criminal' }],
+      };
+      render(<SpeciesTraitsAndFeats character={char} />);
+      expect(screen.getByText('Alert')).toBeInTheDocument();
+      expect(screen.queryByText(/\(/)).not.toBeInTheDocument();
+    });
+
+    // Backward compatibility: characters created before VEG-430 (or via the
+    // classic editor's FeaturesEditor) carry feats as `features` whose source is
+    // neither the class nor the race. Those must keep rendering (with their
+    // description) even with no structured `feats`.
+    it('still renders legacy feats stored in features (non-class/non-race source)', () => {
       const char: Character = {
         ...baseCharacter,
         features: [
-          { name: 'Mystery Power', source: 'Unknown', description: 'Something mysterious.' },
+          { name: 'Great Weapon Master', source: 'Feat', description: 'Bonus attack on crit.' },
+          { name: 'Homebrew Ability', description: 'Custom feature with no source.' },
         ],
+        feats: [],
       };
       render(<SpeciesTraitsAndFeats character={char} />);
-      expect(screen.getByText('Mystery Power')).toBeInTheDocument();
+      expect(screen.getByText('Great Weapon Master')).toBeInTheDocument();
+      expect(screen.getByText('Bonus attack on crit.')).toBeInTheDocument();
+      expect(screen.getByText('Homebrew Ability')).toBeInTheDocument();
     });
 
-    it('renders features with no source as feats', () => {
+    it('does not double-list a feat present in both feats and features', () => {
       const char: Character = {
         ...baseCharacter,
-        features: [{ name: 'Homebrew Ability', description: 'Custom feature.' }],
+        features: [{ name: 'Magic Initiate', source: 'Feat' }],
+        feats: [{ featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' }],
       };
       render(<SpeciesTraitsAndFeats character={char} />);
-      expect(screen.getByText('Homebrew Ability')).toBeInTheDocument();
+      expect(screen.getAllByText('Magic Initiate')).toHaveLength(1);
+    });
+
+    it('renders both structured feats and legacy feature-feats together', () => {
+      const char: Character = {
+        ...baseCharacter,
+        features: [{ name: 'Lucky', source: 'Feat' }],
+        feats: [{ featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' }],
+      };
+      render(<SpeciesTraitsAndFeats character={char} />);
+      expect(screen.getByText('Magic Initiate')).toBeInTheDocument();
+      expect(screen.getByText('(Cleric)')).toBeInTheDocument();
+      expect(screen.getByText('Lucky')).toBeInTheDocument();
     });
   });
 
@@ -112,13 +151,14 @@ describe('SpeciesTraitsAndFeats', () => {
       const char: Character = {
         ...baseCharacter,
         features: [{ name: 'Second Wind', source: 'Fighter' }],
+        feats: [],
       };
       const { container } = render(<SpeciesTraitsAndFeats character={char} />);
       expect(container.innerHTML).toBe('');
     });
 
-    it('renders nothing when features array is empty', () => {
-      const char = { ...baseCharacter, features: [] };
+    it('renders nothing when features and feats are both empty', () => {
+      const char: Character = { ...baseCharacter, features: [], feats: [] };
       const { container } = render(<SpeciesTraitsAndFeats character={char} />);
       expect(container.innerHTML).toBe('');
     });
@@ -127,6 +167,7 @@ describe('SpeciesTraitsAndFeats', () => {
       const char: Character = {
         ...baseCharacter,
         features: [{ name: 'Darkvision', source: 'Dwarf' }],
+        feats: [],
       };
       render(<SpeciesTraitsAndFeats character={char} />);
       expect(screen.getByText('Species Traits')).toBeInTheDocument();
@@ -137,7 +178,8 @@ describe('SpeciesTraitsAndFeats', () => {
     it('renders only Feats when no species traits exist', () => {
       const char: Character = {
         ...baseCharacter,
-        features: [{ name: 'Lucky', source: 'Feat' }],
+        features: [],
+        feats: [{ name: 'Lucky', option: null, source: 'Custom' }],
       };
       render(<SpeciesTraitsAndFeats character={char} />);
       expect(screen.getByText('Species Traits')).toBeInTheDocument();

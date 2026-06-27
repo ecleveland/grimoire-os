@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import type {
   AbilityScores,
   Character,
+  CharacterFeat,
   Currency,
   DieType,
   Feature,
@@ -68,9 +69,15 @@ export interface CharacterFormValues {
   backstory: string;
   avatarUrl: string;
   // Weapons table + features/traits/feats (slice 5). Features are categorized on
-  // the sheet by `source` (class → Class Features, race → Species Traits, else Feats).
+  // the sheet by `source` (class → Class Features, race → Species Traits, any
+  // other source → Feats); granted feats also come from the structured `feats`
+  // field below (VEG-430).
   weapons: Weapon[];
   features: Feature[];
+  // Granted feats (VEG-430), e.g. a background's origin feat. Carried structured
+  // ({ featId, name, option }) rather than folded into `features` so the chosen
+  // parameter (Magic Initiate's spell list) survives round-trips.
+  feats: CharacterFeat[];
   // Starting inventory + coin. Currently written only by the guided builder's
   // Equipment step (VEG-382); the classic editor round-trips them untouched (no
   // inventory editor yet), so loading and re-sending them is a no-op there.
@@ -143,6 +150,7 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     avatarUrl: '',
     weapons: [],
     features: [],
+    feats: [],
     inventory: [],
     currency: emptyCurrency(),
     spells: [],
@@ -183,6 +191,7 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     avatarUrl: c.avatarUrl ?? '',
     weapons: c.weapons ?? [],
     features: c.features ?? [],
+    feats: c.feats ?? [],
     inventory: c.inventory ?? [],
     currency: c.currency ?? emptyCurrency(),
     spells: c.spells ?? [],
@@ -223,6 +232,7 @@ type CharacterWriteFields = Pick<
   | 'avatarUrl'
   | 'weapons'
   | 'features'
+  | 'feats'
   | 'inventory'
   | 'currency'
   | 'spells'
@@ -265,6 +275,7 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     // Drop incomplete rows the user added but never named.
     weapons: v.weapons.filter(w => w.name.trim() !== ''),
     features: v.features.filter(f => f.name.trim() !== ''),
+    feats: v.feats.filter(f => f.name.trim() !== ''),
     inventory: v.inventory.filter(i => i.name.trim() !== ''),
     currency: v.currency,
     spells: v.spells.filter(s => s.name.trim() !== ''),

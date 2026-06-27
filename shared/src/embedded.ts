@@ -89,6 +89,21 @@ export interface Feature {
 }
 
 /**
+ * A feat granted to a character (VEG-430). `featId` references the SRD/homebrew
+ * `Feat` row when the grant came from the catalog (absent for a free-typed
+ * entry). `option` carries the chosen parameter for a parameterized feat — e.g.
+ * Magic Initiate's spell list ("Cleric"). `source` tags where the grant came
+ * from (e.g. the background name for an origin feat) so it can be reconciled and
+ * grouped, mirroring the `Feature.source` convention.
+ */
+export interface CharacterFeat {
+  featId?: string | null;
+  name: string;
+  option?: string | null;
+  source?: string;
+}
+
+/**
  * A single stocked line in a campaign shop (VEG-353). `itemId` links the global
  * Item catalog when the line was added from the picker (null/absent for a
  * free-typed entry); `name`/`category` are denormalized so a renamed or deleted

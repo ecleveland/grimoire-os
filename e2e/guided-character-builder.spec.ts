@@ -38,8 +38,12 @@ test.describe('guided character builder — class selection', () => {
     await expect(page.getByRole('heading', { name: /origin/i })).toBeVisible();
     const background = page.getByRole('combobox', { name: /background/i });
     await background.click();
+    // First background alphabetically is Acolyte, whose origin feat is Magic
+    // Initiate (Cleric) — the grant card surfaces it (VEG-430).
     await page.getByRole('option').first().click();
-    await expect(page.getByRole('group', { name: /background grants/i })).toBeVisible();
+    const backgroundGrants = page.getByRole('group', { name: /background grants/i });
+    await expect(backgroundGrants).toBeVisible();
+    await expect(backgroundGrants).toContainText('Magic Initiate (Cleric)');
     const species = page.getByRole('combobox', { name: /species/i });
     await species.click();
     await page.getByRole('option').first().click();
@@ -84,6 +88,10 @@ test.describe('guided character builder — class selection', () => {
     await create.click();
 
     await expect(page.getByRole('heading', { name: 'Borin Quickblade' })).toBeVisible();
+    // The granted origin feat persists onto the sheet's Feats section (VEG-430).
+    const feats = page.getByRole('heading', { name: /^Feats$/ }).locator('..');
+    await expect(feats).toContainText('Magic Initiate');
+    await expect(feats).toContainText('(Cleric)');
   });
 
   // VEG-383 Spells step: a caster class surfaces the otherwise-hidden Spells step
