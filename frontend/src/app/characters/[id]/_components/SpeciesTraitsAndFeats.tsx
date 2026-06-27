@@ -13,10 +13,16 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
   // is neither the class nor the race (the classic editor's FeaturesEditor still
   // allows a "Feat"/blank source). Those carry a description; structured feats
   // carry the option.
-  const featureFeats = features.filter(
-    f => f.source !== character.class && f.source !== character.race
-  );
   const grantedFeats = character.feats ?? [];
+  const grantedNames = new Set(grantedFeats.map(f => f.name));
+  const featureFeats = features.filter(
+    f =>
+      f.source !== character.class &&
+      f.source !== character.race &&
+      // Don't double-list a feat that's already in the structured `feats` field
+      // (e.g. a guided-granted feat the user also re-typed in the classic editor).
+      !grantedNames.has(f.name)
+  );
 
   if (speciesTraits.length === 0 && featureFeats.length === 0 && grantedFeats.length === 0) {
     return null;
@@ -49,7 +55,7 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
         </h3>
         <div className="space-y-3">
           {grantedFeats.map(feat => (
-            <div key={`feat:${feat.name}:${feat.option ?? ''}`}>
+            <div key={`feat:${feat.featId ?? feat.name}:${feat.option ?? ''}`}>
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feat.name}
                 {feat.option && (

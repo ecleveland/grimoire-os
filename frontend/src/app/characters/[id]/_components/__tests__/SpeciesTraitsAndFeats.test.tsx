@@ -116,6 +116,16 @@ describe('SpeciesTraitsAndFeats', () => {
       expect(screen.getByText('Homebrew Ability')).toBeInTheDocument();
     });
 
+    it('does not double-list a feat present in both feats and features', () => {
+      const char: Character = {
+        ...baseCharacter,
+        features: [{ name: 'Magic Initiate', source: 'Feat' }],
+        feats: [{ featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' }],
+      };
+      render(<SpeciesTraitsAndFeats character={char} />);
+      expect(screen.getAllByText('Magic Initiate')).toHaveLength(1);
+    });
+
     it('renders both structured feats and legacy feature-feats together', () => {
       const char: Character = {
         ...baseCharacter,

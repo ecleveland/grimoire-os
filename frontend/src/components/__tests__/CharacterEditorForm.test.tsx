@@ -234,6 +234,20 @@ describe('pure helpers', () => {
     expect(payload.features).toEqual([{ name: 'Second Wind', source: 'Fighter', description: '' }]);
   });
 
+  it('round-trips structured feats through load and save, dropping unnamed entries (VEG-430)', () => {
+    // The classic editor must preserve a granted origin feat: load it from the
+    // character, and include it (with its option) in the save payload.
+    const feats = [
+      { featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' },
+    ];
+    const v = characterToFormValues(makeCharacter({ feats }));
+    expect(v.feats).toEqual(feats);
+
+    v.feats = [...feats, { featId: null, name: '  ', option: null, source: 'x' }];
+    const payload = characterFormPayload(v);
+    expect(payload.feats).toEqual(feats);
+  });
+
   it('characterFormPayload carries inventory/currency and drops unnamed items', () => {
     const v = emptyCharacterFormValues();
     v.inventory = [
