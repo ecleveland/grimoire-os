@@ -98,6 +98,12 @@ export class CampaignsController {
     return this.campaignsService.findAttachableCharacters(id, req.user.userId);
   }
 
+  @Get(':id/members')
+  @ApiOperation({ summary: 'List campaign members with display names (owner only)' })
+  findMembers(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.campaignsService.findMembers(id, req.user.userId);
+  }
+
   @Post(':id/characters/:characterId')
   @ApiOperation({ summary: 'Add character to campaign' })
   addCharacter(

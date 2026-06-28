@@ -41,6 +41,19 @@ export class PartyCharacterDto {
   @Expose() hitPoints!: HitPoints | null;
 }
 
+/**
+ * Campaign member projection backing the roster's owner-facing member list and
+ * its DM "remove a player" control (VEG-360). Just the identity fields the UI
+ * needs — userId (the `DELETE /players/:playerId` target), a display name, and
+ * the owner flag so the UI never offers a Remove on the owner's own row. Owner
+ * only; non-members never see the campaign's member identities.
+ */
+export class CampaignMemberDto {
+  @Expose() userId!: string;
+  @Expose() displayName!: string;
+  @Expose() isOwner!: boolean;
+}
+
 /** Slim campaign shape for list views (VEG-125 projection, VEG-128 DTO). */
 export class CampaignListItemDto {
   @Expose() id!: string;

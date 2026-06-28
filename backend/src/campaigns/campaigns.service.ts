@@ -9,7 +9,12 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
-import { CampaignDto, CampaignListItemDto, PartyCharacterDto } from './dto/campaign-response.dto';
+import {
+  CampaignDto,
+  CampaignListItemDto,
+  CampaignMemberDto,
+  PartyCharacterDto,
+} from './dto/campaign-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { stripCombatantsForCharacters } from './combatant-cleanup';
 
@@ -214,6 +219,36 @@ export class CampaignsService {
       select: partyCharacterSelect,
     });
     return toDtoArray(PartyCharacterDto, characters);
+  }
+
+  /**
+   * Owner-facing campaign member list backing the roster's "remove a player"
+   * control (VEG-360). Owner-gated — only the DM manages membership, and a
+   * member's identity (display name) is owner-only. The owner is returned first
+   * with `isOwner: true` so the UI never offers a Remove on their own row;
+   * players follow, sorted by display name. The owner is de-duped out of the
+   * players relation (campaigns store the owner as a CampaignPlayer too).
+   */
+  async findMembers(campaignId: string, userId: string): Promise<CampaignMemberDto[]> {
+    const campaign = await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    const playerIds = campaign.players.map(p => p.userId).filter(id => id !== campaign.ownerId);
+    const memberIds = [campaign.ownerId, ...playerIds];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: memberIds } },
+      select: { id: true, displayName: true },
+    });
+    const displayNameById = new Map(users.map(u => [u.id, u.displayName]));
+    const toMember = (id: string) => ({
+      userId: id,
+      // A member row always has a user; fall back defensively so a since-deleted
+      // account can still be listed and removed rather than crashing the list.
+      displayName: displayNameById.get(id) ?? 'Unknown',
+      isOwner: id === campaign.ownerId,
+    });
+    const players = playerIds
+      .map(toMember)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return toDtoArray(CampaignMemberDto, [toMember(campaign.ownerId), ...players]);
   }
 
   async addCharacter(campaignId: string, characterId: string, userId: string) {

@@ -43,6 +43,7 @@ export type {
   Weapon,
   Combatant,
   PartyCharacter,
+  CampaignMember,
   // Entity types
   User,
   Campaign,

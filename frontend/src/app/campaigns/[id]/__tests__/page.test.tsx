@@ -821,6 +821,11 @@ describe('CampaignDetailPage', () => {
           if (path === '/campaigns/camp-1/attachable-characters') {
             return Promise.resolve(pool);
           }
+          // VEG-360 member list — not under test here, but the owner roster tab
+          // now fetches it, so return an array rather than the generic fallback.
+          if (path === '/campaigns/camp-1/members') {
+            return Promise.resolve([]);
+          }
           if (path === '/campaigns/camp-1/characters') {
             return Promise.resolve(rows);
           }
@@ -1132,6 +1137,205 @@ describe('CampaignDetailPage', () => {
       // would 403 now that we've left and fire 'Failed to load campaign').
       expect(detailGetCount()).toBe(before);
       expect(mockToastError).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('member removal (VEG-360)', () => {
+    type Member = { userId: string; displayName: string; isOwner: boolean };
+
+    // Path-routing mock: the members list is read from a mutable closure so a
+    // DELETE followed by react-query invalidation re-reads the shrunken list.
+    function routeMembers(opts: {
+      campaign?: Campaign;
+      members: Member[];
+      onRemove?: (playerId: string) => Promise<unknown>;
+    }) {
+      const campaign = opts.campaign ?? makeCampaign();
+      let rows = opts.members;
+      mockApiFetch.mockImplementation(
+        (path: string, init?: { method?: string }): Promise<unknown> => {
+          if (path.startsWith('/campaigns/camp-1/players/') && init?.method === 'DELETE') {
+            const playerId = path.split('/')[4];
+            if (opts.onRemove) return opts.onRemove(playerId);
+            rows = rows.filter(m => m.userId !== playerId);
+            return Promise.resolve(undefined);
+          }
+          // Must precede the generic no-method campaign branch.
+          if (path === '/campaigns/camp-1/members') {
+            return Promise.resolve(rows);
+          }
+          if (path === '/campaigns/camp-1/characters') {
+            return Promise.resolve([]);
+          }
+          if (path === '/campaigns/camp-1/attachable-characters') {
+            return Promise.resolve([]);
+          }
+          if (path.startsWith('/campaigns/camp-1') && init?.method === undefined) {
+            return Promise.resolve(campaign);
+          }
+          return Promise.resolve(makeListResponse([]));
+        }
+      );
+    }
+
+    async function openRosterTab(user: ReturnType<typeof userEvent.setup>) {
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      await user.click(screen.getByRole('button', { name: /^roster$/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: /party roster/i })).toBeInTheDocument()
+      );
+    }
+
+    it('owner sees a Members list: owner row badged, Remove only on other members', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        members: [
+          { userId: 'user-1', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-2', displayName: 'Bob Player', isOwner: false },
+        ],
+      });
+      await openRosterTab(user);
+
+      await waitFor(() => expect(screen.getByText('Bob Player')).toBeInTheDocument());
+      expect(screen.getByRole('heading', { name: /members/i })).toBeInTheDocument();
+      expect(screen.getByText('Dungeon Master')).toBeInTheDocument();
+      // Remove offered for the player but never for the owner's own row.
+      expect(screen.getByRole('button', { name: /remove player bob player/i })).toBeInTheDocument();
+      expect(
+        screen.queryByRole('button', { name: /remove player dungeon master/i })
+      ).not.toBeInTheDocument();
+    });
+
+    it('never shows the Members list to non-owners and never fetches it', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        campaign: makeCampaign({ ownerId: 'someone-else' }),
+        members: [
+          { userId: 'someone-else', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-1', displayName: 'Me', isOwner: false },
+        ],
+      });
+      await openRosterTab(user);
+
+      expect(screen.queryByRole('heading', { name: /members/i })).not.toBeInTheDocument();
+      expect(mockApiFetch).not.toHaveBeenCalledWith('/campaigns/camp-1/members');
+      expect(mockApiFetch).not.toHaveBeenCalledWith('/campaigns/camp-1/members', expect.anything());
+    });
+
+    it('confirming removal DELETEs the player id, re-syncs the list, and toasts', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        members: [
+          { userId: 'user-1', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-2', displayName: 'Bob Player', isOwner: false },
+        ],
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Bob Player')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove player bob player/i }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/remove player/i);
+      // Copy spells out the VEG-138 cascade consequences.
+      expect(dialog).toHaveTextContent(/detached/i);
+      expect(dialog).toHaveTextContent(/private notes/i);
+      await user.click(within(dialog).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(screen.queryByText('Bob Player')).not.toBeInTheDocument());
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/campaigns/camp-1/players/user-2',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      // The list is re-synced from the server (refetched), not patched locally.
+      const memberCalls = mockApiFetch.mock.calls.filter(c => c[0] === '/campaigns/camp-1/members');
+      expect(memberCalls.length).toBeGreaterThanOrEqual(2);
+      expect(mockToastSuccess).toHaveBeenCalledWith('Player removed from campaign');
+    });
+
+    it('keeps the member and toasts the error message when removal fails', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        members: [
+          { userId: 'user-1', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-2', displayName: 'Bob Player', isOwner: false },
+        ],
+        onRemove: () =>
+          Promise.reject(new Error('Only the campaign owner can perform this action')),
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Bob Player')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove player bob player/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith(
+          'Only the campaign owner can perform this action'
+        )
+      );
+      expect(screen.getByText('Bob Player')).toBeInTheDocument();
+    });
+
+    it('toasts a generic message when removal rejects with a non-Error', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        members: [
+          { userId: 'user-1', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-2', displayName: 'Bob Player', isOwner: false },
+        ],
+        onRemove: () => Promise.reject('boom'),
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Bob Player')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove player bob player/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to remove player'));
+      expect(screen.getByText('Bob Player')).toBeInTheDocument();
+    });
+
+    it('disables the remove button while the DELETE is in flight', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        members: [
+          { userId: 'user-1', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-2', displayName: 'Bob Player', isOwner: false },
+        ],
+        onRemove: () => new Promise(() => {}), // never resolves
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Bob Player')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove player bob player/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+      expect(screen.getByRole('button', { name: /remove player bob player/i })).toBeDisabled();
+    });
+
+    it('cancelling closes the dialog without calling DELETE and keeps the member', async () => {
+      const user = userEvent.setup();
+      routeMembers({
+        members: [
+          { userId: 'user-1', displayName: 'Dungeon Master', isOwner: true },
+          { userId: 'user-2', displayName: 'Bob Player', isOwner: false },
+        ],
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByText('Bob Player')).toBeInTheDocument());
+
+      await user.click(screen.getByRole('button', { name: /remove player bob player/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(
+        mockApiFetch.mock.calls.filter(
+          c => (c[1] as { method?: string } | undefined)?.method === 'DELETE'
+        )
+      ).toHaveLength(0);
+      expect(screen.getByText('Bob Player')).toBeInTheDocument();
     });
   });
 });

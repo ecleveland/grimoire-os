@@ -662,6 +662,86 @@ describe('CampaignsService', () => {
     });
   });
 
+  describe('findMembers', () => {
+    // Owner is USER_ID; USER_ID_2 is a joined player. The owner is also present
+    // in the players relation (campaigns add the owner as a CampaignPlayer), so
+    // the member list must de-dupe the owner rather than list them twice.
+    const ownerAndMemberCampaign = {
+      ...mockCampaign,
+      ownerId: USER_ID,
+      players: [
+        { id: 'cp1', campaignId: CAMPAIGN_ID, userId: USER_ID, joinedAt: new Date() },
+        { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+      ],
+    };
+
+    it('owner-gates, then lists the owner first and players sorted by displayName', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      // Returned out of order to prove the service sorts players by displayName.
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID_2, displayName: 'Zara' },
+        { id: USER_ID, displayName: 'Owner Olwen' },
+      ]);
+
+      const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
+
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [USER_ID, USER_ID_2] } },
+        select: { id: true, displayName: true },
+      });
+      expect(result).toEqual([
+        { userId: USER_ID, displayName: 'Owner Olwen', isOwner: true },
+        { userId: USER_ID_2, displayName: 'Zara', isOwner: false },
+      ]);
+    });
+
+    it('sorts multiple players by displayName, owner always first', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({
+        ...mockCampaign,
+        ownerId: USER_ID,
+        players: [
+          { id: 'cp1', campaignId: CAMPAIGN_ID, userId: USER_ID, joinedAt: new Date() },
+          { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+          { id: 'cp3', campaignId: CAMPAIGN_ID, userId: CHARACTER_ID, joinedAt: new Date() },
+        ],
+      });
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID, displayName: 'Owner' },
+        { id: USER_ID_2, displayName: 'Brunhild' },
+        { id: CHARACTER_ID, displayName: 'Aerin' },
+      ]);
+
+      const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
+
+      expect(result.map(m => m.displayName)).toEqual(['Owner', 'Aerin', 'Brunhild']);
+      expect(result.map(m => m.isOwner)).toEqual([true, false, false]);
+    });
+
+    it("falls back to 'Unknown' for a member whose user row is missing (since-deleted)", async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      // The player's user row is gone (account deleted) — findMany omits it, so
+      // the display-name lookup misses and the row is still listed + removable.
+      prisma.user.findMany.mockResolvedValue([{ id: USER_ID, displayName: 'Owner Olwen' }]);
+
+      const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
+
+      expect(result).toEqual([
+        { userId: USER_ID, displayName: 'Owner Olwen', isOwner: true },
+        { userId: USER_ID_2, displayName: 'Unknown', isOwner: false },
+      ]);
+    });
+
+    it('propagates ForbiddenException for non-owners without querying users', async () => {
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
+
+      await expect(service.findMembers(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('removeCharacter', () => {
     it('removes character from campaign when called by owner', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);

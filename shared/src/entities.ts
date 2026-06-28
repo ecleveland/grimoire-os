@@ -143,6 +143,12 @@ export interface PartyCharacter {
   hitPoints: HitPoints | null;
 }
 
+export interface CampaignMember {
+  userId: string;
+  displayName: string;
+  isOwner: boolean;
+}
+
 export interface Note {
   id: string;
   campaignId: string;
