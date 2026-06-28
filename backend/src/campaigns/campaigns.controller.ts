@@ -129,4 +129,11 @@ export class CampaignsController {
   ) {
     return this.campaignsService.removePlayer(id, playerId, req.user.userId);
   }
+
+  @Delete(':id/membership')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Leave a campaign (self-service; the owner cannot leave)' })
+  leaveCampaign(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.campaignsService.leaveCampaign(id, req.user.userId);
+  }
 }

@@ -18,12 +18,14 @@ const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
 const mockToastSuccess = vi.fn();
 const mockUseAuth = vi.fn();
+const mockPush = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'camp-1' }),
+  useRouter: () => ({ push: mockPush }),
 }));
 vi.mock('sonner', () => ({
   toast: {
@@ -153,6 +155,7 @@ beforeEach(() => {
   mockApiFetch.mockReset();
   mockToastError.mockReset();
   mockToastSuccess.mockReset();
+  mockPush.mockReset();
   mockUseAuth.mockReturnValue({
     user: { userId: 'user-1', username: 'dm', role: 'dungeon_master' },
   });
@@ -1021,6 +1024,114 @@ describe('CampaignDetailPage', () => {
         )
       );
       expect(screen.getByRole('combobox', { name: /add a member/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('leave campaign (VEG-359)', () => {
+    async function renderAsMemberOf(campaign = makeCampaign({ ownerId: 'someone-else' })) {
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
+        if (path === '/campaigns/camp-1/membership' && init?.method === 'DELETE') {
+          return Promise.resolve(undefined);
+        }
+        if (path === '/campaigns/camp-1') return Promise.resolve(campaign);
+        return Promise.resolve(makeListResponse([]));
+      });
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+    }
+
+    it('offers the owner Edit, not Leave', async () => {
+      // Default auth user (user-1) owns the default campaign.
+      mockApiFetch.mockResolvedValue(makeCampaign({ ownerId: 'user-1' }));
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      expect(screen.getByRole('link', { name: /edit/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /leave campaign/i })).not.toBeInTheDocument();
+    });
+
+    it('offers a non-owner member Leave, not Edit', async () => {
+      await renderAsMemberOf();
+      expect(screen.getByRole('button', { name: /leave campaign/i })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /edit/i })).not.toBeInTheDocument();
+    });
+
+    it('confirming leave DELETEs the membership, toasts, and routes to the list', async () => {
+      const user = userEvent.setup();
+      await renderAsMemberOf();
+
+      await user.click(screen.getByRole('button', { name: /leave campaign/i }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/leave campaign/i);
+      expect(dialog).toHaveTextContent(/detached/i);
+      await user.click(within(dialog).getByRole('button', { name: 'Leave' }));
+
+      await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns'));
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/campaigns/camp-1/membership',
+        expect.objectContaining({ method: 'DELETE' })
+      );
+      expect(mockToastSuccess).toHaveBeenCalledWith('You left the campaign');
+    });
+
+    it('toasts and stays put when leaving fails', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string }) => {
+        if (path === '/campaigns/camp-1/membership' && init?.method === 'DELETE') {
+          return Promise.reject(new Error('Server error'));
+        }
+        if (path === '/campaigns/camp-1') {
+          return Promise.resolve(makeCampaign({ ownerId: 'someone-else' }));
+        }
+        return Promise.resolve(makeListResponse([]));
+      });
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+
+      await user.click(screen.getByRole('button', { name: /leave campaign/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Leave' }));
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Server error'));
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+
+    it('does not offer Leave (or Edit) while auth is still hydrating', async () => {
+      // `user` not yet hydrated → owner-vs-member is unknown, so neither
+      // destructive control is shown (the owner must never see Leave).
+      mockUseAuth.mockReturnValue({ user: null });
+      mockApiFetch.mockResolvedValue(makeCampaign({ ownerId: 'user-1' }));
+      renderPage();
+      await waitFor(() =>
+        expect(screen.getByRole('heading', { name: 'The Lost Mines' })).toBeInTheDocument()
+      );
+      expect(screen.queryByRole('button', { name: /leave campaign/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /edit/i })).not.toBeInTheDocument();
+    });
+
+    it('does not refetch the left campaign after leaving (no spurious 403 toast)', async () => {
+      const user = userEvent.setup();
+      await renderAsMemberOf();
+      const detailGetCount = () =>
+        mockApiFetch.mock.calls.filter(
+          ([p, init]) =>
+            p === '/campaigns/camp-1' &&
+            (init as { method?: string } | undefined)?.method === undefined
+        ).length;
+      const before = detailGetCount();
+
+      await user.click(screen.getByRole('button', { name: /leave campaign/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Leave' }));
+      await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns'));
+
+      // The detail query is not invalidated, so it isn't refetched (a refetch
+      // would 403 now that we've left and fire 'Failed to load campaign').
+      expect(detailGetCount()).toBe(before);
+      expect(mockToastError).not.toHaveBeenCalled();
     });
   });
 });

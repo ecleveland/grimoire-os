@@ -845,4 +845,62 @@ describe('CampaignsService', () => {
       expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
     });
   });
+
+  describe('leaveCampaign (VEG-359)', () => {
+    it('blocks the owner from leaving their own campaign and runs no cleanup', async () => {
+      // mockCampaign.ownerId === USER_ID, so USER_ID is the owner.
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+
+      await expect(service.leaveCampaign(CAMPAIGN_ID, USER_ID)).rejects.toThrow(ForbiddenException);
+
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('lets a non-owner member leave, running the same cleanup as a DM removal', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign); // owner is USER_ID
+      prisma.character.findMany.mockResolvedValue([]); // no owned chars → no combatant cleanup
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+      prisma.note.deleteMany.mockResolvedValue({ count: 1 });
+      prisma.campaignPlayer.delete.mockResolvedValue({});
+
+      const result = await service.leaveCampaign(CAMPAIGN_ID, USER_ID_2);
+
+      expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID_2);
+      // Self-service: the owner-gate is never consulted.
+      expect(campaignAuth.assertCampaignOwner).not.toHaveBeenCalled();
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      // The leaver's characters are detached (campaignId -> null), not deleted.
+      expect(prisma.character.updateMany).toHaveBeenCalledWith({
+        where: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 },
+        data: { campaignId: null },
+      });
+      // Only the leaver's PRIVATE notes are deleted.
+      expect(prisma.note.deleteMany).toHaveBeenCalledWith({
+        where: {
+          campaignId: CAMPAIGN_ID,
+          authorId: USER_ID_2,
+          visibility: NoteVisibility.PRIVATE,
+        },
+      });
+      // The membership join row is deleted.
+      expect(prisma.campaignPlayer.delete).toHaveBeenCalledWith({
+        where: { campaignId_userId: { campaignId: CAMPAIGN_ID, userId: USER_ID_2 } },
+      });
+      // Self-leave returns no body — the caller is no longer a member.
+      expect(result).toBeUndefined();
+    });
+
+    it('propagates ForbiddenException for a non-member without running cleanup', async () => {
+      campaignAuth.assertCampaignMember.mockRejectedValue(
+        new ForbiddenException('You are not a member of this campaign')
+      );
+
+      await expect(service.leaveCampaign(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
 });
