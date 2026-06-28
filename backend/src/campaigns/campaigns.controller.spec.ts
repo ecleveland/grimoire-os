@@ -28,6 +28,7 @@ describe('CampaignsController', () => {
       addCharacter: jest.fn(),
       removeCharacter: jest.fn(),
       removePlayer: jest.fn(),
+      leaveCampaign: jest.fn(),
       findCharactersForMember: jest.fn(),
       findAttachableCharacters: jest.fn(),
     };
@@ -183,6 +184,16 @@ describe('CampaignsController', () => {
       await controller.removePlayer(CAMPAIGN_ID, playerId, mockReq);
 
       expect(service.removePlayer).toHaveBeenCalledWith(CAMPAIGN_ID, playerId, USER_ID);
+    });
+  });
+
+  describe('leaveCampaign', () => {
+    it('delegates to service with campaignId and the caller userId', async () => {
+      service.leaveCampaign.mockResolvedValue(undefined);
+
+      await controller.leaveCampaign(CAMPAIGN_ID, mockReq);
+
+      expect(service.leaveCampaign).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
     });
   });
 });

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
@@ -37,8 +37,10 @@ export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const [tab, setTab] = useState<Tab>('overview');
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
   const [notesPage, setNotesPage] = useState(1);
   const [encountersPage, setEncountersPage] = useState(1);
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
@@ -52,6 +54,10 @@ export default function CampaignDetailPage() {
   });
   const campaign = campaignQuery.data ?? null;
   const isOwner = campaign && user && campaign.ownerId === user.userId;
+  // A positively-known non-owner member (the page only loads for members). Gated
+  // on `user` being hydrated so the destructive Leave control is never shown to
+  // the real owner during the auth-loading race (when `isOwner` is still falsy).
+  const canLeave = Boolean(campaign && user && campaign.ownerId !== user.userId);
   // The campaign cache is the single source of truth for the invite code;
   // generate/revoke write it back via setQueryData (below) so it can't go stale
   // and resurface a revoked code on a cached remount.
@@ -227,6 +233,22 @@ export default function CampaignDetailPage() {
     }
   );
 
+  const leaveCampaign = useApiMutation(
+    () => apiFetch(`/campaigns/${id}/membership`, { method: 'DELETE' }),
+    {
+      onSuccess: () => {
+        toast.success('You left the campaign');
+        router.push('/campaigns');
+        // Refresh the campaigns LIST only (`/campaigns?…`). Deliberately do NOT
+        // invalidate this campaign's detail/roster queries — we've just left, so
+        // a refetch would 403 and fire a spurious "Failed to load" toast; they're
+        // left to be GC'd as the page unmounts.
+        invalidateApiPath(queryClient, '/campaigns?');
+      },
+      onError: err => toast.error(err instanceof Error ? err.message : 'Failed to leave campaign'),
+    }
+  );
+
   if (campaignQuery.isPending)
     return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   if (!campaign) return <div className="text-gray-500 dark:text-gray-400">Campaign not found.</div>;
@@ -261,14 +283,23 @@ export default function CampaignDetailPage() {
             )}
           </div>
         </div>
-        {isOwner && (
+        {isOwner ? (
           <Link
             href={`/campaigns/${id}/edit`}
             className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
           >
             Edit
           </Link>
-        )}
+        ) : canLeave ? (
+          <button
+            type="button"
+            onClick={() => setConfirmingLeave(true)}
+            disabled={leaveCampaign.isPending}
+            className="px-4 py-2 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
+          >
+            Leave campaign
+          </button>
+        ) : null}
       </div>
 
       {campaign.description && (
@@ -739,6 +770,18 @@ export default function CampaignDetailPage() {
         onConfirm={() => {
           if (characterToDetach) detachCharacter.mutate(characterToDetach);
         }}
+      />
+
+      <ConfirmDialog
+        open={confirmingLeave}
+        onOpenChange={open => {
+          if (!open) setConfirmingLeave(false);
+        }}
+        title="Leave campaign?"
+        description="Leave this campaign? Your characters will be detached from it and your private notes here will be removed. This can't be undone."
+        confirmLabel="Leave"
+        variant="danger"
+        onConfirm={() => leaveCampaign.mutate()}
       />
     </div>
   );

@@ -258,9 +258,32 @@ export class CampaignsService {
 
   async removePlayer(campaignId: string, playerId: string, userId: string) {
     await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    await this.cleanupPlayerMembership(campaignId, playerId);
+    return this.findOne(campaignId);
+  }
 
-    // Cascade the removed player's campaign-scoped cleanup atomically so a
-    // partial failure rolls everything back (VEG-138).
+  /**
+   * Self-service leave (VEG-359): a member removes their OWN membership. Runs the
+   * same campaign-scoped cleanup as a DM-initiated removal so the two paths can't
+   * drift. The owner cannot leave their own campaign — they must transfer
+   * ownership or delete it instead.
+   */
+  async leaveCampaign(campaignId: string, userId: string): Promise<void> {
+    const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
+    if (campaign.ownerId === userId) {
+      throw new ForbiddenException(
+        'The campaign owner cannot leave their own campaign; transfer ownership or delete it instead.'
+      );
+    }
+    await this.cleanupPlayerMembership(campaignId, userId);
+  }
+
+  /**
+   * Campaign-scoped cleanup when a player leaves a campaign — whether removed by
+   * the DM (removePlayer) or self-leaving (leaveCampaign). Cascades atomically so
+   * a partial failure rolls everything back (VEG-138).
+   */
+  private async cleanupPlayerMembership(campaignId: string, playerId: string): Promise<void> {
     await this.prisma.$transaction(async tx => {
       // Collect the player's character ids up front (VEG-256): combatants
       // snapshot a `characterId`, so this is the key for stripping their PC
@@ -330,7 +353,5 @@ export class CampaignsService {
         },
       });
     });
-
-    return this.findOne(campaignId);
   }
 }
