@@ -786,17 +786,37 @@ describe('CampaignDetailPage', () => {
     function routeRoster(opts: {
       campaign?: Campaign;
       characters: PartyCharacter[];
+      attachable?: PartyCharacter[];
       onDetach?: (id: string) => Promise<unknown>;
+      onAttach?: (id: string) => Promise<unknown>;
     }) {
       const campaign = opts.campaign ?? makeCampaign();
       let rows = opts.characters;
+      let pool = opts.attachable ?? [];
       mockApiFetch.mockImplementation(
         (path: string, init?: { method?: string }): Promise<unknown> => {
           if (path.startsWith('/campaigns/camp-1/characters/') && init?.method === 'DELETE') {
             const cid = path.split('/')[4];
             if (opts.onDetach) return opts.onDetach(cid);
+            const moved = rows.find(c => c.id === cid);
             rows = rows.filter(c => c.id !== cid);
+            // A detached character becomes unattached → re-enters the attach pool
+            // (models the backend's campaignId: null filter).
+            if (moved) pool = [...pool, moved];
             return Promise.resolve(undefined);
+          }
+          if (path.startsWith('/campaigns/camp-1/characters/') && init?.method === 'POST') {
+            const cid = path.split('/')[4];
+            if (opts.onAttach) return opts.onAttach(cid);
+            const moved = pool.find(c => c.id === cid);
+            pool = pool.filter(c => c.id !== cid);
+            if (moved) rows = [...rows, moved];
+            return Promise.resolve(campaign);
+          }
+          // Must precede the generic `/campaigns/camp-1` (no-method) campaign
+          // branch, which would otherwise swallow this GET.
+          if (path === '/campaigns/camp-1/attachable-characters') {
+            return Promise.resolve(pool);
           }
           if (path === '/campaigns/camp-1/characters') {
             return Promise.resolve(rows);
@@ -895,6 +915,112 @@ describe('CampaignDetailPage', () => {
 
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('not allowed'));
       expect(screen.getByText('Aria')).toBeInTheDocument();
+    });
+
+    // ── VEG-361: DM attach-on-behalf ──────────────────────────────────────────
+    it('shows the owner an attach picker listing members’ attachable characters', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        characters: [],
+        attachable: [makeParty({ id: 'char-2', name: 'Borin', level: 4 })],
+      });
+      await openRosterTab(user);
+
+      const picker = await screen.findByRole('combobox', { name: /add a member/i });
+      expect(within(picker).getByRole('option', { name: /borin \(lvl 4/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^add$/i })).toBeInTheDocument();
+    });
+
+    it('shows the owner an empty-add hint when nothing is attachable', async () => {
+      const user = userEvent.setup();
+      routeRoster({ characters: [], attachable: [] });
+      await openRosterTab(user);
+      await waitFor(() =>
+        expect(screen.getByText(/no member characters are available to add/i)).toBeInTheDocument()
+      );
+      expect(screen.queryByRole('combobox', { name: /add a member/i })).not.toBeInTheDocument();
+    });
+
+    it('never shows the attach picker to non-owners', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        campaign: makeCampaign({ ownerId: 'someone-else' }),
+        characters: [],
+        attachable: [makeParty({ id: 'char-2', name: 'Borin' })],
+      });
+      await openRosterTab(user);
+      expect(screen.queryByRole('combobox', { name: /add a member/i })).not.toBeInTheDocument();
+      // And the attachable list is never even fetched for a non-owner.
+      expect(mockApiFetch).not.toHaveBeenCalledWith(
+        '/campaigns/camp-1/attachable-characters',
+        expect.anything()
+      );
+      expect(mockApiFetch).not.toHaveBeenCalledWith('/campaigns/camp-1/attachable-characters');
+    });
+
+    it('attaching a character POSTs the id, moves it into the roster, and toasts', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        characters: [],
+        attachable: [makeParty({ id: 'char-2', name: 'Borin', level: 4 })],
+      });
+      await openRosterTab(user);
+
+      const picker = await screen.findByRole('combobox', { name: /add a member/i });
+      await user.selectOptions(picker, 'char-2');
+      await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+      // Lands in the roster…
+      await waitFor(() => expect(screen.getByRole('link', { name: /borin/i })).toBeInTheDocument());
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/campaigns/camp-1/characters/char-2',
+        expect.objectContaining({ method: 'POST' })
+      );
+      expect(mockToastSuccess).toHaveBeenCalledWith('Character added to campaign');
+      // …and drops out of the attach picker (the list was re-fetched).
+      await waitFor(() =>
+        expect(screen.queryByRole('combobox', { name: /add a member/i })).not.toBeInTheDocument()
+      );
+    });
+
+    it('re-offers a detached character in the attach picker (detach invalidates the list)', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        characters: [makeParty({ id: 'char-1', name: 'Aria', level: 3 })],
+        attachable: [],
+      });
+      await openRosterTab(user);
+      await waitFor(() => expect(screen.getByRole('link', { name: /aria/i })).toBeInTheDocument());
+      // Nothing attachable yet, so no picker.
+      expect(screen.queryByRole('combobox', { name: /add a member/i })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /remove aria/i }));
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove' }));
+
+      // The freed character re-enters the attach picker without a reload.
+      const picker = await screen.findByRole('combobox', { name: /add a member/i });
+      expect(within(picker).getByRole('option', { name: /aria \(lvl 3/i })).toBeInTheDocument();
+    });
+
+    it('keeps the selection and toasts an error when attach fails', async () => {
+      const user = userEvent.setup();
+      routeRoster({
+        characters: [],
+        attachable: [makeParty({ id: 'char-2', name: 'Borin' })],
+        onAttach: () => Promise.reject(new Error("You can only add a campaign member's character")),
+      });
+      await openRosterTab(user);
+
+      const picker = await screen.findByRole('combobox', { name: /add a member/i });
+      await user.selectOptions(picker, 'char-2');
+      await user.click(screen.getByRole('button', { name: /^add$/i }));
+
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith(
+          "You can only add a campaign member's character"
+        )
+      );
+      expect(screen.getByRole('combobox', { name: /add a member/i })).toBeInTheDocument();
     });
   });
 });

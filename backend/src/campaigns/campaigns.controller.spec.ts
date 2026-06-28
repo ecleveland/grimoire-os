@@ -29,6 +29,7 @@ describe('CampaignsController', () => {
       removeCharacter: jest.fn(),
       removePlayer: jest.fn(),
       findCharactersForMember: jest.fn(),
+      findAttachableCharacters: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -138,6 +139,18 @@ describe('CampaignsController', () => {
 
       expect(service.findCharactersForMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(result).toEqual(roster);
+    });
+  });
+
+  describe('findAttachableCharacters', () => {
+    it('delegates to service with campaignId and userId', async () => {
+      const attachable = [{ id: CHARACTER_ID, name: 'Borin' }];
+      service.findAttachableCharacters.mockResolvedValue(attachable);
+
+      const result = await controller.findAttachableCharacters(CAMPAIGN_ID, mockReq);
+
+      expect(service.findAttachableCharacters).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(result).toEqual(attachable);
     });
   });
 

@@ -32,6 +32,22 @@ const campaignListSelect = {
   players: { select: { userId: true } },
 } satisfies Prisma.CampaignSelect;
 
+// Slim party-character projection (VEG-283) backing PartyCharacterDto. Shared by
+// the roster (findCharactersForMember) and the owner attach picker
+// (findAttachableCharacters) so the two member-character lists can't diverge —
+// the DB-level select is the projection, so private sheet fields never load.
+const partyCharacterSelect = {
+  id: true,
+  userId: true,
+  name: true,
+  race: true,
+  class: true,
+  level: true,
+  armorClass: true,
+  initiative: true,
+  hitPoints: true,
+} satisfies Prisma.CharacterSelect;
+
 function serialize(campaign: any): CampaignDto {
   const { players, characters, ...rest } = campaign;
   return toDto(CampaignDto, {
@@ -174,17 +190,28 @@ export class CampaignsService {
     const characters = await this.prisma.character.findMany({
       where: { campaignId },
       orderBy: { name: 'asc' },
-      select: {
-        id: true,
-        userId: true,
-        name: true,
-        race: true,
-        class: true,
-        level: true,
-        armorClass: true,
-        initiative: true,
-        hitPoints: true,
-      },
+      select: partyCharacterSelect,
+    });
+    return toDtoArray(PartyCharacterDto, characters);
+  }
+
+  /**
+   * Owner-facing list backing the roster's "attach a member's character" picker
+   * (VEG-361). Returns the slim PartyCharacter projection of every character
+   * owned by a campaign member (the owner + joined players) that isn't already
+   * attached to a campaign. Owner-gated — the DM is the only one who attaches on
+   * a member's behalf. Unattached only (`campaignId: null`): a character already
+   * in another campaign is excluded rather than silently yanked out of it, which
+   * matches the addCharacter guards. The member-id set comes straight off the
+   * campaign assertCampaignOwner already loaded, so there's no extra round-trip.
+   */
+  async findAttachableCharacters(campaignId: string, userId: string): Promise<PartyCharacterDto[]> {
+    const campaign = await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    const memberIds = [campaign.ownerId, ...campaign.players.map(p => p.userId)];
+    const characters = await this.prisma.character.findMany({
+      where: { userId: { in: memberIds }, campaignId: null },
+      orderBy: { name: 'asc' },
+      select: partyCharacterSelect,
     });
     return toDtoArray(PartyCharacterDto, characters);
   }
