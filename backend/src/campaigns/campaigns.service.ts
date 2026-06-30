@@ -321,6 +321,15 @@ export class CampaignsService {
         'The campaign owner cannot be removed; transfer ownership or delete the campaign instead.'
       );
     }
+    // The target must actually be a member. Without this, a removal against a
+    // stale roster (the player already self-left or was removed elsewhere)
+    // reaches cleanup's `campaignPlayer.delete` on a missing join row, which
+    // throws Prisma P2025 and leaks as a confusing generic 404. Fail clearly
+    // instead. The member-id set is already loaded on the campaign, so no extra
+    // query.
+    if (!campaign.players.some(p => p.userId === playerId)) {
+      throw new NotFoundException(`Player "${playerId}" is not a member of this campaign`);
+    }
     await this.cleanupPlayerMembership(campaignId, playerId);
     return this.findOne(campaignId);
   }
