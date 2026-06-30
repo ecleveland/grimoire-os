@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, GoneException, Logger, NotFoundException } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -662,6 +662,90 @@ describe('CampaignsService', () => {
     });
   });
 
+  describe('findMembers', () => {
+    // Owner is USER_ID; USER_ID_2 is a joined player. The owner is also present
+    // in the players relation (campaigns add the owner as a CampaignPlayer), so
+    // the member list must de-dupe the owner rather than list them twice.
+    const ownerAndMemberCampaign = {
+      ...mockCampaign,
+      ownerId: USER_ID,
+      players: [
+        { id: 'cp1', campaignId: CAMPAIGN_ID, userId: USER_ID, joinedAt: new Date() },
+        { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+      ],
+    };
+
+    it('owner-gates, then lists the owner first and players sorted by displayName', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      // Returned out of order to prove the service sorts players by displayName.
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID_2, displayName: 'Zara' },
+        { id: USER_ID, displayName: 'Owner Olwen' },
+      ]);
+
+      const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
+
+      expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.user.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [USER_ID, USER_ID_2] } },
+        select: { id: true, displayName: true },
+      });
+      expect(result).toEqual([
+        { userId: USER_ID, displayName: 'Owner Olwen', isOwner: true },
+        { userId: USER_ID_2, displayName: 'Zara', isOwner: false },
+      ]);
+    });
+
+    it('sorts multiple players by displayName, owner always first', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({
+        ...mockCampaign,
+        ownerId: USER_ID,
+        players: [
+          { id: 'cp1', campaignId: CAMPAIGN_ID, userId: USER_ID, joinedAt: new Date() },
+          { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+          { id: 'cp3', campaignId: CAMPAIGN_ID, userId: CHARACTER_ID, joinedAt: new Date() },
+        ],
+      });
+      prisma.user.findMany.mockResolvedValue([
+        { id: USER_ID, displayName: 'Owner' },
+        { id: USER_ID_2, displayName: 'Brunhild' },
+        { id: CHARACTER_ID, displayName: 'Aerin' },
+      ]);
+
+      const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
+
+      expect(result.map(m => m.displayName)).toEqual(['Owner', 'Aerin', 'Brunhild']);
+      expect(result.map(m => m.isOwner)).toEqual([true, false, false]);
+    });
+
+    it("falls back to 'Unknown' and logs an error for a member with no user row (broken FK invariant)", async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      // The player's user row is absent — only possible via a broken FK cascade
+      // (orphaned membership). The row is still listed + removable, but the
+      // impossible state is surfaced loudly rather than silently masked.
+      prisma.user.findMany.mockResolvedValue([{ id: USER_ID, displayName: 'Owner Olwen' }]);
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
+
+      const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
+
+      expect(result).toEqual([
+        { userId: USER_ID, displayName: 'Owner Olwen', isOwner: true },
+        { userId: USER_ID_2, displayName: 'Unknown', isOwner: false },
+      ]);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(USER_ID_2));
+      errorSpy.mockRestore();
+    });
+
+    it('propagates ForbiddenException for non-owners without querying users', async () => {
+      campaignAuth.assertCampaignOwner.mockRejectedValue(
+        new ForbiddenException('Only the campaign owner can perform this action')
+      );
+
+      await expect(service.findMembers(CAMPAIGN_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
+      expect(prisma.user.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('removeCharacter', () => {
     it('removes character from campaign when called by owner', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
@@ -690,6 +774,17 @@ describe('CampaignsService', () => {
   });
 
   describe('removePlayer', () => {
+    // assertCampaignOwner returns the campaign with its members; removePlayer's
+    // membership guard reads `players`, so the removed target (USER_ID_2) must be
+    // present there for the cleanup path to run.
+    const campaignWithMember = {
+      ...mockCampaign,
+      players: [
+        { id: 'cp1', campaignId: CAMPAIGN_ID, userId: USER_ID, joinedAt: new Date() },
+        { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+      ],
+    };
+
     it('throws ForbiddenException for non-owner', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')
@@ -700,8 +795,35 @@ describe('CampaignsService', () => {
       );
     });
 
+    it('refuses to remove the owner themselves, without running any cleanup', async () => {
+      // Defense-in-depth behind the UI (which hides the owner's Remove control):
+      // a crafted DELETE for the owner's own id must not run the cascade on them.
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign); // ownerId === USER_ID
+
+      await expect(service.removePlayer(CAMPAIGN_ID, USER_ID, USER_ID)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+      expect(prisma.note.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.campaignPlayer.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException for a non-member target, without running cleanup', async () => {
+      // Stale-roster removal: the target already left / was removed elsewhere, so
+      // it isn't in players. Fail clearly instead of leaking a Prisma P2025 from
+      // the join-row delete.
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign); // players: [USER_ID] only
+
+      await expect(service.removePlayer(CAMPAIGN_ID, USER_ID_2, USER_ID)).rejects.toThrow(
+        NotFoundException
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.campaignPlayer.delete).not.toHaveBeenCalled();
+    });
+
     it('detaches the removed player characters, deletes their private notes, and deletes the join row in one transaction', async () => {
-      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(campaignWithMember);
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.character.findMany.mockResolvedValue([]); // no owned characters → no combatant cleanup
       prisma.character.updateMany.mockResolvedValue({ count: 1 });
@@ -747,7 +869,7 @@ describe('CampaignsService', () => {
     });
 
     it("strips the removed player's PC combatants from encounters that contain them, bumping version, and leaves others untouched (VEG-256)", async () => {
-      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(campaignWithMember);
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       // The player owns char-1; their combatant should be removed.
       prisma.character.findMany.mockResolvedValue([{ id: 'char-1' }]);
@@ -797,7 +919,7 @@ describe('CampaignsService', () => {
     });
 
     it('clamps currentTurn when stripping a combatant pushes it past the end of the list (VEG-256)', async () => {
-      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(campaignWithMember);
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign);
       prisma.character.findMany.mockResolvedValue([{ id: 'char-1' }]);
       prisma.character.updateMany.mockResolvedValue({ count: 1 });
@@ -831,7 +953,7 @@ describe('CampaignsService', () => {
     });
 
     it('propagates the error and does not re-fetch the campaign when a cleanup step fails (rollback)', async () => {
-      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      campaignAuth.assertCampaignOwner.mockResolvedValue(campaignWithMember);
       prisma.character.findMany.mockResolvedValue([]);
       prisma.character.updateMany.mockResolvedValue({ count: 1 });
       prisma.note.deleteMany.mockResolvedValue({ count: 0 });

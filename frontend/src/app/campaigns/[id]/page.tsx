@@ -19,6 +19,7 @@ import type {
   NpcListItem,
   ShopListItem,
   PartyCharacter,
+  CampaignMember,
   PaginatedResponse,
   InviteCodeResponse,
 } from '@/lib/types';
@@ -46,6 +47,7 @@ export default function CampaignDetailPage() {
   const [encounterToDelete, setEncounterToDelete] = useState<EncounterListItem | null>(null);
   const [characterToDetach, setCharacterToDetach] = useState<PartyCharacter | null>(null);
   const [characterToAttach, setCharacterToAttach] = useState('');
+  const [memberToRemove, setMemberToRemove] = useState<CampaignMember | null>(null);
   const encountersHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const rosterHeadingRef = useRef<HTMLHeadingElement | null>(null);
 
@@ -97,6 +99,14 @@ export default function CampaignDetailPage() {
     errorToast: { message: 'Failed to load attachable characters', id: 'load-attachable' },
   });
   const attachable = attachableQuery.data ?? [];
+  // Owner-only: the campaign's members (with display names) backing the DM
+  // "remove a player" control (VEG-360). Gated on owner so non-owners never
+  // fetch or see member identities.
+  const membersQuery = useApiQuery<CampaignMember[]>(`/campaigns/${id}/members`, {
+    enabled: tab === 'roster' && Boolean(isOwner),
+    errorToast: { message: 'Failed to load members', id: 'load-members' },
+  });
+  const members = membersQuery.data ?? [];
 
   const notes = notesQuery.data?.data ?? [];
   const notesTotal = notesQuery.data?.total ?? 0;
@@ -230,6 +240,35 @@ export default function CampaignDetailPage() {
         });
       },
       onError: err => toast.error(err instanceof Error ? err.message : 'Failed to add character'),
+    }
+  );
+
+  const removePlayer = useApiMutation(
+    (m: CampaignMember) => apiFetch(`/campaigns/${id}/players/${m.userId}`, { method: 'DELETE' }),
+    {
+      onSuccess: async () => {
+        toast.success('Player removed from campaign');
+        // Re-sync the member list plus everything the VEG-138 cascade touches:
+        // the roster (the player's characters detach), the campaign (player and
+        // character counts change), and the attach picker (a removed player's
+        // characters are no longer a member's, so they leave the pool).
+        await queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/members`),
+        });
+        queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/characters`),
+        });
+        queryClient.invalidateQueries({ queryKey: apiQueryKey(`/campaigns/${id}`) });
+        queryClient.invalidateQueries({
+          queryKey: apiQueryKey(`/campaigns/${id}/attachable-characters`),
+        });
+        // The removed row is unmounting; if focus dropped to <body>, land it on
+        // the roster heading rather than leaving it stranded.
+        if (document.activeElement === document.body) {
+          rosterHeadingRef.current?.focus();
+        }
+      },
+      onError: err => toast.error(err instanceof Error ? err.message : 'Failed to remove player'),
     }
   );
 
@@ -411,6 +450,41 @@ export default function CampaignDetailPage() {
               ? 'Add a member’s character below, or remove one to detach it.'
               : 'Add your own characters from their character sheet.'}
           </p>
+          {isOwner && (
+            <div className="mb-6">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Members</h3>
+              {membersQuery.isLoading ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Loading members…</p>
+              ) : (
+                <ul className="space-y-2">
+                  {members.map(m => (
+                    <li
+                      key={m.userId}
+                      className="flex items-center justify-between gap-3 p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                    >
+                      <span className="flex items-center gap-2 min-w-0">
+                        <span className="font-medium text-gray-900 dark:text-white truncate">
+                          {m.displayName}
+                        </span>
+                        {m.isOwner && <Badge variant="neutral">Owner</Badge>}
+                      </span>
+                      {!m.isOwner && (
+                        <button
+                          type="button"
+                          onClick={() => setMemberToRemove(m)}
+                          disabled={removePlayer.isPending}
+                          aria-label={`Remove player ${m.displayName}`}
+                          className="px-3 py-1.5 text-sm border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 disabled:opacity-50 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           {isOwner &&
             (attachable.length > 0 ? (
               <div className="mb-4 flex items-end gap-2">
@@ -769,6 +843,20 @@ export default function CampaignDetailPage() {
         variant="danger"
         onConfirm={() => {
           if (characterToDetach) detachCharacter.mutate(characterToDetach);
+        }}
+      />
+
+      <ConfirmDialog
+        open={memberToRemove !== null}
+        onOpenChange={open => {
+          if (!open) setMemberToRemove(null);
+        }}
+        title="Remove player?"
+        description={`Remove ${memberToRemove?.displayName ?? ''} from this campaign? Their characters will be detached from it and their private notes here will be deleted. This can't be undone.`}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (memberToRemove) removePlayer.mutate(memberToRemove);
         }}
       />
 

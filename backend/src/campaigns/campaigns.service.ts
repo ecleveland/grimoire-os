@@ -1,4 +1,10 @@
-import { ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Combatant } from '@grimoire-os/shared';
 import * as crypto from 'crypto';
@@ -9,7 +15,12 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { UpdateCampaignDto } from './dto/update-campaign.dto';
-import { CampaignDto, CampaignListItemDto, PartyCharacterDto } from './dto/campaign-response.dto';
+import {
+  CampaignDto,
+  CampaignListItemDto,
+  CampaignMemberDto,
+  PartyCharacterDto,
+} from './dto/campaign-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { stripCombatantsForCharacters } from './combatant-cleanup';
 
@@ -67,6 +78,8 @@ function serializeListItem(campaign: any): CampaignListItemDto {
 
 @Injectable()
 export class CampaignsService {
+  private readonly logger = new Logger(CampaignsService.name);
+
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService
@@ -216,6 +229,47 @@ export class CampaignsService {
     return toDtoArray(PartyCharacterDto, characters);
   }
 
+  /**
+   * Owner-facing campaign member list backing the roster's "remove a player"
+   * control (VEG-360). Owner-gated — only the DM manages membership, and a
+   * member's identity (display name) is owner-only. The owner is returned first
+   * with `isOwner: true` so the UI never offers a Remove on their own row;
+   * players follow, sorted by display name. The owner is de-duped out of the
+   * players relation (campaigns store the owner as a CampaignPlayer too).
+   */
+  async findMembers(campaignId: string, userId: string): Promise<CampaignMemberDto[]> {
+    const campaign = await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    const playerIds = campaign.players.map(p => p.userId).filter(id => id !== campaign.ownerId);
+    const memberIds = [campaign.ownerId, ...playerIds];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: memberIds } },
+      select: { id: true, displayName: true },
+    });
+    const displayNameById = new Map(users.map(u => [u.id, u.displayName]));
+    const toMember = (id: string) => {
+      const displayName = displayNameById.get(id);
+      // A member id should always resolve to a User: both CampaignPlayer.user and
+      // Campaign.owner are onDelete: Cascade, so deleting a user removes their
+      // membership rows. A miss therefore means a broken FK invariant (orphaned
+      // membership, manual DB surgery, corrupt restore) — surface it loudly, but
+      // still list the row as 'Unknown' so the DM can remove the orphan.
+      if (displayName === undefined) {
+        this.logger.error(
+          `Campaign ${campaignId} lists member ${id} with no User row — FK cascade invariant violated`
+        );
+      }
+      return {
+        userId: id,
+        displayName: displayName ?? 'Unknown',
+        isOwner: id === campaign.ownerId,
+      };
+    };
+    const players = playerIds
+      .map(toMember)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    return toDtoArray(CampaignMemberDto, [toMember(campaign.ownerId), ...players]);
+  }
+
   async addCharacter(campaignId: string, characterId: string, userId: string) {
     const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
     const character = await this.prisma.character.findUnique({
@@ -257,7 +311,25 @@ export class CampaignsService {
   }
 
   async removePlayer(campaignId: string, playerId: string, userId: string) {
-    await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    // The owner cannot remove themselves — running the VEG-138 cascade on the
+    // owner would detach their characters and delete their notes while leaving a
+    // campaign with no member-owner. Mirrors leaveCampaign's owner guard; the UI
+    // already hides the owner's Remove control, this is the defense-in-depth.
+    if (playerId === campaign.ownerId) {
+      throw new ForbiddenException(
+        'The campaign owner cannot be removed; transfer ownership or delete the campaign instead.'
+      );
+    }
+    // The target must actually be a member. Without this, a removal against a
+    // stale roster (the player already self-left or was removed elsewhere)
+    // reaches cleanup's `campaignPlayer.delete` on a missing join row, which
+    // throws Prisma P2025 and leaks as a confusing generic 404. Fail clearly
+    // instead. The member-id set is already loaded on the campaign, so no extra
+    // query.
+    if (!campaign.players.some(p => p.userId === playerId)) {
+      throw new NotFoundException(`Player "${playerId}" is not a member of this campaign`);
+    }
     await this.cleanupPlayerMembership(campaignId, playerId);
     return this.findOne(campaignId);
   }
