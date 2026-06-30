@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -48,6 +48,20 @@ const srdClasses: SrdClass[] = [
     numSkillChoices: 2,
     features: [],
     spellcasting: { ability: 'Intelligence' },
+    source: 'SRD',
+  },
+  {
+    id: 'cls-monk',
+    name: 'Monk',
+    hitDie: 'd8',
+    primaryAbilities: ['Dexterity', 'Wisdom'],
+    savingThrows: ['Strength', 'Dexterity'],
+    armorProficiencies: [],
+    weaponProficiencies: ['Simple'],
+    skillChoices: ['Acrobatics', 'Stealth'],
+    toolProficiencies: [],
+    numSkillChoices: 2,
+    features: [],
     source: 'SRD',
   },
 ];
@@ -752,5 +766,47 @@ describe('CharacterEditorForm interactions', () => {
     expect(screen.getByText('identity-extra-slot')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled();
+  });
+});
+
+describe('recommended primary abilities (VEG-447)', () => {
+  const abilityCell = (name: string) =>
+    screen.getByRole('spinbutton', { name }).closest('div') as HTMLElement;
+
+  it('summarizes and tags the selected class’s primary ability', async () => {
+    renderForm({ initialValues: { ...emptyCharacterFormValues(), class: 'Fighter' } });
+    const summary = await screen.findByTestId('recommended-summary');
+    expect(summary).toHaveTextContent('Recommended for Fighter: Strength');
+    expect(within(abilityCell('STR')).queryByTestId('recommended-tag')).toBeInTheDocument();
+    expect(within(abilityCell('DEX')).queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+
+  it('tags every primary for a multi-primary class (Monk → Dex + Wis)', async () => {
+    renderForm({ initialValues: { ...emptyCharacterFormValues(), class: 'Monk' } });
+    const summary = await screen.findByTestId('recommended-summary');
+    expect(summary).toHaveTextContent('Recommended for Monk: Dexterity, Wisdom');
+    expect(screen.getAllByTestId('recommended-tag')).toHaveLength(2);
+    expect(within(abilityCell('DEX')).queryByTestId('recommended-tag')).toBeInTheDocument();
+    expect(within(abilityCell('WIS')).queryByTestId('recommended-tag')).toBeInTheDocument();
+    expect(within(abilityCell('STR')).queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+
+  it('shows nothing with no class selected', () => {
+    renderForm();
+    expect(screen.queryByTestId('recommended-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+
+  it('shows nothing for a free-typed/homebrew class with no SRD match', async () => {
+    renderForm({ initialValues: { ...emptyCharacterFormValues(), class: 'Artificer' } });
+    // Let the class catalog settle. The Fighter/Monk cases above prove the
+    // loaded-positive path under this same mock, so a resolved catalog that
+    // simply doesn't match 'Artificer' yields no recommendation (not a loading
+    // gap). The combobox echoing the current value confirms render.
+    expect(await screen.findByDisplayValue('Artificer')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId('recommended-summary')).not.toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('recommended-tag')).not.toBeInTheDocument();
   });
 });
