@@ -46,7 +46,8 @@ export class PartyCharacterDto {
  * its DM "remove a player" control (VEG-360). Just the identity fields the UI
  * needs — userId (the `DELETE /players/:playerId` target), a display name, and
  * the owner flag so the UI never offers a Remove on the owner's own row. Owner
- * only; non-members never see the campaign's member identities.
+ * only; non-members never see the campaign's member identities. Wire shape
+ * mirrors the shared `CampaignMember` type.
  */
 export class CampaignMemberDto {
   @Expose() userId!: string;

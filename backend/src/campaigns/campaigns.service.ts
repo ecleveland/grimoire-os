@@ -1,4 +1,10 @@
-import { ForbiddenException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { Combatant } from '@grimoire-os/shared';
 import * as crypto from 'crypto';
@@ -72,6 +78,8 @@ function serializeListItem(campaign: any): CampaignListItemDto {
 
 @Injectable()
 export class CampaignsService {
+  private readonly logger = new Logger(CampaignsService.name);
+
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService
@@ -238,13 +246,24 @@ export class CampaignsService {
       select: { id: true, displayName: true },
     });
     const displayNameById = new Map(users.map(u => [u.id, u.displayName]));
-    const toMember = (id: string) => ({
-      userId: id,
-      // A member row always has a user; fall back defensively so a since-deleted
-      // account can still be listed and removed rather than crashing the list.
-      displayName: displayNameById.get(id) ?? 'Unknown',
-      isOwner: id === campaign.ownerId,
-    });
+    const toMember = (id: string) => {
+      const displayName = displayNameById.get(id);
+      // A member id should always resolve to a User: both CampaignPlayer.user and
+      // Campaign.owner are onDelete: Cascade, so deleting a user removes their
+      // membership rows. A miss therefore means a broken FK invariant (orphaned
+      // membership, manual DB surgery, corrupt restore) — surface it loudly, but
+      // still list the row as 'Unknown' so the DM can remove the orphan.
+      if (displayName === undefined) {
+        this.logger.error(
+          `Campaign ${campaignId} lists member ${id} with no User row — FK cascade invariant violated`
+        );
+      }
+      return {
+        userId: id,
+        displayName: displayName ?? 'Unknown',
+        isOwner: id === campaign.ownerId,
+      };
+    };
     const players = playerIds
       .map(toMember)
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -292,7 +311,16 @@ export class CampaignsService {
   }
 
   async removePlayer(campaignId: string, playerId: string, userId: string) {
-    await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    const campaign = await this.campaignAuth.assertCampaignOwner(campaignId, userId);
+    // The owner cannot remove themselves — running the VEG-138 cascade on the
+    // owner would detach their characters and delete their notes while leaving a
+    // campaign with no member-owner. Mirrors leaveCampaign's owner guard; the UI
+    // already hides the owner's Remove control, this is the defense-in-depth.
+    if (playerId === campaign.ownerId) {
+      throw new ForbiddenException(
+        'The campaign owner cannot be removed; transfer ownership or delete the campaign instead.'
+      );
+    }
     await this.cleanupPlayerMembership(campaignId, playerId);
     return this.findOne(campaignId);
   }

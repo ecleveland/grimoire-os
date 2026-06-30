@@ -143,6 +143,12 @@ export interface PartyCharacter {
   hitPoints: HitPoints | null;
 }
 
+/**
+ * Slim campaign-member projection (VEG-360) backing the owner-facing roster
+ * member list and its DM "remove a player" control. `userId` is the
+ * DELETE /campaigns/:id/players/:playerId target; `isOwner` lets the UI suppress
+ * Remove on the owner's own row. Mirrored by the backend `CampaignMemberDto`.
+ */
 export interface CampaignMember {
   userId: string;
   displayName: string;

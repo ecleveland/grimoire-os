@@ -1249,9 +1249,17 @@ describe('CampaignDetailPage', () => {
         '/campaigns/camp-1/players/user-2',
         expect.objectContaining({ method: 'DELETE' })
       );
-      // The list is re-synced from the server (refetched), not patched locally.
-      const memberCalls = mockApiFetch.mock.calls.filter(c => c[0] === '/campaigns/camp-1/members');
-      expect(memberCalls.length).toBeGreaterThanOrEqual(2);
+      // The full VEG-138 cascade surface is re-synced from the server, not
+      // patched locally: members + roster + the campaign detail (player/char
+      // counts) + the attach picker (the removed player's chars leave the pool).
+      const countGets = (path: string) =>
+        mockApiFetch.mock.calls.filter(
+          c => c[0] === path && (c[1] as { method?: string } | undefined)?.method === undefined
+        ).length;
+      expect(countGets('/campaigns/camp-1/members')).toBeGreaterThanOrEqual(2);
+      expect(countGets('/campaigns/camp-1/characters')).toBeGreaterThanOrEqual(2);
+      expect(countGets('/campaigns/camp-1/attachable-characters')).toBeGreaterThanOrEqual(2);
+      expect(countGets('/campaigns/camp-1')).toBeGreaterThanOrEqual(2);
       expect(mockToastSuccess).toHaveBeenCalledWith('Player removed from campaign');
     });
 

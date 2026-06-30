@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, GoneException, Logger, NotFoundException } from '@nestjs/common';
 import { CampaignsService } from './campaigns.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -718,11 +718,13 @@ describe('CampaignsService', () => {
       expect(result.map(m => m.isOwner)).toEqual([true, false, false]);
     });
 
-    it("falls back to 'Unknown' for a member whose user row is missing (since-deleted)", async () => {
+    it("falls back to 'Unknown' and logs an error for a member with no user row (broken FK invariant)", async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
-      // The player's user row is gone (account deleted) — findMany omits it, so
-      // the display-name lookup misses and the row is still listed + removable.
+      // The player's user row is absent — only possible via a broken FK cascade
+      // (orphaned membership). The row is still listed + removable, but the
+      // impossible state is surfaced loudly rather than silently masked.
       prisma.user.findMany.mockResolvedValue([{ id: USER_ID, displayName: 'Owner Olwen' }]);
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => {});
 
       const result = await service.findMembers(CAMPAIGN_ID, USER_ID);
 
@@ -730,6 +732,8 @@ describe('CampaignsService', () => {
         { userId: USER_ID, displayName: 'Owner Olwen', isOwner: true },
         { userId: USER_ID_2, displayName: 'Unknown', isOwner: false },
       ]);
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining(USER_ID_2));
+      errorSpy.mockRestore();
     });
 
     it('propagates ForbiddenException for non-owners without querying users', async () => {
@@ -778,6 +782,20 @@ describe('CampaignsService', () => {
       await expect(service.removePlayer(CAMPAIGN_ID, 'some-player-id', USER_ID_2)).rejects.toThrow(
         ForbiddenException
       );
+    });
+
+    it('refuses to remove the owner themselves, without running any cleanup', async () => {
+      // Defense-in-depth behind the UI (which hides the owner's Remove control):
+      // a crafted DELETE for the owner's own id must not run the cascade on them.
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign); // ownerId === USER_ID
+
+      await expect(service.removePlayer(CAMPAIGN_ID, USER_ID, USER_ID)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+      expect(prisma.note.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.campaignPlayer.delete).not.toHaveBeenCalled();
     });
 
     it('detaches the removed player characters, deletes their private notes, and deletes the join row in one transaction', async () => {
