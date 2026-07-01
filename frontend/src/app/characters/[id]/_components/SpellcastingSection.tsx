@@ -12,6 +12,7 @@ import {
   togglePreparedAt,
   toSpellEntry,
 } from '@/lib/character-spells';
+import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
 import { useApiQuery } from '@/lib/query';
 import SrdSpellSearch from '@/components/SrdSpellSearch';
 import SpellCardModal from './SpellCardModal';
@@ -51,7 +52,10 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
 
   if (!character.spellcastingAbility) return null;
 
-  const abilityScore = getAbilityScore(character.abilityScores, character.spellcastingAbility);
+  const abilityScore = getAbilityScore(
+    character.abilityScores ?? DEFAULT_ABILITY_SCORES,
+    character.spellcastingAbility
+  );
   const modifier = abilityModifier(abilityScore);
   const spellSlots = character.spellSlots ?? [];
 

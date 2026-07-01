@@ -1,6 +1,7 @@
 'use client';
 
 import type { Character } from '@/lib/types';
+import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
 import {
   abilityModifier,
   formatModifier,
@@ -25,11 +26,14 @@ function toTestId(name: string): string {
 
 export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreColumnProps) {
   const { rollCheck } = useDiceRoll();
+  // abilityScores is nullable at the API boundary (VEG-425); fall back to a
+  // neutral all-10 spread so a minimal character renders +0s instead of crashing.
+  const abilityScores = character.abilityScores ?? DEFAULT_ABILITY_SCORES;
 
   return (
     <div className="flex flex-col gap-4">
       {ABILITY_KEYS.map(key => {
-        const score = character.abilityScores[key];
+        const score = abilityScores[key];
         const mod = abilityModifier(score);
         const abilityName = ABILITY_KEY_TO_NAME[key];
         const skills = ABILITY_SKILLS_MAP[abilityName] ?? [];

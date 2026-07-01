@@ -92,7 +92,9 @@ export function hitDiceRegainedOnLongRest(total: number): number {
  * hit-dice-less sheet doesn't get spurious empty-array/undefined writes.
  */
 export interface LongRestPatch {
-  hitPoints: HitPoints;
+  // Omitted for a character with no stored HP block (VEG-425) — a long rest
+  // must never fabricate-and-persist a zeroed HitPoints onto a null-HP record.
+  hitPoints?: HitPoints;
   deathSaves: DeathSaves;
   hitDice?: HitDice;
   spellSlots?: SpellSlot[];
@@ -105,18 +107,21 @@ export interface LongRestPatch {
  * UI and tests share one source of truth — the sheet just dispatches the result.
  */
 export function applyLongRest(character: {
-  hitPoints: HitPoints;
-  // Typed loosely on purpose: although `Character` declares these non-optional,
-  // the API returns `null` for a non-caster's `spellSlots` and can omit
-  // `hitDice` — guard for both so a real character can't crash the rest.
+  // All three are nullable at the API boundary (VEG-425): the columns are
+  // `Json?`, so a minimal character has no `hitPoints`, a non-caster has `null`
+  // `spellSlots`, and a hit-dice-less sheet omits `hitDice`. Each is omitted from
+  // the patch when absent, so the rest never writes a fabricated block back.
+  hitPoints: HitPoints | null;
   hitDice?: HitDice | null;
   spellSlots?: SpellSlot[] | null;
 }): LongRestPatch {
   const { hitPoints, spellSlots, hitDice } = character;
   const patch: LongRestPatch = {
-    hitPoints: { ...hitPoints, current: hitPoints.max, temporary: 0 },
     deathSaves: { ...CLEARED_DEATH_SAVES },
   };
+  if (hitPoints) {
+    patch.hitPoints = { ...hitPoints, current: hitPoints.max, temporary: 0 };
+  }
   if (hitDice) {
     const regained = hitDiceRegainedOnLongRest(hitDice.total);
     patch.hitDice = { ...hitDice, spent: Math.max(0, hitDice.spent - regained) };

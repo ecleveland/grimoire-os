@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { Character } from '@/lib/types';
+import { ZERO_HIT_POINTS } from '@/lib/character-defaults';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import {
   damageHitPoints,
@@ -12,6 +13,7 @@ import {
   deathSavesAfterRevive,
   parseNonNegativeInt,
   applyLongRest,
+  CLEARED_DEATH_SAVES,
 } from '@/lib/character-play';
 
 type CombatBarProps = { character: Character } & PlayControlProps;
@@ -26,20 +28,28 @@ function hpBarColor(current: number, max: number): string {
 export default function CombatBar(props: CombatBarProps) {
   const { character } = props;
   const { editable, patch, isSaving } = resolvePlayControls(props);
-  const { hitPoints, hitDice } = character;
-  const deathSaves = character.deathSaves ?? { successes: 0, failures: 0 };
+  // hitPoints/deathSaves are nullable at the API boundary (VEG-425); fall back
+  // so a minimal character's combat bar renders instead of crashing. The HP
+  // fallback is display-only — `hasHitPoints` gates the write actions so we never
+  // persist a fabricated {0,0,0} block onto a null-HP record.
+  const { hitDice } = character;
+  const hasHitPoints = character.hitPoints !== null;
+  const hitPoints = character.hitPoints ?? ZERO_HIT_POINTS;
+  const deathSaves = character.deathSaves ?? CLEARED_DEATH_SAVES;
   const hpPct = hitPoints.max > 0 ? (hitPoints.current / hitPoints.max) * 100 : 0;
   const [amount, setAmount] = useState('');
 
   const amountValue = parseNonNegativeInt(amount);
 
+  // HP writes no-op for a null-HP record: modifying a display-only fallback would
+  // persist a fabricated block. The owner sets HP through the editor first.
   const applyDamage = () => {
-    if (amountValue <= 0) return;
+    if (amountValue <= 0 || !hasHitPoints) return;
     patch({ hitPoints: damageHitPoints(hitPoints, amountValue) });
     setAmount('');
   };
   const applyHeal = () => {
-    if (amountValue <= 0) return;
+    if (amountValue <= 0 || !hasHitPoints) return;
     const next = healHitPoints(hitPoints, amountValue);
     // A downed PC healed above 0 clears its death saves (5e).
     const cleared = deathSavesAfterRevive(next.current, deathSaves);
@@ -47,6 +57,7 @@ export default function CombatBar(props: CombatBarProps) {
     setAmount('');
   };
   const applySetTemp = () => {
+    if (!hasHitPoints) return;
     patch({ hitPoints: setTempHitPoints(hitPoints, amountValue) });
     setAmount('');
   };
@@ -101,7 +112,7 @@ export default function CombatBar(props: CombatBarProps) {
           Armor Class
         </div>
         <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
-          {character.armorClass}
+          {character.armorClass ?? '—'}
         </div>
       </div>
 
@@ -139,7 +150,7 @@ export default function CombatBar(props: CombatBarProps) {
               <button
                 type="button"
                 onClick={applyDamage}
-                disabled={isSaving}
+                disabled={isSaving || !hasHitPoints}
                 className="flex-1 px-1 py-1 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
               >
                 Damage
@@ -147,7 +158,7 @@ export default function CombatBar(props: CombatBarProps) {
               <button
                 type="button"
                 onClick={applyHeal}
-                disabled={isSaving}
+                disabled={isSaving || !hasHitPoints}
                 className="flex-1 px-1 py-1 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
               >
                 Heal
@@ -155,7 +166,7 @@ export default function CombatBar(props: CombatBarProps) {
               <button
                 type="button"
                 onClick={applySetTemp}
-                disabled={isSaving}
+                disabled={isSaving || !hasHitPoints}
                 className="flex-1 px-1 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 Set Temp

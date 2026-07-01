@@ -24,6 +24,10 @@ import type {
 import { DIE_TYPES, SIZES } from '@/lib/types';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
 import { recommendedAbilityKeys } from '@/lib/ability-math';
+import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
+
+/** Editable HP baseline for a new or legacy/null-HP character (10/10/0). */
+const DEFAULT_EDITOR_HIT_POINTS: HitPoints = { max: 10, current: 10, temporary: 0 };
 import { useApiQuery } from '@/lib/query';
 import {
   RecommendedAbilitiesSummary,
@@ -96,7 +100,7 @@ export interface CharacterFormValues {
 
 /** Zeroed coin purse — the SRD default for a fresh character. */
 export function emptyCurrency(): Currency {
-  return { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  return { ...EMPTY_CURRENCY };
 }
 
 const abilityKeys: (keyof AbilityScores)[] = [
@@ -127,18 +131,11 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     background: '',
     alignment: '',
     size: 'Medium',
-    abilityScores: {
-      strength: 10,
-      dexterity: 10,
-      constitution: 10,
-      intelligence: 10,
-      wisdom: 10,
-      charisma: 10,
-    },
+    abilityScores: { ...DEFAULT_ABILITY_SCORES },
     armorClass: 10,
     initiative: 0,
-    speed: 30,
-    hitPoints: { max: 10, current: 10, temporary: 0 },
+    speed: DEFAULT_SPEED,
+    hitPoints: { ...DEFAULT_EDITOR_HIT_POINTS },
     hitDice: { dieType: 'd8', total: 1, spent: 0 },
     savingThrows: [],
     skills: [],
@@ -175,11 +172,13 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     // Server-side `size` is free-text; coerce to the canonical union, falling
     // back to Medium for absent/legacy values outside the set.
     size: (SIZES as readonly string[]).includes(c.size ?? '') ? (c.size as Size) : 'Medium',
-    abilityScores: c.abilityScores,
-    armorClass: c.armorClass,
+    // These columns are nullable at the API boundary (VEG-425); a legacy/minimal
+    // character edits from the same neutral defaults as a brand-new one.
+    abilityScores: c.abilityScores ?? { ...DEFAULT_ABILITY_SCORES },
+    armorClass: c.armorClass ?? 10,
     initiative: c.initiative ?? 0,
-    speed: c.speed,
-    hitPoints: c.hitPoints,
+    speed: c.speed ?? DEFAULT_SPEED,
+    hitPoints: c.hitPoints ?? { ...DEFAULT_EDITOR_HIT_POINTS },
     hitDice: c.hitDice ?? { dieType: 'd8', total: c.level, spent: 0 },
     savingThrows: c.savingThrows ?? [],
     skills: c.skills ?? [],

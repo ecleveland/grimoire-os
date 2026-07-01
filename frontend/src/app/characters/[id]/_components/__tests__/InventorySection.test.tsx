@@ -659,3 +659,19 @@ describe('InventorySection', () => {
     });
   });
 });
+
+describe('null embedded stats (VEG-425)', () => {
+  it('renders without crashing when abilityScores/speed/currency/inventory are null', () => {
+    const char = {
+      ...baseCharacter,
+      abilityScores: null,
+      speed: null,
+      currency: null,
+      inventory: null,
+    };
+    // Editable so the encumbrance math (carryingCapacity/encumbranceStatus, which
+    // read abilityScores.strength + speed) actually runs — the null-deref path.
+    render(<InventorySection character={char} editable onPatch={vi.fn()} />);
+    expect(screen.getByText('Equipment')).toBeInTheDocument();
+  });
+});

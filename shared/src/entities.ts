@@ -55,12 +55,16 @@ export interface Character {
   background?: string;
   alignment?: string;
   experiencePoints: number;
-  abilityScores: AbilityScores;
-  hitPoints: HitPoints;
-  deathSaves: DeathSaves;
-  armorClass: number;
-  speed: number;
-  initiative: number;
+  // Nullable to match the backend `CharacterDto` and the underlying `Json?` /
+  // `Int?` Prisma columns: a legacy/minimal character deserializes these as
+  // `null` (VEG-425). Consumers must guard (`?? default`) — the type now forces
+  // it, so the compiler catches the null-deref the old lying type let through.
+  abilityScores: AbilityScores | null;
+  hitPoints: HitPoints | null;
+  deathSaves: DeathSaves | null;
+  armorClass: number | null;
+  speed: number | null;
+  initiative: number | null;
   proficiencies: string[];
   languages: string[];
   savingThrows: string[];
@@ -68,18 +72,18 @@ export interface Character {
   spellcastingAbility?: string;
   spellSaveDC?: number;
   spellAttackBonus?: number;
-  // Optional: the backing JSONB columns are nullable, so a character with no
-  // spells/attunement deserializes these as absent (consumers guard with `?? []`).
-  spells?: SpellEntry[];
-  spellSlots: SpellSlot[];
-  inventory: InventoryItem[];
-  attunedItems?: AttunedItem[];
-  currency: Currency;
-  features: Feature[];
-  // Granted feats (VEG-430), e.g. a background's origin feat. Optional: the
-  // backing JSONB column is nullable, so a character with no feats deserializes
-  // this as absent (consumers guard with `?? []`).
-  feats?: CharacterFeat[];
+  // Nullable JSONB columns: a character with no spells/slots/inventory/etc.
+  // deserializes these as `null` (consumers guard with `?? []`). The `?` on
+  // spells/attunedItems/feats/etc. is kept — the frontend never constructs a
+  // Character (only reads deserialized JSON), so requiring them buys no safety.
+  spells?: SpellEntry[] | null;
+  spellSlots: SpellSlot[] | null;
+  inventory: InventoryItem[] | null;
+  attunedItems?: AttunedItem[] | null;
+  currency: Currency | null;
+  features: Feature[] | null;
+  // Granted feats (VEG-430), e.g. a background's origin feat.
+  feats?: CharacterFeat[] | null;
   personalityTraits?: string;
   ideals?: string;
   bonds?: string;
@@ -89,9 +93,9 @@ export interface Character {
   avatarUrl?: string;
   size?: string;
   heroicInspiration?: boolean;
-  hitDice?: HitDice;
+  hitDice?: HitDice | null;
   armorTraining?: string[];
-  weapons?: Weapon[];
+  weapons?: Weapon[] | null;
   /** Optimistic-locking counter (VEG-137); incremented on each guarded write. */
   version: number;
   createdAt: string;

@@ -343,3 +343,26 @@ describe('CombatBar', () => {
     expect(screen.queryByRole('button', { name: 'Long Rest' })).toBeNull();
   });
 });
+
+describe('null hitPoints / armorClass (VEG-425)', () => {
+  it('renders a zeroed HP block and an em-dash AC instead of crashing', () => {
+    const char = { ...mockCharacter, hitPoints: null, armorClass: null };
+    render(<CombatBar character={char} />);
+    expect(within(screen.getByTestId('hp-block')).getByText('0/0')).toBeInTheDocument();
+    expect(within(screen.getByTestId('ac-block')).getByText('—')).toBeInTheDocument();
+  });
+
+  it('disables HP write actions for a null-HP character so no fabricated block is persisted', async () => {
+    const onPatch = vi.fn();
+    const char = { ...mockCharacter, hitPoints: null };
+    render(<CombatBar character={char} editable onPatch={onPatch} isSaving={false} />);
+    // The display fallback renders, but Damage/Heal/Set Temp are disabled — a
+    // long rest still works (clears death saves) without writing a fake HP block.
+    expect(screen.getByRole('button', { name: 'Damage' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Heal' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Set Temp' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+    expect(onPatch).toHaveBeenCalledTimes(1);
+    expect(onPatch.mock.calls[0][0]).not.toHaveProperty('hitPoints');
+  });
+});
