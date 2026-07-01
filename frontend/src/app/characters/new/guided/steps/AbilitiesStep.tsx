@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { AbilityScores } from '@/lib/types';
+import type { AbilityScores, SrdClass } from '@/lib/types';
 import {
   ABILITY_KEYS,
   ABILITY_KEY_TO_NAME,
@@ -7,9 +7,15 @@ import {
   abilityModifier,
   formatModifier,
   proficiencyBonus,
+  recommendedAbilityKeys,
   skillBonus,
   SKILL_ABILITY_MAP,
 } from '@/lib/ability-math';
+import { useApiQuery } from '@/lib/query';
+import {
+  RecommendedAbilitiesSummary,
+  RecommendedAbilityTag,
+} from '@/components/RecommendedAbilities';
 import type { WizardStepProps } from './types';
 
 type Mode = 'manual' | 'array' | 'pointbuy';
@@ -62,6 +68,15 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
   const [mode, setMode] = useState<Mode>('manual');
   const [assignments, setAssignments] =
     useState<Record<AbilityKey, number | null>>(emptyAssignments);
+
+  // Resolve the draft's class to its SRD record (by name, like OriginStep does
+  // for backgrounds) to surface its recommended primary abilities. A free-typed
+  // or homebrew class with no match resolves to no recommendation. The catalog
+  // is a small full array; a failed load just shows no recommendation.
+  const classes = useApiQuery<SrdClass[]>('/srd/classes').data ?? [];
+  const selectedClass = classes.find(c => c.name === value.class);
+  const recommended = recommendedAbilityKeys(selectedClass?.primaryAbilities);
+  const isRecommended = (k: AbilityKey) => recommended.includes(k);
 
   const setScores = (next: AbilityScores) => onChange({ abilityScores: next });
 
@@ -151,11 +166,16 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
         ))}
       </div>
 
+      <RecommendedAbilitiesSummary characterClass={value.class} recommended={recommended} />
+
       {mode === 'manual' && (
         <div className={`grid grid-cols-3 gap-3 ${cardClass}`}>
           {ABILITY_KEYS.map(k => (
             <label key={k} className="flex flex-col text-sm text-gray-600 dark:text-gray-300">
-              {ABILITY_LABELS[k]}
+              <span>
+                {ABILITY_LABELS[k]}
+                {isRecommended(k) && <RecommendedAbilityTag />}
+              </span>
               <input
                 type="number"
                 aria-label={ABILITY_LABELS[k]}
@@ -201,6 +221,9 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
               >
                 +
               </button>
+              {/* Trailing tag so the −/value/+ steppers stay column-aligned
+                  across recommended and non-recommended rows. */}
+              {isRecommended(k) && <RecommendedAbilityTag />}
             </div>
           ))}
         </div>
@@ -210,7 +233,10 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
         <div className={`grid grid-cols-3 gap-3 ${cardClass}`}>
           {ABILITY_KEYS.map(k => (
             <label key={k} className="flex flex-col text-sm text-gray-600 dark:text-gray-300">
-              {ABILITY_LABELS[k]}
+              <span>
+                {ABILITY_LABELS[k]}
+                {isRecommended(k) && <RecommendedAbilityTag />}
+              </span>
               <select
                 aria-label={ABILITY_LABELS[k]}
                 value={assignments[k] ?? ''}

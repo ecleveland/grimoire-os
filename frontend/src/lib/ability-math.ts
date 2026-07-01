@@ -34,6 +34,19 @@ export const ABILITY_KEY_TO_NAME: Record<keyof AbilityScores, string> = {
   charisma: 'Charisma',
 };
 
+/**
+ * Resolve a class's `primaryAbilities` (full ability *names*, e.g. ['Dexterity',
+ * 'Wisdom']) to the matching ability *keys*, returned in canonical `ABILITY_KEYS`
+ * order regardless of input order. Names with no ability match are dropped, so an
+ * absent/empty/homebrew-without-data class yields `[]` — the callers treat that
+ * as "no recommendation to show". Purely informational; it never constrains how
+ * scores are spent or stored (VEG-447).
+ */
+export function recommendedAbilityKeys(primaryAbilities?: string[]): (keyof AbilityScores)[] {
+  if (!primaryAbilities?.length) return [];
+  return ABILITY_KEYS.filter(k => primaryAbilities.includes(ABILITY_KEY_TO_NAME[k]));
+}
+
 export function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }

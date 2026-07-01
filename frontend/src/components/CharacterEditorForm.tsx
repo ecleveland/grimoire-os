@@ -23,7 +23,12 @@ import type {
 } from '@/lib/types';
 import { DIE_TYPES, SIZES } from '@/lib/types';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
+import { recommendedAbilityKeys } from '@/lib/ability-math';
 import { useApiQuery } from '@/lib/query';
+import {
+  RecommendedAbilitiesSummary,
+  RecommendedAbilityTag,
+} from '@/components/RecommendedAbilities';
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
@@ -603,6 +608,10 @@ export default function CharacterEditorForm({
   const selectedRace = races.find(r => r.name === values.race);
   const selectedBackground = backgrounds.find(b => b.name === values.background);
 
+  // Recommended primary abilities for the selected class (VEG-447) — purely
+  // informational; resolves to none for a free-typed/homebrew class.
+  const recommendedAbilities = recommendedAbilityKeys(selectedClass?.primaryAbilities);
+
   const subclasses =
     useApiQuery<SrdSubclass[]>(`/srd/subclasses?classId=${selectedClass?.id ?? ''}`, {
       enabled: !!selectedClass,
@@ -763,11 +772,16 @@ export default function CharacterEditorForm({
       {/* ── Ability Scores ─────────────────────────────────────── */}
       <div className={cardClass}>
         <h2 className={sectionHeading}>Ability Scores</h2>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+        <RecommendedAbilitiesSummary
+          characterClass={values.class}
+          recommended={recommendedAbilities}
+        />
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mt-3">
           {abilityKeys.map(key => (
             <div key={key} className="text-center">
               <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
                 {abilityLabels[key]}
+                {recommendedAbilities.includes(key) && <RecommendedAbilityTag />}
               </label>
               <input
                 type="number"

@@ -99,6 +99,35 @@ test.describe('guided character builder — class selection', () => {
     await expect(feats).toContainText('(Cleric)');
   });
 
+  // VEG-447: the Abilities step surfaces the selected class's recommended primary
+  // abilities (summary line + per-row tag). The seeded Fighter is multi-primary
+  // (Strength + Dexterity), so both rows are tagged.
+  test('highlights the class’s recommended abilities on the Abilities step', async ({ page }) => {
+    await registerAndLogin(page, 'guided-recommend');
+
+    await page.goto('/characters/new/guided');
+    await expect(page.getByRole('heading', { name: /guided character build/i })).toBeVisible();
+
+    const classInput = page.getByRole('combobox', { name: /^class/i });
+    await classInput.click();
+    await classInput.fill('Fighter');
+    await page.getByRole('option', { name: 'Fighter' }).click();
+    const skillChips = page.getByRole('group', { name: /skills/i }).getByRole('button');
+    await skillChips.nth(0).click();
+    await skillChips.nth(1).click();
+
+    const next = page.getByRole('button', { name: /^next$/i });
+    await next.click(); // → Origin
+    await next.click(); // → Abilities
+    await expect(page.getByRole('heading', { name: /abilities/i })).toBeVisible();
+
+    // Summary line names the recommendations (canonical order); both rows tagged.
+    await expect(page.getByTestId('recommended-summary')).toContainText(
+      'Recommended for Fighter: Strength, Dexterity'
+    );
+    await expect(page.getByTestId('recommended-tag')).toHaveCount(2);
+  });
+
   // VEG-342 slice 2: the Review step's optional campaign picker pre-attaches the
   // new character to one of the user's campaigns (parity with the classic form).
   test('attaches the new character to a campaign chosen on the Review step', async ({ page }) => {

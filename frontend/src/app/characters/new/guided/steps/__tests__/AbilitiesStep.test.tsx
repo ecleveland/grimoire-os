@@ -1,12 +1,44 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import AbilitiesStep from '../AbilitiesStep';
 import {
   emptyCharacterFormValues,
   type CharacterFormValues,
 } from '@/components/CharacterEditorForm';
+import type { SrdClass } from '@/lib/types';
+
+const mockApiFetch = vi.fn();
+vi.mock('@/lib/api', () => ({
+  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+}));
+
+function makeClass(over: Partial<SrdClass> = {}): SrdClass {
+  return {
+    id: 'fighter',
+    name: 'Fighter',
+    hitDie: 'd10',
+    primaryAbilities: ['Strength'],
+    savingThrows: ['Strength', 'Constitution'],
+    armorProficiencies: ['All armor', 'Shields'],
+    weaponProficiencies: ['Simple weapons', 'Martial weapons'],
+    skillChoices: ['Acrobatics', 'Athletics'],
+    toolProficiencies: [],
+    numSkillChoices: 2,
+    features: [],
+    source: 'SRD',
+    ...over,
+  };
+}
+
+const MONK = makeClass({
+  id: 'monk',
+  name: 'Monk',
+  hitDie: 'd8',
+  primaryAbilities: ['Dexterity', 'Wisdom'],
+});
 
 function Harness({ initial }: { initial?: Partial<CharacterFormValues> }) {
   const [draft, setDraft] = useState<CharacterFormValues>(() => ({
@@ -23,8 +55,16 @@ function Harness({ initial }: { initial?: Partial<CharacterFormValues> }) {
   );
 }
 
-function renderStep(initial?: Partial<CharacterFormValues>) {
-  render(<Harness initial={initial} />);
+function renderStep(initial?: Partial<CharacterFormValues>, classes: SrdClass[] = []) {
+  mockApiFetch.mockImplementation((path?: string) => {
+    if (path === '/srd/classes') return Promise.resolve(classes);
+    return Promise.resolve([]);
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 0 } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  render(<Harness initial={initial} />, { wrapper });
 }
 
 const scores = () => screen.getByTestId('scores').textContent;
@@ -219,5 +259,57 @@ describe('AbilitiesStep — ability score generation', () => {
     expect(screen.getByTestId('save-wisdom')).toHaveTextContent('+2');
     // Athletics (STR, proficient): +3 + 3 = +6.
     expect(screen.getByTestId('skill-athletics')).toHaveTextContent('+6');
+  });
+});
+
+describe('AbilitiesStep — recommended primary abilities (VEG-447)', () => {
+  it('summarizes the selected class’s recommended abilities', async () => {
+    renderStep({ class: 'Fighter' }, [makeClass()]);
+    const summary = await screen.findByTestId('recommended-summary');
+    expect(summary).toHaveTextContent('Recommended for Fighter: Strength');
+  });
+
+  it('marks the recommended ability row in each method UI', async () => {
+    renderStep({ class: 'Fighter' }, [makeClass()]);
+    const user = userEvent.setup();
+    await screen.findByTestId('recommended-summary');
+    // Manual (default): the STR field's label carries a tag; DEX's doesn't.
+    const labelOf = (name: string) =>
+      screen.getByRole('spinbutton', { name }).closest('label') as HTMLElement;
+    expect(within(labelOf('STR')).queryByTestId('recommended-tag')).toBeInTheDocument();
+    expect(within(labelOf('DEX')).queryByTestId('recommended-tag')).not.toBeInTheDocument();
+
+    // Point-buy and standard-array modes both surface exactly one tag (STR).
+    await user.click(screen.getByRole('radio', { name: /point buy/i }));
+    expect(screen.getAllByTestId('recommended-tag')).toHaveLength(1);
+    await user.click(screen.getByRole('radio', { name: /standard array/i }));
+    expect(screen.getAllByTestId('recommended-tag')).toHaveLength(1);
+  });
+
+  it('highlights every primary for a multi-primary class (Monk → Dex + Wis)', async () => {
+    renderStep({ class: 'Monk' }, [MONK]);
+    const summary = await screen.findByTestId('recommended-summary');
+    expect(summary).toHaveTextContent('Recommended for Monk: Dexterity, Wisdom');
+    // Two tags in the default manual grid — DEX and WIS, not STR.
+    expect(screen.getAllByTestId('recommended-tag')).toHaveLength(2);
+    const labelOf = (name: string) =>
+      screen.getByRole('spinbutton', { name }).closest('label') as HTMLElement;
+    expect(within(labelOf('DEX')).queryByTestId('recommended-tag')).toBeInTheDocument();
+    expect(within(labelOf('WIS')).queryByTestId('recommended-tag')).toBeInTheDocument();
+    expect(within(labelOf('STR')).queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+
+  it('shows nothing when no class is selected', () => {
+    renderStep({ class: '' }, [makeClass()]);
+    expect(screen.queryByTestId('recommended-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+
+  it('shows nothing for a free-typed/homebrew class with no SRD match', async () => {
+    renderStep({ class: 'Artificer' }, [makeClass()]);
+    // Let the class query resolve so this isn't just asserting a loading gap.
+    await screen.findByText('Abilities');
+    expect(screen.queryByTestId('recommended-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recommended-tag')).not.toBeInTheDocument();
   });
 });
