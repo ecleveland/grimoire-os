@@ -7,6 +7,7 @@ import { formatCoin, type Currency } from '@grimoire-os/shared';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useApiMutation, useApiQuery, apiQueryKey } from '@/lib/query';
 import { isInStock } from '@/lib/shop-display';
+import { EMPTY_CURRENCY } from '@/lib/character-defaults';
 import FormField from '@/components/FormField';
 import { canAffordLine, lineTotal } from './purchase-math';
 import type { Character, PartyCharacter, Shop } from '@/lib/types';
@@ -52,6 +53,10 @@ export default function ShopPurchasePanel({ shop, campaignId, userId }: ShopPurc
     errorToast: { message: 'Failed to load character', id: 'load-buyer' },
   });
   const buyer = charQuery.data ?? null;
+  // currency is nullable at the API boundary (VEG-425): a legacy/minimal
+  // character has no purse. Treat null as empty so the balance and affordability
+  // checks don't crash on a null dereference.
+  const balance = buyer?.currency ?? EMPTY_CURRENCY;
 
   const refetch = () => {
     queryClient.invalidateQueries({ queryKey: apiQueryKey(`/shops/${shop.id}`) });
@@ -130,7 +135,7 @@ export default function ShopPurchasePanel({ shop, campaignId, userId }: ShopPurc
 
           {buyer && (
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-              Balance: {formatCoin(buyer.currency)}
+              Balance: {formatCoin(balance)}
             </p>
           )}
 
@@ -140,7 +145,7 @@ export default function ShopPurchasePanel({ shop, campaignId, userId }: ShopPurc
             <ul className="space-y-3">
               {inStock.map(({ item, index }) => {
                 const qty = quantities[index] ?? 1;
-                const affordable = buyer ? canAffordLine(buyer.currency, item.price, qty) : false;
+                const affordable = buyer ? canAffordLine(balance, item.price, qty) : false;
                 const overStock = item.stock !== null && qty > item.stock;
                 const disabled =
                   !effectiveId ||

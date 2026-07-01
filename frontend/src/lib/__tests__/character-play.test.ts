@@ -212,6 +212,17 @@ describe('applyLongRest', () => {
     const patch = applyLongRest({ ...base, hitDice: null });
     expect('hitDice' in patch).toBe(false);
   });
+
+  it('omits hitPoints for a null-HP character (never persists a fabricated block)', () => {
+    // Regression (VEG-425): Character declared hitPoints non-optional, but the
+    // column is `Json?`; `{ ...null }` threw. A minimal character rests without a
+    // hitPoints patch — we must not write a fabricated {0,0,0} block to the DB.
+    const patch = applyLongRest({ ...base, hitPoints: null });
+    expect('hitPoints' in patch).toBe(false);
+    // The rest still clears death saves and regains hit dice.
+    expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
+    expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 1 });
+  });
 });
 
 describe('parseNonNegativeInt', () => {

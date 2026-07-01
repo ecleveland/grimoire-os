@@ -1,6 +1,7 @@
 'use client';
 
 import type { Character } from '@/lib/types';
+import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED } from '@/lib/character-defaults';
 import { abilityModifier, formatModifier, proficiencyBonus, passivePerception } from './utils';
 import { useDiceRoll } from './useDiceRoll';
 import RollableStat from './RollableStat';
@@ -13,11 +14,14 @@ interface StatsBarProps {
 
 export default function StatsBar({ character, canRoll }: StatsBarProps) {
   const { rollCheck } = useDiceRoll();
+  // abilityScores/speed are nullable at the API boundary (VEG-425); fall back
+  // to neutral display values so a minimal character renders instead of crashing.
+  const abilityScores = character.abilityScores ?? DEFAULT_ABILITY_SCORES;
   const profBonus = proficiencyBonus(character.level);
-  const dexMod = abilityModifier(character.abilityScores.dexterity);
+  const dexMod = abilityModifier(abilityScores.dexterity);
   const isPerceptionProficient = character.skills.includes('Perception');
   const passivePerc = passivePerception(
-    character.abilityScores.wisdom,
+    abilityScores.wisdom,
     character.level,
     isPerceptionProficient
   );
@@ -25,7 +29,7 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
   const stats: { label: string; value: string; testId: string }[] = [
     { label: 'Prof. Bonus', value: formatModifier(profBonus), testId: 'stat-prof-bonus' },
     { label: 'Initiative', value: formatModifier(dexMod), testId: 'stat-initiative' },
-    { label: 'Speed', value: `${character.speed} ft`, testId: 'stat-speed' },
+    { label: 'Speed', value: `${character.speed ?? DEFAULT_SPEED} ft`, testId: 'stat-speed' },
     { label: 'Size', value: character.size ?? 'Medium', testId: 'stat-size' },
     { label: 'Passive Perception', value: `${passivePerc}`, testId: 'stat-passive-perception' },
   ];

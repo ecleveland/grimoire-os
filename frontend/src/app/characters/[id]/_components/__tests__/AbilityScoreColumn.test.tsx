@@ -242,3 +242,12 @@ describe('AbilityScoreColumn', () => {
     });
   });
 });
+
+describe('null abilityScores (VEG-425)', () => {
+  it('renders +0 modifiers and (10) scores instead of crashing', () => {
+    const char = { ...mockCharacter, abilityScores: null };
+    render(<AbilityScoreColumn character={char} />);
+    expect(screen.getByTestId('modifier-strength')).toHaveTextContent('+0');
+    expect(screen.getByTestId('score-strength')).toHaveTextContent('(10)');
+  });
+});

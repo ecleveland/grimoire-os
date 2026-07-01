@@ -156,3 +156,13 @@ describe('StatsBar', () => {
     });
   });
 });
+
+describe('null core stats (VEG-425)', () => {
+  it('renders neutral values instead of crashing when abilityScores/speed are null', () => {
+    const char = { ...mockCharacter, abilityScores: null, speed: null };
+    render(<StatsBar character={char} />);
+    // DEFAULT_ABILITY_SCORES (all 10) → +0 initiative; DEFAULT_SPEED → 30 ft.
+    expect(within(screen.getByTestId('stat-initiative')).getByText('+0')).toBeInTheDocument();
+    expect(within(screen.getByTestId('stat-speed')).getByText('30 ft')).toBeInTheDocument();
+  });
+});

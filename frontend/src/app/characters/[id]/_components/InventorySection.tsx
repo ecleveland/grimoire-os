@@ -14,6 +14,7 @@ import {
   updateInventoryItemAt,
 } from '@/lib/character-inventory';
 import { ATTUNEMENT_MAX, addAttunedItem, removeAttunedItemAt } from '@/lib/character-attunement';
+import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
 import SrdItemSearch from '@/components/SrdItemSearch';
 
 type InventorySectionProps = { character: Character } & PlayControlProps;
@@ -43,7 +44,7 @@ export default function InventorySection(props: InventorySectionProps) {
   const { character } = props;
   const { editable, patch, isSaving } = resolvePlayControls(props);
   const inventory = character.inventory ?? [];
-  const currency = character.currency ?? { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
+  const currency = character.currency ?? EMPTY_CURRENCY;
   // Display caps at 3 slots, but the add/remove handlers mutate the full stored
   // array so a (DTO-unreachable) >3 state can't silently drop the hidden tail.
   const storedAttunedItems = character.attunedItems ?? [];
@@ -193,13 +194,17 @@ export default function InventorySection(props: InventorySectionProps) {
 
   if (!showInventory && !showCurrency && !showAttunement) return null;
 
-  const capacity = carryingCapacity(character.abilityScores.strength, character.size);
+  // abilityScores/speed are nullable at the API boundary (VEG-425); fall back to
+  // neutral values so a minimal character's inventory renders instead of crashing.
+  const strength = (character.abilityScores ?? DEFAULT_ABILITY_SCORES).strength;
+  const speed = character.speed ?? DEFAULT_SPEED;
+  const capacity = carryingCapacity(strength, character.size);
   const carried = totalInventoryWeight(inventory);
   const overCapacity = carried > capacity;
   // 5e variant encumbrance tiers (VEG-406): surface the current tier and its
   // movement penalty when carried weight crosses Str×5 / Str×10.
-  const encumbrance = encumbranceStatus(character.abilityScores.strength, character.size, carried);
-  const reducedSpeed = Math.max(0, character.speed - encumbrance.speedPenalty);
+  const encumbrance = encumbranceStatus(strength, character.size, carried);
+  const reducedSpeed = Math.max(0, speed - encumbrance.speedPenalty);
   const encumbranceLabel =
     encumbrance.tier === 'heavily-encumbered' ? 'Heavily encumbered' : 'Encumbered';
 
@@ -400,7 +405,7 @@ export default function InventorySection(props: InventorySectionProps) {
                   : 'text-amber-600 dark:text-amber-400'
               }`}
             >
-              {encumbranceLabel} — speed {character.speed} → {reducedSpeed} ft
+              {encumbranceLabel} — speed {speed} → {reducedSpeed} ft
               {encumbrance.hasDisadvantage &&
                 ', disadvantage on ability checks, attacks & STR/DEX/CON saves'}
             </p>

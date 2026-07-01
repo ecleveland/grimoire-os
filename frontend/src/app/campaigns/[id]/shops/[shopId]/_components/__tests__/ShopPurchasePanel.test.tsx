@@ -153,6 +153,19 @@ describe('ShopPurchasePanel', () => {
     await waitFor(() => expect(buy).toBeEnabled());
   });
 
+  it('renders a zero balance and cannot afford anything with a null purse (legacy data)', async () => {
+    // Regression (VEG-425): currency is `Json?` in the DB, so a legacy/minimal
+    // character deserializes it as null; formatCoin(null)/canAffordLine(null,…)
+    // threw. It should read as an empty purse — 0 gp, affords nothing.
+    routeApi({ party: [makeParty()], character: makeCharacter({ currency: null }) });
+    renderPanel();
+
+    expect(await screen.findByText(/buying as/i)).toHaveTextContent(/mialee/i);
+    await screen.findByText(/\b0 gp\b/i); // balance renders as an empty purse
+    const buy = await screen.findByRole('button', { name: /buy potion of healing/i });
+    await waitFor(() => expect(buy).toBeDisabled());
+  });
+
   it('posts the purchase with version echoes, toasts success, and refetches', async () => {
     const receipt = {
       characterId: 'char-1',
