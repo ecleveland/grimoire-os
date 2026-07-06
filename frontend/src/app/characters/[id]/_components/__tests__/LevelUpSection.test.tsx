@@ -360,6 +360,27 @@ describe('LevelUpSection', () => {
       expect(within(dialog).getByRole('button', { name: /confirm level up/i })).toBeDisabled();
     });
 
+    it('closes the dialog if a concurrent edit brings the character to the level cap', async () => {
+      // The section's atMax gate only hides the button; an already-open dialog
+      // must not offer an impossible 20 → 21 transition.
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <LevelUpSection
+          character={makeCharacter({ level: 19, experiencePoints: 305000 })}
+          {...editable}
+        />
+      );
+      const dialog = await openDialog(user);
+      expect(within(dialog).getByText(/level 19 → 20/i)).toBeInTheDocument();
+      rerender(
+        <LevelUpSection
+          character={makeCharacter({ level: 20, experiencePoints: 355000 })}
+          {...editable}
+        />
+      );
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
     it('cannot open the dialog while a write is saving', () => {
       renderSection({}, { ...editable, isSaving: true });
       expect(screen.getByRole('button', { name: /level up/i })).toBeDisabled();
