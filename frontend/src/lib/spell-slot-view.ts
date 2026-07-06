@@ -3,32 +3,24 @@ import type { ComputedSpellSlots, SpellSlot } from '@/lib/types';
 /**
  * Stored-vs-computed spell-slot reconciliation (VEG-412).
  *
- * The class progression (`computed.spellSlots`, derived server-side) is the
- * authority on slot maxima as a FLOOR, not a ceiling; the stored
- * `Character.spellSlots` array owns the mutable play state (`used`). The sheet
- * renders the merged view below and writes back through `writeSlotUsed`, which
- * heals a stale stored `total` UP to the progression floor on first touch. The
- * Rest and Level-up stories reuse these rules.
+ * Ownership rule: a level the class progression covers with >0 slots is OWNED
+ * by the progression — its max wins in both directions, so a stored `total`
+ * that drifted (stale seed data, or a total baked in by `writeSlotUsed` during
+ * a transient level change) self-heals on display instead of ratcheting
+ * permanently. Every other level (absent from the progression, or covered
+ * with an explicit 0) is owned by the stored array — multiclass or DM-granted
+ * rows live only there and must never silently vanish. `used` always comes
+ * from the stored array, clamped into 0..max.
  *
- * Merge rules (union — never hide or destroy player data):
- * - Each level's max is the LARGER of the progression value and the stored
- *   total. A stored total above the progression is a deliberate grant
- *   (DM-granted or multiclass slots) and is preserved on display and on write;
- *   a stored total below it heals up to the authoritative value.
- * - A level only in the progression renders with `used: 0`; a level only in
- *   the stored array keeps its stored track.
- * - `used` clamps into 0..max, so a corrupt row can't overfill its track.
- * - Levels that end up with max 0 (progression grants none, no stored row)
- *   are not rendered.
- * - No computed block (non-caster, or homebrew class without progression
- *   data) → the stored array renders verbatim.
+ * No computed block at all (non-caster, or homebrew class without progression
+ * data) → the stored array renders verbatim.
  *
  * Known trade-off (documented decision, VEG-412): a stored row at a level the
- * progression no longer covers is indistinguishable from a DM grant, so a
- * level change that shifts slot levels (pact casters especially) leaves the
- * old row rendering until an explicit edit/level-up flow rewrites the stored
- * array. Keeping it is deliberate — dropping it would silently destroy
- * legitimate multiclass/homebrew slots.
+ * progression doesn't cover is indistinguishable from a DM grant, so a level
+ * change that shifts slot levels (pact casters especially) leaves the old row
+ * rendering until an explicit edit/level-up flow rewrites the stored array.
+ * Keeping it is deliberate — dropping it would destroy legitimate
+ * multiclass/homebrew slots.
  */
 export interface SpellSlotView {
   level: number;
@@ -50,19 +42,26 @@ export function resolveSpellSlotView(
   ]);
   return [...levels]
     .map(level => {
+      const progressionMax = maxByLevel[level] ?? 0;
       const storedSlot = storedSlots.find(s => s.level === level);
-      const max = Math.max(maxByLevel[level] ?? 0, storedSlot?.total ?? 0);
-      return { level, max, used: clamp(storedSlot?.used ?? 0, max) };
+      if (progressionMax > 0) {
+        return { level, max: progressionMax, used: clamp(storedSlot?.used ?? 0, progressionMax) };
+      }
+      return storedSlot
+        ? { level, max: storedSlot.total, used: clamp(storedSlot.used, storedSlot.total) }
+        : null;
     })
-    .filter(view => view.max > 0)
+    .filter((view): view is SpellSlotView => view !== null && view.max > 0)
     .sort((a, b) => a.level - b.level);
 }
 
 /**
  * Write a slot's `used` back into the stored array: upserts the level (a
  * progression-only level has no stored entry yet), clamps `used` into 0..max,
- * and sets `total` to the view's max. Because the view max is never below the
- * stored total, this heals a stale total upward but never shrinks a grant.
+ * and stores the view's max as `total`. Writing the max is safe under the
+ * ownership rule above — at progression-covered levels the display always
+ * follows the progression regardless of what was stored, so a total written
+ * during a transient state converges instead of ratcheting.
  */
 export function writeSlotUsed(
   stored: SpellSlot[] | null | undefined,

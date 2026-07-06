@@ -61,10 +61,6 @@ export function proficiencyBonus(level: number): number {
   return Math.ceil(level / 4) + 1;
 }
 
-export function passivePerception(wisScore: number, level: number, isProficient: boolean): number {
-  return 10 + abilityModifier(wisScore) + (isProficient ? proficiencyBonus(level) : 0);
-}
-
 export function skillBonus(abilityScore: number, level: number, isProficient: boolean): number {
   return abilityModifier(abilityScore) + (isProficient ? proficiencyBonus(level) : 0);
 }

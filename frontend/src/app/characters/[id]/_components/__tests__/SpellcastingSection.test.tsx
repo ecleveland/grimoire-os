@@ -739,13 +739,13 @@ describe('spell-slot view merge (VEG-412)', () => {
     expect(pips(5)).toEqual({ filled: 1, empty: 1 });
   });
 
-  it('preserves a DM-granted stored total above the progression max', () => {
-    // The progression is a floor, not a ceiling — extra granted slots keep
-    // rendering with their expended state intact.
+  it('lets the progression own the pip count at a covered level (self-heals a baked total)', () => {
+    // A stored total inflated by an earlier write during a transient level
+    // change must correct itself once the level (and its progression) reverts.
     render(
       <SpellcastingSection character={withSlots([{ level: 1, total: 4, used: 4 }], { 1: 2 })} />
     );
-    expect(pips(1)).toEqual({ filled: 4, empty: 0 });
+    expect(pips(1)).toEqual({ filled: 2, empty: 0 });
   });
 
   it('renders the progression even when the stored array is empty', () => {

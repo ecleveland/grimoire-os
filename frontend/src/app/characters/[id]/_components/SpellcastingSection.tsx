@@ -53,8 +53,8 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   const spellcasting = character.computed.spellcasting;
   if (!character.spellcastingAbility || !spellcasting) return null;
 
-  // Slot maxima take the computed class progression as an authoritative floor
-  // (stored totals above it are preserved as grants), `used` comes from the
+  // Slot maxima: the computed class progression owns every level it covers;
+  // stored-only levels (multiclass/DM grants) are kept; `used` comes from the
   // stored array (VEG-412 reconciliation — rules in @/lib/spell-slot-view).
   const slotViews = resolveSpellSlotView(character.spellSlots, character.computed.spellSlots);
 

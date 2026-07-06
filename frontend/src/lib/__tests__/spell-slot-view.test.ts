@@ -68,19 +68,21 @@ describe('resolveSpellSlotView', () => {
       expect(view.find(v => v.level === 5)).toEqual({ level: 5, max: 2, used: 1 });
     });
 
-    it('preserves a stored total above the progression max (DM-granted extra slots)', () => {
-      // The progression is a floor, not a ceiling: a stored total above it is a
-      // deliberate grant and must keep rendering (and never be healed down).
+    it('lets the progression own the max at a covered level, both directions', () => {
+      // Covered levels are authoritative in BOTH directions so a total baked
+      // into the stored array by an earlier write (e.g. during a transient
+      // level change) self-heals on display instead of ratcheting permanently.
+      // There is no UI that edits stored totals, so nothing legitimate is lost.
       const view = resolveSpellSlotView(
         [{ level: 3, total: 4, used: 4 }],
         computed // level 3 progression max is 2
       );
-      expect(view.find(v => v.level === 3)).toEqual({ level: 3, max: 4, used: 4 });
+      expect(view.find(v => v.level === 3)).toEqual({ level: 3, max: 2, used: 2 });
     });
 
     it('clamps used down to the stored total when it overshoots', () => {
-      const view = resolveSpellSlotView([{ level: 3, total: 2, used: 4 }], computed);
-      expect(view.find(v => v.level === 3)).toEqual({ level: 3, max: 2, used: 2 });
+      const view = resolveSpellSlotView([{ level: 5, total: 2, used: 4 }], computed);
+      expect(view.find(v => v.level === 5)).toEqual({ level: 5, max: 2, used: 2 });
     });
 
     it('keeps a stored row at a level the progression covers with zero slots', () => {
