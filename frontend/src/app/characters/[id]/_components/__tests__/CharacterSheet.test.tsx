@@ -15,6 +15,9 @@ vi.mock('../CharacterSheetHeader', () => ({
     </div>
   ),
 }));
+vi.mock('../LevelUpSection', () => ({
+  default: () => <div data-testid="LevelUpSection" />,
+}));
 vi.mock('../CombatBar', () => ({
   default: () => <div data-testid="CombatBar" />,
 }));
@@ -102,6 +105,7 @@ describe('CharacterSheet', () => {
     it('renders all Character tab components by default', () => {
       render(<CharacterSheet character={mockCharacter} isOwner={false} />);
       expect(screen.getByTestId('CharacterSheetHeader')).toBeInTheDocument();
+      expect(screen.getByTestId('LevelUpSection')).toBeInTheDocument();
       expect(screen.getByTestId('CombatBar')).toBeInTheDocument();
       expect(screen.getByTestId('StatusTracker')).toBeInTheDocument();
       expect(screen.getByTestId('StatsBar')).toBeInTheDocument();
@@ -141,6 +145,7 @@ describe('CharacterSheet', () => {
       await user.click(screen.getByRole('tab', { name: 'Spells & Details' }));
 
       expect(screen.queryByTestId('CharacterSheetHeader')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('LevelUpSection')).not.toBeInTheDocument();
       expect(screen.queryByTestId('CombatBar')).not.toBeInTheDocument();
       expect(screen.queryByTestId('StatsBar')).not.toBeInTheDocument();
     });

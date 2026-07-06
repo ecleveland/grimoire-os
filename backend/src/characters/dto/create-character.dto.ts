@@ -336,9 +336,14 @@ export class CreateCharacterDto {
   @IsString()
   alignment?: string;
 
+  // Bounded to the Postgres int4 range: the sheet's Award XP control (VEG-411)
+  // writes this repeatedly, and an unchecked value overflows the column (or, as
+  // Infinity, JSON-serializes to null) and 500s in Prisma instead of 400ing here.
   @ApiPropertyOptional({ example: 0 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
   experiencePoints?: number;
 
   @ApiPropertyOptional({ type: AbilityScoresDto })

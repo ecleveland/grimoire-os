@@ -212,6 +212,14 @@ describe('CharactersService', () => {
       // Non-caster: no spellcasting block, no slots.
       expect(result.computed.spellcasting).toBeNull();
       expect(result.computed.spellSlots).toBeNull();
+      // Level 5 at exactly 6500 XP: at the band floor, 7500 XP to level 6.
+      expect(result.computed.xp).toEqual({
+        currentLevelAt: 6500,
+        nextLevelAt: 14000,
+        into: 0,
+        span: 7500,
+        readyToLevel: false,
+      });
     });
 
     it('derives spell DC/attack and slot maxima from the class spellcasting data', async () => {

@@ -97,6 +97,7 @@ export class CharactersService {
     const computed = computeCharacterStats(
       {
         level: character.level,
+        experiencePoints: character.experiencePoints,
         abilityScores: character.abilityScores as AbilityScores | null,
         savingThrows: character.savingThrows,
         skills: character.skills,

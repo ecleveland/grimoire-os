@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { Character } from '@/lib/types';
 import { useCharacterMutation, type PlayControlProps } from './useCharacterMutation';
 import CharacterSheetHeader from './CharacterSheetHeader';
+import LevelUpSection from './LevelUpSection';
 import CombatBar from './CombatBar';
 import StatusTracker from './StatusTracker';
 import StatsBar from './StatsBar';
@@ -60,6 +61,7 @@ export default function CharacterSheet({ character, isOwner }: CharacterSheetPro
       {activeTab === 'character' && (
         <div className="space-y-6">
           <CharacterSheetHeader character={character} isOwner={isOwner} />
+          <LevelUpSection character={character} {...controls} />
           <CombatBar character={character} {...controls} />
           <StatusTracker character={character} {...controls} />
           <StatsBar character={character} canRoll={isOwner} />

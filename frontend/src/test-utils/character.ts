@@ -1,4 +1,8 @@
 import type { AbilityScores, Character, ComputedSpellcasting, ComputedStats } from '@/lib/types';
+// Value import from the file-linked shared package: fine here because tests run
+// under Vitest's resolver — app code can't do this (Turbopack limitation, see
+// the types.ts header) and must keep getting computed.xp from the API.
+import { computeXpBand } from '@grimoire-os/shared';
 import {
   ABILITY_KEYS,
   ABILITY_KEY_TO_NAME,
@@ -19,8 +23,43 @@ import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
  * `spellSlots` is always null here — deriving it needs class progression data
  * the frontend doesn't have; caster specs override it explicitly.
  */
+// Test-only mirror of the seeded experience-points/level-thresholds *data*
+// (backend/src/seed/data/game-rules.ts), like ability-math mirrors the
+// proficiency table. The band math itself is the shared `computeXpBand` — only
+// the table is duplicated.
+const XP_LEVEL_THRESHOLDS: Record<string, number> = {
+  '1': 0,
+  '2': 300,
+  '3': 900,
+  '4': 2700,
+  '5': 6500,
+  '6': 14000,
+  '7': 23000,
+  '8': 34000,
+  '9': 48000,
+  '10': 64000,
+  '11': 85000,
+  '12': 100000,
+  '13': 120000,
+  '14': 140000,
+  '15': 165000,
+  '16': 195000,
+  '17': 225000,
+  '18': 265000,
+  '19': 305000,
+  '20': 355000,
+};
+
 export function deriveComputed(
-  c: Pick<Character, 'level' | 'abilityScores' | 'savingThrows' | 'skills' | 'spellcastingAbility'>
+  c: Pick<
+    Character,
+    | 'level'
+    | 'experiencePoints'
+    | 'abilityScores'
+    | 'savingThrows'
+    | 'skills'
+    | 'spellcastingAbility'
+  >
 ): ComputedStats {
   const scores = c.abilityScores ?? DEFAULT_ABILITY_SCORES;
   const prof = proficiencyBonus(c.level);
@@ -69,6 +108,7 @@ export function deriveComputed(
     passivePerception: 10 + skills['Perception'].bonus,
     spellcasting,
     spellSlots: null,
+    xp: computeXpBand(XP_LEVEL_THRESHOLDS, c.level, c.experiencePoints),
   };
 }
 

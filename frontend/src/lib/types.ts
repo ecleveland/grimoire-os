@@ -22,6 +22,15 @@ export type CombatantType = (typeof CombatantType)[keyof typeof CombatantType];
 export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
 export type DieType = (typeof DIE_TYPES)[number];
 
+/**
+ * Narrow a free-form die string (e.g. `SrdClass.hitDie`) to a `DieType`, or
+ * null when it isn't one. Single home for the membership-check-and-cast the
+ * guided builder, character editor, and level-up dialog all need.
+ */
+export function asDieType(value: string | undefined): DieType | null {
+  return value && (DIE_TYPES as readonly string[]).includes(value) ? (value as DieType) : null;
+}
+
 // Creature sizes, smallest to largest. Stored as a free-text string server-side
 // (the DTO doesn't constrain it), but the editor offers the canonical set.
 export const SIZES = ['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'] as const;
@@ -53,6 +62,7 @@ export type {
   ComputedSkill,
   ComputedSpellcasting,
   ComputedSpellSlots,
+  ComputedXp,
   SpellcasterType,
   // Entity types
   User,
