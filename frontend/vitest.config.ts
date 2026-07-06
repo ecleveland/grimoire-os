@@ -23,6 +23,7 @@ export default defineConfig({
         'src/**/*.test.{ts,tsx}',
         'src/**/*.d.ts',
         'src/**/layout.tsx',
+        'src/test-utils/**',
       ],
       thresholds: {
         statements: 88,

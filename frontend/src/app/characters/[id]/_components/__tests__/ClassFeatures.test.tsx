@@ -2,52 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ClassFeatures from '../ClassFeatures';
 import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
-const baseCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Thorin Ironforge',
-  race: 'Dwarf',
-  class: 'Fighter',
-  level: 5,
-  subclass: 'Champion',
-  background: 'Soldier',
-  alignment: 'Lawful Good',
-  experiencePoints: 6500,
-  abilityScores: {
-    strength: 16,
-    dexterity: 12,
-    constitution: 14,
-    intelligence: 10,
-    wisdom: 13,
-    charisma: 8,
-  },
-  hitPoints: { max: 44, current: 44, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 18,
-  speed: 25,
-  initiative: 1,
-  proficiencies: [],
-  languages: [],
-  savingThrows: [],
-  skills: [],
-  spells: [],
-  attunedItems: [],
-  spellSlots: [],
-  inventory: [],
-  currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+const baseCharacter = makeCharacter({
   features: [
     { name: 'Second Wind', source: 'Fighter', description: 'Regain HP as a bonus action.' },
     { name: 'Action Surge', source: 'Fighter', description: 'Take an additional action.' },
     { name: 'Darkvision', source: 'Dwarf', description: 'See in dim light within 60 feet.' },
     { name: 'Great Weapon Master', source: 'Feat', description: 'Bonus attack on crit or kill.' },
   ],
-  conditions: [],
-  concentration: null,
-  exhaustion: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 describe('ClassFeatures', () => {
   it('renders the section header', () => {

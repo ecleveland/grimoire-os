@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Character, Condition } from '@/lib/types';
 import AddConditionSelect from '@/components/AddConditionSelect';
 import ConcentrationChip from '@/components/ConcentrationChip';
@@ -10,7 +10,11 @@ import {
   setExhaustionLevel,
   concentrationFromSpellInput,
 } from '@/lib/character-play';
-import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
+import {
+  resolvePlayControls,
+  type CharacterPatch,
+  type PlayControlProps,
+} from './useCharacterMutation';
 
 type StatusTrackerProps = { character: Character } & PlayControlProps;
 
@@ -57,12 +61,39 @@ export default function StatusTracker(props: StatusTrackerProps) {
     }
   }, [isConcentrating]);
 
+  // The blur that fires when focus moves from the spell input to another
+  // control in this card must NOT solo-commit the draft: its PATCH would flip
+  // `isSaving` and disable the target control before its click lands,
+  // silently swallowing the action. Instead the blur is skipped (detected via
+  // card-level mousedown-capture for pointers, `relatedTarget` for keyboard)
+  // and the control's own handler folds the outstanding draft into its patch —
+  // one composite optimistic-locked write carrying both changes. An aborted
+  // press (mousedown, drag away) commits nothing and keeps the draft visible.
+  const cardRef = useRef<HTMLDivElement>(null);
+  const skipBlurCommitRef = useRef(false);
+
+  /** The concentration change an uncommitted draft implies, or null if none. */
+  const outstandingSpellCommit = () => {
+    if (spellDraft === null || !isConcentrating) return null;
+    const next = concentrationFromSpellInput(spellDraft);
+    return next.spell === serverSpell ? null : next;
+  };
+
+  /** Fold any outstanding draft into `fields` so one PATCH carries both. */
+  const withSpellCommit = (fields: CharacterPatch): CharacterPatch => {
+    const next = outstandingSpellCommit();
+    if (!next) return fields;
+    setSpellDraft(null);
+    setPendingSpell(next.spell ?? '');
+    return { concentration: next, ...fields };
+  };
+
   const toggleCondition = (condition: Condition) => {
-    patch({ conditions: toggleConditionInList(conditions, condition) });
+    patch(withSpellCommit({ conditions: toggleConditionInList(conditions, condition) }));
   };
 
   const clickExhaustion = (level: number) => {
-    patch({ exhaustion: setExhaustionLevel(exhaustion, level) });
+    patch(withSpellCommit({ exhaustion: setExhaustionLevel(exhaustion, level) }));
   };
 
   const commitSpell = () => {
@@ -73,16 +104,43 @@ export default function StatusTracker(props: StatusTrackerProps) {
     // input drops focus) finds no draft and no-ops instead of re-sending the
     // PATCH with a stale expectedVersion.
     setSpellDraft(null);
-    if (next.spell === serverSpell) return;
+    if (next.spell === serverSpell) {
+      // Re-entering the server's own value abandons any pending rename — the
+      // input must show the server value again, not a stale failed attempt.
+      setPendingSpell(null);
+      return;
+    }
     setPendingSpell(next.spell ?? '');
     patch({ concentration: next });
   };
 
-  const stopConcentrating = () => patch({ concentration: null });
+  const handleSpellBlur = (e: React.FocusEvent) => {
+    const skip = skipBlurCommitRef.current;
+    skipBlurCommitRef.current = false;
+    // Focus staying inside the card (pointer press or Tab) defers the commit
+    // to the target control's handler; leaving the card commits solo.
+    if (skip || (e.relatedTarget && cardRef.current?.contains(e.relatedTarget as Node))) return;
+    commitSpell();
+  };
+
+  // Stopping deliberately discards any draft — the spell is ending, so
+  // committing a rename alongside the stop would be nonsense.
+  const stopConcentrating = () => {
+    setSpellDraft(null);
+    patch({ concentration: null });
+  };
 
   return (
     <div
+      ref={cardRef}
       data-testid="status-tracker"
+      onMouseDownCapture={e => {
+        // A pointer press anywhere in the card except the input itself means
+        // the coming blur must defer its commit (see handleSpellBlur).
+        if ((e.target as HTMLElement).getAttribute?.('aria-label') !== 'Concentration spell') {
+          skipBlurCommitRef.current = true;
+        }
+      }}
       className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
     >
       <h2 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</h2>
@@ -155,8 +213,13 @@ export default function StatusTracker(props: StatusTrackerProps) {
                   placeholder="Spell name"
                   value={spellDraft ?? pendingSpell ?? serverSpell ?? ''}
                   disabled={isSaving}
+                  onFocus={() => {
+                    // A stale skip flag (press that never blurred the input)
+                    // must not eat this edit session's eventual commit.
+                    skipBlurCommitRef.current = false;
+                  }}
                   onChange={e => setSpellDraft(e.target.value)}
-                  onBlur={commitSpell}
+                  onBlur={handleSpellBlur}
                   onKeyDown={e => {
                     if (e.key === 'Enter') commitSpell();
                   }}
@@ -165,11 +228,6 @@ export default function StatusTracker(props: StatusTrackerProps) {
                 <button
                   type="button"
                   disabled={isSaving}
-                  // Discard any uncommitted draft before the input's blur
-                  // fires (mousedown precedes blur): otherwise the blur-commit
-                  // would set isSaving, disable this button before mouseup,
-                  // and swallow the stop — renaming instead of stopping.
-                  onMouseDown={() => setSpellDraft(null)}
                   onClick={stopConcentrating}
                   className="text-xs px-1.5 py-0.5 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded disabled:opacity-50"
                 >

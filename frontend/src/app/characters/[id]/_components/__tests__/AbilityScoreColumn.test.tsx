@@ -3,50 +3,15 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import AbilityScoreColumn from '../AbilityScoreColumn';
 import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
 const mockMessage = vi.fn();
 vi.mock('sonner', () => ({ toast: { message: (...args: unknown[]) => mockMessage(...args) } }));
 
-const mockCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Thorin Ironforge',
-  race: 'Dwarf',
-  class: 'Fighter',
-  level: 5,
-  subclass: 'Champion',
-  background: 'Soldier',
-  alignment: 'Lawful Good',
-  experiencePoints: 6500,
-  abilityScores: {
-    strength: 16,
-    dexterity: 12,
-    constitution: 14,
-    intelligence: 10,
-    wisdom: 13,
-    charisma: 8,
-  },
-  hitPoints: { max: 44, current: 44, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 18,
-  speed: 25,
-  initiative: 1,
-  proficiencies: ['Light Armor', 'Medium Armor', 'Heavy Armor', 'Shields'],
-  languages: ['Common', 'Dwarvish'],
+const mockCharacter = makeCharacter({
   savingThrows: ['Strength', 'Constitution'],
   skills: ['Athletics', 'Intimidation'],
-  spells: [],
-  attunedItems: [],
-  spellSlots: [],
-  inventory: [],
-  currency: { cp: 0, sp: 0, ep: 0, gp: 50, pp: 0 },
-  features: [],
-  conditions: [],
-  concentration: null,
-  exhaustion: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 describe('AbilityScoreColumn', () => {
   describe('ability headers', () => {

@@ -3,36 +3,25 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import StatusTracker from '../StatusTracker';
 import type { Character } from '@/lib/types';
+import { makeCharacter as makeBaseCharacter } from '@/test-utils/character';
 
+// StatusTracker's empty-state tests hinge on the nullable stat columns being
+// null (a legacy/minimal row), so this wrapper nulls them out over the shared
+// factory's populated defaults before applying the caller's overrides.
 function makeCharacter(over: Partial<Character> = {}): Character {
-  return {
-    id: 'char-1',
-    userId: 'user-1',
-    name: 'Thorin Ironforge',
-    level: 5,
-    experiencePoints: 6500,
+  return makeBaseCharacter({
     abilityScores: null,
     hitPoints: null,
     deathSaves: null,
     armorClass: null,
     speed: null,
     initiative: null,
-    proficiencies: [],
-    languages: [],
-    savingThrows: [],
-    skills: [],
     spellSlots: null,
     inventory: null,
     currency: null,
     features: null,
-    conditions: [],
-    concentration: null,
-    exhaustion: null,
-    version: 1,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
     ...over,
-  } as Character;
+  });
 }
 
 const onPatch = vi.fn();
@@ -240,6 +229,121 @@ describe('StatusTracker', () => {
       );
 
       expect(screen.getByLabelText('Concentration spell')).toHaveValue('Hold Person');
+    });
+
+    it('folds an uncommitted spell draft into an exhaustion click as one composite patch', () => {
+      // Regression (PR #235 review, iteration 2): the blur-commit used to fire
+      // its own PATCH first, and isSaving disabled the pip before its click
+      // landed — the exhaustion change was silently swallowed.
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      fireEvent.change(input, { target: { value: 'Fireball' } });
+      const pip = screen.getByRole('button', { name: 'Set exhaustion level 3' });
+      fireEvent.mouseDown(pip);
+      fireEvent.blur(input, { relatedTarget: pip });
+      fireEvent.click(pip);
+
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      expect(onPatch).toHaveBeenCalledWith({
+        concentration: { spell: 'Fireball' },
+        exhaustion: 3,
+      });
+    });
+
+    it('folds an uncommitted spell draft into a condition change as one composite patch', () => {
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: {}, conditions: ['Poisoned'] })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      fireEvent.change(input, { target: { value: 'Bless' } });
+      const remove = screen.getByRole('button', { name: 'Remove Poisoned' });
+      fireEvent.mouseDown(remove);
+      fireEvent.blur(input, { relatedTarget: remove });
+      fireEvent.click(remove);
+
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      expect(onPatch).toHaveBeenCalledWith({
+        concentration: { spell: 'Bless' },
+        conditions: [],
+      });
+    });
+
+    it('keyboard: tabbing to Stop concentrating and activating it stops instead of renaming', () => {
+      // Regression (PR #235 review, iteration 2): the mousedown-only discard
+      // left Tab → Enter committing the draft as a rename and swallowing the
+      // stop for keyboard users.
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      fireEvent.change(input, { target: { value: 'Fireball' } });
+      const stop = screen.getByRole('button', { name: 'Stop concentrating' });
+      // Tab: blur with focus moving to the button — no mousedown involved.
+      fireEvent.blur(input, { relatedTarget: stop });
+      fireEvent.click(stop); // keyboard activation dispatches a click
+
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      expect(onPatch).toHaveBeenCalledWith({ concentration: null });
+    });
+
+    it('keeps the typed draft when a press on Stop is aborted (drag away, no click)', () => {
+      // Regression (PR #235 review, iteration 2): the mousedown discard wiped
+      // the typed text even when the click never completed.
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      fireEvent.change(input, { target: { value: 'Polymorph' } });
+      const stop = screen.getByRole('button', { name: 'Stop concentrating' });
+      fireEvent.mouseDown(stop);
+      fireEvent.blur(input, { relatedTarget: stop });
+      // No click — the user dragged off the button before releasing.
+
+      expect(onPatch).not.toHaveBeenCalled();
+      expect(input).toHaveValue('Polymorph');
+    });
+
+    it('retyping the server value after a failed rename restores the server display', () => {
+      // Regression (PR #235 review, iteration 2): the unchanged-value early
+      // return left pendingSpell set, so the input stayed stuck on the
+      // rejected value.
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      // Commit 'Fire' — the write fails server-side (no refetch, prop unchanged).
+      fireEvent.change(input, { target: { value: 'Fire' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(onPatch).toHaveBeenCalledTimes(1);
+
+      // User re-enters the server's own value to abandon the rename.
+      fireEvent.change(input, { target: { value: 'Bless' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+
+      expect(onPatch).toHaveBeenCalledTimes(1); // no redundant PATCH
+      expect(input).toHaveValue('Bless'); // not stuck on 'Fire'
     });
 
     it('commits exactly once when a blur immediately follows the Enter commit', () => {

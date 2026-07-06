@@ -3,6 +3,7 @@ import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SpellcastingSection from '../SpellcastingSection';
 import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
 // The section fetches /srd/classes to resolve the prepared/known allowance
 // (VEG-405). Mock just useApiQuery, leaving the rest of the query layer (used by
@@ -40,17 +41,8 @@ vi.mock('@/components/SrdSpellSearch', () => ({
   ),
 }));
 
-const baseCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Elara Brightmoon',
-  race: 'Elf',
+const baseCharacter = makeCharacter({
   class: 'Wizard',
-  level: 5,
-  subclass: 'Evocation',
-  background: 'Sage',
-  alignment: 'Neutral Good',
-  experiencePoints: 6500,
   abilityScores: {
     strength: 8,
     dexterity: 14,
@@ -59,15 +51,6 @@ const baseCharacter: Character = {
     wisdom: 13,
     charisma: 10,
   },
-  hitPoints: { max: 32, current: 32, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 12,
-  speed: 30,
-  initiative: 2,
-  proficiencies: [],
-  languages: [],
-  savingThrows: [],
-  skills: [],
   spellcastingAbility: 'Intelligence',
   spellSaveDC: 15,
   spellAttackBonus: 7,
@@ -91,16 +74,7 @@ const baseCharacter: Character = {
     { level: 2, total: 3, used: 1 },
     { level: 3, total: 2, used: 0 },
   ],
-  inventory: [],
-  attunedItems: [],
-  currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
-  features: [],
-  conditions: [],
-  concentration: null,
-  exhaustion: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 describe('SpellcastingSection', () => {
   beforeEach(() => {

@@ -1,54 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import PersonalitySection from '../PersonalitySection';
-import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
-const baseCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Elara Brightmoon',
-  race: 'Elf',
-  class: 'Wizard',
-  level: 5,
-  subclass: 'Evocation',
-  background: 'Sage',
+const baseCharacter = makeCharacter({
   alignment: 'Neutral Good',
-  experiencePoints: 6500,
-  abilityScores: {
-    strength: 8,
-    dexterity: 14,
-    constitution: 12,
-    intelligence: 18,
-    wisdom: 13,
-    charisma: 10,
-  },
-  hitPoints: { max: 32, current: 32, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 12,
-  speed: 30,
-  initiative: 2,
-  proficiencies: [],
-  languages: [],
-  savingThrows: [],
-  skills: [],
-  spells: [],
-  attunedItems: [],
-  spellSlots: [],
-  inventory: [],
-  currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
-  features: [],
   appearance: 'Tall with silver hair and violet eyes.',
   backstory: 'Grew up in the Arcane Academy, obsessed with ancient magic.',
   personalityTraits: 'Curious and methodical. Always taking notes.',
   ideals: 'Knowledge is the path to power and self-improvement.',
   bonds: 'The library where I learned my craft is the most important place in the world.',
   flaws: 'I overlook obvious solutions in favor of complicated ones.',
-  conditions: [],
-  concentration: null,
-  exhaustion: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 describe('PersonalitySection', () => {
   describe('Appearance', () => {

@@ -406,6 +406,15 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     describe('clear payloads', () => {
       // The sheet stops concentrating / clears exhaustion by PATCHing null;
       // @IsOptional must keep accepting it if the validators are ever tightened.
+      it('coerces conditions: null to [] (clear-all, symmetric with the other clears)', async () => {
+        // Without coercion null passes @IsOptional but Prisma rejects it for
+        // the required String[] — a 500 instead of a clean clear.
+        const dto = toDto({ ...baseDto, conditions: null });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'conditions')).toHaveLength(0);
+        expect(dto.conditions).toEqual([]);
+      });
+
       it('accepts concentration: null (stop concentrating)', async () => {
         const dto = toDto({ ...baseDto, concentration: null });
         const errors = await validate(dto, VALIDATOR_STRICTNESS);

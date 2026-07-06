@@ -12,7 +12,7 @@ import {
   IsIn,
   IsUUID,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   AttunedItem,
@@ -530,6 +530,10 @@ export class CreateCharacterDto {
   // forbidNonWhitelisted (the VEG-349 deathSaves lesson).
   @ApiPropertyOptional({ enum: CONDITIONS, isArray: true, example: ['Poisoned'] })
   @IsOptional()
+  // null → [] so a null clear behaves like the concentration/exhaustion
+  // clears; without it @IsOptional lets null through to Prisma, which rejects
+  // it for the required String[] column (a 500 instead of a clean clear).
+  @Transform(({ value }) => (value === null ? [] : (value as unknown)))
   @IsArray()
   @ArrayUnique()
   @IsIn(CONDITIONS, { each: true })
