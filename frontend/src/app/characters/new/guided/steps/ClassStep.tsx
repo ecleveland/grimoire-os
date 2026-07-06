@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useApiQuery } from '@/lib/query';
-import { DIE_TYPES, type DieType, type SrdClass, type SrdSubclass } from '@/lib/types';
+import { asDieType, type SrdClass, type SrdSubclass } from '@/lib/types';
 import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
@@ -50,9 +50,7 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
         skills: [],
       });
       if (changed) {
-        const dieType = (DIE_TYPES as readonly string[]).includes(selectedClass.hitDie)
-          ? (selectedClass.hitDie as DieType)
-          : value.hitDice.dieType;
+        const dieType = asDieType(selectedClass.hitDie) ?? value.hitDice.dieType;
         onChange({
           level: 1,
           savingThrows: [...selectedClass.savingThrows],

@@ -10,11 +10,15 @@ import type { Character } from '@/lib/types';
  * Stored character fields the in-sheet play controls (VEG-349) may write.
  * Deliberately a narrow allow-list — these controls mutate stored state only;
  * derived values (DC, attack bonus, modifiers) come from the computed-stats
- * layer and are never patched from here.
+ * layer and are never patched from here. `level`/`experiencePoints`/`features`
+ * are stored inputs too — the level-up assistant (VEG-411) writes them and the
+ * computed layer re-derives proficiency, slot maxima, and XP progress.
  */
 export type CharacterPatch = Partial<
   Pick<
     Character,
+    | 'level'
+    | 'experiencePoints'
     | 'hitPoints'
     | 'deathSaves'
     | 'hitDice'
@@ -27,6 +31,7 @@ export type CharacterPatch = Partial<
     | 'conditions'
     | 'concentration'
     | 'exhaustion'
+    | 'features'
   >
 >;
 

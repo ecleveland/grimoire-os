@@ -1,8 +1,11 @@
 import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
+import { computeXpBand, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
+import { srdGameRules } from '../../seed/data/game-rules';
 import {
   abilityModifier,
   proficiencyBonus,
   computeCharacterStats,
+  computeXp,
   CharacterComputeInput,
 } from './compute-stats';
 
@@ -18,6 +21,7 @@ const BASE_SCORES: AbilityScores = {
 function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput {
   return {
     level: 5,
+    experiencePoints: 6500,
     abilityScores: BASE_SCORES,
     savingThrows: [],
     skills: [],
@@ -90,7 +94,89 @@ describe('proficiencyBonus', () => {
   });
 });
 
+describe('XP threshold data', () => {
+  it('the shared XP_LEVEL_THRESHOLDS constant matches the seeded rule table (drift guard)', () => {
+    // Frontend test fixtures derive computed.xp from the shared constant while
+    // the compute layer reads the seeded rule — this pin keeps them one table.
+    const seeded = srdGameRules.find(
+      r => r.category === 'experience-points' && r.key === 'level-thresholds'
+    );
+    expect(seeded?.value).toEqual(XP_LEVEL_THRESHOLDS);
+  });
+});
+
+describe('computeXpBand', () => {
+  it('throws on a threshold table that does not cover the band', () => {
+    expect(() => computeXpBand({ '1': 0 }, 1, 0)).toThrow(/threshold/i);
+    expect(() => computeXpBand({}, 5, 6500)).toThrow(/threshold/i);
+  });
+});
+
+describe('computeXp', () => {
+  it('reports the band for a fresh level-1 character', () => {
+    expect(computeXp(1, 0)).toEqual({
+      currentLevelAt: 0,
+      nextLevelAt: 300,
+      into: 0,
+      span: 300,
+      readyToLevel: false,
+    });
+  });
+
+  it('tracks progress within a band', () => {
+    // Level 5 spans 6500–14000; 10250 is 3750 in.
+    expect(computeXp(5, 10250)).toEqual({
+      currentLevelAt: 6500,
+      nextLevelAt: 14000,
+      into: 3750,
+      span: 7500,
+      readyToLevel: false,
+    });
+  });
+
+  it('flags readyToLevel exactly at the next threshold', () => {
+    expect(computeXp(1, 300).readyToLevel).toBe(true);
+    expect(computeXp(1, 299).readyToLevel).toBe(false);
+  });
+
+  it('keeps readyToLevel set when XP overshoots the next threshold', () => {
+    const xp = computeXp(3, 14000); // enough for level 6 while still level 3
+    expect(xp.readyToLevel).toBe(true);
+    expect(xp.into).toBe(14000 - 900);
+  });
+
+  it('clamps `into` to zero when XP trails the current level (milestone leveling)', () => {
+    expect(computeXp(5, 0).into).toBe(0);
+  });
+
+  it('has no next band at level 20', () => {
+    expect(computeXp(20, 355000)).toEqual({
+      currentLevelAt: 355000,
+      nextLevelAt: null,
+      into: 0,
+      span: null,
+      readyToLevel: false,
+    });
+  });
+
+  it('clamps out-of-range levels like the other table lookups', () => {
+    expect(computeXp(0, 0)).toEqual(computeXp(1, 0));
+    expect(computeXp(25, 400000)).toEqual(computeXp(20, 400000));
+  });
+});
+
 describe('computeCharacterStats', () => {
+  it('includes the xp block derived from level and experiencePoints', () => {
+    const stats = computeCharacterStats(input({ level: 5, experiencePoints: 6500 }));
+    expect(stats.xp).toEqual({
+      currentLevelAt: 6500,
+      nextLevelAt: 14000,
+      into: 0,
+      span: 7500,
+      readyToLevel: false,
+    });
+  });
+
   it('derives per-ability modifiers keyed like AbilityScores', () => {
     const { abilityModifiers } = computeCharacterStats(input());
     expect(abilityModifiers).toEqual({

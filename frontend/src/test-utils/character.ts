@@ -1,4 +1,10 @@
 import type { AbilityScores, Character, ComputedSpellcasting, ComputedStats } from '@/lib/types';
+// Value import from the file-linked shared package: fine here because tests run
+// under Vitest's resolver — app code can't do this (Turbopack limitation, see
+// the types.ts header) and must keep getting computed.xp from the API. The
+// threshold table is the shared master copy, drift-guarded against the seeded
+// rule by a backend test.
+import { computeXpBand, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
 import {
   ABILITY_KEYS,
   ABILITY_KEY_TO_NAME,
@@ -20,7 +26,15 @@ import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
  * the frontend doesn't have; caster specs override it explicitly.
  */
 export function deriveComputed(
-  c: Pick<Character, 'level' | 'abilityScores' | 'savingThrows' | 'skills' | 'spellcastingAbility'>
+  c: Pick<
+    Character,
+    | 'level'
+    | 'experiencePoints'
+    | 'abilityScores'
+    | 'savingThrows'
+    | 'skills'
+    | 'spellcastingAbility'
+  >
 ): ComputedStats {
   const scores = c.abilityScores ?? DEFAULT_ABILITY_SCORES;
   const prof = proficiencyBonus(c.level);
@@ -69,6 +83,7 @@ export function deriveComputed(
     passivePerception: 10 + skills['Perception'].bonus,
     spellcasting,
     spellSlots: null,
+    xp: computeXpBand(XP_LEVEL_THRESHOLDS, c.level, c.experiencePoints),
   };
 }
 

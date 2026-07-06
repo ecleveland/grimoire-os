@@ -1,0 +1,266 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import type { Character, SrdClass } from '@/lib/types';
+import { asDieType } from '@/lib/types';
+import Modal from '@/components/Modal';
+import { useApiQuery } from '@/lib/query';
+import { rollDie } from '@/lib/dice';
+import { proficiencyBonus } from '@/lib/ability-math';
+import {
+  applyLevelUp,
+  averageHpForDie,
+  classFeaturesAtLevel,
+  dieFaces,
+  hpGain,
+  MAX_LEVEL,
+} from '@/lib/character-level';
+import type { CharacterPatch } from './useCharacterMutation';
+import { formatModifier } from './utils';
+
+interface LevelUpDialogProps {
+  character: Character;
+  onClose: () => void;
+  onPatch: (fields: CharacterPatch) => void;
+  isSaving: boolean;
+}
+
+const sectionTitleClass = 'text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase';
+const noteClass =
+  'text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2';
+
+/**
+ * Guided level-up (VEG-411): one composite optimistic-locked PATCH bumping
+ * `level`, applying the HP gain (roll or fixed average + CON), adding a hit
+ * die, and appending the chosen class features. Spell-slot maxima and the
+ * proficiency bonus are deliberately not written — the computed-stats layer
+ * re-derives both from the new level on the next read.
+ */
+export default function LevelUpDialog({
+  character,
+  onClose,
+  onPatch,
+  isSaving,
+}: LevelUpDialogProps) {
+  const newLevel = character.level + 1;
+  const [mode, setMode] = useState<'average' | 'roll'>('average');
+  const [roll, setRoll] = useState<number | null>(null);
+  // Names the player unchecked — defaulting to "none" keeps every suggested
+  // feature checked without syncing state when the class catalog resolves.
+  const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
+  // Level the confirmed write targets, or null before confirming. The dialog
+  // closes only once the bumped character flows back down — a failed write
+  // (409 conflict, network error) leaves it open with the roll and feature
+  // choices intact so the player can retry against the refetched version.
+  const [targetLevel, setTargetLevel] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (targetLevel !== null && character.level >= targetLevel) onClose();
+  }, [targetLevel, character.level, onClose]);
+
+  // A concurrent edit (other tab, DM) can bring the character to the cap while
+  // the dialog is open — the section's atMax gate only hides the button, so
+  // close rather than offer an impossible 20 → 21 transition the DTO rejects.
+  useEffect(() => {
+    if (character.level >= MAX_LEVEL) onClose();
+  }, [character.level, onClose]);
+
+  // Cached and shared with SpellcastingSection's identical fetch.
+  const classesQuery = useApiQuery<SrdClass[]>('/srd/classes');
+  const srdClass = classesQuery.data?.find(c => c.name === character.class);
+  // Confirming before the catalog resolves would silently drop this level's
+  // feature suggestions (and fall back to the wrong hit die), so a classed
+  // character waits for it. Once settled, a load failure — or a class the SRD
+  // catalog simply doesn't know (homebrew, typo) — only warns: blocking would
+  // make leveling impossible offline or for custom classes, but staying silent
+  // would read as "no new features this level".
+  const classDataPending = !!character.class && !!classesQuery.isPending;
+  const classDataUnavailable =
+    !!character.class && !classesQuery.isPending && (!!classesQuery.isError || !srdClass);
+
+  // The character's own stored die wins (a DM may have granted a nonstandard
+  // one); the class die covers a sheet without hit dice; d8 is the last resort.
+  const classHitDie = asDieType(srdClass?.hitDie);
+  const die = character.hitDice?.dieType ?? classHitDie ?? 'd8';
+  const conMod = character.computed.abilityModifiers.constitution;
+
+  const hasHitPoints = character.hitPoints !== null;
+  const base = mode === 'average' ? averageHpForDie(die) : roll;
+  const gain = hasHitPoints && base !== null ? hpGain(base, conMod) : null;
+
+  // Never re-offer a feature the character already owns (e.g. after a manual
+  // level revert) — a duplicate append would collide on the sheet's
+  // name-keyed feature list.
+  const ownedFeatureKeys = new Set(
+    (character.features ?? []).map(f => `${f.name}\u0000${f.source ?? ''}`)
+  );
+  const suggestedFeatures = (srdClass ? classFeaturesAtLevel(srdClass, newLevel) : []).filter(
+    f => !ownedFeatureKeys.has(`${f.name}\u0000${f.source ?? ''}`)
+  );
+  const chosenFeatures = suggestedFeatures.filter(f => !unchecked.has(f.name));
+
+  const oldProf = proficiencyBonus(character.level);
+  const newProf = proficiencyBonus(newLevel);
+
+  const toggleFeature = (name: string) => {
+    setUnchecked(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  // In roll mode the player must actually roll before the gain exists.
+  const canConfirm = !isSaving && !classDataPending && (!hasHitPoints || gain !== null);
+
+  const confirm = () => {
+    onPatch(applyLevelUp(character, { hpGain: gain, newFeatures: chosenFeatures, classHitDie }));
+    setTargetLevel(newLevel);
+  };
+
+  return (
+    <Modal open onClose={onClose} label={`Level up ${character.name}`} testId="level-up-dialog">
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+            Level {character.level} → {newLevel}
+          </h2>
+          {newProf !== oldProf && (
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Proficiency bonus: {formatModifier(oldProf)} → {formatModifier(newProf)}
+            </p>
+          )}
+        </div>
+
+        {!character.computed.xp.readyToLevel && (
+          <p role="status" className={noteClass}>
+            Below the XP threshold for level {newLevel} — leveling anyway (milestone or DM
+            discretion).
+          </p>
+        )}
+
+        {classDataUnavailable && (
+          <p role="status" className={noteClass}>
+            Class data is unavailable, so new-feature suggestions can&apos;t be shown. You can still
+            level up and add features from the sheet afterwards.
+          </p>
+        )}
+
+        {/* Hit points */}
+        <div className="space-y-2">
+          <h3 className={sectionTitleClass}>Hit Points</h3>
+          {hasHitPoints ? (
+            <>
+              <div className="flex flex-wrap gap-4">
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="radio"
+                    name="hp-mode"
+                    checked={mode === 'average'}
+                    onChange={() => setMode('average')}
+                  />
+                  Average ({averageHpForDie(die)})
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="radio"
+                    name="hp-mode"
+                    checked={mode === 'roll'}
+                    onChange={() => setMode('roll')}
+                  />
+                  Roll
+                </label>
+                {mode === 'roll' && (
+                  <button
+                    type="button"
+                    onClick={() => setRoll(rollDie(dieFaces(die)))}
+                    className="px-3 py-1 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700"
+                  >
+                    Roll {die}
+                  </button>
+                )}
+                {mode === 'roll' && roll !== null && (
+                  <span data-testid="hp-roll-result" className="text-sm font-bold self-center">
+                    Rolled {roll}
+                  </span>
+                )}
+              </div>
+              {gain !== null && (
+                <p
+                  data-testid="hp-gain-preview"
+                  className="text-sm text-gray-700 dark:text-gray-300"
+                >
+                  +{gain} HP ({base} {formatModifier(conMod)} CON, minimum 1) — new maximum{' '}
+                  {character.hitPoints!.max + gain}
+                </p>
+              )}
+            </>
+          ) : (
+            <p role="status" className={noteClass}>
+              No hit points recorded on this sheet — this level-up won&apos;t change HP. Set your
+              hit points in the editor first if you want them tracked.
+            </p>
+          )}
+        </div>
+
+        {/* New class features */}
+        {suggestedFeatures.length > 0 && (
+          <div className="space-y-2">
+            <h3 className={sectionTitleClass}>New Features at Level {newLevel}</h3>
+            {suggestedFeatures.map(feature => (
+              <label
+                key={feature.name}
+                className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300"
+              >
+                <input
+                  type="checkbox"
+                  aria-label={feature.name}
+                  checked={!unchecked.has(feature.name)}
+                  onChange={() => toggleFeature(feature.name)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium text-gray-900 dark:text-gray-100">
+                    {feature.name}
+                  </span>
+                  {feature.description && (
+                    <span className="block text-gray-500 dark:text-gray-400">
+                      {feature.description}
+                    </span>
+                  )}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {/* Spellcasting reminder — slots and budget derive from the new level */}
+        {character.spellcastingAbility && (
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Spell slots and your preparation budget update automatically at level {newLevel}. Add
+            new spells from the Spells &amp; Details tab after leveling.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={confirm}
+            disabled={!canConfirm}
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            Confirm Level Up
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}

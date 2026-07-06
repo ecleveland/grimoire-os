@@ -21,7 +21,7 @@ import type {
   SrdSubclass,
   Weapon,
 } from '@/lib/types';
-import { DIE_TYPES, SIZES } from '@/lib/types';
+import { asDieType, DIE_TYPES, SIZES } from '@/lib/types';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
 import { recommendedAbilityKeys } from '@/lib/ability-math';
 import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
@@ -337,9 +337,7 @@ export function applyClassGrants(
   if (armor.added.length) added.push({ label: 'Armor training', values: armor.added });
   if (profs.added.length) added.push({ label: 'Proficiencies', values: profs.added });
 
-  const dieType = (DIE_TYPES as readonly string[]).includes(c.hitDie)
-    ? (c.hitDie as DieType)
-    : v.hitDice.dieType;
+  const dieType = asDieType(c.hitDie) ?? v.hitDice.dieType;
   if (dieType !== v.hitDice.dieType) added.push({ label: 'Hit die', values: [dieType] });
 
   const spellcastingAbility = c.spellcasting?.ability ?? v.spellcastingAbility;

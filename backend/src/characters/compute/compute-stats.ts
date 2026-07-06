@@ -7,8 +7,10 @@ import type {
   ComputedSpellcasting,
   ComputedSpellSlots,
   ComputedStats,
+  ComputedXp,
   SpellcasterType,
 } from '@grimoire-os/shared';
+import { computeXpBand } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 
 /**
@@ -19,6 +21,7 @@ import { srdGameRules } from '../../seed/data/game-rules';
  */
 export interface CharacterComputeInput {
   level: number;
+  experiencePoints: number;
   abilityScores: AbilityScores | null;
   /** Ability full names the character is proficient in (e.g. "Strength"). */
   savingThrows: string[];
@@ -43,6 +46,10 @@ function ruleValue(category: string, key: string): Record<string, unknown> {
 
 const PROFICIENCY_BONUS_TABLE = ruleValue('proficiency-bonus', 'table') as Record<string, number>;
 const SKILL_ABILITY_MAP = ruleValue('skills', 'ability-mappings') as Record<string, string>;
+const XP_LEVEL_THRESHOLDS = ruleValue('experience-points', 'level-thresholds') as Record<
+  string,
+  number
+>;
 
 const ABILITY_KEYS: (keyof AbilityScores)[] = [
   'strength',
@@ -97,6 +104,13 @@ function abilityKeyFromName(name: string): keyof AbilityScores | null {
  */
 export function isKnownAbilityName(name: string): boolean {
   return abilityKeyFromName(name) !== null;
+}
+
+// ── XP progress ────────────────────────────────────────────────────────
+
+/** The shared XP band math applied to the seeded threshold table (VEG-411). */
+export function computeXp(level: number, experiencePoints: number): ComputedXp {
+  return computeXpBand(XP_LEVEL_THRESHOLDS, level, experiencePoints);
 }
 
 // ── Spell slots ────────────────────────────────────────────────────────
@@ -154,7 +168,8 @@ export function computeCharacterStats(
   character: CharacterComputeInput,
   classSpellcasting?: ClassSpellcasting | null
 ): ComputedStats {
-  const { level, abilityScores, savingThrows, skills, spellcastingAbility } = character;
+  const { level, experiencePoints, abilityScores, savingThrows, skills, spellcastingAbility } =
+    character;
   const profBonus = proficiencyBonus(level);
 
   const abilityModifiers = {} as ComputedAbilityModifiers;
@@ -212,5 +227,6 @@ export function computeCharacterStats(
     passivePerception,
     spellcasting,
     spellSlots: resolveSpellSlots(level, classSpellcasting),
+    xp: computeXp(level, experiencePoints),
   };
 }
