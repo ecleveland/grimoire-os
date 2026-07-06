@@ -3,7 +3,9 @@ import type {
   AbilityScores,
   AttunedItem,
   CharacterFeat,
+  CombatantConcentration,
   ComputedStats,
+  Condition,
   Currency,
   DeathSaves,
   Feature,
@@ -64,6 +66,10 @@ export class CharacterDto {
   @Expose() hitDice!: HitDice | null;
   @Expose() armorTraining!: string[];
   @Expose() weapons!: Weapon[] | null;
+  // PC status tracking (VEG-408).
+  @Expose() conditions!: Condition[];
+  @Expose() concentration!: CombatantConcentration | null;
+  @Expose() exhaustion!: number | null;
   @Expose() version!: number;
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;

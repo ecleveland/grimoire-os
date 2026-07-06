@@ -24,6 +24,9 @@ export type CharacterPatch = Partial<
     | 'currency'
     | 'inventory'
     | 'attunedItems'
+    | 'conditions'
+    | 'concentration'
+    | 'exhaustion'
   >
 >;
 

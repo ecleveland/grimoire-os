@@ -2,22 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import StatsBar from '../StatsBar';
-import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
 const mockMessage = vi.fn();
 vi.mock('sonner', () => ({ toast: { message: (...args: unknown[]) => mockMessage(...args) } }));
 
-const mockCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Thorin Ironforge',
-  race: 'Dwarf',
-  class: 'Fighter',
-  level: 5,
-  subclass: 'Champion',
-  background: 'Soldier',
-  alignment: 'Lawful Good',
-  experiencePoints: 6500,
+const mockCharacter = makeCharacter({
   abilityScores: {
     strength: 16,
     dexterity: 12,
@@ -26,25 +16,9 @@ const mockCharacter: Character = {
     wisdom: 14,
     charisma: 8,
   },
-  hitPoints: { max: 44, current: 44, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 18,
-  speed: 25,
-  initiative: 1,
-  proficiencies: [],
-  languages: [],
-  savingThrows: [],
   skills: ['Perception', 'Athletics'],
-  spells: [],
-  attunedItems: [],
-  spellSlots: [],
-  inventory: [],
-  currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
-  features: [],
   size: 'Small',
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 describe('StatsBar', () => {
   describe('Proficiency Bonus', () => {

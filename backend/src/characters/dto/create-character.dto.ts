@@ -7,14 +7,23 @@ import {
   Max,
   IsArray,
   ArrayMaxSize,
+  ArrayUnique,
   ValidateNested,
   IsIn,
   IsUUID,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AttunedItem, CharacterFeat, DIE_TYPES, Feature, SpellEntry } from '@grimoire-os/shared';
+import {
+  AttunedItem,
+  CharacterFeat,
+  CONDITIONS,
+  DIE_TYPES,
+  Feature,
+  SpellEntry,
+} from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
+import { ConcentrationDto } from '../../common/dto/concentration.dto';
 
 class AbilityScoresDto {
   @ApiPropertyOptional({ example: 10 })
@@ -516,6 +525,32 @@ export class CreateCharacterDto {
   @ValidateNested({ each: true })
   @Type(() => WeaponDto)
   weapons?: WeaponDto[];
+
+  // PC status tracking (VEG-408). Whitelisted here so the sheet's PATCHes pass
+  // forbidNonWhitelisted (the VEG-349 deathSaves lesson).
+  @ApiPropertyOptional({ enum: CONDITIONS, isArray: true, example: ['Poisoned'] })
+  @IsOptional()
+  // null → [] so a null clear behaves like the concentration/exhaustion
+  // clears; without it @IsOptional lets null through to Prisma, which rejects
+  // it for the required String[] column (a 500 instead of a clean clear).
+  @Transform(({ value }) => (value === null ? [] : (value as unknown)))
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(CONDITIONS, { each: true })
+  conditions?: string[];
+
+  @ApiPropertyOptional({ type: ConcentrationDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ConcentrationDto)
+  concentration?: ConcentrationDto;
+
+  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: 6 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(6)
+  exhaustion?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

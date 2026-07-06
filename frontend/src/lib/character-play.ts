@@ -1,4 +1,11 @@
-import type { HitPoints, HitDice, DeathSaves, SpellSlot } from '@/lib/types';
+import type {
+  CombatantConcentration,
+  Condition,
+  DeathSaves,
+  HitDice,
+  HitPoints,
+  SpellSlot,
+} from '@/lib/types';
 import { applyDamage, applyHeal } from './combatant-hp';
 
 /**
@@ -130,4 +137,34 @@ export function applyLongRest(character: {
     patch.spellSlots = spellSlots.map(slot => ({ ...slot, used: 0 }));
   }
   return patch;
+}
+
+// ── Status tracker (VEG-408) ─────────────────────────────
+
+/** Toggle an SRD condition: present → removed, absent → appended. */
+export function toggleConditionInList(current: Condition[], condition: Condition): Condition[] {
+  return current.includes(condition)
+    ? current.filter(c => c !== condition)
+    : [...current, condition];
+}
+
+/**
+ * Set the exhaustion level from a track click. Clicking the current level
+ * clears it (null). The out-of-range → clear branch is defensive — the sheet's
+ * track only ever passes 1–6 — so a bad caller clears rather than persisting
+ * an impossible level.
+ */
+export function setExhaustionLevel(current: number | null, level: number): number | null {
+  if (level < 1 || level > 6 || level === current) return null;
+  return level;
+}
+
+/**
+ * Build the concentration object from the spell-name input: an empty name
+ * keeps concentrating but drops the label (VEG-287 semantics — the object's
+ * presence is what means "concentrating").
+ */
+export function concentrationFromSpellInput(spell: string): CombatantConcentration {
+  const trimmed = spell.trim();
+  return trimmed ? { spell: trimmed } : {};
 }

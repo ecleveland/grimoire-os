@@ -42,6 +42,8 @@ export type {
   CharacterFeat,
   Weapon,
   Combatant,
+  CombatantConcentration,
+  Condition,
   PartyCharacter,
   CampaignMember,
   // Entity types

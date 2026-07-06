@@ -4,7 +4,9 @@ import type {
   AttunedItem,
   CharacterFeat,
   Combatant,
+  CombatantConcentration,
   CombatantLootItem,
+  Condition,
   Currency,
   DeathSaves,
   Feature,
@@ -96,6 +98,16 @@ export interface Character {
   hitDice?: HitDice | null;
   armorTraining?: string[];
   weapons?: Weapon[] | null;
+  // PC status tracking (VEG-408), sharing the combatant vocabulary from
+  // embedded.ts. Honest-null per VEG-425: `conditions` is a Postgres String[]
+  // and never deserializes null; the other two are nullable columns, so legacy
+  // rows carry `null` and consumers must guard.
+  /** Active SRD conditions; empty means none. */
+  conditions: Condition[];
+  /** Concentration; presence means concentrating (VEG-287 semantics). */
+  concentration: CombatantConcentration | null;
+  /** Exhaustion level 1–6; null (or 0) means none. */
+  exhaustion: number | null;
   /** Optimistic-locking counter (VEG-137); incremented on each guarded write. */
   version: number;
   createdAt: string;

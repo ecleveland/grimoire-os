@@ -3,6 +3,7 @@ import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InventorySection from '../InventorySection';
 import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
 // Stub the catalog picker so these tests don't exercise the debounced network
 // search (covered in SrdItemSearch.test.tsx). The stub exposes a button that
@@ -22,37 +23,7 @@ vi.mock('@/components/SrdItemSearch', () => ({
   ),
 }));
 
-const baseCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Thorin Ironforge',
-  race: 'Dwarf',
-  class: 'Fighter',
-  level: 5,
-  subclass: 'Champion',
-  background: 'Soldier',
-  alignment: 'Lawful Good',
-  experiencePoints: 6500,
-  abilityScores: {
-    strength: 16,
-    dexterity: 12,
-    constitution: 14,
-    intelligence: 10,
-    wisdom: 13,
-    charisma: 8,
-  },
-  hitPoints: { max: 44, current: 44, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 18,
-  speed: 25,
-  initiative: 1,
-  proficiencies: [],
-  languages: [],
-  savingThrows: [],
-  skills: [],
-  spells: [],
-  attunedItems: [],
-  spellSlots: [],
+const baseCharacter = makeCharacter({
   inventory: [
     { name: 'Chain Mail', quantity: 1, weight: 55, equipped: true },
     { name: 'Longsword', quantity: 1, weight: 3, equipped: true },
@@ -60,10 +31,7 @@ const baseCharacter: Character = {
     { name: 'Rope (50ft)', quantity: 1, equipped: false },
   ],
   currency: { cp: 10, sp: 25, ep: 0, gp: 150, pp: 5 },
-  features: [],
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+});
 
 describe('InventorySection', () => {
   describe('Equipment List', () => {

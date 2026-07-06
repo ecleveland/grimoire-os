@@ -184,6 +184,10 @@ model Character {
   hitDice             Json?
   armorTraining       String[]
   weapons             Json?
+  // PC status tracking (VEG-408): SRD conditions, concentration, exhaustion 1–6.
+  conditions          String[]
+  concentration       Json?
+  exhaustion          Int?
   // Optimistic-locking counter (VEG-137); guarded updates increment it.
   version             Int      @default(0)
   createdAt           DateTime @default(now())

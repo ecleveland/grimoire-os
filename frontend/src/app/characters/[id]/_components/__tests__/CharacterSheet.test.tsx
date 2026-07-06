@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CharacterSheet from '../CharacterSheet';
 import type { Character } from '@/lib/types';
+import { makeCharacter } from '@/test-utils/character';
 
 vi.mock('../useCharacterMutation', () => ({
   useCharacterMutation: () => ({ patch: vi.fn(), isSaving: false }),
@@ -16,6 +17,9 @@ vi.mock('../CharacterSheetHeader', () => ({
 }));
 vi.mock('../CombatBar', () => ({
   default: () => <div data-testid="CombatBar" />,
+}));
+vi.mock('../StatusTracker', () => ({
+  default: () => <div data-testid="StatusTracker" />,
 }));
 vi.mock('../StatsBar', () => ({
   default: () => <div data-testid="StatsBar" />,
@@ -48,43 +52,7 @@ vi.mock('../InventorySection', () => ({
   default: () => <div data-testid="InventorySection" />,
 }));
 
-const mockCharacter: Character = {
-  id: 'char-1',
-  userId: 'user-1',
-  name: 'Thorin Ironforge',
-  race: 'Dwarf',
-  class: 'Fighter',
-  level: 5,
-  subclass: 'Champion',
-  background: 'Soldier',
-  alignment: 'Lawful Good',
-  experiencePoints: 6500,
-  abilityScores: {
-    strength: 16,
-    dexterity: 12,
-    constitution: 14,
-    intelligence: 10,
-    wisdom: 13,
-    charisma: 8,
-  },
-  hitPoints: { max: 44, current: 44, temporary: 0 },
-  deathSaves: { successes: 0, failures: 0 },
-  armorClass: 18,
-  speed: 25,
-  initiative: 1,
-  proficiencies: [],
-  languages: [],
-  savingThrows: [],
-  skills: [],
-  spells: [],
-  attunedItems: [],
-  spellSlots: [],
-  inventory: [],
-  currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
-  features: [],
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+const mockCharacter = makeCharacter();
 
 describe('CharacterSheet', () => {
   describe('tab switcher', () => {
@@ -135,6 +103,7 @@ describe('CharacterSheet', () => {
       render(<CharacterSheet character={mockCharacter} isOwner={false} />);
       expect(screen.getByTestId('CharacterSheetHeader')).toBeInTheDocument();
       expect(screen.getByTestId('CombatBar')).toBeInTheDocument();
+      expect(screen.getByTestId('StatusTracker')).toBeInTheDocument();
       expect(screen.getByTestId('StatsBar')).toBeInTheDocument();
       expect(screen.getByTestId('AbilityScoreColumn')).toBeInTheDocument();
       expect(screen.getByTestId('EquipmentTraining')).toBeInTheDocument();

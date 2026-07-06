@@ -335,6 +335,120 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('conditions/exhaustion/concentration (VEG-408)', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted):
+    // the sheet's status tracker PATCHes these fields, which a plain validate()
+    // would silently accept even if never whitelisted (the VEG-349 deathSaves trap).
+    describe('conditions', () => {
+      it('accepts a valid SRD condition array (not rejected as unwhitelisted)', async () => {
+        const dto = toDto({ ...baseDto, conditions: ['Poisoned', 'Prone'] });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'conditions')).toHaveLength(0);
+      });
+
+      it('accepts an empty array (clearing all conditions)', async () => {
+        const dto = toDto({ ...baseDto, conditions: [] });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'conditions')).toHaveLength(0);
+      });
+
+      it('rejects a condition outside the SRD vocabulary with the isIn constraint', async () => {
+        const dto = toDto({ ...baseDto, conditions: ['Poisoned', 'Sleepy'] });
+        const errors = await validate(dto);
+        const conditions = errors.find(e => e.property === 'conditions');
+        expect(conditions?.constraints).toHaveProperty('isIn');
+      });
+
+      it('rejects duplicate conditions with the arrayUnique constraint', async () => {
+        // Duplicates would render two identical chips with duplicate React keys,
+        // and removing one would strip both (toggle filters by name).
+        const dto = toDto({ ...baseDto, conditions: ['Poisoned', 'Poisoned'] });
+        const errors = await validate(dto);
+        const conditions = errors.find(e => e.property === 'conditions');
+        expect(conditions?.constraints).toHaveProperty('arrayUnique');
+      });
+
+      it('rejects a non-array conditions value', async () => {
+        const dto = toDto({ ...baseDto, conditions: 'Poisoned' });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === 'conditions')).toBeDefined();
+      });
+    });
+
+    describe('exhaustion', () => {
+      it('accepts levels 1 through 6 (not rejected as unwhitelisted)', async () => {
+        for (const level of [1, 2, 3, 4, 5, 6]) {
+          const dto = toDto({ ...baseDto, exhaustion: level });
+          const errors = await validate(dto, VALIDATOR_STRICTNESS);
+          expect(errors.filter(e => e.property === 'exhaustion')).toHaveLength(0);
+        }
+      });
+
+      it('rejects 0 with the min constraint', async () => {
+        const dto = toDto({ ...baseDto, exhaustion: 0 });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === 'exhaustion')?.constraints).toHaveProperty('min');
+      });
+
+      it('rejects 7 with the max constraint', async () => {
+        const dto = toDto({ ...baseDto, exhaustion: 7 });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === 'exhaustion')?.constraints).toHaveProperty('max');
+      });
+
+      it('rejects a non-integer level', async () => {
+        const dto = toDto({ ...baseDto, exhaustion: 2.5 });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === 'exhaustion')).toBeDefined();
+      });
+    });
+
+    describe('clear payloads', () => {
+      // The sheet stops concentrating / clears exhaustion by PATCHing null;
+      // @IsOptional must keep accepting it if the validators are ever tightened.
+      it('coerces conditions: null to [] (clear-all, symmetric with the other clears)', async () => {
+        // Without coercion null passes @IsOptional but Prisma rejects it for
+        // the required String[] — a 500 instead of a clean clear.
+        const dto = toDto({ ...baseDto, conditions: null });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'conditions')).toHaveLength(0);
+        expect(dto.conditions).toEqual([]);
+      });
+
+      it('accepts concentration: null (stop concentrating)', async () => {
+        const dto = toDto({ ...baseDto, concentration: null });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'concentration')).toHaveLength(0);
+      });
+
+      it('accepts exhaustion: null (clear the track)', async () => {
+        const dto = toDto({ ...baseDto, exhaustion: null });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'exhaustion')).toHaveLength(0);
+      });
+    });
+
+    describe('concentration', () => {
+      it('accepts a named spell (not rejected as unwhitelisted)', async () => {
+        const dto = toDto({ ...baseDto, concentration: { spell: 'Bless' } });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'concentration')).toHaveLength(0);
+      });
+
+      it('accepts an empty object (concentrating, spell unnamed)', async () => {
+        const dto = toDto({ ...baseDto, concentration: {} });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'concentration')).toHaveLength(0);
+      });
+
+      it('rejects a non-string spell name', async () => {
+        const dto = toDto({ ...baseDto, concentration: { spell: 123 } });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === 'concentration')).toBeDefined();
+      });
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);
