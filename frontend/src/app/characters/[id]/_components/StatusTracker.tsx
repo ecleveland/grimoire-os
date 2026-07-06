@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Character, Condition } from '@/lib/types';
-import { CONDITIONS } from '@grimoire-os/shared';
+import AddConditionSelect from '@/components/AddConditionSelect';
 import ConcentrationChip from '@/components/ConcentrationChip';
 import ConditionChips from '@/components/ConditionChips';
 import {
@@ -25,24 +25,37 @@ const EXHAUSTION_LEVELS = [1, 2, 3, 4, 5, 6] as const;
 export default function StatusTracker(props: StatusTrackerProps) {
   const { character } = props;
   const { editable, patch, isSaving } = resolvePlayControls(props);
-  // All three are guarded: rows predating the VEG-408 columns deserialize
-  // without them (or with null), and the section must render, not crash.
+  // Guarded for rows predating the VEG-408 columns: `concentration` and
+  // `exhaustion` are nullable columns, and payloads older than the migration
+  // may omit all three keys entirely. (`conditions` is a Postgres String[], so
+  // a *current* backend never sends null for it — see entities.ts.)
   const conditions = character.conditions ?? [];
   const concentration = character.concentration ?? null;
-  const exhaustion = character.exhaustion ?? null;
+  // 0 means "none", same as the combatant convention — never show "Level 0".
+  const exhaustion = character.exhaustion || null;
 
   // Concentration-spell draft, committed on blur/Enter — a per-keystroke PATCH
-  // would race the optimistic lock (mirrors the encounter tracker's concDraft).
-  // The draft survives the commit (clearing it early would snap the input back
-  // to the stale server value mid-write, and lose the text on a failed write);
-  // it resets only when the refetched server value arrives below.
+  // would race the optimistic lock. The commit clears the draft but parks the
+  // sent value in `pendingSpell` so the input doesn't snap back to stale data
+  // while the write round-trips (and later typing is never wiped by the
+  // refetch); the pending value clears when the server echoes a new spell.
+  // After a failed write the pending value keeps showing what was attempted —
+  // the mutation hook's toast reports the failure, and a re-commit retries.
   const [spellDraft, setSpellDraft] = useState<string | null>(null);
-  const serverSpell = character.concentration?.spell;
+  const [pendingSpell, setPendingSpell] = useState<string | null>(null);
+  const serverSpell = concentration?.spell;
+  const isConcentrating = concentration !== null;
   useEffect(() => {
-    setSpellDraft(null);
+    setPendingSpell(null);
   }, [serverSpell]);
-
-  const availableConditions = CONDITIONS.filter(c => !conditions.includes(c));
+  useEffect(() => {
+    // Concentration ended: drop any draft/pending so a stale spell name can't
+    // resurface (or be stray-committed) on the next concentration.
+    if (!isConcentrating) {
+      setSpellDraft(null);
+      setPendingSpell(null);
+    }
+  }, [isConcentrating]);
 
   const toggleCondition = (condition: Condition) => {
     patch({ conditions: toggleConditionInList(conditions, condition) });
@@ -55,12 +68,17 @@ export default function StatusTracker(props: StatusTrackerProps) {
   const commitSpell = () => {
     if (spellDraft === null) return;
     const next = concentrationFromSpellInput(spellDraft);
-    if (next.spell === concentration?.spell) {
-      setSpellDraft(null);
-      return;
-    }
+    // Clearing the draft here (not after the round-trip) is what makes the
+    // commit single-fire: the blur that follows an Enter commit (the disabled
+    // input drops focus) finds no draft and no-ops instead of re-sending the
+    // PATCH with a stale expectedVersion.
+    setSpellDraft(null);
+    if (next.spell === serverSpell) return;
+    setPendingSpell(next.spell ?? '');
     patch({ concentration: next });
   };
+
+  const stopConcentrating = () => patch({ concentration: null });
 
   return (
     <div
@@ -79,23 +97,13 @@ export default function StatusTracker(props: StatusTrackerProps) {
           disabled={isSaving}
         />
         {concentration && <ConcentrationChip concentration={concentration} />}
-        {editable && availableConditions.length > 0 && (
-          <select
-            aria-label="Add condition"
-            value=""
+        {editable && (
+          <AddConditionSelect
+            activeConditions={conditions}
+            onAdd={toggleCondition}
             disabled={isSaving}
-            onChange={e => {
-              if (e.target.value) toggleCondition(e.target.value as Condition);
-            }}
             className="text-xs px-1.5 py-0.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50"
-          >
-            <option value="">+ Condition</option>
-            {availableConditions.map(c => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
+          />
         )}
       </div>
 
@@ -107,30 +115,28 @@ export default function StatusTracker(props: StatusTrackerProps) {
           </span>
           {EXHAUSTION_LEVELS.map(level => {
             const filled = exhaustion !== null && level <= exhaustion;
-            const className = `inline-block w-3.5 h-3.5 rounded-full border text-[0] ${
-              filled
-                ? 'bg-red-500 border-red-500'
-                : 'bg-transparent border-gray-300 dark:border-gray-600'
-            }`;
+            const shared = {
+              'data-testid': `exhaustion-pip-${level}`,
+              'data-filled': filled,
+              className: `inline-block w-3.5 h-3.5 rounded-full border text-[0] ${
+                filled
+                  ? 'bg-red-500 border-red-500'
+                  : 'bg-transparent border-gray-300 dark:border-gray-600'
+              }`,
+            };
             return editable ? (
               <button
                 key={level}
                 type="button"
-                data-testid={`exhaustion-pip-${level}`}
-                data-filled={filled}
+                {...shared}
                 aria-label={`Set exhaustion level ${level}`}
                 aria-pressed={filled}
                 disabled={isSaving}
                 onClick={() => clickExhaustion(level)}
-                className={`${className} disabled:opacity-50`}
+                className={`${shared.className} disabled:opacity-50`}
               />
             ) : (
-              <span
-                key={level}
-                data-testid={`exhaustion-pip-${level}`}
-                data-filled={filled}
-                className={className}
-              />
+              <span key={level} {...shared} />
             );
           })}
           {exhaustion !== null && (
@@ -147,7 +153,7 @@ export default function StatusTracker(props: StatusTrackerProps) {
                   type="text"
                   aria-label="Concentration spell"
                   placeholder="Spell name"
-                  value={spellDraft ?? concentration.spell ?? ''}
+                  value={spellDraft ?? pendingSpell ?? serverSpell ?? ''}
                   disabled={isSaving}
                   onChange={e => setSpellDraft(e.target.value)}
                   onBlur={commitSpell}
@@ -159,7 +165,12 @@ export default function StatusTracker(props: StatusTrackerProps) {
                 <button
                   type="button"
                   disabled={isSaving}
-                  onClick={() => patch({ concentration: null })}
+                  // Discard any uncommitted draft before the input's blur
+                  // fires (mousedown precedes blur): otherwise the blur-commit
+                  // would set isSaving, disable this button before mouseup,
+                  // and swallow the stop — renaming instead of stopping.
+                  onMouseDown={() => setSpellDraft(null)}
+                  onClick={stopConcentrating}
                   className="text-xs px-1.5 py-0.5 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 rounded disabled:opacity-50"
                 >
                   Stop concentrating

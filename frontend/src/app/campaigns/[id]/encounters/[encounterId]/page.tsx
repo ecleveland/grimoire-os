@@ -13,6 +13,7 @@ import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import AddCombatantDialog from '@/components/AddCombatantDialog';
+import AddConditionSelect from '@/components/AddConditionSelect';
 import DropdownMenu from '@/components/DropdownMenu';
 import EncounterDifficulty from '@/components/EncounterDifficulty';
 import AddPartyDialog from '@/components/AddPartyDialog';
@@ -35,7 +36,7 @@ import {
   DEATH_SAVE_MAX,
 } from '@/lib/death-saves';
 import type { AddToEncounterResult } from '@/components/AddToEncounterDialog';
-import { aggregateCombatantLoot, CONDITIONS, xpForCr } from '@grimoire-os/shared';
+import { aggregateCombatantLoot, xpForCr } from '@grimoire-os/shared';
 import type {
   CombatantLootCoinage,
   CombatantLootItem,
@@ -1397,22 +1398,13 @@ export default function InitiativeTrackerPage() {
                   read-only chips above are shown to everyone. */}
                 {isController && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <select
-                      aria-label={`Add condition to ${c.name}`}
-                      value=""
-                      onChange={e => {
-                        if (e.target.value) toggleCondition(c.name, i, e.target.value as Condition);
-                      }}
+                    <AddConditionSelect
+                      activeConditions={c.conditions ?? []}
+                      onAdd={cond => toggleCondition(c.name, i, cond)}
+                      ariaLabel={`Add condition to ${c.name}`}
                       disabled={writePending}
                       className={statusSelectClass}
-                    >
-                      <option value="">+ Condition</option>
-                      {CONDITIONS.filter(cond => !(c.conditions ?? []).includes(cond)).map(cond => (
-                        <option key={cond} value={cond}>
-                          {cond}
-                        </option>
-                      ))}
-                    </select>
+                    />
                     <button
                       type="button"
                       aria-label={`Toggle concentration for ${c.name}`}

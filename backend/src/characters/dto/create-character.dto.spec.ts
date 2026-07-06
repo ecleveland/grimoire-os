@@ -403,6 +403,22 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       });
     });
 
+    describe('clear payloads', () => {
+      // The sheet stops concentrating / clears exhaustion by PATCHing null;
+      // @IsOptional must keep accepting it if the validators are ever tightened.
+      it('accepts concentration: null (stop concentrating)', async () => {
+        const dto = toDto({ ...baseDto, concentration: null });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'concentration')).toHaveLength(0);
+      });
+
+      it('accepts exhaustion: null (clear the track)', async () => {
+        const dto = toDto({ ...baseDto, exhaustion: null });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'exhaustion')).toHaveLength(0);
+      });
+    });
+
     describe('concentration', () => {
       it('accepts a named spell (not rejected as unwhitelisted)', async () => {
         const dto = toDto({ ...baseDto, concentration: { spell: 'Bless' } });

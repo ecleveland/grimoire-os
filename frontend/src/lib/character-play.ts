@@ -150,8 +150,9 @@ export function toggleConditionInList(current: Condition[], condition: Condition
 
 /**
  * Set the exhaustion level from a track click. Clicking the current level
- * clears it (null); anything outside 1–6 also clears, mirroring the encounter
- * tracker's set-or-delete rule.
+ * clears it (null). The out-of-range → clear branch is defensive — the sheet's
+ * track only ever passes 1–6 — so a bad caller clears rather than persisting
+ * an impossible level.
  */
 export function setExhaustionLevel(current: number | null, level: number): number | null {
   if (level < 1 || level > 6 || level === current) return null;

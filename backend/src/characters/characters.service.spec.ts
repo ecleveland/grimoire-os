@@ -348,6 +348,24 @@ describe('CharactersService', () => {
       expect(result.computed.proficiencyBonus).toBe(3);
     });
 
+    it('round-trips status fields through the response DTO on update (VEG-408)', async () => {
+      // The status tracker only ever writes through update(); guard the
+      // @Expose whitelist on the path the feature actually uses, not just create.
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+      prisma.character.update.mockResolvedValue({
+        ...mockCharacter,
+        conditions: ['Frightened'],
+        concentration: {},
+        exhaustion: 1,
+      });
+
+      const result = await service.update(CHARACTER_ID, USER_ID, { conditions: ['Frightened'] });
+
+      expect(result.conditions).toEqual(['Frightened']);
+      expect(result.concentration).toEqual({});
+      expect(result.exhaustion).toBe(1);
+    });
+
     it('should throw ForbiddenException when non-owner tries to update', async () => {
       prisma.character.findUnique.mockResolvedValue(mockCharacter);
 

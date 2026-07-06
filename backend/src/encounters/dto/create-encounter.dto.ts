@@ -11,6 +11,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { ConcentrationDto } from '../../common/dto/concentration.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { CONDITIONS } from '@grimoire-os/shared';
@@ -86,16 +87,6 @@ class CombatantLootDto {
   @IsOptional()
   @IsString()
   rolledAt?: string;
-}
-
-// Concentration tracking (VEG-287). Like the loot shapes, it must stay
-// whitelisted here: the tracker echoes whole combatants back on every PATCH,
-// so an undeclared property the server persisted would 400 those writes.
-class CombatantConcentrationDto {
-  @ApiPropertyOptional({ description: 'The spell being concentrated on, if named.' })
-  @IsOptional()
-  @IsString()
-  spell?: string;
 }
 
 // Death-saving throws for a downed PC (VEG-288); whitelisted for the same
@@ -197,8 +188,8 @@ class CombatantDto {
   })
   @IsOptional()
   @ValidateNested()
-  @Type(() => CombatantConcentrationDto)
-  concentration?: CombatantConcentrationDto;
+  @Type(() => ConcentrationDto)
+  concentration?: ConcentrationDto;
 
   @ApiPropertyOptional({ description: 'Exhaustion level 1–6 (VEG-287); absent means none.' })
   @IsOptional()

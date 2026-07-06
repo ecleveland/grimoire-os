@@ -23,6 +23,7 @@ import {
   SpellEntry,
 } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
+import { ConcentrationDto } from '../../common/dto/concentration.dto';
 
 class AbilityScoresDto {
   @ApiPropertyOptional({ example: 10 })
@@ -87,15 +88,6 @@ class DeathSavesDto {
   @Min(0)
   @Max(3)
   failures?: number;
-}
-
-// Concentration tracking (VEG-408). Mirrors CombatantConcentration: the
-// object's presence means concentrating; `spell` optionally names what.
-class ConcentrationDto {
-  @ApiPropertyOptional({ example: 'Bless' })
-  @IsOptional()
-  @IsString()
-  spell?: string;
 }
 
 class SpellSlotDto {
