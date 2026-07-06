@@ -69,3 +69,7 @@ Classify the PR before running any automated review. Measure against main (`git 
 | **deep** | Risk trigger hit, OR full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `/pr-review-toolkit:review-pr` + `code-review high --comment`, max 3 iterations |
 
 Test-only and generated files (lockfiles, `tsconfig.tsbuildinfo`, snapshots) don't count toward the line/file thresholds — size the review on production-code impact. When borderline, state the tier and the numbers and let the user bump it up or down before starting.
+
+### Posting inline review comments (`--comment`)
+
+Post findings with `gh api repos/<owner>/<repo>/pulls/<pr>/comments -f commit_id=… -f path=… -F line=… -f side=RIGHT -f body=…`. The command **must start with `gh api`** to match the project's `Bash(gh api:*)` allow rule — a compound prefix like `SHA=$(git rev-parse HEAD) && gh api …` falls through to the permission classifier and gets denied. Resolve the commit SHA in a separate `git rev-parse HEAD` call first.
