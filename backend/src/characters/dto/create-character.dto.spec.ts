@@ -24,6 +24,30 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('level', () => {
+    // VEG-411 makes level client-writable from the sheet (CharacterPatch), so
+    // it needs the same boundary guards as experiencePoints: a non-integer or
+    // out-of-range level 500s in Prisma instead of 400ing here.
+    it('accepts levels 1 and 20', async () => {
+      for (const level of [1, 20]) {
+        const errors = await validate(toDto({ ...baseDto, level }));
+        expect(errors.filter(e => e.property === 'level')).toHaveLength(0);
+      }
+    });
+
+    it('rejects level 0 and level 21', async () => {
+      for (const level of [0, 21]) {
+        const errors = await validate(toDto({ ...baseDto, level }));
+        expect(errors.find(e => e.property === 'level')).toBeDefined();
+      }
+    });
+
+    it('rejects a non-integer level', async () => {
+      const errors = await validate(toDto({ ...baseDto, level: 2.5 }));
+      expect(errors.find(e => e.property === 'level')).toBeDefined();
+    });
+  });
+
   describe('experiencePoints', () => {
     // VEG-411: the sheet's Award XP control writes this on every award, so the
     // boundary must reject values Postgres int4 can't hold (or non-integers

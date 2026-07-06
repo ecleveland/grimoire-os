@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_EXPERIENCE_POINTS } from '@grimoire-os/shared';
 import type { ComputedXp, SrdClass } from '@/lib/types';
 import {
   applyLevelUp,
@@ -7,6 +8,7 @@ import {
   dieFaces,
   hpGain,
   MAX_LEVEL,
+  MAX_XP,
   xpProgressPercent,
 } from '@/lib/character-level';
 
@@ -169,5 +171,11 @@ describe('applyLevelUp', () => {
 
   it('exposes the level cap the UI gates on', () => {
     expect(MAX_LEVEL).toBe(20);
+  });
+
+  it('pins the local XP ceiling to the shared boundary constant (drift guard)', () => {
+    // Turbopack blocks app-code value imports from the file-linked shared
+    // package, so MAX_XP is a local copy of the DTO's @Max bound.
+    expect(MAX_XP).toBe(MAX_EXPERIENCE_POINTS);
   });
 });

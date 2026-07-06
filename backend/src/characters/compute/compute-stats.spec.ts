@@ -1,4 +1,6 @@
 import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
+import { computeXpBand, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
+import { srdGameRules } from '../../seed/data/game-rules';
 import {
   abilityModifier,
   proficiencyBonus,
@@ -89,6 +91,24 @@ describe('proficiencyBonus', () => {
     expect(proficiencyBonus(0)).toBe(2);
     expect(proficiencyBonus(-3)).toBe(2);
     expect(proficiencyBonus(25)).toBe(6);
+  });
+});
+
+describe('XP threshold data', () => {
+  it('the shared XP_LEVEL_THRESHOLDS constant matches the seeded rule table (drift guard)', () => {
+    // Frontend test fixtures derive computed.xp from the shared constant while
+    // the compute layer reads the seeded rule — this pin keeps them one table.
+    const seeded = srdGameRules.find(
+      r => r.category === 'experience-points' && r.key === 'level-thresholds'
+    );
+    expect(seeded?.value).toEqual(XP_LEVEL_THRESHOLDS);
+  });
+});
+
+describe('computeXpBand', () => {
+  it('throws on a threshold table that does not cover the band', () => {
+    expect(() => computeXpBand({ '1': 0 }, 1, 0)).toThrow(/threshold/i);
+    expect(() => computeXpBand({}, 5, 6500)).toThrow(/threshold/i);
   });
 });
 

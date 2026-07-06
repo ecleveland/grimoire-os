@@ -12,7 +12,10 @@ export const MAX_LEVEL = 20;
 
 /**
  * Postgres int4 ceiling for stored `experiencePoints` — the Award XP control
- * refuses awards past it (the backend DTO enforces the same bound).
+ * refuses awards past it. Local copy of the shared `MAX_EXPERIENCE_POINTS`
+ * (the DTO's `@Max` bound): app code can't value-import from the file-linked
+ * shared package (Turbopack, see types.ts header). A drift-guard test pins
+ * the two together.
  */
 export const MAX_XP = 2_147_483_647;
 

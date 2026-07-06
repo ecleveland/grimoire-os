@@ -314,14 +314,25 @@ describe('LevelUpSection', () => {
       ]);
     });
 
-    it('renders no feature list for an unknown or homebrew class', async () => {
+    it('warns for an unknown or homebrew class instead of silently dropping suggestions', async () => {
       mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
       const user = userEvent.setup();
       renderSection({ class: 'Pumpkin Sage' });
       const dialog = await openDialog(user);
       expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
+      // The catalog resolved but has no such class — same advisory as a failed
+      // load, so the player knows suggestions were unavailable, not absent.
+      expect(within(dialog).getByText(/class data.*unavailable/i)).toBeInTheDocument();
       // HP average falls back to the character's own stored hit die (d10 → +8).
       expect(within(dialog).getByText(/\+8 HP/)).toBeInTheDocument();
+    });
+
+    it('shows no class-data advisory when the class resolves normally', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+      const user = userEvent.setup();
+      renderSection();
+      const dialog = await openDialog(user);
+      expect(within(dialog).queryByText(/class data.*unavailable/i)).not.toBeInTheDocument();
     });
 
     it('points casters at the Spells tab instead of managing spells inline', async () => {

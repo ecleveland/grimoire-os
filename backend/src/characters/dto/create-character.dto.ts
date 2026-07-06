@@ -20,6 +20,7 @@ import {
   CONDITIONS,
   DIE_TYPES,
   Feature,
+  MAX_EXPERIENCE_POINTS,
   SpellEntry,
 } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
@@ -316,9 +317,15 @@ export class CreateCharacterDto {
   @IsString()
   class?: string;
 
+  // Same boundary rationale as experiencePoints: level became client-writable
+  // with the level-up assistant (VEG-411), and Prisma 500s on a non-integer or
+  // out-of-range Int. 5e caps characters at level 20 (MAX_LEVEL mirrors this
+  // in the sheet UI).
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(1)
+  @Max(20)
   level?: number;
 
   @ApiPropertyOptional({ example: 'Champion' })
@@ -337,13 +344,13 @@ export class CreateCharacterDto {
   alignment?: string;
 
   // Bounded to the Postgres int4 range: the sheet's Award XP control (VEG-411)
-  // writes this repeatedly, and an unchecked value overflows the column (or, as
-  // Infinity, JSON-serializes to null) and 500s in Prisma instead of 400ing here.
+  // writes this repeatedly, and an unchecked finite value past the column range
+  // overflows in Prisma and 500s instead of 400ing here.
   @ApiPropertyOptional({ example: 0 })
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(2147483647)
+  @Max(MAX_EXPERIENCE_POINTS)
   experiencePoints?: number;
 
   @ApiPropertyOptional({ type: AbilityScoresDto })

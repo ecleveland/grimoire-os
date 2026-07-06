@@ -108,11 +108,7 @@ export function isKnownAbilityName(name: string): boolean {
 
 // ── XP progress ────────────────────────────────────────────────────────
 
-/**
- * Position within the current level's XP band: the shared band math applied to
- * the seeded threshold table (VEG-411). `readyToLevel` is advisory — level-up
- * is never gated on it, so milestone campaigns (XP left at 0) work unchanged.
- */
+/** The shared XP band math applied to the seeded threshold table (VEG-411). */
 export function computeXp(level: number, experiencePoints: number): ComputedXp {
   return computeXpBand(XP_LEVEL_THRESHOLDS, level, experiencePoints);
 }

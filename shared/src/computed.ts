@@ -71,10 +71,45 @@ export interface ComputedXp {
 }
 
 /**
+ * Postgres int4 ceiling for stored `experiencePoints`: the write boundary (DTO
+ * `@Max`) and the sheet's Award XP control both enforce this one constant.
+ */
+export const MAX_EXPERIENCE_POINTS = 2_147_483_647;
+
+/**
+ * SRD XP required to reach each level, keyed '1'–'20'. Master copy for the
+ * frontend test fixtures; the seeded `experience-points/level-thresholds` rule
+ * carries the same data and a backend drift-guard test pins the two together.
+ */
+export const XP_LEVEL_THRESHOLDS: Readonly<Record<string, number>> = {
+  '1': 0,
+  '2': 300,
+  '3': 900,
+  '4': 2700,
+  '5': 6500,
+  '6': 14000,
+  '7': 23000,
+  '8': 34000,
+  '9': 48000,
+  '10': 64000,
+  '11': 85000,
+  '12': 100000,
+  '13': 120000,
+  '14': 140000,
+  '15': 165000,
+  '16': 195000,
+  '17': 225000,
+  '18': 265000,
+  '19': 305000,
+  '20': 355000,
+};
+
+/**
  * Pure XP band math shared by the backend compute layer and test fixtures, so
  * the derivation exists once and only the threshold *data* is ever mirrored.
  * `thresholds` maps level (as a string key, '1'–'20') to the XP required to
- * reach it; out-of-range levels clamp to 1–20 like the other table lookups.
+ * reach it and must cover that full range; out-of-range levels clamp to 1–20
+ * like the other table lookups.
  */
 export function computeXpBand(
   thresholds: Readonly<Record<string, number>>,
@@ -84,6 +119,10 @@ export function computeXpBand(
   const lvl = Number.isFinite(level) ? Math.min(20, Math.max(1, Math.floor(level))) : 1;
   const currentLevelAt = thresholds[String(lvl)];
   const nextLevelAt = lvl >= 20 ? null : thresholds[String(lvl + 1)];
+  // A sparse table would otherwise surface as a silent NaN band downstream.
+  if (currentLevelAt === undefined || nextLevelAt === undefined) {
+    throw new Error(`XP threshold table is missing the level-${lvl} band`);
+  }
   return {
     currentLevelAt,
     nextLevelAt,
