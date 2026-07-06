@@ -7,13 +7,21 @@ import {
   Max,
   IsArray,
   ArrayMaxSize,
+  ArrayUnique,
   ValidateNested,
   IsIn,
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { AttunedItem, CharacterFeat, DIE_TYPES, Feature, SpellEntry } from '@grimoire-os/shared';
+import {
+  AttunedItem,
+  CharacterFeat,
+  CONDITIONS,
+  DIE_TYPES,
+  Feature,
+  SpellEntry,
+} from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 class AbilityScoresDto {
@@ -79,6 +87,15 @@ class DeathSavesDto {
   @Min(0)
   @Max(3)
   failures?: number;
+}
+
+// Concentration tracking (VEG-408). Mirrors CombatantConcentration: the
+// object's presence means concentrating; `spell` optionally names what.
+class ConcentrationDto {
+  @ApiPropertyOptional({ example: 'Bless' })
+  @IsOptional()
+  @IsString()
+  spell?: string;
 }
 
 class SpellSlotDto {
@@ -516,6 +533,28 @@ export class CreateCharacterDto {
   @ValidateNested({ each: true })
   @Type(() => WeaponDto)
   weapons?: WeaponDto[];
+
+  // PC status tracking (VEG-408). Whitelisted here so the sheet's PATCHes pass
+  // forbidNonWhitelisted (the VEG-349 deathSaves lesson).
+  @ApiPropertyOptional({ enum: CONDITIONS, isArray: true, example: ['Poisoned'] })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(CONDITIONS, { each: true })
+  conditions?: string[];
+
+  @ApiPropertyOptional({ type: ConcentrationDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ConcentrationDto)
+  concentration?: ConcentrationDto;
+
+  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: 6 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(6)
+  exhaustion?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

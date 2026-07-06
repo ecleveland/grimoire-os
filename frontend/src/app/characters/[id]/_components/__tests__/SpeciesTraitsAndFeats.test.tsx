@@ -46,6 +46,9 @@ const baseCharacter: Character = {
     { featId: 'feat-mi', name: 'Magic Initiate', option: 'Cleric', source: 'Acolyte' },
     { featId: 'feat-sentinel', name: 'Sentinel', option: null, source: 'Soldier' },
   ],
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

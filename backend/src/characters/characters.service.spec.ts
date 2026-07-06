@@ -60,6 +60,23 @@ describe('CharactersService', () => {
       expect(result.computed.initiative).toBe(1);
     });
 
+    it('round-trips conditions/concentration/exhaustion through the response DTO (VEG-408)', async () => {
+      // Guards the @Expose whitelist: a freshly-added column is silently
+      // dropped by toCharacterDto until exposed on CharacterDto.
+      prisma.character.create.mockResolvedValue({
+        ...mockCharacter,
+        conditions: ['Poisoned', 'Prone'],
+        concentration: { spell: 'Bless' },
+        exhaustion: 3,
+      });
+
+      const result = await service.create(USER_ID, createCharacterDto);
+
+      expect(result.conditions).toEqual(['Poisoned', 'Prone']);
+      expect(result.concentration).toEqual({ spell: 'Bless' });
+      expect(result.exhaustion).toBe(3);
+    });
+
     it('does not check campaign membership when no campaignId is given', async () => {
       prisma.character.create.mockResolvedValue(mockCharacter);
 

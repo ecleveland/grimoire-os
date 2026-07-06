@@ -17,6 +17,9 @@ vi.mock('../CharacterSheetHeader', () => ({
 vi.mock('../CombatBar', () => ({
   default: () => <div data-testid="CombatBar" />,
 }));
+vi.mock('../StatusTracker', () => ({
+  default: () => <div data-testid="StatusTracker" />,
+}));
 vi.mock('../StatsBar', () => ({
   default: () => <div data-testid="StatsBar" />,
 }));
@@ -82,6 +85,9 @@ const mockCharacter: Character = {
   inventory: [],
   currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   features: [],
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -135,6 +141,7 @@ describe('CharacterSheet', () => {
       render(<CharacterSheet character={mockCharacter} isOwner={false} />);
       expect(screen.getByTestId('CharacterSheetHeader')).toBeInTheDocument();
       expect(screen.getByTestId('CombatBar')).toBeInTheDocument();
+      expect(screen.getByTestId('StatusTracker')).toBeInTheDocument();
       expect(screen.getByTestId('StatsBar')).toBeInTheDocument();
       expect(screen.getByTestId('AbilityScoreColumn')).toBeInTheDocument();
       expect(screen.getByTestId('EquipmentTraining')).toBeInTheDocument();

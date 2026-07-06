@@ -39,6 +39,9 @@ const mockCharacter: Character = {
   features: [],
   armorTraining: ['Light', 'Medium', 'Heavy', 'Shields'],
   heroicInspiration: true,
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

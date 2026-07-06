@@ -58,6 +58,9 @@ const mockCharacter: Character = {
       notes: 'Cantrip, 120ft',
     },
   ],
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

@@ -43,6 +43,9 @@ const baseCharacter: Character = {
   ideals: 'Knowledge is the path to power and self-improvement.',
   bonds: 'The library where I learned my craft is the most important place in the world.',
   flaws: 'I overlook obvious solutions in favor of complicated ones.',
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

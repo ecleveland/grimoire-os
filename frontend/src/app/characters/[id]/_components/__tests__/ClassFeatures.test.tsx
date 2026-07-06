@@ -42,6 +42,9 @@ const baseCharacter: Character = {
     { name: 'Darkvision', source: 'Dwarf', description: 'See in dim light within 60 feet.' },
     { name: 'Great Weapon Master', source: 'Feat', description: 'Bonus attack on crit or kill.' },
   ],
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

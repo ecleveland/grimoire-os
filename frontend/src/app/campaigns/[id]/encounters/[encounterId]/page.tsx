@@ -7,6 +7,8 @@ import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import type { Combatant, Encounter, PartyCharacter, SrdMonster } from '@/lib/types';
 import Badge from '@/components/Badge';
+import ConcentrationChip from '@/components/ConcentrationChip';
+import ConditionChips from '@/components/ConditionChips';
 import Modal from '@/components/Modal';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
@@ -24,6 +26,7 @@ import {
 } from '@/lib/encounter-combatants';
 import type { ManualCombatantInput, PartyCombatantEntry } from '@/lib/encounter-combatants';
 import { applyDamage, applyHeal, grantTempHp } from '@/lib/combatant-hp';
+import { concentrationFromSpellInput, toggleConditionInList } from '@/lib/character-play';
 import {
   clearDeathSavesIfRevived,
   deathSaveStatus,
@@ -750,10 +753,7 @@ export default function InitiativeTrackerPage() {
   // The key is deleted when the list empties so cleared rows stay minimal.
   const toggleCondition = async (name: string, rowIndex: number, condition: Condition) => {
     await mutateCombatantRow(name, rowIndex, c => {
-      const current = c.conditions ?? [];
-      const next = current.includes(condition)
-        ? current.filter(x => x !== condition)
-        : [...current, condition];
+      const next = toggleConditionInList(c.conditions ?? [], condition);
       const updated = { ...c };
       if (next.length > 0) updated.conditions = next;
       else delete updated.conditions;
@@ -777,10 +777,10 @@ export default function InitiativeTrackerPage() {
   // still concentrating; an empty spell drops the name but keeps concentration.
   const commitConcentrationSpell = async (name: string) => {
     if (!concDraft || concDraft.name !== name) return;
-    const spell = concDraft.value.trim();
+    const next = concentrationFromSpellInput(concDraft.value);
     setConcDraft(null);
     await mutateCombatantRow(name, concDraft.index, c =>
-      c.concentration ? { ...c, concentration: spell ? { spell } : {} } : c
+      c.concentration ? { ...c, concentration: next } : c
     );
   };
 
@@ -1173,33 +1173,13 @@ export default function InitiativeTrackerPage() {
                   c.concentration ||
                   (c.exhaustion ?? 0) > 0) && (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {(c.conditions ?? []).map(cond => (
-                      <span
-                        key={cond}
-                        className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded"
-                      >
-                        {cond}
-                        {isController && (
-                          <button
-                            type="button"
-                            aria-label={`Remove ${cond} from ${c.name}`}
-                            onClick={() => toggleCondition(c.name, i, cond)}
-                            disabled={writePending}
-                            className="hover:text-purple-900 dark:hover:text-purple-100 disabled:opacity-50"
-                          >
-                            &times;
-                          </button>
-                        )}
-                      </span>
-                    ))}
-                    {c.concentration && (
-                      <span
-                        className="text-xs px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded"
-                        title="Concentration"
-                      >
-                        Concentrating{c.concentration.spell ? `: ${c.concentration.spell}` : ''}
-                      </span>
-                    )}
+                    <ConditionChips
+                      conditions={c.conditions ?? []}
+                      onRemove={isController ? cond => toggleCondition(c.name, i, cond) : undefined}
+                      removeLabel={cond => `Remove ${cond} from ${c.name}`}
+                      disabled={writePending}
+                    />
+                    {c.concentration && <ConcentrationChip concentration={c.concentration} />}
                     {(c.exhaustion ?? 0) > 0 && (
                       <span className="text-xs px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded">
                         Exhaustion {c.exhaustion}

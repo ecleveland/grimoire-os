@@ -10,6 +10,9 @@ import {
   CLEARED_DEATH_SAVES,
   hitDiceRegainedOnLongRest,
   applyLongRest,
+  toggleConditionInList,
+  setExhaustionLevel,
+  concentrationFromSpellInput,
 } from '../character-play';
 
 describe('character-play HP helpers', () => {
@@ -241,5 +244,58 @@ describe('parseNonNegativeInt', () => {
   it('treats blank/non-numeric as 0', () => {
     expect(parseNonNegativeInt('')).toBe(0);
     expect(parseNonNegativeInt('abc')).toBe(0);
+  });
+});
+
+describe('status tracker helpers (VEG-408)', () => {
+  describe('toggleConditionInList', () => {
+    it('adds a condition not in the list', () => {
+      expect(toggleConditionInList(['Poisoned'], 'Prone')).toEqual(['Poisoned', 'Prone']);
+    });
+
+    it('removes a condition already in the list', () => {
+      expect(toggleConditionInList(['Poisoned', 'Prone'], 'Poisoned')).toEqual(['Prone']);
+    });
+
+    it('adds to an empty list', () => {
+      expect(toggleConditionInList([], 'Blinded')).toEqual(['Blinded']);
+    });
+
+    it('does not mutate the input list', () => {
+      const input: ReturnType<typeof toggleConditionInList> = ['Poisoned'];
+      toggleConditionInList(input, 'Prone');
+      expect(input).toEqual(['Poisoned']);
+    });
+  });
+
+  describe('setExhaustionLevel', () => {
+    it('sets a level 1-6', () => {
+      expect(setExhaustionLevel(null, 3)).toBe(3);
+      expect(setExhaustionLevel(2, 6)).toBe(6);
+    });
+
+    it('clears when clicking the current level', () => {
+      expect(setExhaustionLevel(3, 3)).toBeNull();
+    });
+
+    it('clears for out-of-range levels', () => {
+      expect(setExhaustionLevel(2, 0)).toBeNull();
+      expect(setExhaustionLevel(2, 7)).toBeNull();
+    });
+  });
+
+  describe('concentrationFromSpellInput', () => {
+    it('names the spell when non-empty', () => {
+      expect(concentrationFromSpellInput('Bless')).toEqual({ spell: 'Bless' });
+    });
+
+    it('trims whitespace', () => {
+      expect(concentrationFromSpellInput('  Hold Person  ')).toEqual({ spell: 'Hold Person' });
+    });
+
+    it('drops the name but keeps concentrating on empty input', () => {
+      expect(concentrationFromSpellInput('')).toEqual({});
+      expect(concentrationFromSpellInput('   ')).toEqual({});
+    });
   });
 });

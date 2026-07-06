@@ -60,6 +60,31 @@ describe('useCharacterMutation', () => {
     );
   });
 
+  it('accepts status-tracker fields in the patch allow-list (VEG-408)', async () => {
+    mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
+    const { result } = renderMutation(makeCharacter({ version: 7 }));
+
+    act(() =>
+      result.current.patch({
+        conditions: ['Poisoned'],
+        concentration: { spell: 'Bless' },
+        exhaustion: 2,
+      })
+    );
+
+    await waitFor(() =>
+      expect(mockApiFetch).toHaveBeenCalledWith('/characters/char-1', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          conditions: ['Poisoned'],
+          concentration: { spell: 'Bless' },
+          exhaustion: 2,
+          expectedVersion: 7,
+        }),
+      })
+    );
+  });
+
   it('invalidates the character query on success', async () => {
     mockApiFetch.mockResolvedValue(makeCharacter());
     const { result, client } = renderMutation(makeCharacter());

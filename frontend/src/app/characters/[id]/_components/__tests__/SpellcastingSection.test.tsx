@@ -95,6 +95,9 @@ const baseCharacter: Character = {
   attunedItems: [],
   currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   features: [],
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };

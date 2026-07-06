@@ -39,6 +39,9 @@ const mockCharacter: Character = {
   currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
   features: [],
   hitDice: { dieType: 'd10', total: 8, spent: 3 },
+  conditions: [],
+  concentration: null,
+  exhaustion: null,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
