@@ -3,7 +3,6 @@ import {
   abilityModifier,
   formatModifier,
   proficiencyBonus,
-  passivePerception,
   skillBonus,
   SKILL_ABILITY_MAP,
   ABILITY_SKILLS_MAP,
@@ -50,23 +49,6 @@ describe('proficiencyBonus', () => {
     [20, 6],
   ])('level %i → +%i', (level, expected) => {
     expect(proficiencyBonus(level)).toBe(expected);
-  });
-});
-
-describe('passivePerception', () => {
-  it('WIS 14, level 5, proficient → 15', () => {
-    // wisMod(14) = 2, profBonus(5) = 3 → 10 + 2 + 3 = 15
-    expect(passivePerception(14, 5, true)).toBe(15);
-  });
-
-  it('WIS 10, level 1, not proficient → 10', () => {
-    // wisMod(10) = 0, no prof → 10 + 0 = 10
-    expect(passivePerception(10, 1, false)).toBe(10);
-  });
-
-  it('WIS 16, level 9, proficient → 17', () => {
-    // wisMod(16) = 3, profBonus(9) = 4 → 10 + 3 + 4 = 17
-    expect(passivePerception(16, 9, true)).toBe(17);
   });
 });
 

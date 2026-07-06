@@ -46,6 +46,14 @@ export type {
   Condition,
   PartyCharacter,
   CampaignMember,
+  // Computed character stats (VEG-346/VEG-412)
+  ComputedStats,
+  ComputedAbilityModifiers,
+  ComputedSave,
+  ComputedSkill,
+  ComputedSpellcasting,
+  ComputedSpellSlots,
+  SpellcasterType,
   // Entity types
   User,
   Campaign,

@@ -3,9 +3,7 @@
 import type { Character } from '@/lib/types';
 import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
 import {
-  abilityModifier,
   formatModifier,
-  skillBonus,
   ABILITY_KEYS,
   ABILITY_LABELS,
   ABILITY_KEY_TO_NAME,
@@ -26,19 +24,25 @@ function toTestId(name: string): string {
 
 export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreColumnProps) {
   const { rollCheck } = useDiceRoll();
-  // abilityScores is nullable at the API boundary (VEG-425); fall back to a
-  // neutral all-10 spread so a minimal character renders +0s instead of crashing.
+  // Modifiers, saves and skills read the server-computed block — the single
+  // source of truth (VEG-412). Only the raw (score) display stays on the stored
+  // abilityScores, which are nullable at the API boundary (VEG-425) and fall
+  // back to a neutral all-10 spread.
+  const { computed } = character;
   const abilityScores = character.abilityScores ?? DEFAULT_ABILITY_SCORES;
 
   return (
     <div className="flex flex-col gap-4">
       {ABILITY_KEYS.map(key => {
         const score = abilityScores[key];
-        const mod = abilityModifier(score);
+        const mod = computed.abilityModifiers[key];
         const abilityName = ABILITY_KEY_TO_NAME[key];
         const skills = ABILITY_SKILLS_MAP[abilityName] ?? [];
-        const isSaveProficient = character.savingThrows.includes(abilityName);
-        const saveBonus = skillBonus(score, character.level, isSaveProficient);
+        // Neutral fallbacks guard a key mismatch between the frontend ability/
+        // skill name lists and the backend game-rules keys — fail soft, not crash.
+        const save = computed.savingThrows[abilityName] ?? { proficient: false, bonus: mod };
+        const isSaveProficient = save.proficient;
+        const saveBonus = save.bonus;
 
         return (
           <div
@@ -90,8 +94,9 @@ export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreC
             </div>
 
             {skills.map(skillName => {
-              const isSkillProficient = character.skills.includes(skillName);
-              const bonus = skillBonus(score, character.level, isSkillProficient);
+              const skill = computed.skills[skillName] ?? { proficient: false, bonus: mod };
+              const isSkillProficient = skill.proficient;
+              const bonus = skill.bonus;
               return (
                 <div
                   key={skillName}

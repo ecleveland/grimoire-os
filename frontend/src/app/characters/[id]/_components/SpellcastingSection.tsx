@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import type { AbilityScores, Character, SpellEntry, SrdClass, SrdSpell } from '@/lib/types';
-import { abilityModifier, formatModifier, ABILITY_KEY_TO_NAME } from './utils';
+import type { Character, SpellEntry, SrdClass, SrdSpell } from '@/lib/types';
+import { formatModifier } from './utils';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt, togglePip } from '@/lib/character-play';
+import { resolveSpellSlotView, writeSlotUsed } from '@/lib/spell-slot-view';
 import {
   addSpellEntry,
   removeSpellEntryAt,
@@ -12,7 +13,6 @@ import {
   togglePreparedAt,
   toSpellEntry,
 } from '@/lib/character-spells';
-import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
 import { useApiQuery } from '@/lib/query';
 import SrdSpellSearch from '@/components/SrdSpellSearch';
 import SpellCardModal from './SpellCardModal';
@@ -23,12 +23,6 @@ const MAX_SPELL_LEVEL = 9;
 
 const textInputClass =
   'px-2 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white';
-
-function getAbilityScore(abilityScores: AbilityScores, abilityName: string): number {
-  const entry = Object.entries(ABILITY_KEY_TO_NAME).find(([, name]) => name === abilityName);
-  if (!entry) return 10;
-  return abilityScores[entry[0] as keyof AbilityScores];
-}
 
 export default function SpellcastingSection(props: SpellcastingSectionProps) {
   const { character } = props;
@@ -50,17 +44,22 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
     enabled: !!character.spellcastingAbility,
   });
 
-  if (!character.spellcastingAbility) return null;
+  // Gate on the STORED spellcastingAbility column, deliberately: the computed
+  // block also resolves a class-default ability when the column is null, and
+  // gating on it would newly reveal the section for such characters — a
+  // visibility change out of scope for VEG-412. Past the gate the backend
+  // guarantees `computed.spellcasting` (resolved from this same column), so the
+  // null check only narrows the type.
+  const spellcasting = character.computed.spellcasting;
+  if (!character.spellcastingAbility || !spellcasting) return null;
 
-  const abilityScore = getAbilityScore(
-    character.abilityScores ?? DEFAULT_ABILITY_SCORES,
-    character.spellcastingAbility
-  );
-  const modifier = abilityModifier(abilityScore);
-  const spellSlots = character.spellSlots ?? [];
+  // Slot maxima: the computed class progression owns every level it covers;
+  // stored-only levels (multiclass/DM grants) are kept; `used` comes from the
+  // stored array (VEG-412 reconciliation — rules in @/lib/spell-slot-view).
+  const slotViews = resolveSpellSlotView(character.spellSlots, character.computed.spellSlots);
 
-  const setSlotUsed = (level: number, used: number) => {
-    patch({ spellSlots: spellSlots.map(s => (s.level === level ? { ...s, used } : s)) });
+  const setSlotUsed = (level: number, used: number, max: number) => {
+    patch({ spellSlots: writeSlotUsed(character.spellSlots, level, used, max) });
   };
 
   // The table sorts by level (cantrips first) then name, but mutations must hit
@@ -72,12 +71,17 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   // Prepared/known budget for this class+level (VEG-405). Null until the class
   // list resolves or for a class with no spellcasting data — the indicator is
   // simply omitted then.
-  const spellcasting = classesQuery.data?.find(c => c.name === character.class)?.spellcasting;
-  const prepSummary = spellcasting
-    ? spellPreparationSummary(spellcasting, character.level, modifier, storedSpells)
+  const classSpellcasting = classesQuery.data?.find(c => c.name === character.class)?.spellcasting;
+  const prepSummary = classSpellcasting
+    ? spellPreparationSummary(
+        classSpellcasting,
+        character.level,
+        spellcasting.modifier,
+        storedSpells
+      )
     : null;
 
-  const hasSpellSlots = spellSlots.length > 0;
+  const hasSpellSlots = slotViews.length > 0;
   const hasSpells = storedSpells.length > 0;
   // Show the spells card when there are spells, the owner can add them, or there
   // is a budget to surface (so a read-only caster with no spells still sees it).
@@ -114,19 +118,19 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
           </div>
           <div>
             <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-              {formatModifier(modifier)}
+              {formatModifier(spellcasting.modifier)}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">Spellcasting Modifier</div>
           </div>
           <div>
             <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-              {character.spellSaveDC}
+              {spellcasting.saveDC}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">Spell Save DC</div>
           </div>
           <div>
             <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-              {formatModifier(character.spellAttackBonus ?? 0)}
+              {formatModifier(spellcasting.attackBonus)}
             </div>
             <div className="text-xs text-gray-500 dark:text-gray-400">Spell Attack Bonus</div>
           </div>
@@ -140,7 +144,7 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
             Spell Slots
           </h3>
           <div className="grid grid-cols-3 gap-3">
-            {spellSlots.map(slot => (
+            {slotViews.map(slot => (
               <div
                 key={slot.level}
                 data-testid={`spell-slots-level-${slot.level}`}
@@ -150,7 +154,7 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
                   Level {slot.level}
                 </span>
                 <div className="flex gap-1">
-                  {Array.from({ length: slot.total }, (_, i) => {
+                  {Array.from({ length: slot.max }, (_, i) => {
                     const isUsed = i < slot.used;
                     const testId = isUsed ? 'slot-filled' : 'slot-empty';
                     const pipClass = `inline-block w-3 h-3 rotate-45 ${
@@ -166,7 +170,9 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
                         aria-label={`Level ${slot.level} slot ${i + 1}`}
                         aria-pressed={isUsed}
                         disabled={isSaving}
-                        onClick={() => setSlotUsed(slot.level, togglePip(slot.used, i, slot.total))}
+                        onClick={() =>
+                          setSlotUsed(slot.level, togglePip(slot.used, i, slot.max), slot.max)
+                        }
                         className={`${pipClass} disabled:opacity-50`}
                       />
                     ) : (

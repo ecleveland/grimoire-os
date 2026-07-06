@@ -45,6 +45,22 @@ test.describe('character sheet — Long Rest', () => {
       'true'
     );
 
+    // Slot maxima come from the class progression, not the stored row (VEG-412):
+    // a real L5 Wizard has {1: 4, 2: 3, 3: 2} even though this character was
+    // stored with a stale `total: 3` and no L2/L3 rows. The 3 used slots render
+    // against the authoritative 4-pip track.
+    await page.getByRole('tab', { name: 'Spells & Details' }).click();
+    const level1 = page.getByTestId('spell-slots-level-1');
+    await expect(level1.locator('[data-testid="slot-filled"]')).toHaveCount(3);
+    await expect(level1.locator('[data-testid="slot-empty"]')).toHaveCount(1);
+    await expect(
+      page.getByTestId('spell-slots-level-2').locator('[data-testid="slot-empty"]')
+    ).toHaveCount(3);
+    await expect(
+      page.getByTestId('spell-slots-level-3').locator('[data-testid="slot-empty"]')
+    ).toHaveCount(2);
+    await page.getByRole('tab', { name: 'Character' }).click();
+
     // One click rests.
     await hpBlock.getByRole('button', { name: 'Long Rest' }).click();
 
@@ -59,11 +75,15 @@ test.describe('character sheet — Long Rest', () => {
       'false'
     );
 
-    // Spell slots (Spells & Details tab) reset to unused.
+    // Spell slots (Spells & Details tab) reset to unused, still on the
+    // authoritative 4-pip track.
     await page.getByRole('tab', { name: 'Spells & Details' }).click();
     await expect(
       page.getByTestId('spell-slots-level-1').locator('[data-testid="slot-filled"]')
     ).toHaveCount(0);
+    await expect(
+      page.getByTestId('spell-slots-level-1').locator('[data-testid="slot-empty"]')
+    ).toHaveCount(4);
   });
 
   test('owner long-rests a non-caster whose spellSlots persist as null', async ({ page }) => {

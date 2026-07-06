@@ -1,4 +1,5 @@
 import type { CampaignStatus, NoteVisibility, Role } from './enums';
+import type { ComputedStats } from './computed';
 import type {
   AbilityScores,
   AttunedItem,
@@ -110,6 +111,15 @@ export interface Character {
   exhaustion: number | null;
   /** Optimistic-locking counter (VEG-137); incremented on each guarded write. */
   version: number;
+  /**
+   * Authoritative derived stats, attached by the backend to every character
+   * response (VEG-346) and consumed by the sheet as the single source of truth
+   * (VEG-412). Required, not optional: `toCharacterDto` always sets it, and an
+   * honest type lets the sheet read it without fabricated fallbacks. Where a
+   * stored column overlaps (initiative, spell-slot maxima), the computed value
+   * wins for display; stored fields keep only the mutable play state (`used`).
+   */
+  computed: ComputedStats;
   createdAt: string;
   updatedAt: string;
 }

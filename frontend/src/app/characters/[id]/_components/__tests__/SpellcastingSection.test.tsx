@@ -626,3 +626,169 @@ describe('SpellcastingSection', () => {
     });
   });
 });
+
+describe('computed spellcasting is the source of truth (VEG-412)', () => {
+  beforeEach(() => {
+    mockUseApiQuery.mockReturnValue({ data: undefined });
+  });
+
+  // Computed numbers that DISAGREE with both the stored columns (spellSaveDC 15,
+  // spellAttackBonus 7) and client math over INT 18 (+4) — the stats bar must
+  // follow computed, proving the stored/derived divergence seam is closed.
+  const divergent: Character = {
+    ...baseCharacter,
+    computed: {
+      ...baseCharacter.computed,
+      spellcasting: { ability: 'Intelligence', modifier: 5, saveDC: 19, attackBonus: 11 },
+    },
+  };
+
+  it('renders modifier, save DC and attack bonus from computed.spellcasting', () => {
+    render(<SpellcastingSection character={divergent} />);
+    expect(screen.getByText('+5')).toBeInTheDocument();
+    expect(screen.getByText('19')).toBeInTheDocument();
+    expect(screen.getByText('+11')).toBeInTheDocument();
+    // The stored columns and client-derived values must NOT render.
+    expect(screen.queryByText('15')).toBeNull();
+    expect(screen.queryByText('+7')).toBeNull();
+    expect(screen.queryByText('+4')).toBeNull();
+  });
+
+  it('feeds the computed modifier into the preparation budget', () => {
+    mockUseApiQuery.mockReturnValue({
+      data: [
+        {
+          id: 'wizard',
+          name: 'Wizard',
+          spellcasting: {
+            ability: 'Intelligence',
+            cantripsKnown: { 5: 4 },
+            preparedFormula: 'level + intelligence modifier',
+          },
+        },
+      ],
+    });
+    render(<SpellcastingSection character={divergent} />);
+    // level 5 + computed modifier 5 = 10 (client math over INT 18 would give 9).
+    expect(screen.getByTestId('leveled-summary')).toHaveTextContent('Prepared 3 / 10');
+  });
+
+  it('still hides the section when the stored spellcastingAbility is unset, even if computed resolves one', () => {
+    // The backend resolves a class-default ability into computed.spellcasting;
+    // the sheet deliberately keeps gating on the stored column so this ticket
+    // ships no visibility change (VEG-412 decision).
+    const char: Character = { ...divergent, spellcastingAbility: undefined };
+    const { container } = render(<SpellcastingSection character={char} />);
+    expect(container.innerHTML).toBe('');
+  });
+});
+
+describe('spell-slot view merge (VEG-412)', () => {
+  beforeEach(() => {
+    mockUseApiQuery.mockReturnValue({ data: undefined });
+  });
+
+  const withSlots = (
+    spellSlots: Character['spellSlots'],
+    maxByLevel: Record<number, number>
+  ): Character => ({
+    ...baseCharacter,
+    spellSlots,
+    computed: {
+      ...baseCharacter.computed,
+      spellSlots: { caster: 'full', maxByLevel },
+    },
+  });
+
+  const pips = (level: number) => {
+    const row = screen.getByTestId(`spell-slots-level-${level}`);
+    return {
+      filled: row.querySelectorAll('[data-testid="slot-filled"]').length,
+      empty: row.querySelectorAll('[data-testid="slot-empty"]').length,
+    };
+  };
+
+  it('takes the pip count from the computed progression and used from stored', () => {
+    render(
+      <SpellcastingSection character={withSlots([{ level: 1, total: 4, used: 2 }], { 1: 6 })} />
+    );
+    expect(pips(1)).toEqual({ filled: 2, empty: 4 });
+  });
+
+  it('renders a computed-only level with all pips empty', () => {
+    render(
+      <SpellcastingSection
+        character={withSlots([{ level: 1, total: 4, used: 2 }], { 1: 4, 2: 3 })}
+      />
+    );
+    expect(pips(2)).toEqual({ filled: 0, empty: 3 });
+  });
+
+  it('keeps a stored-only level the progression does not cover (multiclass/DM-granted)', () => {
+    render(
+      <SpellcastingSection
+        character={withSlots(
+          [
+            { level: 1, total: 4, used: 2 },
+            { level: 5, total: 2, used: 1 },
+          ],
+          { 1: 4 }
+        )}
+      />
+    );
+    expect(pips(5)).toEqual({ filled: 1, empty: 1 });
+  });
+
+  it('lets the progression own the pip count at a covered level (self-heals a baked total)', () => {
+    // A stored total inflated by an earlier write during a transient level
+    // change must correct itself once the level (and its progression) reverts.
+    render(
+      <SpellcastingSection character={withSlots([{ level: 1, total: 4, used: 4 }], { 1: 2 })} />
+    );
+    expect(pips(1)).toEqual({ filled: 2, empty: 0 });
+  });
+
+  it('renders the progression even when the stored array is empty', () => {
+    render(<SpellcastingSection character={withSlots([], { 1: 2, 2: 1 })} />);
+    expect(pips(1)).toEqual({ filled: 0, empty: 2 });
+    expect(pips(2)).toEqual({ filled: 0, empty: 1 });
+  });
+
+  it('expending a pip on a computed-only level upserts the stored entry', async () => {
+    const user = userEvent.setup();
+    const onPatch = vi.fn();
+    render(
+      <SpellcastingSection
+        character={withSlots([{ level: 1, total: 4, used: 2 }], { 1: 4, 2: 3 })}
+        editable
+        onPatch={onPatch}
+        isSaving={false}
+      />
+    );
+    await user.click(screen.getByRole('button', { name: 'Level 2 slot 1' }));
+    expect(onPatch).toHaveBeenCalledWith({
+      spellSlots: [
+        { level: 1, total: 4, used: 2 },
+        { level: 2, total: 3, used: 1 },
+      ],
+    });
+  });
+
+  it('heals a stale stored total up to the computed max on write', async () => {
+    const user = userEvent.setup();
+    const onPatch = vi.fn();
+    render(
+      <SpellcastingSection
+        character={withSlots([{ level: 1, total: 3, used: 2 }], { 1: 4 })}
+        editable
+        onPatch={onPatch}
+        isSaving={false}
+      />
+    );
+    // View shows 4 pips (2 filled); clicking pip 3 expends up to 3 used.
+    await user.click(screen.getByRole('button', { name: 'Level 1 slot 3' }));
+    expect(onPatch).toHaveBeenCalledWith({
+      spellSlots: [{ level: 1, total: 4, used: 3 }],
+    });
+  });
+});
