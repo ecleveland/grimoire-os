@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Character, Condition } from '@/lib/types';
 import AddConditionSelect from '@/components/AddConditionSelect';
 import ConcentrationChip from '@/components/ConcentrationChip';
@@ -61,28 +61,26 @@ export default function StatusTracker(props: StatusTrackerProps) {
     }
   }, [isConcentrating]);
 
-  // The blur that fires when focus moves from the spell input to another
-  // control in this card must NOT solo-commit the draft: its PATCH would flip
-  // `isSaving` and disable the target control before its click lands,
-  // silently swallowing the action. Instead the blur is skipped (detected via
-  // card-level mousedown-capture for pointers, `relatedTarget` for keyboard)
-  // and the control's own handler folds the outstanding draft into its patch —
-  // one composite optimistic-locked write carrying both changes. An aborted
-  // press (mousedown, drag away) commits nothing and keeps the draft visible.
-  const cardRef = useRef<HTMLDivElement>(null);
-  const skipBlurCommitRef = useRef(false);
-
-  /** The concentration change an uncommitted draft implies, or null if none. */
-  const outstandingSpellCommit = () => {
-    if (spellDraft === null || !isConcentrating) return null;
-    const next = concentrationFromSpellInput(spellDraft);
-    return next.spell === serverSpell ? null : next;
-  };
+  // The spell name never commits on blur. An implicit blur-commit races the
+  // click that caused it (its PATCH flips `isSaving` and disables the clicked
+  // control before mouseup — the click is silently swallowed), and every
+  // suppression scheme just moves the hazard (stale flags, stranded drafts).
+  // Commits are explicit instead: Enter or the Save button, and any status
+  // control in this card folds the outstanding draft into its own composite
+  // PATCH. Until then the Save button stays visible, so an unsaved draft
+  // never masquerades as saved.
 
   /** Fold any outstanding draft into `fields` so one PATCH carries both. */
   const withSpellCommit = (fields: CharacterPatch): CharacterPatch => {
-    const next = outstandingSpellCommit();
-    if (!next) return fields;
+    if (spellDraft === null || !isConcentrating) return fields;
+    const next = concentrationFromSpellInput(spellDraft);
+    if (next.spell === serverSpell) {
+      // Draft matches the server (an abandoned rename): clear it so it can't
+      // linger, mask a concurrent rename, or be stray-committed later.
+      setSpellDraft(null);
+      setPendingSpell(null);
+      return fields;
+    }
     setSpellDraft(null);
     setPendingSpell(next.spell ?? '');
     return { concentration: next, ...fields };
@@ -114,15 +112,6 @@ export default function StatusTracker(props: StatusTrackerProps) {
     patch({ concentration: next });
   };
 
-  const handleSpellBlur = (e: React.FocusEvent) => {
-    const skip = skipBlurCommitRef.current;
-    skipBlurCommitRef.current = false;
-    // Focus staying inside the card (pointer press or Tab) defers the commit
-    // to the target control's handler; leaving the card commits solo.
-    if (skip || (e.relatedTarget && cardRef.current?.contains(e.relatedTarget as Node))) return;
-    commitSpell();
-  };
-
   // Stopping deliberately discards any draft — the spell is ending, so
   // committing a rename alongside the stop would be nonsense.
   const stopConcentrating = () => {
@@ -132,15 +121,7 @@ export default function StatusTracker(props: StatusTrackerProps) {
 
   return (
     <div
-      ref={cardRef}
       data-testid="status-tracker"
-      onMouseDownCapture={e => {
-        // A pointer press anywhere in the card except the input itself means
-        // the coming blur must defer its commit (see handleSpellBlur).
-        if ((e.target as HTMLElement).getAttribute?.('aria-label') !== 'Concentration spell') {
-          skipBlurCommitRef.current = true;
-        }
-      }}
       className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
     >
       <h2 className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">Status</h2>
@@ -213,18 +194,23 @@ export default function StatusTracker(props: StatusTrackerProps) {
                   placeholder="Spell name"
                   value={spellDraft ?? pendingSpell ?? serverSpell ?? ''}
                   disabled={isSaving}
-                  onFocus={() => {
-                    // A stale skip flag (press that never blurred the input)
-                    // must not eat this edit session's eventual commit.
-                    skipBlurCommitRef.current = false;
-                  }}
                   onChange={e => setSpellDraft(e.target.value)}
-                  onBlur={handleSpellBlur}
                   onKeyDown={e => {
                     if (e.key === 'Enter') commitSpell();
                   }}
                   className="text-xs px-1.5 py-0.5 w-32 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50"
                 />
+                {spellDraft !== null && (
+                  <button
+                    type="button"
+                    aria-label="Save spell name"
+                    disabled={isSaving}
+                    onClick={commitSpell}
+                    className="text-xs px-1.5 py-0.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={isSaving}

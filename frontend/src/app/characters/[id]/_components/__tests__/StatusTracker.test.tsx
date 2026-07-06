@@ -167,16 +167,77 @@ describe('StatusTracker', () => {
       expect(onPatch).toHaveBeenCalledWith({ concentration: {} });
     });
 
-    it('names the concentration spell on blur (single atomic patch)', () => {
+    it('names the concentration spell via the Save button (single atomic patch)', () => {
       render(<StatusTracker character={makeCharacter({ concentration: {} })} {...editable} />);
 
       // fireEvent.change sets the value atomically — userEvent.type would
-      // exercise per-keystroke onChange, but commit happens on blur.
+      // exercise per-keystroke onChange, but commit is explicit (Enter/Save).
       const input = screen.getByLabelText('Concentration spell');
       fireEvent.change(input, { target: { value: 'Hold Person' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save spell name' }));
+
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      expect(onPatch).toHaveBeenCalledWith({ concentration: { spell: 'Hold Person' } });
+    });
+
+    it('never commits on blur — clicking inert content keeps the draft and the Save affordance', () => {
+      // Regression (PR #235 review, iteration 3): implicit blur-commits kept
+      // spawning event-ordering bugs (swallowed clicks, stale skip flags,
+      // stranded drafts). Commits are explicit now; an unsaved draft stays
+      // visibly unsaved via the Save button.
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      fireEvent.change(input, { target: { value: 'Fireball' } });
+      // Focus leaves the input for inert card content (heading/whitespace).
       fireEvent.blur(input);
 
-      expect(onPatch).toHaveBeenCalledWith({ concentration: { spell: 'Hold Person' } });
+      expect(onPatch).not.toHaveBeenCalled();
+      expect(input).toHaveValue('Fireball');
+      expect(screen.getByRole('button', { name: 'Save spell name' })).toBeInTheDocument();
+    });
+
+    it('hides the Save button while no draft is pending', () => {
+      render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+      expect(screen.queryByRole('button', { name: 'Save spell name' })).not.toBeInTheDocument();
+    });
+
+    it('clears the draft when a fold-through action finds it equal to the server value', () => {
+      // Regression (PR #235 review, iteration 3): the equal-value path left the
+      // draft dangling, which could later mask (and stray-commit over) a
+      // concurrent rename.
+      const { rerender } = render(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Bless' } })}
+          {...editable}
+        />
+      );
+
+      const input = screen.getByLabelText('Concentration spell');
+      fireEvent.change(input, { target: { value: 'Bless' } }); // retype server value
+      fireEvent.click(screen.getByRole('button', { name: 'Set exhaustion level 2' }));
+
+      expect(onPatch).toHaveBeenCalledTimes(1);
+      expect(onPatch).toHaveBeenCalledWith({ exhaustion: 2 }); // no concentration fold
+
+      // A concurrent rename lands: the input must show it, not a stale draft.
+      rerender(
+        <StatusTracker
+          character={makeCharacter({ concentration: { spell: 'Moonbeam' }, version: 2 })}
+          {...editable}
+        />
+      );
+      expect(screen.getByLabelText('Concentration spell')).toHaveValue('Moonbeam');
     });
 
     it('commits the spell name on Enter', () => {
@@ -436,7 +497,7 @@ describe('StatusTracker', () => {
 
       const input = screen.getByLabelText('Concentration spell');
       fireEvent.change(input, { target: { value: '' } });
-      fireEvent.blur(input);
+      fireEvent.keyDown(input, { key: 'Enter' });
 
       expect(onPatch).toHaveBeenCalledWith({ concentration: {} });
     });
