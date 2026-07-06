@@ -186,11 +186,12 @@ describe('AbilityScoreColumn', () => {
 
   describe('edge cases', () => {
     it('handles character with no proficient skills or saving throws', () => {
-      const unproficientCharacter: Character = {
-        ...mockCharacter,
+      // Built through the factory so `computed` reflects the empty proficiency
+      // lists (a spread of mockCharacter would keep its proficient computed block).
+      const unproficientCharacter: Character = makeCharacter({
         savingThrows: [],
         skills: [],
-      };
+      });
       render(<AbilityScoreColumn character={unproficientCharacter} />);
 
       // All save dots should be empty
@@ -213,9 +214,82 @@ describe('AbilityScoreColumn', () => {
 
 describe('null abilityScores (VEG-425)', () => {
   it('renders +0 modifiers and (10) scores instead of crashing', () => {
-    const char = { ...mockCharacter, abilityScores: null };
+    const char = makeCharacter({
+      abilityScores: null,
+      savingThrows: ['Strength', 'Constitution'],
+      skills: ['Athletics', 'Intimidation'],
+    });
     render(<AbilityScoreColumn character={char} />);
     expect(screen.getByTestId('modifier-strength')).toHaveTextContent('+0');
     expect(screen.getByTestId('score-strength')).toHaveTextContent('(10)');
+  });
+});
+
+describe('computed block is the source of truth (VEG-412)', () => {
+  // Computed values that DISAGREE with client math over the stored fields —
+  // every derived readout must follow computed. The raw (score) stays stored.
+  const divergent: Character = {
+    ...mockCharacter,
+    computed: {
+      ...mockCharacter.computed,
+      abilityModifiers: { ...mockCharacter.computed.abilityModifiers, strength: 9 },
+      savingThrows: {
+        ...mockCharacter.computed.savingThrows,
+        // Stored lists say STR is proficient (+6); computed disagrees.
+        Strength: { proficient: false, bonus: 2 },
+        // Stored lists say DEX is not proficient (+1); computed disagrees.
+        Dexterity: { proficient: true, bonus: 8 },
+      },
+      skills: {
+        ...mockCharacter.computed.skills,
+        // Stored lists say Athletics is proficient (+6); computed disagrees.
+        Athletics: { ability: 'Strength', proficient: false, bonus: 4 },
+      },
+    },
+  };
+
+  it('renders ability modifiers from computed, not score math', () => {
+    // STR 16 would derive +3; computed says +9. Raw score display unchanged.
+    render(<AbilityScoreColumn character={divergent} />);
+    expect(screen.getByTestId('modifier-strength')).toHaveTextContent('+9');
+    expect(screen.getByTestId('score-strength')).toHaveTextContent('(16)');
+  });
+
+  it('renders save bonus and proficiency dot from computed', () => {
+    render(<AbilityScoreColumn character={divergent} />);
+    const strSaveRow = screen.getByTestId('save-row-strength');
+    expect(within(strSaveRow).getByText('+2')).toBeInTheDocument();
+    expect(screen.getByTestId('save-dot-strength').className).toContain('bg-gray-300');
+
+    const dexSaveRow = screen.getByTestId('save-row-dexterity');
+    expect(within(dexSaveRow).getByText('+8')).toBeInTheDocument();
+    expect(screen.getByTestId('save-dot-dexterity').className).toContain('bg-indigo-600');
+  });
+
+  it('renders skill bonus and proficiency dot from computed', () => {
+    render(<AbilityScoreColumn character={divergent} />);
+    const athleticsRow = screen.getByTestId('skill-row-athletics');
+    expect(within(athleticsRow).getByText('+4')).toBeInTheDocument();
+    expect(screen.getByTestId('skill-dot-athletics').className).toContain('bg-gray-300');
+  });
+
+  it('falls back to the ability modifier when a skill is missing from computed.skills', () => {
+    // Guards against a skill-name key mismatch between the frontend SKILLS list
+    // and the backend game-rules keys — degrade to the governing ability's
+    // modifier (like an unproficient skill), matching the save fallback.
+    const missingSkill: Character = {
+      ...mockCharacter,
+      computed: {
+        ...mockCharacter.computed,
+        skills: Object.fromEntries(
+          Object.entries(mockCharacter.computed.skills).filter(([name]) => name !== 'Stealth')
+        ),
+      },
+    };
+    render(<AbilityScoreColumn character={missingSkill} />);
+    // Stealth is a DEX skill; computed DEX modifier is +1.
+    const stealthRow = screen.getByTestId('skill-row-stealth');
+    expect(within(stealthRow).getByText('+1')).toBeInTheDocument();
+    expect(screen.getByTestId('skill-dot-stealth').className).toContain('bg-gray-300');
   });
 });

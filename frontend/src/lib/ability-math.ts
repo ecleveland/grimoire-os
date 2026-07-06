@@ -1,10 +1,12 @@
 import type { AbilityScores } from '@/lib/types';
 import { SKILLS } from '@/lib/dnd-constants';
 
-// Pure ability-score math + ability/skill maps. The single source of truth for
-// the values the character sheet, the editor, and the guided builder all render
-// (so a live creation-time preview matches the saved sheet). No route or API
-// dependency — formerly colocated under characters/[id]/_components/utils.ts,
+// Pure ability-score math + ability/skill maps for contexts with NO server
+// character yet — the guided builder and editor previews, where a live
+// creation-time preview must match what the backend will derive. The character
+// sheet itself no longer computes these: it reads the server-attached
+// `character.computed` block, the authoritative source (VEG-412). No route or
+// API dependency — formerly colocated under characters/[id]/_components/utils.ts,
 // which now re-exports this module.
 
 export const ABILITY_KEYS: (keyof AbilityScores)[] = [

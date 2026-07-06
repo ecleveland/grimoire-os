@@ -95,8 +95,12 @@ describe('StatsBar', () => {
     });
 
     it('renders passive perception without proficiency when Perception is not a skill', () => {
-      // WIS 14 → mod +2, no prof, 10 + 2 = 12
-      const char = { ...mockCharacter, skills: ['Athletics'] };
+      // WIS 14 → mod +2, no prof, 10 + 2 = 12. Built through the factory so
+      // `computed` re-derives from the overridden skills list.
+      const char = makeCharacter({
+        abilityScores: mockCharacter.abilityScores,
+        skills: ['Athletics'],
+      });
       render(<StatsBar character={char} />);
       const block = screen.getByTestId('stat-passive-perception');
       expect(within(block).getByText('12')).toBeInTheDocument();
@@ -133,10 +137,46 @@ describe('StatsBar', () => {
 
 describe('null core stats (VEG-425)', () => {
   it('renders neutral values instead of crashing when abilityScores/speed are null', () => {
-    const char = { ...mockCharacter, abilityScores: null, speed: null };
+    // Built through the factory so `computed` derives from the null scores the
+    // way the backend would (all-10 defaults → +0), not from the old fixture's.
+    const char = makeCharacter({ abilityScores: null, speed: null });
     render(<StatsBar character={char} />);
-    // DEFAULT_ABILITY_SCORES (all 10) → +0 initiative; DEFAULT_SPEED → 30 ft.
     expect(within(screen.getByTestId('stat-initiative')).getByText('+0')).toBeInTheDocument();
     expect(within(screen.getByTestId('stat-speed')).getByText('30 ft')).toBeInTheDocument();
+  });
+});
+
+describe('computed block is the source of truth (VEG-412)', () => {
+  // Force computed values that DISAGREE with what client math would derive from
+  // the stored fields — the readouts must follow computed, proving the sheet no
+  // longer recomputes ability math locally.
+  const divergent = {
+    ...mockCharacter,
+    computed: {
+      ...mockCharacter.computed,
+      proficiencyBonus: 7,
+      initiative: 9,
+      passivePerception: 23,
+    },
+  };
+
+  it('renders proficiency bonus from computed, not from level math', () => {
+    // Level 5 would derive +3; computed says +7.
+    render(<StatsBar character={divergent} />);
+    expect(within(screen.getByTestId('stat-prof-bonus')).getByText('+7')).toBeInTheDocument();
+  });
+
+  it('renders initiative from computed, not from the Dex modifier', () => {
+    // DEX 12 would derive +1; computed says +9.
+    render(<StatsBar character={divergent} />);
+    expect(within(screen.getByTestId('stat-initiative')).getByText('+9')).toBeInTheDocument();
+  });
+
+  it('renders passive perception from computed, not from Wis/prof math', () => {
+    // WIS 14 + prof would derive 15; computed says 23.
+    render(<StatsBar character={divergent} />);
+    expect(
+      within(screen.getByTestId('stat-passive-perception')).getByText('23')
+    ).toBeInTheDocument();
   });
 });

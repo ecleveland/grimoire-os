@@ -1,8 +1,8 @@
 'use client';
 
 import type { Character } from '@/lib/types';
-import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED } from '@/lib/character-defaults';
-import { abilityModifier, formatModifier, proficiencyBonus, passivePerception } from './utils';
+import { DEFAULT_SPEED } from '@/lib/character-defaults';
+import { formatModifier } from './utils';
 import { useDiceRoll } from './useDiceRoll';
 import RollableStat from './RollableStat';
 
@@ -14,24 +14,23 @@ interface StatsBarProps {
 
 export default function StatsBar({ character, canRoll }: StatsBarProps) {
   const { rollCheck } = useDiceRoll();
-  // abilityScores/speed are nullable at the API boundary (VEG-425); fall back
-  // to neutral display values so a minimal character renders instead of crashing.
-  const abilityScores = character.abilityScores ?? DEFAULT_ABILITY_SCORES;
-  const profBonus = proficiencyBonus(character.level);
-  const dexMod = abilityModifier(abilityScores.dexterity);
-  const isPerceptionProficient = character.skills.includes('Perception');
-  const passivePerc = passivePerception(
-    abilityScores.wisdom,
-    character.level,
-    isPerceptionProficient
-  );
+  // Derived stats come from the server-computed block — the single source of
+  // truth (VEG-412). Initiative deliberately ignores the stored
+  // `character.initiative` column: computed (the Dex modifier) wins on the
+  // sheet. Speed/size are stored, not derived; nullable at the API boundary
+  // (VEG-425) so they keep neutral display fallbacks.
+  const { proficiencyBonus, initiative, passivePerception } = character.computed;
 
   const stats: { label: string; value: string; testId: string }[] = [
-    { label: 'Prof. Bonus', value: formatModifier(profBonus), testId: 'stat-prof-bonus' },
-    { label: 'Initiative', value: formatModifier(dexMod), testId: 'stat-initiative' },
+    { label: 'Prof. Bonus', value: formatModifier(proficiencyBonus), testId: 'stat-prof-bonus' },
+    { label: 'Initiative', value: formatModifier(initiative), testId: 'stat-initiative' },
     { label: 'Speed', value: `${character.speed ?? DEFAULT_SPEED} ft`, testId: 'stat-speed' },
     { label: 'Size', value: character.size ?? 'Medium', testId: 'stat-size' },
-    { label: 'Passive Perception', value: `${passivePerc}`, testId: 'stat-passive-perception' },
+    {
+      label: 'Passive Perception',
+      value: `${passivePerception}`,
+      testId: 'stat-passive-perception',
+    },
   ];
 
   return (
@@ -50,7 +49,7 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
             <RollableStat
               canRoll={rollable}
               label="Roll initiative"
-              onRoll={() => rollCheck('Initiative', dexMod)}
+              onRoll={() => rollCheck('Initiative', initiative)}
               className="block w-full text-center text-xl font-bold text-gray-900 dark:text-white mt-1"
             >
               {value}
