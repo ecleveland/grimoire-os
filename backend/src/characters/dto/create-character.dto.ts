@@ -133,7 +133,9 @@ class GearMetaDto {
 
   @ApiPropertyOptional({ example: 16 })
   @ValidateIf(o => o.type === 'armor' || o.baseArmorClass !== undefined)
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(99)
   baseArmorClass?: number;
 
   @ApiPropertyOptional()

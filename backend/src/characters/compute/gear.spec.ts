@@ -128,6 +128,16 @@ describe('gearMetaFromItem', () => {
     ).toBeNull();
   });
 
+  it('returns null for a minus-form AC string on body armor and shields (cursed "-1")', () => {
+    // leadingInt strips the sign, so "-1" would otherwise snapshot base 1 on
+    // body armor (AC ~3) or a +1 bonus on a cursed shield. Penalties aren't
+    // representable in the snapshot — degrade to none.
+    expect(
+      gearMetaFromItem({ category: 'Light Armor', armorClass: '-1', properties: [] })
+    ).toBeNull();
+    expect(gearMetaFromItem({ category: 'Shield', armorClass: '-1', properties: [] })).toBeNull();
+  });
+
   it('maps a melee weapon (ranged: false) with its properties', () => {
     expect(
       gearMetaFromItem({
@@ -468,5 +478,56 @@ describe('deriveWeapons', () => {
       attackBonus: '+5',
       notes: undefined,
     });
+  });
+
+  it('tolerates wrong-typed properties (string / non-string elements) without crashing', () => {
+    const stringProps = [
+      item({
+        name: 'Bad Import',
+        gear: {
+          type: 'weapon',
+          damage: '1d8',
+          damageType: 'Slashing',
+          ranged: false,
+          properties: 'Finesse',
+        } as never,
+      }),
+    ];
+    // A string is not a properties array: no crash, no accidental finesse.
+    expect(deriveWeapons(stringProps, mods, 2)[0]).toMatchObject({
+      attackBonus: '+5',
+      notes: undefined,
+    });
+
+    const mixedProps = [
+      item({
+        name: 'Half Bad',
+        gear: {
+          type: 'weapon',
+          damage: '1d4',
+          damageType: 'Piercing',
+          ranged: false,
+          properties: ['Finesse', 42],
+        } as never,
+      }),
+    ];
+    // Non-string elements are dropped; the valid Finesse entry still counts.
+    expect(deriveWeapons(mixedProps, { strength: 0, dexterity: 4 }, 2)[0]).toMatchObject({
+      attackBonus: '+6',
+      notes: 'Finesse',
+    });
+  });
+
+  it('omits a derived row shadowed by a manual weapon of the same name (manual wins)', () => {
+    const inv = [
+      item({ name: 'Longsword', gear: weaponGear() }),
+      item({ name: 'Dagger', gear: weaponGear({ damage: '1d4', damageType: 'Piercing' }) }),
+    ];
+    const manual = [
+      { name: ' longsword ', attackBonus: '+7', damage: '1d8+4', damageType: 'Slashing' },
+    ];
+    // Case/whitespace-insensitive match: the player's own entry (which may
+    // carry magic/fighting-style bonuses) stays authoritative.
+    expect(deriveWeapons(inv, mods, 2, manual).map(w => w.name)).toEqual(['Dagger']);
   });
 });

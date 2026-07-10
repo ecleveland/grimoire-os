@@ -62,10 +62,12 @@ function leadingInt(text: string): number | null {
 export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
   const armorType = ARMOR_CATEGORY_TYPES[item.category];
   if (armorType) {
-    // A bonus-form AC string ("+1") on BODY armor is a bonus, not a base —
-    // snapshotting base 1 would derive a catastrophically wrong AC. Only
-    // shields use the bonus form; homebrew bonus-form body armor degrades to
-    // no snapshot (manual override covers it).
+    // A signed AC string is a bonus/penalty, not a base — leadingInt strips
+    // the sign, so "+1" body armor would snapshot base 1 (AC ~3) and a cursed
+    // "-1" shield would snapshot +1. Only the shield "+N" bonus form is
+    // representable; everything else signed degrades to no snapshot (the
+    // manual override covers it).
+    if (item.armorClass && /^\s*-/.test(item.armorClass)) return null;
     if (armorType !== 'shield' && item.armorClass && /^\s*\+/.test(item.armorClass)) {
       return null;
     }
@@ -178,9 +180,34 @@ export function formatSigned(value: number): string {
   return value < 0 ? String(value) : `+${value}`;
 }
 
+/**
+ * floor((score - 10) / 2) — the canonical 5e ability modifier, shared so the
+ * backend compute layer, the campaign-roster AC resolution, and the frontend
+ * previews/fixtures all feed the derivations from one formula.
+ */
+export function abilityModifier(score: number): number {
+  return Math.floor((score - 10) / 2);
+}
+
+/**
+ * A hand-edited/out-of-band row may hold anything where the properties array
+ * should be — a bare string, numbers in the array. Same posture as the
+ * baseArmorClass and inventory guards: degrade to what's usable, never crash
+ * a read.
+ */
+function propertiesOf(gear: WeaponGear): string[] {
+  return Array.isArray(gear.properties)
+    ? gear.properties.filter((p): p is string => typeof p === 'string')
+    : [];
+}
+
 function isFinesse(gear: WeaponGear): boolean {
-  // `?? []`: a hand-edited row may lack the array; degrade, don't crash.
-  return (gear.properties ?? []).some(p => p.toLowerCase().startsWith('finesse'));
+  return propertiesOf(gear).some(p => p.toLowerCase().startsWith('finesse'));
+}
+
+/** Trim/casefold key for the derived-vs-manual weapon shadow match. */
+function weaponKey(name: string): string {
+  return name.trim().toLowerCase();
 }
 
 /**
@@ -189,25 +216,34 @@ function isFinesse(gear: WeaponGear): boolean {
  * for v1 — proficiencies are free text, so a reliable match isn't possible;
  * the manual `Character.weapons` path stays the escape hatch. Rows use the
  * stored `Weapon` shape so the sheet's table and roll buttons work unchanged.
+ *
+ * An equipped weapon whose name matches a `manualWeapons` entry derives no
+ * row: the player's own entry may carry bonuses (magic, fighting style) the
+ * derivation can't know about, and a duplicate row would offer a second,
+ * silently-weaker attack button.
  */
 export function deriveWeapons(
   inventory: InventoryItem[],
   modifiers: Pick<Record<keyof AbilityScores, number>, 'strength' | 'dexterity'>,
-  proficiencyBonus: number
+  proficiencyBonus: number,
+  manualWeapons: Weapon[] = []
 ): Weapon[] {
-  return equippedGear(inventory, 'weapon').map(({ item, gear }) => {
-    const mod = isFinesse(gear)
-      ? Math.max(modifiers.strength, modifiers.dexterity)
-      : gear.ranged
-        ? modifiers.dexterity
-        : modifiers.strength;
-    const properties = gear.properties ?? [];
-    return {
-      name: item.name,
-      attackBonus: formatSigned(mod + proficiencyBonus),
-      damage: mod === 0 ? gear.damage : `${gear.damage}${formatSigned(mod)}`,
-      damageType: gear.damageType,
-      notes: properties.length > 0 ? properties.join(', ') : undefined,
-    };
-  });
+  const manualNames = new Set(manualWeapons.map(w => weaponKey(w.name)));
+  return equippedGear(inventory, 'weapon')
+    .filter(({ item }) => !manualNames.has(weaponKey(item.name)))
+    .map(({ item, gear }) => {
+      const mod = isFinesse(gear)
+        ? Math.max(modifiers.strength, modifiers.dexterity)
+        : gear.ranged
+          ? modifiers.dexterity
+          : modifiers.strength;
+      const properties = propertiesOf(gear);
+      return {
+        name: item.name,
+        attackBonus: formatSigned(mod + proficiencyBonus),
+        damage: mod === 0 ? gear.damage : `${gear.damage}${formatSigned(mod)}`,
+        damageType: gear.damageType,
+        notes: properties.length > 0 ? properties.join(', ') : undefined,
+      };
+    });
 }

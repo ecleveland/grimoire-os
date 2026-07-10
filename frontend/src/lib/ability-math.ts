@@ -1,5 +1,5 @@
 import type { AbilityScores } from '@/lib/types';
-import { formatSigned } from '@grimoire-os/shared';
+import { abilityModifier as sharedAbilityModifier, formatSigned } from '@grimoire-os/shared';
 import { SKILLS } from '@/lib/dnd-constants';
 
 // Pure ability-score math + ability/skill maps for contexts with NO server
@@ -50,8 +50,10 @@ export function recommendedAbilityKeys(primaryAbilities?: string[]): (keyof Abil
   return ABILITY_KEYS.filter(k => primaryAbilities.includes(ABILITY_KEY_TO_NAME[k]));
 }
 
+/** Delegates to the shared canonical formula (VEG-410) — one implementation
+ * feeds the backend compute layer, the roster AC, and these previews. */
 export function abilityModifier(score: number): number {
-  return Math.floor((score - 10) / 2);
+  return sharedAbilityModifier(score);
 }
 
 /** Delegates to the shared signed formatter so derived weapon rows, ability

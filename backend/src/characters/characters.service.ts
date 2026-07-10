@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
+import type { AbilityScores, ClassSpellcasting, Weapon } from '@grimoire-os/shared';
 import { inventoryFromJson } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -105,6 +105,7 @@ export class CharactersService {
         spellcastingAbility: character.spellcastingAbility,
         armorClass: character.armorClass,
         inventory: inventoryFromJson(character.inventory),
+        weapons: Array.isArray(character.weapons) ? (character.weapons as unknown as Weapon[]) : [],
       },
       classSpellcasting
     );

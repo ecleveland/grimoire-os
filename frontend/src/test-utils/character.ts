@@ -41,6 +41,7 @@ export function deriveComputed(
     | 'spellcastingAbility'
     | 'armorClass'
     | 'inventory'
+    | 'weapons'
   >
 ): ComputedStats {
   const scores = c.abilityScores ?? DEFAULT_ABILITY_SCORES;
@@ -94,7 +95,7 @@ export function deriveComputed(
     // Same shared derivations the backend compute layer uses (VEG-410), so
     // fixture AC/weapons stay consistent with stored inventory/armorClass.
     armorClass: deriveArmorClass(c.inventory ?? [], abilityModifiers.dexterity, c.armorClass),
-    weapons: deriveWeapons(c.inventory ?? [], abilityModifiers, prof),
+    weapons: deriveWeapons(c.inventory ?? [], abilityModifiers, prof, c.weapons ?? []),
   };
 }
 

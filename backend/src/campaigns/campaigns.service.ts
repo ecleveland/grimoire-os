@@ -7,8 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AbilityScores, Combatant } from '@grimoire-os/shared';
-import { deriveArmorClass, inventoryFromJson } from '@grimoire-os/shared';
-import { abilityModifier } from '../characters/compute/compute-stats';
+import { abilityModifier, deriveArmorClass, inventoryFromJson } from '@grimoire-os/shared';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';

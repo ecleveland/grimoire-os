@@ -385,6 +385,21 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         expect(type?.constraints).toHaveProperty('isIn');
       });
 
+      it('rejects a fractional or negative baseArmorClass', async () => {
+        for (const baseArmorClass of [2.5, -1]) {
+          const dto = toDto({
+            ...baseDto,
+            inventory: [{ name: 'X', gear: { type: 'armor', armorType: 'light', baseArmorClass } }],
+          });
+          const errors = await validate(dto);
+          const base = errors
+            .find(e => e.property === 'inventory')
+            ?.children?.[0]?.children?.find(c => c.property === 'gear')
+            ?.children?.find(c => c.property === 'baseArmorClass');
+          expect(base?.constraints).toBeDefined();
+        }
+      });
+
       it('rejects armor gear missing its baseArmorClass', async () => {
         const dto = toDto({
           ...baseDto,
@@ -395,7 +410,7 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
           .find(e => e.property === 'inventory')
           ?.children?.[0]?.children?.find(c => c.property === 'gear')
           ?.children?.find(c => c.property === 'baseArmorClass');
-        expect(base?.constraints).toHaveProperty('isNumber');
+        expect(base?.constraints).toHaveProperty('isInt');
       });
 
       it('rejects armor gear with an unknown armorType', async () => {
@@ -458,7 +473,7 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
           .find(e => e.property === 'inventory')
           ?.children?.[0]?.children?.find(c => c.property === 'gear')
           ?.children?.find(c => c.property === 'baseArmorClass');
-        expect(base?.constraints).toHaveProperty('isNumber');
+        expect(base?.constraints).toHaveProperty('isInt');
       });
 
       it('rejects weapon gear missing damage fields', async () => {

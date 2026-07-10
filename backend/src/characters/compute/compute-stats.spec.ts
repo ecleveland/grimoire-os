@@ -28,6 +28,7 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     spellcastingAbility: null,
     armorClass: null,
     inventory: [],
+    weapons: [],
     ...over,
   };
 }
@@ -365,6 +366,18 @@ describe('computeCharacterStats', () => {
 
     it('returns no weapon rows when nothing with weapon gear is equipped', () => {
       const stats = computeCharacterStats(input({ inventory: [chainShirt] }));
+      expect(stats.weapons).toEqual([]);
+    });
+
+    it('omits derived rows shadowed by a stored manual weapon of the same name', () => {
+      const stats = computeCharacterStats(
+        input({
+          inventory: [longsword],
+          weapons: [
+            { name: 'Longsword', attackBonus: '+7', damage: '1d8+4', damageType: 'Slashing' },
+          ],
+        })
+      );
       expect(stats.weapons).toEqual([]);
     });
   });

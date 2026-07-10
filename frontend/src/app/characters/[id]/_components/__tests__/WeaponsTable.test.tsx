@@ -147,6 +147,21 @@ describe('WeaponsTable', () => {
       expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longbow damage'));
     });
 
+    it('shows only the manual row when an equipped weapon shares its name (manual wins)', () => {
+      // The player's own entry may carry magic/fighting-style bonuses the
+      // derivation can't know about — a duplicate derived row would offer a
+      // second, silently-weaker roll button.
+      const char = makeCharacter({
+        weapons: [{ name: 'Longbow', attackBonus: '+6', damage: '1d8+2', damageType: 'Piercing' }],
+        inventory: [equippedBow],
+      });
+      render(<WeaponsTable character={char} />);
+      const rows = screen.getAllByRole('row');
+      expect(rows).toHaveLength(2); // header + the manual row only
+      expect(screen.getByText('+6')).toBeInTheDocument();
+      expect(screen.queryByTestId('derived-weapon-tag')).toBeNull();
+    });
+
     it('renders manual weapons unchanged when a pre-VEG-410 payload lacks computed.weapons', () => {
       const base = makeCharacter({
         weapons: [
