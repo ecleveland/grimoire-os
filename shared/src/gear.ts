@@ -60,7 +60,11 @@ function leadingInt(text: string): number | null {
  * the category name since properties don't encode it.
  */
 export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
-  const armorType = ARMOR_CATEGORY_TYPES[item.category];
+  // Own-property lookup: homebrew categories are free text, so "constructor"
+  // must not resolve Object.prototype members into an armorType.
+  const armorType = Object.prototype.hasOwnProperty.call(ARMOR_CATEGORY_TYPES, item.category)
+    ? ARMOR_CATEGORY_TYPES[item.category]
+    : undefined;
   if (armorType) {
     // A signed AC string is a bonus/penalty, not a base — leadingInt strips
     // the sign, so "+1" body armor would snapshot base 1 (AC ~3) and a cursed
@@ -228,9 +232,21 @@ export function deriveWeapons(
   proficiencyBonus: number,
   manualWeapons: Weapon[] = []
 ): Weapon[] {
-  const manualNames = new Set(manualWeapons.map(w => weaponKey(w.name)));
+  // Both name sources come out of Json columns guarded only for array-ness,
+  // so a null / name-less element must degrade (skip), not crash the read.
+  const manualNames = new Set(
+    manualWeapons.flatMap(w => (typeof w?.name === 'string' ? [weaponKey(w.name)] : []))
+  );
   return equippedGear(inventory, 'weapon')
-    .filter(({ item }) => !manualNames.has(weaponKey(item.name)))
+    .filter(
+      ({ item, gear }) =>
+        // A row needs a usable name and damage pair to render as anything but
+        // literal "undefined" — unusable snapshots contribute nothing.
+        typeof item.name === 'string' &&
+        typeof gear.damage === 'string' &&
+        typeof gear.damageType === 'string' &&
+        !manualNames.has(weaponKey(item.name))
+    )
     .map(({ item, gear }) => {
       const mod = isFinesse(gear)
         ? Math.max(modifiers.strength, modifiers.dexterity)

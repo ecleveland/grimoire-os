@@ -400,6 +400,31 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         }
       });
 
+      it('rejects a fractional, negative, or absurd strengthRequirement', async () => {
+        for (const strengthRequirement of [-3.7, -1, 1e308]) {
+          const dto = toDto({
+            ...baseDto,
+            inventory: [
+              {
+                name: 'X',
+                gear: {
+                  type: 'armor',
+                  armorType: 'heavy',
+                  baseArmorClass: 16,
+                  strengthRequirement,
+                },
+              },
+            ],
+          });
+          const errors = await validate(dto);
+          const str = errors
+            .find(e => e.property === 'inventory')
+            ?.children?.[0]?.children?.find(c => c.property === 'gear')
+            ?.children?.find(c => c.property === 'strengthRequirement');
+          expect(str?.constraints).toBeDefined();
+        }
+      });
+
       it('rejects armor gear missing its baseArmorClass', async () => {
         const dto = toDto({
           ...baseDto,

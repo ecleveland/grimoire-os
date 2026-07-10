@@ -200,6 +200,14 @@ describe('gearMetaFromItem', () => {
     expect(gearMetaFromItem({ category: 'Equipment Pack', properties: [] })).toBeNull();
     expect(gearMetaFromItem({ category: "Artisan's Tools", properties: [] })).toBeNull();
   });
+
+  it('does not resolve prototype-chain names as armor categories', () => {
+    // Homebrew categories are free text; "constructor" must not hit
+    // Object.prototype and snapshot a function as the armorType.
+    for (const category of ['constructor', 'toString', 'valueOf']) {
+      expect(gearMetaFromItem({ category, armorClass: '16', properties: [] })).toBeNull();
+    }
+  });
 });
 
 describe('inventoryFromJson', () => {
@@ -529,5 +537,25 @@ describe('deriveWeapons', () => {
     // Case/whitespace-insensitive match: the player's own entry (which may
     // carry magic/fighting-style bonuses) stays authoritative.
     expect(deriveWeapons(inv, mods, 2, manual).map(w => w.name)).toEqual(['Dagger']);
+  });
+
+  it('tolerates null / name-less manual weapon entries (corrupt weapons column)', () => {
+    const inv = [item({ name: 'Longsword', gear: weaponGear() })];
+    const manual = [null, { damage: '1d8' }] as never;
+    expect(deriveWeapons(inv, mods, 2, manual).map(w => w.name)).toEqual(['Longsword']);
+  });
+
+  it('skips equipped weapon rows with a non-string name or missing damage fields', () => {
+    const inv = [
+      // Name-less row: would crash the shadow match and render a nameless row.
+      item({ name: undefined as never, gear: weaponGear() }),
+      // Damage-less snapshot: would render literal "undefined" in the table.
+      item({
+        name: 'Broken Snapshot',
+        gear: { type: 'weapon', ranged: false, properties: [] } as never,
+      }),
+      item({ name: 'Dagger', gear: weaponGear({ damage: '1d4', damageType: 'Piercing' }) }),
+    ];
+    expect(deriveWeapons(inv, mods, 2).map(w => w.name)).toEqual(['Dagger']);
   });
 });

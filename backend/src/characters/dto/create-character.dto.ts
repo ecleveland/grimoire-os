@@ -145,7 +145,9 @@ class GearMetaDto {
 
   @ApiPropertyOptional({ example: 13 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(30)
   strengthRequirement?: number;
 
   // ── weapon branch ──
