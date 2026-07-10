@@ -150,6 +150,29 @@ describe('ResourceTracker', () => {
       expect(screen.getByLabelText('New resource name')).toHaveValue('');
     });
 
+    it('does not wipe a newly typed draft when the pending add lands', async () => {
+      // User submits 'Bardic Inspiration', then starts typing the next
+      // resource while the write round-trips: the confirmation must only
+      // clear the form if it still holds the submitted draft.
+      const user = userEvent.setup();
+      const added = { name: 'Bardic Inspiration', max: 4, used: 0, recharge: 'short' as const };
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [ki] })} {...editable} />
+      );
+      const name = screen.getByLabelText('New resource name');
+      await user.type(name, 'Bardic Inspiration');
+      fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '4' } });
+      await user.click(screen.getByRole('button', { name: 'Add resource' }));
+      // Next draft typed while the write is in flight.
+      fireEvent.change(name, { target: { value: 'Rage' } });
+      fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '3' } });
+      rerender(
+        <ResourceTracker character={makeCharacter({ resources: [ki, added] })} {...editable} />
+      );
+      expect(screen.getByLabelText('New resource name')).toHaveValue('Rage');
+      expect(screen.getByLabelText('New resource max')).toHaveValue(3);
+    });
+
     it('disables Add for a non-integer max instead of silently flooring it', async () => {
       const user = userEvent.setup();
       render(<ResourceTracker character={makeCharacter()} {...editable} />);
@@ -270,18 +293,25 @@ describe('ResourceTracker', () => {
       expect(onPatch).toHaveBeenCalledWith({ resources: [rage] });
     });
 
-    it('closes an open editor when any row is removed (indexes shift under it)', async () => {
-      // With the editor keyed by index, removing a row above it would leave
-      // Save silently overwriting a different resource once the list refetches.
+    it('keeps an open editor tracking its row when a different row is removed', async () => {
+      // The editor is identity-keyed, so removing an unrelated row must not
+      // discard the in-progress draft; after the refetch shifts indexes the
+      // editor still targets (and Save still writes) the row being edited.
       const user = userEvent.setup();
-      render(
+      const { rerender } = render(
         <ResourceTracker character={makeCharacter({ resources: [ki, rage] })} {...editable} />
       );
       await user.click(screen.getByLabelText('Edit Rage'));
-      expect(screen.getByLabelText('Edit resource name')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Edit resource name'), {
+        target: { value: 'Rages' },
+      });
       await user.click(screen.getByLabelText('Remove Ki Points'));
       expect(onPatch).toHaveBeenCalledWith({ resources: [rage] });
-      expect(screen.queryByLabelText('Edit resource name')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Edit resource name')).toHaveValue('Rages');
+      // Refetch lands without Ki Points; Save writes the edited row at its new index.
+      rerender(<ResourceTracker character={makeCharacter({ resources: [rage] })} {...editable} />);
+      await user.click(screen.getByRole('button', { name: 'Save resource' }));
+      expect(onPatch).toHaveBeenLastCalledWith({ resources: [{ ...rage, name: 'Rages' }] });
     });
   });
 

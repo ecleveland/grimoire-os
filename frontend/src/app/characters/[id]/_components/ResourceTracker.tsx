@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Character, CharacterResource, ResourceRecharge } from '@/lib/types';
 import { RECHARGE_KINDS } from '@/lib/types';
-import { parseNonNegativeInt, togglePip } from '@/lib/character-play';
+import { togglePip } from '@/lib/character-play';
 import { addResource, editResource, removeResource } from '@/lib/character-resources';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 
@@ -46,8 +46,13 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   const [addForm, setAddForm] = useState<ResourceFormState>(EMPTY_FORM);
   // The add PATCH is fire-and-forget; clearing the form immediately would
   // discard the typed draft if the write 409s. `pendingAdd` remembers what was
-  // submitted, and the form resets only once the refetched list contains it.
-  const [pendingAdd, setPendingAdd] = useState<CharacterResource | null>(null);
+  // submitted (and the form snapshot it came from), and the form resets only
+  // once the refetched list contains the row — and only if the user hasn't
+  // started typing the next draft in the meantime.
+  const [pendingAdd, setPendingAdd] = useState<{
+    resource: CharacterResource;
+    form: ResourceFormState;
+  } | null>(null);
   // The resource being edited, snapshotted at open. Identity-keyed (not
   // index-keyed) so a refetch that reshuffles the list — e.g. a 409-conflict
   // reload after another tab deleted a row — can't make Save silently
@@ -56,15 +61,21 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   const [editTarget, setEditTarget] = useState<CharacterResource | null>(null);
   const [editForm, setEditForm] = useState<ResourceFormState>(EMPTY_FORM);
 
-  const resourcesKey = JSON.stringify(resources);
+  // `character.resources` (the prop reference) only changes when a refetch
+  // lands — exactly the event this confirmation watches for.
   useEffect(() => {
-    if (pendingAdd && resources.some(r => sameResource(r, pendingAdd))) {
+    if (!pendingAdd) return;
+    if ((character.resources ?? []).some(r => sameResource(r, pendingAdd.resource))) {
       setPendingAdd(null);
-      setAddForm(EMPTY_FORM);
+      setAddForm(current =>
+        current.name === pendingAdd.form.name &&
+        current.max === pendingAdd.form.max &&
+        current.recharge === pendingAdd.form.recharge
+          ? EMPTY_FORM
+          : current
+      );
     }
-    // resourcesKey stands in for the freshly-allocated `resources` array.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resourcesKey, pendingAdd]);
+  }, [character.resources, pendingAdd]);
 
   // A viewer with nothing to see gets no empty card taking up sheet space.
   if (!editable && resources.length === 0) return null;
@@ -83,15 +94,16 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   };
 
   const removeAt = (index: number) => {
-    // Same-tab removal mid-edit: close the editor rather than let it hop rows.
-    setEditTarget(null);
+    // No editor bookkeeping needed: the editor is identity-keyed, so it keeps
+    // tracking its row (draft intact) when a different row is removed, and the
+    // row in edit mode hides its own Remove button.
     patch({ resources: removeResource(resources, index) });
   };
 
   // Mirrors the backend ResourceDto bounds (name non-blank, max an integer
-  // 1–99): the HTML max attr doesn't block typed input, decimals would be
-  // silently floored by parseNonNegativeInt, and a 400 would arrive only
-  // after the user thinks the write went through.
+  // 1–99): the HTML max attr doesn't block typed input, silently flooring a
+  // typed decimal would alter the value, and a 400 would arrive only after
+  // the user thinks the write went through.
   const isFormValid = (form: ResourceFormState) => {
     const max = Number(form.max);
     return form.name.trim().length > 0 && Number.isInteger(max) && max >= 1 && max <= 99;
@@ -107,7 +119,7 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
       used: 0,
       recharge: addForm.recharge,
     };
-    setPendingAdd(added);
+    setPendingAdd({ resource: added, form: addForm });
     patch({ resources: addResource(resources, added) });
   };
 
