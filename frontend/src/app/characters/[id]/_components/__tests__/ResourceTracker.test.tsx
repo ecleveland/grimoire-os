@@ -173,6 +173,53 @@ describe('ResourceTracker', () => {
       expect(screen.getByLabelText('New resource max')).toHaveValue(3);
     });
 
+    it('does not confirm the add against a pre-existing identical row', async () => {
+      // Adding a second copy of an existing pool: the confirmation must wait
+      // for the row COUNT to grow, not merely for a value-match to exist —
+      // otherwise the form wipes before the write settles and a 409 loses it.
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [rage] })} {...editable} />
+      );
+      const name = screen.getByLabelText('New resource name');
+      await user.type(name, 'Rage');
+      fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '3' } });
+      await user.selectOptions(screen.getByLabelText('New resource recharge'), 'long');
+      await user.click(screen.getByRole('button', { name: 'Add resource' }));
+      // Refetch lands unchanged (write not landed yet): the pre-existing
+      // identical row must not confirm the add.
+      rerender(<ResourceTracker character={makeCharacter({ resources: [rage] })} {...editable} />);
+      expect(screen.getByLabelText('New resource name')).toHaveValue('Rage');
+      // The second copy lands → now it confirms and the untouched form clears.
+      rerender(
+        <ResourceTracker
+          character={makeCharacter({ resources: [rage, { ...rage, used: 0 }] })}
+          {...editable}
+        />
+      );
+      expect(screen.getByLabelText('New resource name')).toHaveValue('');
+    });
+
+    it('keeps a deliberately re-typed identical draft when the first add confirms', async () => {
+      // Reference equality on the form snapshot distinguishes "untouched since
+      // submit" from "re-typed the same values to add a second copy".
+      const user = userEvent.setup();
+      const added = { name: 'Ki Points', max: 4, used: 0, recharge: 'short' as const };
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [] })} {...editable} />
+      );
+      const name = screen.getByLabelText('New resource name');
+      await user.type(name, 'Ki Points');
+      fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '4' } });
+      await user.click(screen.getByRole('button', { name: 'Add resource' }));
+      // Re-type the exact same draft for a second copy (a real re-type passes
+      // through intermediate values — an identical set wouldn't fire onChange).
+      fireEvent.change(name, { target: { value: 'Ki Point' } });
+      fireEvent.change(name, { target: { value: 'Ki Points' } });
+      rerender(<ResourceTracker character={makeCharacter({ resources: [added] })} {...editable} />);
+      expect(screen.getByLabelText('New resource name')).toHaveValue('Ki Points');
+    });
+
     it('disables Add for a non-integer max instead of silently flooring it', async () => {
       const user = userEvent.setup();
       render(<ResourceTracker character={makeCharacter()} {...editable} />);
@@ -271,6 +318,24 @@ describe('ResourceTracker', () => {
       await user.click(screen.getByLabelText('Edit Rage'));
       rerender(<ResourceTracker character={makeCharacter({ resources: [ki] })} {...editable} />);
       expect(screen.queryByLabelText('Edit resource name')).not.toBeInTheDocument();
+    });
+
+    it('does not resurrect a stale editor when an identical row is later re-added', async () => {
+      // Editor open on Rage → row deleted elsewhere (editor unmounts) → a new
+      // value-identical Rage is added: the stale target must have been cleared,
+      // not lie in wait to reopen with the forgotten draft.
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [ki, rage] })} {...editable} />
+      );
+      await user.click(screen.getByLabelText('Edit Rage'));
+      rerender(<ResourceTracker character={makeCharacter({ resources: [ki] })} {...editable} />);
+      expect(screen.queryByLabelText('Edit resource name')).not.toBeInTheDocument();
+      rerender(
+        <ResourceTracker character={makeCharacter({ resources: [ki, rage] })} {...editable} />
+      );
+      expect(screen.queryByLabelText('Edit resource name')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Edit Rage')).toBeInTheDocument();
     });
 
     it('cancel closes the editor without patching', async () => {

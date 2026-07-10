@@ -52,6 +52,10 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   const [pendingAdd, setPendingAdd] = useState<{
     resource: CharacterResource;
     form: ResourceFormState;
+    // Value-identical rows are legal, so confirmation waits for the COUNT of
+    // matching rows to grow past what existed at submit — a pre-existing
+    // duplicate must not confirm the add before the write settles.
+    priorCount: number;
   } | null>(null);
   // The resource being edited, snapshotted at open. Identity-keyed (not
   // index-keyed) so a refetch that reshuffles the list — e.g. a 409-conflict
@@ -65,17 +69,26 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   // lands — exactly the event this confirmation watches for.
   useEffect(() => {
     if (!pendingAdd) return;
-    if ((character.resources ?? []).some(r => sameResource(r, pendingAdd.resource))) {
+    const matches = (character.resources ?? []).filter(r =>
+      sameResource(r, pendingAdd.resource)
+    ).length;
+    if (matches > pendingAdd.priorCount) {
       setPendingAdd(null);
-      setAddForm(current =>
-        current.name === pendingAdd.form.name &&
-        current.max === pendingAdd.form.max &&
-        current.recharge === pendingAdd.form.recharge
-          ? EMPTY_FORM
-          : current
-      );
+      // Reference equality distinguishes "untouched since submit" (clear it)
+      // from "re-typed — even identically — for the next add" (keep it):
+      // every keystroke allocates a new form object.
+      setAddForm(current => (current === pendingAdd.form ? EMPTY_FORM : current));
     }
   }, [character.resources, pendingAdd]);
+
+  // A refetch can delete the row under an open editor; drop the stale target
+  // so a later value-identical row can't resurrect the editor with the
+  // forgotten draft.
+  useEffect(() => {
+    if (editTarget && !(character.resources ?? []).some(r => sameResource(r, editTarget))) {
+      setEditTarget(null);
+    }
+  }, [character.resources, editTarget]);
 
   // A viewer with nothing to see gets no empty card taking up sheet space.
   if (!editable && resources.length === 0) return null;
@@ -119,7 +132,11 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
       used: 0,
       recharge: addForm.recharge,
     };
-    setPendingAdd({ resource: added, form: addForm });
+    setPendingAdd({
+      resource: added,
+      form: addForm,
+      priorCount: resources.filter(r => sameResource(r, added)).length,
+    });
     patch({ resources: addResource(resources, added) });
   };
 
