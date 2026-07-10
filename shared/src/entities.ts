@@ -4,6 +4,7 @@ import type {
   AbilityScores,
   AttunedItem,
   CharacterFeat,
+  CharacterResource,
   Combatant,
   CombatantConcentration,
   CombatantLootItem,
@@ -109,6 +110,11 @@ export interface Character {
   concentration: CombatantConcentration | null;
   /** Exhaustion level 1–6; null (or 0) means none. */
   exhaustion: number | null;
+  /**
+   * Limited-use class/race resources (VEG-409), player-defined. Nullable JSONB
+   * column: legacy/minimal characters carry `null` (consumers guard `?? []`).
+   */
+  resources?: CharacterResource[] | null;
   /** Optimistic-locking counter (VEG-137); incremented on each guarded write. */
   version: number;
   /**

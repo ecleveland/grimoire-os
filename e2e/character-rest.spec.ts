@@ -119,4 +119,66 @@ test.describe('character sheet — Long Rest', () => {
     await expect(hpBlock.getByText('36/36')).toBeVisible();
     await expect(page.getByTestId('hd-block').getByText('1/4')).toBeVisible();
   });
+
+  test('short rest recharges only short-rest resources; long rest recharges both (VEG-409)', async ({
+    page,
+  }) => {
+    await registerAndLogin(page, 'rest-resources', 'Rester Three');
+    const headers = await csrfHeaders(page);
+
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Shan Two-Rivers',
+        class: 'Monk',
+        level: 5,
+        abilityScores: { strength: 12, dexterity: 16, constitution: 14, wisdom: 15 },
+        hitPoints: { max: 33, current: 33, temporary: 0 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        // Both pools fully spent, so recovery is visible per recharge kind.
+        resources: [
+          { name: 'Ki Points', max: 5, used: 5, recharge: 'short' },
+          { name: 'Luck Points', max: 3, used: 3, recharge: 'long' },
+        ],
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Shan Two-Rivers' })).toBeVisible();
+
+    const tracker = page.getByTestId('resource-tracker');
+    // Ki (5 pips) and Luck (3 pips) both start fully consumed.
+    await expect(
+      tracker.locator('[data-testid^="resource-0-pip-"][data-filled="true"]')
+    ).toHaveCount(5);
+    await expect(
+      tracker.locator('[data-testid^="resource-1-pip-"][data-filled="true"]')
+    ).toHaveCount(3);
+
+    // Short rest: Ki refills, Luck stays spent.
+    await page.getByRole('button', { name: 'Short Rest' }).click();
+    await expect(
+      tracker.locator('[data-testid^="resource-0-pip-"][data-filled="true"]')
+    ).toHaveCount(0);
+    await expect(
+      tracker.locator('[data-testid^="resource-1-pip-"][data-filled="true"]')
+    ).toHaveCount(3);
+
+    // Re-spend one Ki so the long rest has something short-recharge to clear too.
+    await page.getByRole('button', { name: 'Ki Points use 1' }).click();
+    await expect(
+      tracker.locator('[data-testid^="resource-0-pip-"][data-filled="true"]')
+    ).toHaveCount(1);
+
+    // Long rest: everything refills.
+    await page.getByRole('button', { name: 'Long Rest' }).click();
+    await expect(
+      tracker.locator('[data-testid^="resource-0-pip-"][data-filled="true"]')
+    ).toHaveCount(0);
+    await expect(
+      tracker.locator('[data-testid^="resource-1-pip-"][data-filled="true"]')
+    ).toHaveCount(0);
+  });
 });

@@ -508,6 +508,105 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('resources (VEG-409)', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted):
+    // the sheet's resource tracker PATCHes this field, which a plain validate()
+    // would silently accept even if never whitelisted (the VEG-349 deathSaves trap).
+    const ki = { name: 'Ki Points', max: 5, used: 2, recharge: 'short' };
+
+    it('accepts a valid resource array (not rejected as unwhitelisted)', async () => {
+      const dto = toDto({
+        ...baseDto,
+        resources: [ki, { name: 'Rage', max: 3, used: 0, recharge: 'long' }],
+      });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'resources')).toHaveLength(0);
+    });
+
+    it('accepts an empty array (removing the last resource)', async () => {
+      const dto = toDto({ ...baseDto, resources: [] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'resources')).toHaveLength(0);
+    });
+
+    it('rejects a recharge kind outside short/long', async () => {
+      const dto = toDto({ ...baseDto, resources: [{ ...ki, recharge: 'dawn' }] });
+      const errors = await validate(dto);
+      const recharge = errors
+        .find(e => e.property === 'resources')
+        ?.children?.[0]?.children?.find(c => c.property === 'recharge');
+      expect(recharge?.constraints).toHaveProperty('isIn');
+    });
+
+    it('rejects a missing, empty, or whitespace-only name', async () => {
+      for (const bad of [
+        { ...ki, name: undefined },
+        { ...ki, name: '' },
+        { ...ki, name: '   ' },
+      ]) {
+        const dto = toDto({ ...baseDto, resources: [bad] });
+        const errors = await validate(dto);
+        const name = errors
+          .find(e => e.property === 'resources')
+          ?.children?.[0]?.children?.find(c => c.property === 'name');
+        expect(name?.constraints).toBeDefined();
+      }
+    });
+
+    it('rejects max outside 1–99 and non-integer max', async () => {
+      for (const max of [0, 100, 2.5]) {
+        const dto = toDto({ ...baseDto, resources: [{ ...ki, max }] });
+        const errors = await validate(dto);
+        const maxErr = errors
+          .find(e => e.property === 'resources')
+          ?.children?.[0]?.children?.find(c => c.property === 'max');
+        expect(maxErr?.constraints).toBeDefined();
+      }
+    });
+
+    it('rejects used outside 0–99 and non-integer used', async () => {
+      for (const used of [-1, 100, 1.5]) {
+        const dto = toDto({ ...baseDto, resources: [{ ...ki, used }] });
+        const errors = await validate(dto);
+        const usedErr = errors
+          .find(e => e.property === 'resources')
+          ?.children?.[0]?.children?.find(c => c.property === 'used');
+        expect(usedErr?.constraints).toBeDefined();
+      }
+    });
+
+    it('rejects used greater than max (over-consumed pool)', async () => {
+      // Independently-ranged bounds would accept { max: 5, used: 50 } and the
+      // sheet would render a negative remaining count — cross-field guard.
+      const dto = toDto({ ...baseDto, resources: [{ ...ki, max: 5, used: 6 }] });
+      const errors = await validate(dto);
+      const usedErr = errors
+        .find(e => e.property === 'resources')
+        ?.children?.[0]?.children?.find(c => c.property === 'used');
+      expect(usedErr?.constraints).toBeDefined();
+    });
+
+    it('accepts used equal to max (fully consumed pool)', async () => {
+      const dto = toDto({ ...baseDto, resources: [{ ...ki, max: 5, used: 5 }] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'resources')).toHaveLength(0);
+    });
+
+    it('rejects more than 30 resources with the arrayMaxSize constraint', async () => {
+      const resources = Array.from({ length: 31 }, (_, i) => ({ ...ki, name: `R${i}` }));
+      const dto = toDto({ ...baseDto, resources });
+      const errors = await validate(dto);
+      const resourcesErr = errors.find(e => e.property === 'resources');
+      expect(resourcesErr?.constraints).toHaveProperty('arrayMaxSize');
+    });
+
+    it('rejects a non-array resources value', async () => {
+      const dto = toDto({ ...baseDto, resources: 'Ki' });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'resources')).toBeDefined();
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);

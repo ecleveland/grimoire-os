@@ -31,6 +31,7 @@ export type CharacterPatch = Partial<
     | 'conditions'
     | 'concentration'
     | 'exhaustion'
+    | 'resources'
     | 'features'
   >
 >;

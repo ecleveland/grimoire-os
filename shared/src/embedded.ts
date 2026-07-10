@@ -271,6 +271,26 @@ export interface HitDice {
   spent: number;
 }
 
+/**
+ * When a limited-use class/race resource recharges (VEG-409): a short rest
+ * restores `'short'` resources; a long rest restores both kinds.
+ */
+export const RECHARGE_KINDS = ['short', 'long'] as const;
+export type ResourceRecharge = (typeof RECHARGE_KINDS)[number];
+
+/**
+ * A player-defined limited-use resource on the character sheet (VEG-409) — ki
+ * points, rage, sorcery points, channel divinity, bardic inspiration, etc.
+ * Generic by design: no per-class lists. `used` is a consumed counter
+ * (mirroring `SpellSlot.used` / `HitDice.spent`); recovery resets it to 0.
+ */
+export interface CharacterResource {
+  name: string;
+  max: number;
+  used: number;
+  recharge: ResourceRecharge;
+}
+
 export interface Weapon {
   name: string;
   attackBonus: string;

@@ -1,4 +1,5 @@
 import type {
+  CharacterResource,
   CombatantConcentration,
   Condition,
   DeathSaves,
@@ -7,6 +8,7 @@ import type {
   SpellSlot,
 } from '@/lib/types';
 import { applyDamage, applyHeal } from './combatant-hp';
+import { recoverResources } from './character-resources';
 
 /**
  * Pure state transitions for the in-sheet play controls (VEG-349). The sheet
@@ -105,6 +107,7 @@ export interface LongRestPatch {
   deathSaves: DeathSaves;
   hitDice?: HitDice;
   spellSlots?: SpellSlot[];
+  resources?: CharacterResource[];
 }
 
 /**
@@ -114,15 +117,16 @@ export interface LongRestPatch {
  * UI and tests share one source of truth — the sheet just dispatches the result.
  */
 export function applyLongRest(character: {
-  // All three are nullable at the API boundary (VEG-425): the columns are
+  // All four are nullable at the API boundary (VEG-425): the columns are
   // `Json?`, so a minimal character has no `hitPoints`, a non-caster has `null`
   // `spellSlots`, and a hit-dice-less sheet omits `hitDice`. Each is omitted from
   // the patch when absent, so the rest never writes a fabricated block back.
   hitPoints: HitPoints | null;
   hitDice?: HitDice | null;
   spellSlots?: SpellSlot[] | null;
+  resources?: CharacterResource[] | null;
 }): LongRestPatch {
-  const { hitPoints, spellSlots, hitDice } = character;
+  const { hitPoints, spellSlots, hitDice, resources } = character;
   const patch: LongRestPatch = {
     deathSaves: { ...CLEARED_DEATH_SAVES },
   };
@@ -136,7 +140,31 @@ export function applyLongRest(character: {
   if (spellSlots && spellSlots.length > 0) {
     patch.spellSlots = spellSlots.map(slot => ({ ...slot, used: 0 }));
   }
+  if (resources && resources.length > 0) {
+    patch.resources = recoverResources(resources, 'long');
+  }
   return patch;
+}
+
+/**
+ * The composite write a short rest produces (VEG-409). A short rest only
+ * recharges `recharge: 'short'` resources — HP healing and hit-die spending
+ * stay under the player's manual controls (5e: hit dice are *spent* on a short
+ * rest at the player's discretion, not restored). Empty when the character has
+ * no resources, so the button never writes a fabricated array back.
+ */
+export interface ShortRestPatch {
+  resources?: CharacterResource[];
+}
+
+export function applyShortRest(character: {
+  resources?: CharacterResource[] | null;
+}): ShortRestPatch {
+  const { resources } = character;
+  // Empty when nothing would change: patching an identical array burns an
+  // optimistic-lock version and 409s a concurrent session for a no-op click.
+  if (!resources?.some(r => r.recharge === 'short' && r.used > 0)) return {};
+  return { resources: recoverResources(resources, 'short') };
 }
 
 // ── Status tracker (VEG-408) ─────────────────────────────

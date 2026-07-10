@@ -3,6 +3,7 @@ import type {
   AbilityScores,
   AttunedItem,
   CharacterFeat,
+  CharacterResource,
   CombatantConcentration,
   ComputedStats,
   Condition,
@@ -70,6 +71,8 @@ export class CharacterDto {
   @Expose() conditions!: Condition[];
   @Expose() concentration!: CombatantConcentration | null;
   @Expose() exhaustion!: number | null;
+  // Limited-use class/race resources (VEG-409); null on legacy/minimal rows.
+  @Expose() resources!: CharacterResource[] | null;
   @Expose() version!: number;
   @Expose() createdAt!: Date;
   @Expose() updatedAt!: Date;

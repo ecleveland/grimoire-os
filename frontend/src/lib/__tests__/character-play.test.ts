@@ -10,6 +10,7 @@ import {
   CLEARED_DEATH_SAVES,
   hitDiceRegainedOnLongRest,
   applyLongRest,
+  applyShortRest,
   toggleConditionInList,
   setExhaustionLevel,
   concentrationFromSpellInput,
@@ -225,6 +226,51 @@ describe('applyLongRest', () => {
     // The rest still clears death saves and regains hit dice.
     expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
     expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 1 });
+  });
+
+  // ── Resource recovery (VEG-409) ─────────────────────────
+  const ki = { name: 'Ki Points', max: 5, used: 3, recharge: 'short' as const };
+  const rage = { name: 'Rage', max: 3, used: 2, recharge: 'long' as const };
+
+  it('resets every resource (short and long recharge) to used:0', () => {
+    const patch = applyLongRest({ ...base, resources: [ki, rage] });
+    expect(patch.resources).toEqual([
+      { ...ki, used: 0 },
+      { ...rage, used: 0 },
+    ]);
+  });
+
+  it('omits resources from the patch when the character has none', () => {
+    expect('resources' in applyLongRest(base)).toBe(false);
+    expect('resources' in applyLongRest({ ...base, resources: null })).toBe(false);
+    expect('resources' in applyLongRest({ ...base, resources: [] })).toBe(false);
+  });
+});
+
+describe('applyShortRest (VEG-409)', () => {
+  const ki = { name: 'Ki Points', max: 5, used: 3, recharge: 'short' as const };
+  const rage = { name: 'Rage', max: 3, used: 2, recharge: 'long' as const };
+
+  it("resets only recharge:'short' resources, leaving long-rest pools spent", () => {
+    const patch = applyShortRest({ resources: [ki, rage] });
+    expect(patch.resources).toEqual([{ ...ki, used: 0 }, rage]);
+  });
+
+  it('patches only resources — HP, hit dice, slots, and death saves are untouched', () => {
+    expect(Object.keys(applyShortRest({ resources: [ki] }))).toEqual(['resources']);
+  });
+
+  it('returns an empty patch when the character has no resources', () => {
+    expect(applyShortRest({ resources: null })).toEqual({});
+    expect(applyShortRest({ resources: [] })).toEqual({});
+    expect(applyShortRest({})).toEqual({});
+  });
+
+  it('returns an empty patch when no short-recharge resource has uses to recover', () => {
+    // Patching an identical array would burn an optimistic-lock version and
+    // 409 a concurrent session for a click that changed nothing.
+    expect(applyShortRest({ resources: [rage] })).toEqual({});
+    expect(applyShortRest({ resources: [{ ...ki, used: 0 }, rage] })).toEqual({});
   });
 });
 
