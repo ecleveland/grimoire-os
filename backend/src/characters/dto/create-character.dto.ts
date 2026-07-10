@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsInt,
   Min,
+  MinLength,
   Max,
   IsArray,
   ArrayMaxSize,
@@ -21,9 +22,11 @@ import {
   DIE_TYPES,
   Feature,
   MAX_EXPERIENCE_POINTS,
+  RECHARGE_KINDS,
   SpellEntry,
 } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
+import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
 import { ConcentrationDto } from '../../common/dto/concentration.dto';
 
 class AbilityScoresDto {
@@ -177,6 +180,30 @@ class HitDiceDto {
   @ApiProperty({ example: 2 })
   @IsNumber()
   spent!: number;
+}
+
+class ResourceDto {
+  @ApiProperty({ example: 'Ki Points' })
+  @IsString()
+  @MinLength(1)
+  name!: string;
+
+  @ApiProperty({ example: 5, minimum: 1, maximum: 99 })
+  @IsInt()
+  @Min(1)
+  @Max(99)
+  max!: number;
+
+  @ApiProperty({ example: 2, minimum: 0, maximum: 99 })
+  @IsInt()
+  @Min(0)
+  @Max(99)
+  @IsLteSibling('max')
+  used!: number;
+
+  @ApiProperty({ example: 'short', enum: RECHARGE_KINDS })
+  @IsIn(RECHARGE_KINDS)
+  recharge!: string;
 }
 
 class WeaponDto {
@@ -563,6 +590,16 @@ export class CreateCharacterDto {
   @Min(1)
   @Max(6)
   exhaustion?: number;
+
+  // Limited-use class/race resources (VEG-409). Whitelisted so the sheet's
+  // resource-tracker PATCHes pass forbidNonWhitelisted (the VEG-349 lesson).
+  @ApiPropertyOptional({ type: [ResourceDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(30)
+  @ValidateNested({ each: true })
+  @Type(() => ResourceDto)
+  resources?: ResourceDto[];
 
   @ApiPropertyOptional()
   @IsOptional()

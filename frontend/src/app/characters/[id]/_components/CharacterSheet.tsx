@@ -7,6 +7,7 @@ import CharacterSheetHeader from './CharacterSheetHeader';
 import LevelUpSection from './LevelUpSection';
 import CombatBar from './CombatBar';
 import StatusTracker from './StatusTracker';
+import ResourceTracker from './ResourceTracker';
 import StatsBar from './StatsBar';
 import AbilityScoreColumn from './AbilityScoreColumn';
 import EquipmentTraining from './EquipmentTraining';
@@ -64,6 +65,7 @@ export default function CharacterSheet({ character, isOwner }: CharacterSheetPro
           <LevelUpSection character={character} {...controls} />
           <CombatBar character={character} {...controls} />
           <StatusTracker character={character} {...controls} />
+          <ResourceTracker character={character} {...controls} />
           <StatsBar character={character} canRoll={isOwner} />
           <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
             <div className="space-y-6">

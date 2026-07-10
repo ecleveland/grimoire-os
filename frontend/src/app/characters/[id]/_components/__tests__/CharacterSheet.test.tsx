@@ -24,6 +24,9 @@ vi.mock('../CombatBar', () => ({
 vi.mock('../StatusTracker', () => ({
   default: () => <div data-testid="StatusTracker" />,
 }));
+vi.mock('../ResourceTracker', () => ({
+  default: () => <div data-testid="ResourceTracker" />,
+}));
 vi.mock('../StatsBar', () => ({
   default: () => <div data-testid="StatsBar" />,
 }));
@@ -108,6 +111,7 @@ describe('CharacterSheet', () => {
       expect(screen.getByTestId('LevelUpSection')).toBeInTheDocument();
       expect(screen.getByTestId('CombatBar')).toBeInTheDocument();
       expect(screen.getByTestId('StatusTracker')).toBeInTheDocument();
+      expect(screen.getByTestId('ResourceTracker')).toBeInTheDocument();
       expect(screen.getByTestId('StatsBar')).toBeInTheDocument();
       expect(screen.getByTestId('AbilityScoreColumn')).toBeInTheDocument();
       expect(screen.getByTestId('EquipmentTraining')).toBeInTheDocument();

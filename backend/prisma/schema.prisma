@@ -188,6 +188,8 @@ model Character {
   conditions          String[]
   concentration       Json?
   exhaustion          Int?
+  // Limited-use class/race resources (VEG-409): [{ name, max, used, recharge }].
+  resources           Json?
   // Optimistic-locking counter (VEG-137); guarded updates increment it.
   version             Int      @default(0)
   createdAt           DateTime @default(now())

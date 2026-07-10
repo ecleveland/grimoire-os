@@ -13,6 +13,7 @@ import {
   deathSavesAfterRevive,
   parseNonNegativeInt,
   applyLongRest,
+  applyShortRest,
   CLEARED_DEATH_SAVES,
 } from '@/lib/character-play';
 
@@ -72,8 +73,17 @@ export default function CombatBar(props: CombatBarProps) {
   };
 
   // One-click long rest: HP to max, temp cleared, slots reset, hit dice regained,
-  // death saves cleared — a single optimistic-locked composite write (VEG-407).
+  // death saves cleared, resources recharged — a single optimistic-locked
+  // composite write (VEG-407, VEG-409).
   const longRest = () => patch(applyLongRest(character));
+
+  // Short rest (VEG-409) only recharges `recharge: 'short'` resources; HP and
+  // hit-die spending stay manual. No-op when there's nothing to recharge — an
+  // empty PATCH would burn an optimistic-lock version for nothing.
+  const shortRest = () => {
+    const rested = applyShortRest(character);
+    if (rested.resources) patch(rested);
+  };
 
   const renderPips = (track: 'successes' | 'failures', filledClass: string) => {
     const filled = deathSaves[track];
@@ -172,14 +182,24 @@ export default function CombatBar(props: CombatBarProps) {
                 Set Temp
               </button>
             </div>
-            <button
-              type="button"
-              onClick={longRest}
-              disabled={isSaving}
-              className="w-full px-1 py-1 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              Long Rest
-            </button>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={shortRest}
+                disabled={isSaving}
+                className="flex-1 px-1 py-1 text-xs font-medium rounded border border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50"
+              >
+                Short Rest
+              </button>
+              <button
+                type="button"
+                onClick={longRest}
+                disabled={isSaving}
+                className="flex-1 px-1 py-1 text-xs font-medium rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Long Rest
+              </button>
+            </div>
           </div>
         )}
       </div>

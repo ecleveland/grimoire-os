@@ -300,11 +300,67 @@ describe('CombatBar', () => {
       renderOwner({}, true);
       expect(screen.getByRole('button', { name: 'Long Rest' })).toBeDisabled();
     });
+
+    // ── Short rest (VEG-409) ─────────────────────────────
+    const ki = { name: 'Ki Points', max: 5, used: 3, recharge: 'short' as const };
+    const rage = { name: 'Rage', max: 3, used: 2, recharge: 'long' as const };
+
+    it("short rest recharges only 'short' resources, leaving everything else untouched", () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 10, temporary: 7 },
+        resources: [ki, rage],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        resources: [{ ...ki, used: 0 }, rage],
+      });
+    });
+
+    it('long rest also resets every resource in the composite patch', () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 10, temporary: 7 },
+        deathSaves: { successes: 0, failures: 0 },
+        hitDice: undefined,
+        spellSlots: [],
+        resources: [ki, rage],
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+        resources: [
+          { ...ki, used: 0 },
+          { ...rage, used: 0 },
+        ],
+      });
+    });
+
+    it('short rest with no resources is a no-op (no empty write burning the lock version)', () => {
+      const onPatch = renderOwner({ resources: null as unknown as Character['resources'] });
+      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('short rest with only long-recharge resources is a no-op (nothing to recover)', () => {
+      const onPatch = renderOwner({ resources: [rage] });
+      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('disables Short Rest while a write is in flight', () => {
+      renderOwner({}, true);
+      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
+    });
   });
 
   it('hides the Long Rest button for a non-owner', () => {
     render(<CombatBar character={mockCharacter} />);
     expect(screen.queryByRole('button', { name: 'Long Rest' })).toBeNull();
+  });
+
+  it('hides the Short Rest button for a non-owner', () => {
+    render(<CombatBar character={mockCharacter} />);
+    expect(screen.queryByRole('button', { name: 'Short Rest' })).toBeNull();
   });
 });
 

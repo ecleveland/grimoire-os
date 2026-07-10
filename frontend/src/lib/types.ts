@@ -31,6 +31,13 @@ export function asDieType(value: string | undefined): DieType | null {
   return value && (DIE_TYPES as readonly string[]).includes(value) ? (value as DieType) : null;
 }
 
+// Resource recharge kinds — mirrors RECHARGE_KINDS in @grimoire-os/shared (the
+// backend ResourceDto validates `recharge` with `@IsIn(RECHARGE_KINDS)`).
+// Defined locally as a value because Turbopack can't resolve file:-linked
+// packages for value imports.
+export const RECHARGE_KINDS = ['short', 'long'] as const;
+export type ResourceRecharge = (typeof RECHARGE_KINDS)[number];
+
 // Creature sizes, smallest to largest. Stored as a free-text string server-side
 // (the DTO doesn't constrain it), but the editor offers the canonical set.
 export const SIZES = ['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'] as const;
@@ -49,6 +56,7 @@ export type {
   Currency,
   Feature,
   CharacterFeat,
+  CharacterResource,
   Weapon,
   Combatant,
   CombatantConcentration,
