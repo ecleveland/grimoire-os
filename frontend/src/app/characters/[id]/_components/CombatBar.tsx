@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Character, ComputedArmorClassBreakdown } from '@/lib/types';
+import type { Character, ComputedArmorClass, ComputedArmorClassBreakdown } from '@/lib/types';
 import { ZERO_HIT_POINTS } from '@/lib/character-defaults';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import {
@@ -51,8 +51,10 @@ export default function CombatBar(props: CombatBarProps) {
   const [amount, setAmount] = useState('');
   // Equipment-derived AC (VEG-410): the stored column is the manual override
   // and wins when set; otherwise the compute layer's derived value shows.
-  const ac = character.computed.armorClass;
-  const hasOverride = ac.override !== null;
+  // `ac` can be absent under version skew (a payload from a pre-VEG-410
+  // backend) — degrade to the legacy stored-AC render instead of crashing.
+  const ac: ComputedArmorClass | undefined = character.computed.armorClass;
+  const hasOverride = ac != null && ac.override !== null;
   const [acOverride, setAcOverride] = useState('');
 
   const applyAcOverride = () => {
@@ -145,11 +147,16 @@ export default function CombatBar(props: CombatBarProps) {
         <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
           Armor Class
         </div>
-        <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{ac.effective}</div>
-        <div data-testid="ac-breakdown" className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {hasOverride ? 'manual override' : formatAcBreakdown(ac.breakdown)}
+        <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
+          {ac ? ac.effective : (character.armorClass ?? '—')}
         </div>
+        {ac && (
+          <div data-testid="ac-breakdown" className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {hasOverride ? 'manual override' : formatAcBreakdown(ac.breakdown)}
+          </div>
+        )}
         {editable &&
+          ac &&
           (hasOverride ? (
             <button
               type="button"

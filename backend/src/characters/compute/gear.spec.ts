@@ -117,6 +117,17 @@ describe('gearMetaFromItem', () => {
     ).toBeNull();
   });
 
+  it('returns null for body armor with a bonus-form AC string (homebrew "+1")', () => {
+    // "+1" is a bonus, not a base — snapshotting base 1 would derive AC ~3.
+    // Only shields use the bonus form; body armor degrades to no snapshot.
+    expect(
+      gearMetaFromItem({ category: 'Light Armor', armorClass: '+1', properties: [] })
+    ).toBeNull();
+    expect(
+      gearMetaFromItem({ category: 'Heavy Armor', armorClass: ' +2', properties: [] })
+    ).toBeNull();
+  });
+
   it('maps a melee weapon (ranged: false) with its properties', () => {
     expect(
       gearMetaFromItem({
@@ -184,11 +195,16 @@ describe('gearMetaFromItem', () => {
 describe('inventoryFromJson', () => {
   it('passes an array through and maps any non-array JSON to []', () => {
     const inv = [item()];
-    expect(inventoryFromJson(inv)).toBe(inv);
+    expect(inventoryFromJson(inv)).toEqual(inv);
     expect(inventoryFromJson({})).toEqual([]);
     expect(inventoryFromJson('[]')).toEqual([]);
     expect(inventoryFromJson(null)).toEqual([]);
     expect(inventoryFromJson(undefined)).toEqual([]);
+  });
+
+  it('drops null/non-object elements so one bad row cannot crash every read', () => {
+    const good = item();
+    expect(inventoryFromJson([null, good, 'junk', 7])).toEqual([good]);
   });
 });
 
@@ -308,6 +324,43 @@ describe('deriveArmorClass', () => {
       breakdown: { base: 11, dexApplied: 3, shield: 0, armorType: 'light' },
     });
   });
+
+  it('uses worn body armor even when unarmored 10 + Dex would score higher (5e RAW)', () => {
+    // Dex +5 in Ring Mail (heavy 14): armor wins at 14, never unarmored 15.
+    const inv = [
+      item({ name: 'Ring Mail', gear: armorGear({ armorType: 'heavy', baseArmorClass: 14 }) }),
+    ];
+    expect(deriveArmorClass(inv, 5, null)).toMatchObject({
+      derived: 14,
+      breakdown: { base: 14, dexApplied: 0, shield: 0, armorType: 'heavy' },
+    });
+    // Same for medium below the unarmored line: Hide 12 + capped 2 = 14, not 15.
+    const hide = [
+      item({ name: 'Hide Armor', gear: armorGear({ armorType: 'medium', baseArmorClass: 12 }) }),
+    ];
+    expect(deriveArmorClass(hide, 5, null)).toMatchObject({
+      derived: 14,
+      breakdown: { base: 12, dexApplied: 2, armorType: 'medium' },
+    });
+  });
+
+  it('skips gear whose baseArmorClass is not a finite number (corrupt JSON)', () => {
+    const inv = [
+      item({
+        name: 'Bad Import',
+        gear: { type: 'armor', armorType: 'heavy', baseArmorClass: '16' } as never,
+      }),
+      item({
+        name: 'Bad Shield',
+        gear: { type: 'armor', armorType: 'shield', baseArmorClass: '2' } as never,
+      }),
+    ];
+    // Falls back to unarmored arithmetic instead of string-concatenating "16".
+    expect(deriveArmorClass(inv, 1, null)).toMatchObject({
+      derived: 11,
+      breakdown: { base: 10, dexApplied: 1, shield: 0, armorType: 'unarmored' },
+    });
+  });
 });
 
 describe('deriveWeapons', () => {
@@ -401,5 +454,19 @@ describe('deriveWeapons', () => {
       item({ name: 'Dagger', gear: weaponGear({ damage: '1d4', damageType: 'Piercing' }) }),
     ];
     expect(deriveWeapons(inv, mods, 2).map(w => w.name)).toEqual(['Longsword', 'Dagger']);
+  });
+
+  it('tolerates weapon gear missing its properties array (hand-edited row)', () => {
+    const inv = [
+      item({
+        name: 'Old Sword',
+        gear: { type: 'weapon', damage: '1d8', damageType: 'Slashing', ranged: false } as never,
+      }),
+    ];
+    expect(deriveWeapons(inv, mods, 2)[0]).toMatchObject({
+      name: 'Old Sword',
+      attackBonus: '+5',
+      notes: undefined,
+    });
   });
 });

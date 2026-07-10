@@ -13,9 +13,10 @@ interface WeaponsTableProps {
 export default function WeaponsTable({ character, canRoll }: WeaponsTableProps) {
   // Derived rows (from equipped gear, VEG-410) render first and get a tag;
   // manual entries keep working exactly as before. Both share the Weapon
-  // shape, so the roll buttons don't care which kind a row is.
+  // shape, so the roll buttons don't care which kind a row is. `?? []`:
+  // computed.weapons is absent under version skew (pre-VEG-410 backend).
   const rows = [
-    ...character.computed.weapons.map(weapon => ({ weapon, derived: true })),
+    ...(character.computed.weapons ?? []).map(weapon => ({ weapon, derived: true })),
     ...(character.weapons ?? []).map(weapon => ({ weapon, derived: false })),
   ];
   const { rollCheck, rollDamage } = useDiceRoll();

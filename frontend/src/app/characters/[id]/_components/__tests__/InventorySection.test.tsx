@@ -581,6 +581,32 @@ describe('InventorySection', () => {
         expect(row).not.toHaveProperty('itemId');
       });
 
+      it('does not treat a stored name with stray whitespace as a rename', async () => {
+        // The row was written via the API as "Chain Mail " (trailing space);
+        // a quantity-only edit must not spuriously strip the gear snapshot.
+        const user = userEvent.setup();
+        const onPatch = renderOwner({
+          inventory: [
+            {
+              name: 'Chain Mail ',
+              quantity: 1,
+              equipped: true,
+              itemId: catalogArmor.id,
+              gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+            },
+          ],
+        });
+        await user.click(screen.getByRole('button', { name: 'Edit Chain Mail' }));
+        fireEvent.change(screen.getByLabelText('Item quantity'), { target: { value: '3' } });
+        await user.click(screen.getByRole('button', { name: 'Save' }));
+        const row = onPatch.mock.calls[0][0].inventory[0];
+        expect(row).toMatchObject({
+          quantity: 3,
+          itemId: catalogArmor.id,
+          gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+        });
+      });
+
       it('keeps gear + itemId when only quantity/weight are edited', async () => {
         const user = userEvent.setup();
         const onPatch = renderOwner({

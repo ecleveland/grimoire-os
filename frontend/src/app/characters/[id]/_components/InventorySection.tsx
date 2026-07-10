@@ -141,8 +141,10 @@ export default function InventorySection(props: InventorySectionProps) {
     if (weight != null) fields.weight = weight;
     let next = updateInventoryItemAt(inventory, index, fields);
     // A rename repurposes the row: drop the catalog link + gear snapshot so the
-    // old item's AC/weapon stats don't silently ride along (VEG-410).
-    if (name !== inventory[index]?.name) next = stripCatalogLinkAt(next, index);
+    // old item's AC/weapon stats don't silently ride along (VEG-410). Compare
+    // trimmed-to-trimmed — a stored name with stray whitespace (the DTO doesn't
+    // trim) must not turn a quantity edit into a spurious rename.
+    if (name !== (inventory[index]?.name ?? '').trim()) next = stripCatalogLinkAt(next, index);
     patch({ inventory: next });
     setEditIndex(null);
   };

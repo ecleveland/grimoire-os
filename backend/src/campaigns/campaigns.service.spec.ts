@@ -699,6 +699,29 @@ describe('CampaignsService', () => {
       expect(row).not.toHaveProperty('inventory');
     });
 
+    it('resolves a null armorClass to the equipment-derived AC (VEG-410)', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        {
+          ...attachable,
+          armorClass: null,
+          abilityScores: { dexterity: 16 },
+          inventory: [
+            {
+              name: 'Leather Armor',
+              quantity: 1,
+              equipped: true,
+              gear: { type: 'armor', armorType: 'light', baseArmorClass: 11 },
+            },
+          ],
+        },
+      ]);
+
+      const [row] = await service.findAttachableCharacters(CAMPAIGN_ID, USER_ID);
+      // Light 11 + Dex 3.
+      expect(row.armorClass).toBe(14);
+    });
+
     it('propagates ForbiddenException for non-owners without querying characters', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')

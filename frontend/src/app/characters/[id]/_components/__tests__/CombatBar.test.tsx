@@ -86,6 +86,36 @@ describe('CombatBar', () => {
       expect(screen.queryByRole('button', { name: 'Use derived AC' })).toBeNull();
       expect(screen.queryByLabelText('AC override')).toBeNull();
     });
+
+    it('renders a Dex penalty in the breakdown with a minus sign', () => {
+      const char = makeCharacter({
+        armorClass: null,
+        abilityScores: {
+          strength: 10,
+          dexterity: 8,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+        },
+        inventory: [chainShirt],
+      });
+      render(<CombatBar character={char} />);
+      expect(screen.getByTestId('ac-breakdown')).toHaveTextContent('13 - 1 Dex');
+    });
+
+    it('degrades to the stored AC when a pre-VEG-410 payload lacks computed.armorClass', () => {
+      // Version skew (old backend / cached payload): the sheet must render
+      // like it used to, not white-screen — the documented null-crash class.
+      const base = makeCharacter({ armorClass: 16 });
+      const char = {
+        ...base,
+        computed: { ...base.computed, armorClass: undefined, weapons: undefined },
+      } as unknown as Character;
+      render(<CombatBar character={char} />);
+      expect(within(screen.getByTestId('ac-block')).getByText('16')).toBeInTheDocument();
+      expect(screen.queryByTestId('ac-breakdown')).toBeNull();
+    });
   });
 
   describe('Hit Points', () => {

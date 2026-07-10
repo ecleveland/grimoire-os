@@ -138,6 +138,28 @@ describe('WeaponsTable', () => {
       await user.click(screen.getByRole('button', { name: 'Roll Longbow attack' }));
       expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longbow attack'));
     });
+
+    it('rolls damage from a derived row', async () => {
+      const user = userEvent.setup();
+      const char = makeCharacter({ weapons: [], inventory: [equippedBow] });
+      render(<WeaponsTable character={char} canRoll />);
+      await user.click(screen.getByRole('button', { name: 'Roll Longbow damage' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longbow damage'));
+    });
+
+    it('renders manual weapons unchanged when a pre-VEG-410 payload lacks computed.weapons', () => {
+      const base = makeCharacter({
+        weapons: [
+          { name: 'Longsword', attackBonus: '+6', damage: '1d8+3', damageType: 'Slashing' },
+        ],
+      });
+      const char = {
+        ...base,
+        computed: { ...base.computed, weapons: undefined },
+      } as unknown as typeof base;
+      render(<WeaponsTable character={char} />);
+      expect(screen.getByText('Longsword')).toBeInTheDocument();
+    });
   });
 
   describe('dice rolls (canRoll)', () => {

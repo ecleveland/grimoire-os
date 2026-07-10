@@ -62,6 +62,13 @@ function leadingInt(text: string): number | null {
 export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
   const armorType = ARMOR_CATEGORY_TYPES[item.category];
   if (armorType) {
+    // A bonus-form AC string ("+1") on BODY armor is a bonus, not a base —
+    // snapshotting base 1 would derive a catastrophically wrong AC. Only
+    // shields use the bonus form; homebrew bonus-form body armor degrades to
+    // no snapshot (manual override covers it).
+    if (armorType !== 'shield' && item.armorClass && /^\s*\+/.test(item.armorClass)) {
+      return null;
+    }
     const parsed = item.armorClass ? leadingInt(item.armorClass) : null;
     const baseArmorClass = parsed ?? (armorType === 'shield' ? DEFAULT_SHIELD_BONUS : null);
     if (baseArmorClass === null) return null;
@@ -92,7 +99,10 @@ export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
  * crash. A non-array simply contributes no gear.
  */
 export function inventoryFromJson(value: unknown): InventoryItem[] {
-  return Array.isArray(value) ? (value as InventoryItem[]) : [];
+  if (!Array.isArray(value)) return [];
+  // Element-level guard too: one null/scalar element in a hand-imported row
+  // must not crash every character and campaign-roster read downstream.
+  return value.filter((el): el is InventoryItem => typeof el === 'object' && el !== null);
 }
 
 function equippedGear<T extends GearMeta['type']>(
@@ -126,24 +136,32 @@ export function deriveArmorClass(
   dexModifier: number,
   override: number | null
 ): ComputedArmorClass {
-  const armors = equippedGear(inventory, 'armor');
+  // A corrupt snapshot (baseArmorClass persisted as a string by an
+  // out-of-band write) must not string-concatenate into the AC; it simply
+  // contributes nothing, like any other unusable gear.
+  const armors = equippedGear(inventory, 'armor').filter(({ gear }) =>
+    Number.isFinite(gear.baseArmorClass)
+  );
 
-  let base = 10;
-  let armorType: ComputedArmorClass['breakdown']['armorType'] = 'unarmored';
+  // Worn body armor always wins over the unarmored 10 + Dex baseline (5e:
+  // wearing armor means using its calculation, even when that's worse); the
+  // baseline applies only when no body armor is equipped. Among several
+  // equipped body armors, the highest resulting AC counts.
+  let best: { base: number; armorType: ArmorGear['armorType'] } | null = null;
   for (const { gear } of armors) {
     if (gear.armorType === 'shield') continue;
-    const current = base + dexFor(armorType, dexModifier);
     const candidate = gear.baseArmorClass + dexFor(gear.armorType, dexModifier);
-    if (candidate > current) {
-      base = gear.baseArmorClass;
-      armorType = gear.armorType;
+    if (!best || candidate > best.base + dexFor(best.armorType, dexModifier)) {
+      best = { base: gear.baseArmorClass, armorType: gear.armorType };
     }
   }
+  const base = best?.base ?? 10;
+  const armorType: ComputedArmorClass['breakdown']['armorType'] = best?.armorType ?? 'unarmored';
 
   // Shields don't stack with each other (5e): only the best one counts.
   const shield = armors
     .filter(({ gear }) => gear.armorType === 'shield')
-    .reduce((best, { gear }) => Math.max(best, gear.baseArmorClass), 0);
+    .reduce((bestShield, { gear }) => Math.max(bestShield, gear.baseArmorClass), 0);
 
   const dexApplied = dexFor(armorType, dexModifier);
   const derived = base + dexApplied + shield;
@@ -161,7 +179,8 @@ export function formatSigned(value: number): string {
 }
 
 function isFinesse(gear: WeaponGear): boolean {
-  return gear.properties.some(p => p.toLowerCase().startsWith('finesse'));
+  // `?? []`: a hand-edited row may lack the array; degrade, don't crash.
+  return (gear.properties ?? []).some(p => p.toLowerCase().startsWith('finesse'));
 }
 
 /**
@@ -182,12 +201,13 @@ export function deriveWeapons(
       : gear.ranged
         ? modifiers.dexterity
         : modifiers.strength;
+    const properties = gear.properties ?? [];
     return {
       name: item.name,
       attackBonus: formatSigned(mod + proficiencyBonus),
       damage: mod === 0 ? gear.damage : `${gear.damage}${formatSigned(mod)}`,
       damageType: gear.damageType,
-      notes: gear.properties.length > 0 ? gear.properties.join(', ') : undefined,
+      notes: properties.length > 0 ? properties.join(', ') : undefined,
     };
   });
 }
