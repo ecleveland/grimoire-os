@@ -6,7 +6,7 @@
 // `spellAttackBonus` columns did. The display sheet consumes this block instead
 // of recomputing locally. Formulas mirror the M10 `game_rules` source.
 
-import type { AbilityScores } from './embedded';
+import type { AbilityScores, ArmorType, Weapon } from './embedded';
 
 /** Per-ability modifiers, keyed exactly like {@link AbilityScores}. */
 export type ComputedAbilityModifiers = Record<keyof AbilityScores, number>;
@@ -133,6 +133,33 @@ export function computeXpBand(
 }
 
 /**
+ * How the derived AC was assembled (VEG-410): the winning body armor's base
+ * (or 10 unarmored), the Dex actually applied after the armor type's cap, and
+ * the shield bonus. Lets the sheet render "13 + 2 Dex + 2 shield" without
+ * re-deriving.
+ */
+export interface ComputedArmorClassBreakdown {
+  base: number;
+  dexApplied: number;
+  shield: number;
+  armorType: ArmorType | 'unarmored';
+}
+
+/**
+ * Derived armor class (VEG-410). `derived` comes from equipped armor + shield
+ * (+ Dex per armor type) and always exists (unarmored fallback = 10 + Dex);
+ * `override` mirrors the stored `Character.armorClass` column, which wins when
+ * set so homebrew/unarmored-defense builds keep working; `effective` is what
+ * the sheet displays.
+ */
+export interface ComputedArmorClass {
+  derived: number;
+  override: number | null;
+  effective: number;
+  breakdown: ComputedArmorClassBreakdown;
+}
+
+/**
  * Authoritative derived values for a character. Everything here is a pure
  * function of the character's stored inputs — recomputed per read, never
  * persisted. Spellcasting fields are null for non-casters.
@@ -154,4 +181,8 @@ export interface ComputedStats {
   spellSlots: ComputedSpellSlots | null;
   /** XP progress within the current level's threshold band. */
   xp: ComputedXp;
+  /** AC from equipped gear, with the stored column as manual override (VEG-410). */
+  armorClass: ComputedArmorClass;
+  /** Attack rows derived from equipped weapons (VEG-410); manual `Character.weapons` entries are separate. */
+  weapons: Weapon[];
 }

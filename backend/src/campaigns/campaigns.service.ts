@@ -6,7 +6,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { Combatant } from '@grimoire-os/shared';
+import type { AbilityScores, Combatant } from '@grimoire-os/shared';
+import { deriveArmorClass, inventoryFromJson } from '@grimoire-os/shared';
+import { abilityModifier } from '../characters/compute/compute-stats';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -57,7 +59,30 @@ const partyCharacterSelect = {
   armorClass: true,
   initiative: true,
   hitPoints: true,
+  // Loaded only to resolve the effective AC server-side (VEG-410); the DTO
+  // whitelist drops both, so members still never see each other's inventory.
+  abilityScores: true,
+  inventory: true,
 } satisfies Prisma.CharacterSelect;
+
+/**
+ * Resolve the AC the roster exposes (VEG-410): the stored column is a manual
+ * override that is usually null now that AC derives from equipped gear, so
+ * every PartyCharacter consumer (encounter party-add, the roster cards) gets
+ * the same effective value the owner's sheet shows instead of a null.
+ */
+function withEffectiveArmorClass<
+  T extends { armorClass: number | null; abilityScores: unknown; inventory: unknown },
+>(character: T): T {
+  if (character.armorClass !== null) return character;
+  const dexterity = (character.abilityScores as AbilityScores | null)?.dexterity ?? 10;
+  const { derived } = deriveArmorClass(
+    inventoryFromJson(character.inventory),
+    abilityModifier(dexterity),
+    null
+  );
+  return { ...character, armorClass: derived };
+}
 
 function serialize(campaign: any): CampaignDto {
   const { players, characters, ...rest } = campaign;
@@ -205,7 +230,7 @@ export class CampaignsService {
       orderBy: { name: 'asc' },
       select: partyCharacterSelect,
     });
-    return toDtoArray(PartyCharacterDto, characters);
+    return toDtoArray(PartyCharacterDto, characters.map(withEffectiveArmorClass));
   }
 
   /**
@@ -226,7 +251,7 @@ export class CampaignsService {
       orderBy: { name: 'asc' },
       select: partyCharacterSelect,
     });
-    return toDtoArray(PartyCharacterDto, characters);
+    return toDtoArray(PartyCharacterDto, characters.map(withEffectiveArmorClass));
   }
 
   /**

@@ -85,6 +85,61 @@ describe('WeaponsTable', () => {
     expect(container.innerHTML).toBe('');
   });
 
+  // Derived weapon rows (VEG-410): equipped weapons with gear metadata surface
+  // in the table via computed.weapons, ahead of manual entries.
+  describe('derived weapons from equipped gear (VEG-410)', () => {
+    const equippedBow = {
+      name: 'Longbow',
+      quantity: 1,
+      equipped: true,
+      gear: {
+        type: 'weapon' as const,
+        damage: '1d8',
+        damageType: 'Piercing',
+        properties: ['Heavy', 'Two-Handed'],
+        ranged: true,
+      },
+    };
+
+    it('renders a derived row for an equipped weapon with an "equipped" tag', () => {
+      const char = makeCharacter({ weapons: [], inventory: [equippedBow] });
+      render(<WeaponsTable character={char} />);
+      // Dex 12 → +1, level 5 → prof +3.
+      expect(screen.getByText('Longbow')).toBeInTheDocument();
+      expect(screen.getByText('+4')).toBeInTheDocument();
+      expect(screen.getByText(/1d8\+1 Piercing/)).toBeInTheDocument();
+      expect(screen.getByTestId('derived-weapon-tag')).toBeInTheDocument();
+    });
+
+    it('renders derived rows before manual entries, untagged manual rows intact', () => {
+      const char = makeCharacter({
+        weapons: [{ name: 'Handaxe', attackBonus: '+6', damage: '1d6+3', damageType: 'Slashing' }],
+        inventory: [equippedBow],
+      });
+      render(<WeaponsTable character={char} />);
+      const rows = screen.getAllByRole('row');
+      expect(rows).toHaveLength(3); // header + derived + manual
+      expect(rows[1]).toHaveTextContent('Longbow');
+      expect(rows[2]).toHaveTextContent('Handaxe');
+      expect(screen.getAllByTestId('derived-weapon-tag')).toHaveLength(1);
+    });
+
+    it('renders a derived-only table when there are no manual weapons', () => {
+      const char = makeCharacter({ weapons: undefined, inventory: [equippedBow] });
+      render(<WeaponsTable character={char} />);
+      expect(screen.getByText('Weapons & Damage Cantrips')).toBeInTheDocument();
+      expect(screen.getByText('Longbow')).toBeInTheDocument();
+    });
+
+    it('offers roll buttons on derived rows when canRoll is set', async () => {
+      const user = userEvent.setup();
+      const char = makeCharacter({ weapons: [], inventory: [equippedBow] });
+      render(<WeaponsTable character={char} canRoll />);
+      await user.click(screen.getByRole('button', { name: 'Roll Longbow attack' }));
+      expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longbow attack'));
+    });
+  });
+
   describe('dice rolls (canRoll)', () => {
     beforeEach(() => mockMessage.mockReset());
 

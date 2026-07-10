@@ -55,7 +55,8 @@ export interface CharacterFormValues {
   alignment: string;
   size: Size;
   abilityScores: AbilityScores;
-  armorClass: number;
+  /** Blank = no manual override — AC derives from equipped gear (VEG-410). */
+  armorClass: number | '';
   initiative: number;
   speed: number;
   hitPoints: HitPoints;
@@ -132,7 +133,9 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     alignment: '',
     size: 'Medium',
     abilityScores: { ...DEFAULT_ABILITY_SCORES },
-    armorClass: 10,
+    // Blank, not 10: a new character starts on derived AC (VEG-410); a stored
+    // 10 would be a manual override that pins the sheet even after equipping armor.
+    armorClass: '',
     initiative: 0,
     speed: DEFAULT_SPEED,
     hitPoints: { ...DEFAULT_EDITOR_HIT_POINTS },
@@ -175,7 +178,9 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     // These columns are nullable at the API boundary (VEG-425); a legacy/minimal
     // character edits from the same neutral defaults as a brand-new one.
     abilityScores: c.abilityScores ?? { ...DEFAULT_ABILITY_SCORES },
-    armorClass: c.armorClass ?? 10,
+    // Null stays blank: it means "derived from equipment" (VEG-410), and
+    // seeding a number here would silently re-materialize a manual override.
+    armorClass: c.armorClass ?? '',
     initiative: c.initiative ?? 0,
     speed: c.speed ?? DEFAULT_SPEED,
     hitPoints: c.hitPoints ?? { ...DEFAULT_EDITOR_HIT_POINTS },
@@ -258,7 +263,7 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     alignment: v.alignment,
     size: v.size,
     abilityScores: v.abilityScores,
-    armorClass: v.armorClass,
+    armorClass: v.armorClass === '' ? null : v.armorClass,
     initiative: v.initiative,
     speed: v.speed,
     hitPoints: v.hitPoints,
@@ -807,8 +812,9 @@ export default function CharacterEditorForm({
             label="Armor Class"
             type="number"
             min={0}
+            placeholder="derived"
             value={values.armorClass}
-            onChange={e => set('armorClass', Number(e.target.value))}
+            onChange={e => set('armorClass', e.target.value === '' ? '' : Number(e.target.value))}
           />
           <FormField
             label="Initiative"

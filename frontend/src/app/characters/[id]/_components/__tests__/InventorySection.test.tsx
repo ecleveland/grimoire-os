@@ -6,8 +6,8 @@ import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
 
 // Stub the catalog picker so these tests don't exercise the debounced network
-// search (covered in SrdItemSearch.test.tsx). The stub exposes a button that
-// fires onSelect with a fixed catalog item.
+// search (covered in SrdItemSearch.test.tsx). The stub exposes one button per
+// fixture that fires onSelect with that catalog item.
 const catalogItem = {
   id: '123e4567-e89b-42d3-a456-426614174000',
   name: 'Ring of Protection',
@@ -15,11 +15,41 @@ const catalogItem = {
   weight: 0,
   rarity: 'Rare',
 };
+// Gear-bearing fixtures (VEG-410): picking these must snapshot armor/weapon
+// metadata onto the added inventory item.
+const catalogArmor = {
+  id: '223e4567-e89b-42d3-a456-426614174000',
+  name: 'Chain Mail',
+  category: 'Heavy Armor',
+  weight: 55,
+  armorClass: '16',
+  stealthDisadvantage: true,
+  strengthRequirement: 13,
+  properties: [],
+};
+const catalogWeapon = {
+  id: '323e4567-e89b-42d3-a456-426614174000',
+  name: 'Longbow',
+  category: 'Martial Ranged Weapon',
+  weight: 2,
+  damage: '1d8',
+  damageType: 'Piercing',
+  properties: ['Ammunition (Range 150/600; Arrow)', 'Heavy', 'Two-Handed'],
+};
+type CatalogFixture = typeof catalogItem | typeof catalogArmor | typeof catalogWeapon;
 vi.mock('@/components/SrdItemSearch', () => ({
-  default: ({ onSelect }: { onSelect: (item: typeof catalogItem) => void }) => (
-    <button type="button" onClick={() => onSelect(catalogItem)}>
-      stub-pick-catalog
-    </button>
+  default: ({ onSelect }: { onSelect: (item: CatalogFixture) => void }) => (
+    <>
+      <button type="button" onClick={() => onSelect(catalogItem)}>
+        stub-pick-catalog
+      </button>
+      <button type="button" onClick={() => onSelect(catalogArmor)}>
+        stub-pick-armor
+      </button>
+      <button type="button" onClick={() => onSelect(catalogWeapon)}>
+        stub-pick-weapon
+      </button>
+    </>
   ),
 }));
 
@@ -473,6 +503,122 @@ describe('InventorySection', () => {
       const added = onPatch.mock.calls[0][0].inventory.at(-1);
       expect(added).not.toHaveProperty('itemId');
       expect(added).toMatchObject({ name: 'Custom Ring' });
+    });
+
+    // Gear snapshots (VEG-410): a catalog pick carries armor/weapon metadata
+    // onto the added item so the compute layer can derive AC/weapons from it.
+    describe('gear snapshots (VEG-410)', () => {
+      it('snapshots armor gear when an armor item is picked and added', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-armor' }));
+        await user.click(screen.getByRole('button', { name: 'Add item' }));
+        const added = onPatch.mock.calls[0][0].inventory.at(-1);
+        expect(added).toMatchObject({
+          name: 'Chain Mail',
+          itemId: catalogArmor.id,
+          gear: {
+            type: 'armor',
+            armorType: 'heavy',
+            baseArmorClass: 16,
+            stealthDisadvantage: true,
+            strengthRequirement: 13,
+          },
+        });
+      });
+
+      it('snapshots weapon gear when a weapon item is picked and added', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-weapon' }));
+        await user.click(screen.getByRole('button', { name: 'Add item' }));
+        const added = onPatch.mock.calls[0][0].inventory.at(-1);
+        expect(added).toMatchObject({
+          name: 'Longbow',
+          itemId: catalogWeapon.id,
+          gear: {
+            type: 'weapon',
+            damage: '1d8',
+            damageType: 'Piercing',
+            properties: ['Ammunition (Range 150/600; Arrow)', 'Heavy', 'Two-Handed'],
+            ranged: true,
+          },
+        });
+      });
+
+      it('adds no gear for a non-gear catalog item', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-catalog' }));
+        await user.click(screen.getByRole('button', { name: 'Add item' }));
+        expect(onPatch.mock.calls[0][0].inventory.at(-1)).not.toHaveProperty('gear');
+      });
+
+      it('drops gear + itemId when a row is renamed inline (stale-snapshot guard)', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({
+          inventory: [
+            {
+              name: 'Chain Mail',
+              quantity: 1,
+              equipped: true,
+              itemId: catalogArmor.id,
+              gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+            },
+          ],
+        });
+        await user.click(screen.getByRole('button', { name: 'Edit Chain Mail' }));
+        fireEvent.change(screen.getByLabelText('Item name'), {
+          target: { value: "Traveler's Clothes" },
+        });
+        await user.click(screen.getByRole('button', { name: 'Save' }));
+        const row = onPatch.mock.calls[0][0].inventory[0];
+        expect(row.name).toBe("Traveler's Clothes");
+        expect(row).not.toHaveProperty('gear');
+        expect(row).not.toHaveProperty('itemId');
+      });
+
+      it('keeps gear + itemId when only quantity/weight are edited', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({
+          inventory: [
+            {
+              name: 'Chain Mail',
+              quantity: 1,
+              equipped: true,
+              itemId: catalogArmor.id,
+              gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+            },
+          ],
+        });
+        await user.click(screen.getByRole('button', { name: 'Edit Chain Mail' }));
+        fireEvent.change(screen.getByLabelText('Item quantity'), { target: { value: '2' } });
+        await user.click(screen.getByRole('button', { name: 'Save' }));
+        const row = onPatch.mock.calls[0][0].inventory[0];
+        expect(row).toMatchObject({
+          name: 'Chain Mail',
+          quantity: 2,
+          itemId: catalogArmor.id,
+          gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+        });
+      });
+
+      it('drops the gear snapshot along with the catalog link on a name hand-edit', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-armor' }));
+        fireEvent.change(screen.getByLabelText('New item name'), {
+          target: { value: 'Custom Plate' },
+        });
+        await user.click(screen.getByRole('button', { name: 'Add item' }));
+        const added = onPatch.mock.calls[0][0].inventory.at(-1);
+        expect(added).not.toHaveProperty('gear');
+        expect(added).not.toHaveProperty('itemId');
+      });
     });
 
     it('disables row actions while a write is in flight', () => {

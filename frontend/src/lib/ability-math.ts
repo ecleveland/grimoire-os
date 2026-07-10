@@ -1,4 +1,5 @@
 import type { AbilityScores } from '@/lib/types';
+import { formatSigned } from '@grimoire-os/shared';
 import { SKILLS } from '@/lib/dnd-constants';
 
 // Pure ability-score math + ability/skill maps for contexts with NO server
@@ -53,8 +54,10 @@ export function abilityModifier(score: number): number {
   return Math.floor((score - 10) / 2);
 }
 
+/** Delegates to the shared signed formatter so derived weapon rows, ability
+ * modifiers, and stat blocks can never drift in "+N/-N" rendering (VEG-410). */
 export function formatModifier(mod: number): string {
-  return mod >= 0 ? `+${mod}` : `${mod}`;
+  return formatSigned(mod);
 }
 
 export function proficiencyBonus(level: number): number {

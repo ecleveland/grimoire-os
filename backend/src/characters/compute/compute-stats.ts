@@ -8,9 +8,10 @@ import type {
   ComputedSpellSlots,
   ComputedStats,
   ComputedXp,
+  InventoryItem,
   SpellcasterType,
 } from '@grimoire-os/shared';
-import { computeXpBand } from '@grimoire-os/shared';
+import { computeXpBand, deriveArmorClass, deriveWeapons } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 
 /**
@@ -29,6 +30,10 @@ export interface CharacterComputeInput {
   skills: string[];
   /** Explicit spellcasting ability (full name); overrides the class default. */
   spellcastingAbility: string | null;
+  /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
+  armorClass: number | null;
+  /** Inventory rows; equipped items with gear metadata drive AC/weapons (VEG-410). */
+  inventory: InventoryItem[];
 }
 
 // ── Game-rules source (single source of truth, mirrors GET /srd/rules) ──
@@ -168,8 +173,16 @@ export function computeCharacterStats(
   character: CharacterComputeInput,
   classSpellcasting?: ClassSpellcasting | null
 ): ComputedStats {
-  const { level, experiencePoints, abilityScores, savingThrows, skills, spellcastingAbility } =
-    character;
+  const {
+    level,
+    experiencePoints,
+    abilityScores,
+    savingThrows,
+    skills,
+    spellcastingAbility,
+    armorClass,
+    inventory,
+  } = character;
   const profBonus = proficiencyBonus(level);
 
   const abilityModifiers = {} as ComputedAbilityModifiers;
@@ -228,5 +241,7 @@ export function computeCharacterStats(
     spellcasting,
     spellSlots: resolveSpellSlots(level, classSpellcasting),
     xp: computeXp(level, experiencePoints),
+    armorClass: deriveArmorClass(inventory, abilityModifiers.dexterity, armorClass),
+    weapons: deriveWeapons(inventory, abilityModifiers, profBonus),
   };
 }

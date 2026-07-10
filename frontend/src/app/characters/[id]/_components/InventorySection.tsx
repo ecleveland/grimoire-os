@@ -1,7 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { AttunedItem, Character, Currency, InventoryItem, SrdItem } from '@/lib/types';
+import type {
+  AttunedItem,
+  Character,
+  Currency,
+  GearMeta,
+  InventoryItem,
+  SrdItem,
+} from '@/lib/types';
+import { gearMetaFromItem } from '@grimoire-os/shared';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
 import {
@@ -9,6 +17,7 @@ import {
   carryingCapacity,
   encumbranceStatus,
   removeInventoryItemAt,
+  stripCatalogLinkAt,
   toggleEquippedAt,
   totalInventoryWeight,
   updateInventoryItemAt,
@@ -80,12 +89,14 @@ export default function InventorySection(props: InventorySectionProps) {
   }, [character.version]);
 
   // Add-item form drafts. `addItemId` links to the catalog when filled from the
-  // picker; `addDetail` is the catalog blurb shown after a pick.
+  // picker; `addDetail` is the catalog blurb shown after a pick; `addGear` is
+  // the armor/weapon metadata snapshotted from the pick (VEG-410).
   const [addName, setAddName] = useState('');
   const [addQty, setAddQty] = useState('1');
   const [addWeight, setAddWeight] = useState('');
   const [addItemId, setAddItemId] = useState<string | undefined>(undefined);
   const [addDetail, setAddDetail] = useState<string | null>(null);
+  const [addGear, setAddGear] = useState<GearMeta | undefined>(undefined);
 
   // Add-attunement form drafts (separate from the inventory add form).
   const [attuneName, setAttuneName] = useState('');
@@ -128,7 +139,11 @@ export default function InventorySection(props: InventorySectionProps) {
     // zeroing it out — clearing the box to retype shouldn't drop carried weight.
     const weight = parseWeight(editWeight);
     if (weight != null) fields.weight = weight;
-    patch({ inventory: updateInventoryItemAt(inventory, index, fields) });
+    let next = updateInventoryItemAt(inventory, index, fields);
+    // A rename repurposes the row: drop the catalog link + gear snapshot so the
+    // old item's AC/weapon stats don't silently ride along (VEG-410).
+    if (name !== inventory[index]?.name) next = stripCatalogLinkAt(next, index);
+    patch({ inventory: next });
     setEditIndex(null);
   };
 
@@ -148,6 +163,9 @@ export default function InventorySection(props: InventorySectionProps) {
     setAddWeight(item.weight != null ? String(item.weight) : '');
     setAddItemId(item.id);
     setAddDetail(item.category + (item.rarity ? ` · ${item.rarity}` : ''));
+    // Snapshot armor/weapon stats at pick time (VEG-410) so equipping the item
+    // can drive derived AC/weapons; non-gear items map to null → no snapshot.
+    setAddGear(gearMetaFromItem(item) ?? undefined);
   };
 
   const resetAddForm = () => {
@@ -156,6 +174,7 @@ export default function InventorySection(props: InventorySectionProps) {
     setAddWeight('');
     setAddItemId(undefined);
     setAddDetail(null);
+    setAddGear(undefined);
   };
 
   const addItem = () => {
@@ -169,6 +188,7 @@ export default function InventorySection(props: InventorySectionProps) {
     const weight = parseWeight(addWeight);
     if (weight != null) item.weight = weight;
     if (addItemId) item.itemId = addItemId;
+    if (addGear) item.gear = addGear;
     patch({ inventory: addInventoryItem(inventory, item) });
     resetAddForm();
   };
@@ -422,9 +442,11 @@ export default function InventorySection(props: InventorySectionProps) {
                   disabled={isSaving}
                   onChange={e => {
                     setAddName(e.target.value);
-                    // Free-typing breaks the catalog link from a prior pick.
+                    // Free-typing breaks the catalog link (and its gear
+                    // snapshot) from a prior pick.
                     setAddItemId(undefined);
                     setAddDetail(null);
+                    setAddGear(undefined);
                   }}
                   className={`flex-1 min-w-[8rem] ${textInputClass}`}
                 />

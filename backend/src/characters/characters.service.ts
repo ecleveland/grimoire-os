@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
+import { inventoryFromJson } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -102,6 +103,8 @@ export class CharactersService {
         savingThrows: character.savingThrows,
         skills: character.skills,
         spellcastingAbility: character.spellcastingAbility,
+        armorClass: character.armorClass,
+        inventory: inventoryFromJson(character.inventory),
       },
       classSpellcasting
     );
