@@ -4,7 +4,12 @@ import type { AbilityScores, Character, ComputedSpellcasting, ComputedStats } fr
 // the types.ts header) and must keep getting computed.xp from the API. The
 // threshold table is the shared master copy, drift-guarded against the seeded
 // rule by a backend test.
-import { computeXpBand, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
+import {
+  computeXpBand,
+  deriveArmorClass,
+  deriveWeapons,
+  XP_LEVEL_THRESHOLDS,
+} from '@grimoire-os/shared';
 import {
   ABILITY_KEYS,
   ABILITY_KEY_TO_NAME,
@@ -34,6 +39,9 @@ export function deriveComputed(
     | 'savingThrows'
     | 'skills'
     | 'spellcastingAbility'
+    | 'armorClass'
+    | 'inventory'
+    | 'weapons'
   >
 ): ComputedStats {
   const scores = c.abilityScores ?? DEFAULT_ABILITY_SCORES;
@@ -84,6 +92,10 @@ export function deriveComputed(
     spellcasting,
     spellSlots: null,
     xp: computeXpBand(XP_LEVEL_THRESHOLDS, c.level, c.experiencePoints),
+    // Same shared derivations the backend compute layer uses (VEG-410), so
+    // fixture AC/weapons stay consistent with stored inventory/armorClass.
+    armorClass: deriveArmorClass(c.inventory ?? [], abilityModifiers.dexterity, c.armorClass),
+    weapons: deriveWeapons(c.inventory ?? [], abilityModifiers, prof, c.weapons ?? []),
   };
 }
 

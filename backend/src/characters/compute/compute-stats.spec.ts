@@ -1,4 +1,4 @@
-import type { AbilityScores, ClassSpellcasting } from '@grimoire-os/shared';
+import type { AbilityScores, ClassSpellcasting, InventoryItem } from '@grimoire-os/shared';
 import { computeXpBand, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 import {
@@ -26,6 +26,9 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     savingThrows: [],
     skills: [],
     spellcastingAbility: null,
+    armorClass: null,
+    inventory: [],
+    weapons: [],
     ...over,
   };
 }
@@ -300,5 +303,82 @@ describe('computeCharacterStats', () => {
     });
     expect(stats.initiative).toBe(0);
     expect(stats.passivePerception).toBe(10);
+  });
+
+  // ── Equipment-derived AC & weapons (VEG-410) — the per-case math is covered
+  // in gear.spec.ts; these pin the wiring: inventory + the stored armorClass
+  // column flow into the derivation with the character's own Dex/prof inputs.
+  describe('equipment-derived AC & weapons', () => {
+    const chainShirt: InventoryItem = {
+      name: 'Chain Shirt',
+      quantity: 1,
+      equipped: true,
+      gear: { type: 'armor', armorType: 'medium', baseArmorClass: 13 },
+    };
+    const longsword: InventoryItem = {
+      name: 'Longsword',
+      quantity: 1,
+      equipped: true,
+      gear: {
+        type: 'weapon',
+        damage: '1d8',
+        damageType: 'Slashing',
+        properties: ['Versatile (1d10)'],
+        ranged: false,
+      },
+    };
+
+    it('derives AC from equipped armor using the character Dex modifier', () => {
+      // Dex 12 → +1; medium 13 + 1 = 14, no shield.
+      const stats = computeCharacterStats(input({ inventory: [chainShirt] }));
+      expect(stats.armorClass).toEqual({
+        derived: 14,
+        override: null,
+        effective: 14,
+        breakdown: { base: 13, dexApplied: 1, shield: 0, armorType: 'medium' },
+      });
+    });
+
+    it('falls back to unarmored 10 + Dex with an empty inventory', () => {
+      const stats = computeCharacterStats(input());
+      expect(stats.armorClass.derived).toBe(11);
+      expect(stats.armorClass.breakdown.armorType).toBe('unarmored');
+    });
+
+    it('lets the stored armorClass column win as a manual override', () => {
+      const stats = computeCharacterStats(input({ inventory: [chainShirt], armorClass: 18 }));
+      expect(stats.armorClass).toMatchObject({ derived: 14, override: 18, effective: 18 });
+    });
+
+    it('derives weapon rows from equipped weapons using Str/prof', () => {
+      // Str 16 → +3, level 5 → prof +3.
+      const stats = computeCharacterStats(input({ inventory: [longsword] }));
+      expect(stats.weapons).toEqual([
+        {
+          name: 'Longsword',
+          attackBonus: '+6',
+          damage: '1d8+3',
+          damageType: 'Slashing',
+          notes: 'Versatile (1d10)',
+        },
+      ]);
+    });
+
+    it('returns no weapon rows when nothing with weapon gear is equipped', () => {
+      const stats = computeCharacterStats(input({ inventory: [chainShirt] }));
+      expect(stats.weapons).toEqual([]);
+    });
+
+    it('omits derived rows shadowed by a stored manual weapon of the same name', () => {
+      const stats = computeCharacterStats(
+        input({
+          inventory: [longsword],
+          weapons: [
+            { name: 'Longsword', attackBonus: '+7', damage: '1d8+4', damageType: 'Slashing' },
+          ],
+        })
+      );
+      expect(stats.weapons).toEqual([]);
+    });
   });
 });

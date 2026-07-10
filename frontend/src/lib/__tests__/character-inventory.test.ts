@@ -8,6 +8,7 @@ import {
   addInventoryItem,
   removeInventoryItemAt,
   updateInventoryItemAt,
+  stripCatalogLinkAt,
   toggleEquippedAt,
 } from '../character-inventory';
 
@@ -139,6 +140,34 @@ describe('updateInventoryItemAt', () => {
     const next = updateInventoryItemAt(items, 1, { quantity: 5 });
     expect(next[0]).toEqual(items[0]);
     expect(next[2]).toEqual(items[2]);
+  });
+});
+
+describe('stripCatalogLinkAt', () => {
+  const linked: InventoryItem[] = [
+    {
+      name: 'Chain Mail',
+      quantity: 1,
+      equipped: true,
+      itemId: 'item-1',
+      gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+    },
+    { name: 'Rope', quantity: 1, equipped: false },
+  ];
+
+  it('removes itemId and gear from the item at the index', () => {
+    const next = stripCatalogLinkAt(linked, 0);
+    expect(next[0]).toEqual({ name: 'Chain Mail', quantity: 1, equipped: true });
+    expect(next[0]).not.toHaveProperty('itemId');
+    expect(next[0]).not.toHaveProperty('gear');
+    // Original untouched, other items unchanged.
+    expect(linked[0].gear).toBeDefined();
+    expect(next[1]).toEqual(linked[1]);
+  });
+
+  it('is a no-op (new array) for an unlinked item or out-of-range index', () => {
+    expect(stripCatalogLinkAt(linked, 1)[1]).toEqual(linked[1]);
+    expect(stripCatalogLinkAt(linked, 9)).toHaveLength(2);
   });
 });
 

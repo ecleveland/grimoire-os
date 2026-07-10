@@ -9,12 +9,14 @@ import {
   ArrayMaxSize,
   ArrayUnique,
   ValidateNested,
+  ValidateIf,
   IsIn,
   IsUUID,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ARMOR_TYPES,
   AttunedItem,
   CharacterFeat,
   CONDITIONS,
@@ -110,6 +112,67 @@ class SpellSlotDto {
   used?: number;
 }
 
+/**
+ * Armor/weapon metadata snapshotted from the catalog at add time (VEG-410).
+ * A discriminated union in the shared type; class-validator can't switch DTO
+ * classes on `type`, so one class carries both branches. Each branch field is
+ * required when its `type` matches AND validated whenever present — otherwise
+ * a whitelisted cross-branch field (weapon `damage` on armor gear) would
+ * persist completely unvalidated junk into the inventory JSON.
+ */
+class GearMetaDto {
+  @ApiProperty({ enum: ['armor', 'weapon'] })
+  @IsIn(['armor', 'weapon'])
+  type!: string;
+
+  // ── armor branch ──
+  @ApiPropertyOptional({ enum: ARMOR_TYPES })
+  @ValidateIf(o => o.type === 'armor' || o.armorType !== undefined)
+  @IsIn(ARMOR_TYPES)
+  armorType?: string;
+
+  @ApiPropertyOptional({ example: 16 })
+  @ValidateIf(o => o.type === 'armor' || o.baseArmorClass !== undefined)
+  @IsInt()
+  @Min(0)
+  @Max(99)
+  baseArmorClass?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsStrictBoolean()
+  stealthDisadvantage?: boolean;
+
+  @ApiPropertyOptional({ example: 13 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  strengthRequirement?: number;
+
+  // ── weapon branch ──
+  @ApiPropertyOptional({ example: '1d8' })
+  @ValidateIf(o => o.type === 'weapon' || o.damage !== undefined)
+  @IsString()
+  damage?: string;
+
+  @ApiPropertyOptional({ example: 'Slashing' })
+  @ValidateIf(o => o.type === 'weapon' || o.damageType !== undefined)
+  @IsString()
+  damageType?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @ValidateIf(o => o.type === 'weapon' || o.properties !== undefined)
+  @IsArray()
+  @IsString({ each: true })
+  properties?: string[];
+
+  @ApiPropertyOptional()
+  @ValidateIf(o => o.type === 'weapon' || o.ranged !== undefined)
+  @IsStrictBoolean()
+  ranged?: boolean;
+}
+
 class InventoryItemDto {
   @ApiProperty({ example: 'Longsword' })
   @IsString()
@@ -139,6 +202,15 @@ class InventoryItemDto {
   @IsOptional()
   @IsUUID()
   itemId?: string;
+
+  @ApiPropertyOptional({
+    type: GearMetaDto,
+    description: 'Armor/weapon stats snapshotted from the catalog (VEG-410)',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GearMetaDto)
+  gear?: GearMetaDto;
 }
 
 class CurrencyDto {

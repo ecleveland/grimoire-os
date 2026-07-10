@@ -21,6 +21,103 @@ describe('CombatBar', () => {
     });
   });
 
+  // Equipment-derived AC (VEG-410): the block shows computed.armorClass.effective —
+  // derived from equipped gear, with the stored armorClass column as manual override.
+  describe('Armor Class from equipped gear (VEG-410)', () => {
+    const chainShirt = {
+      name: 'Chain Shirt',
+      quantity: 1,
+      equipped: true,
+      gear: { type: 'armor' as const, armorType: 'medium' as const, baseArmorClass: 13 },
+    };
+    const shield = {
+      name: 'Shield',
+      quantity: 1,
+      equipped: true,
+      gear: { type: 'armor' as const, armorType: 'shield' as const, baseArmorClass: 2 },
+    };
+
+    it('shows the derived AC with its breakdown when no override is set', () => {
+      // Dex 12 → +1; medium 13 + 1 + shield 2 = 16.
+      const char = makeCharacter({ armorClass: null, inventory: [chainShirt, shield] });
+      render(<CombatBar character={char} />);
+      const acBlock = screen.getByTestId('ac-block');
+      expect(within(acBlock).getByText('16')).toBeInTheDocument();
+      expect(screen.getByTestId('ac-breakdown')).toHaveTextContent('13 + 1 Dex + 2 shield');
+    });
+
+    it('labels a stored armorClass as a manual override', () => {
+      const char = makeCharacter({ armorClass: 18, inventory: [chainShirt] });
+      render(<CombatBar character={char} />);
+      expect(within(screen.getByTestId('ac-block')).getByText('18')).toBeInTheDocument();
+      expect(screen.getByTestId('ac-breakdown')).toHaveTextContent('manual override');
+    });
+
+    it('lets the owner reset a manual override back to the derived value', async () => {
+      const onPatch = vi.fn();
+      const char = makeCharacter({ armorClass: 18, inventory: [chainShirt] });
+      render(<CombatBar character={char} editable onPatch={onPatch} isSaving={false} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Use derived AC' }));
+      expect(onPatch).toHaveBeenCalledWith({ armorClass: null });
+    });
+
+    it('lets the owner set a manual override', async () => {
+      const onPatch = vi.fn();
+      const char = makeCharacter({ armorClass: null, inventory: [chainShirt] });
+      render(<CombatBar character={char} editable onPatch={onPatch} isSaving={false} />);
+      fireEvent.change(screen.getByLabelText('AC override'), { target: { value: '17' } });
+      await userEvent.click(screen.getByRole('button', { name: 'Override' }));
+      expect(onPatch).toHaveBeenCalledWith({ armorClass: 17 });
+    });
+
+    it('ignores an Override click with a blank or non-positive value', async () => {
+      const onPatch = vi.fn();
+      const char = makeCharacter({ armorClass: null, inventory: [chainShirt] });
+      render(<CombatBar character={char} editable onPatch={onPatch} isSaving={false} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Override' }));
+      fireEvent.change(screen.getByLabelText('AC override'), { target: { value: '0' } });
+      await userEvent.click(screen.getByRole('button', { name: 'Override' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('shows no AC controls to a non-owner', () => {
+      const char = makeCharacter({ armorClass: 18, inventory: [chainShirt] });
+      render(<CombatBar character={char} />);
+      expect(screen.queryByRole('button', { name: 'Use derived AC' })).toBeNull();
+      expect(screen.queryByLabelText('AC override')).toBeNull();
+    });
+
+    it('renders a Dex penalty in the breakdown with a minus sign', () => {
+      const char = makeCharacter({
+        armorClass: null,
+        abilityScores: {
+          strength: 10,
+          dexterity: 8,
+          constitution: 10,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 10,
+        },
+        inventory: [chainShirt],
+      });
+      render(<CombatBar character={char} />);
+      expect(screen.getByTestId('ac-breakdown')).toHaveTextContent('13 - 1 Dex');
+    });
+
+    it('degrades to the stored AC when a pre-VEG-410 payload lacks computed.armorClass', () => {
+      // Version skew (old backend / cached payload): the sheet must render
+      // like it used to, not white-screen — the documented null-crash class.
+      const base = makeCharacter({ armorClass: 16 });
+      const char = {
+        ...base,
+        computed: { ...base.computed, armorClass: undefined, weapons: undefined },
+      } as unknown as Character;
+      render(<CombatBar character={char} />);
+      expect(within(screen.getByTestId('ac-block')).getByText('16')).toBeInTheDocument();
+      expect(screen.queryByTestId('ac-breakdown')).toBeNull();
+    });
+  });
+
   describe('Hit Points', () => {
     it('renders current/max HP', () => {
       render(<CombatBar character={mockCharacter} />);
@@ -370,11 +467,13 @@ describe('CombatBar', () => {
 });
 
 describe('null hitPoints / armorClass (VEG-425)', () => {
-  it('renders a zeroed HP block and an em-dash AC instead of crashing', () => {
-    const char = { ...mockCharacter, hitPoints: null, armorClass: null };
+  it('renders a zeroed HP block and the derived unarmored AC instead of crashing', () => {
+    // A null armorClass is no longer a dash: it means "no override", so the
+    // derived value (unarmored 10 + Dex 1 with an empty inventory) shows (VEG-410).
+    const char = makeCharacter({ hitPoints: null, armorClass: null, inventory: [] });
     render(<CombatBar character={char} />);
     expect(within(screen.getByTestId('hp-block')).getByText('0/0')).toBeInTheDocument();
-    expect(within(screen.getByTestId('ac-block')).getByText('—')).toBeInTheDocument();
+    expect(within(screen.getByTestId('ac-block')).getByText('11')).toBeInTheDocument();
   });
 
   it('disables HP write actions for a null-HP character so no fabricated block is persisted', async () => {

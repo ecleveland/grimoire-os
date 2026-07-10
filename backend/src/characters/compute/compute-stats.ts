@@ -8,9 +8,16 @@ import type {
   ComputedSpellSlots,
   ComputedStats,
   ComputedXp,
+  InventoryItem,
   SpellcasterType,
+  Weapon,
 } from '@grimoire-os/shared';
-import { computeXpBand } from '@grimoire-os/shared';
+import {
+  abilityModifier,
+  computeXpBand,
+  deriveArmorClass,
+  deriveWeapons,
+} from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 
 /**
@@ -29,6 +36,12 @@ export interface CharacterComputeInput {
   skills: string[];
   /** Explicit spellcasting ability (full name); overrides the class default. */
   spellcastingAbility: string | null;
+  /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
+  armorClass: number | null;
+  /** Inventory rows; equipped items with gear metadata drive AC/weapons (VEG-410). */
+  inventory: InventoryItem[];
+  /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
+  weapons: Weapon[];
 }
 
 // ── Game-rules source (single source of truth, mirrors GET /srd/rules) ──
@@ -77,10 +90,9 @@ function clampLevel(level: number): number {
   return Math.min(20, Math.max(1, Math.floor(level)));
 }
 
-/** floor((score - 10) / 2) — the canonical 5e ability modifier. */
-export function abilityModifier(score: number): number {
-  return Math.floor((score - 10) / 2);
-}
+// The canonical 5e modifier formula lives in @grimoire-os/shared next to the
+// gear derivations it feeds; re-exported so existing consumers keep working.
+export { abilityModifier };
 
 /** Proficiency bonus from the rules table (ceil(level/4)+1), clamped 1–20. */
 export function proficiencyBonus(level: number): number {
@@ -168,8 +180,17 @@ export function computeCharacterStats(
   character: CharacterComputeInput,
   classSpellcasting?: ClassSpellcasting | null
 ): ComputedStats {
-  const { level, experiencePoints, abilityScores, savingThrows, skills, spellcastingAbility } =
-    character;
+  const {
+    level,
+    experiencePoints,
+    abilityScores,
+    savingThrows,
+    skills,
+    spellcastingAbility,
+    armorClass,
+    inventory,
+    weapons,
+  } = character;
   const profBonus = proficiencyBonus(level);
 
   const abilityModifiers = {} as ComputedAbilityModifiers;
@@ -228,5 +249,7 @@ export function computeCharacterStats(
     spellcasting,
     spellSlots: resolveSpellSlots(level, classSpellcasting),
     xp: computeXp(level, experiencePoints),
+    armorClass: deriveArmorClass(inventory, abilityModifiers.dexterity, armorClass),
+    weapons: deriveWeapons(inventory, abilityModifiers, profBonus, weapons),
   };
 }

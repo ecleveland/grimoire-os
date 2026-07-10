@@ -11,10 +11,17 @@ interface WeaponsTableProps {
 }
 
 export default function WeaponsTable({ character, canRoll }: WeaponsTableProps) {
-  const weapons = character.weapons;
+  // Derived rows (from equipped gear, VEG-410) render first and get a tag;
+  // manual entries keep working exactly as before. Both share the Weapon
+  // shape, so the roll buttons don't care which kind a row is. `?? []`:
+  // computed.weapons is absent under version skew (pre-VEG-410 backend).
+  const rows = [
+    ...(character.computed.weapons ?? []).map(weapon => ({ weapon, derived: true })),
+    ...(character.weapons ?? []).map(weapon => ({ weapon, derived: false })),
+  ];
   const { rollCheck, rollDamage } = useDiceRoll();
 
-  if (!weapons || weapons.length === 0) return null;
+  if (rows.length === 0) return null;
 
   return (
     <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -39,16 +46,24 @@ export default function WeaponsTable({ character, canRoll }: WeaponsTableProps) 
           </tr>
         </thead>
         <tbody>
-          {weapons.map(weapon => {
+          {rows.map(({ weapon, derived }, index) => {
             const attackMod = canRoll ? parseModifier(weapon.attackBonus) : null;
             const canRollDamage = canRoll && parseDiceExpression(weapon.damage) !== null;
             return (
               <tr
-                key={weapon.name}
+                key={index}
                 className="border-b border-gray-100 dark:border-gray-700 last:border-0"
               >
                 <td className="py-1.5 text-gray-900 dark:text-gray-100 font-medium">
                   {weapon.name}
+                  {derived && (
+                    <span
+                      data-testid="derived-weapon-tag"
+                      className="ml-1.5 px-1.5 py-0.5 text-[10px] font-medium uppercase rounded bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300"
+                    >
+                      equipped
+                    </span>
+                  )}
                 </td>
                 <td className="py-1.5 text-gray-700 dark:text-gray-300">
                   <span className="inline-flex items-center gap-2">

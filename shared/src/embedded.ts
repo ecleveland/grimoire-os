@@ -63,6 +63,51 @@ export interface AttunedItem {
   itemId?: string;
 }
 
+/** Wearable-armor categories the AC derivation distinguishes (VEG-410). */
+export const ARMOR_TYPES = ['light', 'medium', 'heavy', 'shield'] as const;
+export type ArmorType = (typeof ARMOR_TYPES)[number];
+
+/**
+ * Armor stats snapshotted onto an inventory item at catalog-add time
+ * (VEG-410). `baseArmorClass` is the flat base for body armor and the bonus
+ * for a shield; the Dex rule (full / capped at 2 / none) follows from
+ * `armorType`, so no cap is stored. `stealthDisadvantage` /
+ * `strengthRequirement` are captured for future derivations even though the
+ * AC math doesn't read them yet.
+ */
+export interface ArmorGear {
+  type: 'armor';
+  armorType: ArmorType;
+  baseArmorClass: number;
+  stealthDisadvantage?: boolean;
+  strengthRequirement?: number;
+}
+
+/**
+ * Weapon stats snapshotted onto an inventory item at catalog-add time
+ * (VEG-410). The attack bonus is deliberately NOT stored — it derives from
+ * ability modifiers + proficiency at read time (storing it would recreate the
+ * stale-column drift VEG-346 removed). `ranged` is resolved from the catalog
+ * category ("… Ranged Weapon") since properties don't carry it.
+ */
+export interface WeaponGear {
+  type: 'weapon';
+  damage: string;
+  damageType: string;
+  properties: string[];
+  ranged: boolean;
+}
+
+/**
+ * Combat-relevant metadata a catalog item contributes to derived stats
+ * (VEG-410), snapshotted onto the `InventoryItem` when it's added from the
+ * picker — the same link-time denormalization as `Combatant.cr`/`xp`. A
+ * discriminated union so one item can never carry both armor and weapon
+ * stats. Absent on free-typed items and rows added before this existed; such
+ * items simply contribute nothing to the derivation.
+ */
+export type GearMeta = ArmorGear | WeaponGear;
+
 export interface InventoryItem {
   name: string;
   quantity: number;
@@ -72,6 +117,8 @@ export interface InventoryItem {
   /** Optional link to the Item catalog row (srd/shared/homebrew); set when the
    * item was added from the catalog picker, absent for free-typed items. */
   itemId?: string;
+  /** Armor/weapon stats snapshotted from the catalog at add time (VEG-410). */
+  gear?: GearMeta;
 }
 
 export interface Currency {

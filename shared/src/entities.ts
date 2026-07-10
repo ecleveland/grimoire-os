@@ -170,6 +170,11 @@ export interface PartyCharacter {
   race: string | null;
   class: string | null;
   level: number;
+  /**
+   * Effective AC (VEG-410): the stored override when set, else the
+   * equipment-derived value resolved server-side — so encounter snapshots and
+   * roster cards match the owner's sheet. Null only on legacy payloads.
+   */
   armorClass: number | null;
   initiative: number | null;
   hitPoints: HitPoints | null;

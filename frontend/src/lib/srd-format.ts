@@ -1,3 +1,5 @@
+import { formatSigned } from '@grimoire-os/shared';
+
 /** Format a numeric challenge rating the way 5e prints it (fractions for < 1). */
 export function formatCr(cr: number): string {
   if (cr === 0.125) return '1/8';
@@ -14,7 +16,7 @@ export function abilityModifier(score: number): string {
 
 /** Render a bonus with an explicit sign, e.g. 7 → "+7", -1 → "-1". */
 export function signed(n: number): string {
-  return n >= 0 ? `+${n}` : `${n}`;
+  return formatSigned(n);
 }
 
 /** Format a bonus map the way 5e stat blocks print it, e.g. "str +7, con +9". */

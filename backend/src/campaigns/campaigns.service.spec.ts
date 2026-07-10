@@ -537,6 +537,10 @@ describe('CampaignsService', () => {
           armorClass: true,
           initiative: true,
           hitPoints: true,
+          // Loaded to resolve the effective AC server-side (VEG-410); dropped
+          // at the DTO layer, never exposed to other members.
+          abilityScores: true,
+          inventory: true,
         },
       });
       expect(result).toEqual([
@@ -552,6 +556,49 @@ describe('CampaignsService', () => {
           hitPoints: { max: 22, current: 17, temporary: 0 },
         },
       ]);
+    });
+
+    // VEG-410: the stored armorClass column is now a usually-null manual
+    // override, so the roster resolves the effective AC server-side — every
+    // consumer of PartyCharacter.armorClass (encounter party-add, AddPartyDialog)
+    // sees the same number the owner's sheet shows.
+    it('resolves a null armorClass to the equipment-derived AC', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        {
+          ...fullCharacter,
+          armorClass: null,
+          abilityScores: { dexterity: 14 },
+          inventory: [
+            {
+              name: 'Chain Shirt',
+              quantity: 1,
+              equipped: true,
+              gear: { type: 'armor', armorType: 'medium', baseArmorClass: 13 },
+            },
+            {
+              name: 'Shield',
+              quantity: 1,
+              equipped: true,
+              gear: { type: 'armor', armorType: 'shield', baseArmorClass: 2 },
+            },
+          ],
+        },
+      ]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      // Medium 13 + Dex (capped) 2 + shield 2.
+      expect(roster.armorClass).toBe(17);
+    });
+
+    it('falls back to unarmored 10 + Dex for a null armorClass with no gear (non-array inventory tolerated)', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        { ...fullCharacter, armorClass: null, abilityScores: { dexterity: 14 }, inventory: {} },
+      ]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      expect(roster.armorClass).toBe(12);
     });
 
     it('never leaks sheet fields beyond the roster projection', async () => {
@@ -623,6 +670,8 @@ describe('CampaignsService', () => {
           armorClass: true,
           initiative: true,
           hitPoints: true,
+          abilityScores: true,
+          inventory: true,
         },
       });
       expect(result).toEqual([
@@ -648,6 +697,29 @@ describe('CampaignsService', () => {
 
       expect(row).not.toHaveProperty('backstory');
       expect(row).not.toHaveProperty('inventory');
+    });
+
+    it('resolves a null armorClass to the equipment-derived AC (VEG-410)', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        {
+          ...attachable,
+          armorClass: null,
+          abilityScores: { dexterity: 16 },
+          inventory: [
+            {
+              name: 'Leather Armor',
+              quantity: 1,
+              equipped: true,
+              gear: { type: 'armor', armorType: 'light', baseArmorClass: 11 },
+            },
+          ],
+        },
+      ]);
+
+      const [row] = await service.findAttachableCharacters(CAMPAIGN_ID, USER_ID);
+      // Light 11 + Dex 3.
+      expect(row.armorClass).toBe(14);
     });
 
     it('propagates ForbiddenException for non-owners without querying characters', async () => {

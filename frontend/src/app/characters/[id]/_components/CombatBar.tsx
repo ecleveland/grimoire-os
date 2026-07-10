@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Character } from '@/lib/types';
+import type { Character, ComputedArmorClass, ComputedArmorClassBreakdown } from '@/lib/types';
 import { ZERO_HIT_POINTS } from '@/lib/character-defaults';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import {
@@ -18,6 +18,16 @@ import {
 } from '@/lib/character-play';
 
 type CombatBarProps = { character: Character } & PlayControlProps;
+
+/** "13 + 1 Dex + 2 shield" — zero parts are dropped, a Dex penalty shows as "- 1 Dex". */
+function formatAcBreakdown(b: ComputedArmorClassBreakdown): string {
+  let text = String(b.base);
+  if (b.dexApplied !== 0) {
+    text += b.dexApplied > 0 ? ` + ${b.dexApplied} Dex` : ` - ${-b.dexApplied} Dex`;
+  }
+  if (b.shield > 0) text += ` + ${b.shield} shield`;
+  return text;
+}
 
 function hpBarColor(current: number, max: number): string {
   const pct = max > 0 ? current / max : 0;
@@ -39,6 +49,20 @@ export default function CombatBar(props: CombatBarProps) {
   const deathSaves = character.deathSaves ?? CLEARED_DEATH_SAVES;
   const hpPct = hitPoints.max > 0 ? (hitPoints.current / hitPoints.max) * 100 : 0;
   const [amount, setAmount] = useState('');
+  // Equipment-derived AC (VEG-410): the stored column is the manual override
+  // and wins when set; otherwise the compute layer's derived value shows.
+  // `ac` can be absent under version skew (a payload from a pre-VEG-410
+  // backend) — degrade to the legacy stored-AC render instead of crashing.
+  const ac: ComputedArmorClass | undefined = character.computed.armorClass;
+  const hasOverride = ac != null && ac.override !== null;
+  const [acOverride, setAcOverride] = useState('');
+
+  const applyAcOverride = () => {
+    const value = parseNonNegativeInt(acOverride);
+    if (value <= 0) return;
+    patch({ armorClass: value });
+    setAcOverride('');
+  };
 
   const amountValue = parseNonNegativeInt(amount);
 
@@ -124,8 +148,46 @@ export default function CombatBar(props: CombatBarProps) {
           Armor Class
         </div>
         <div className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
-          {character.armorClass ?? '—'}
+          {ac ? ac.effective : (character.armorClass ?? '—')}
         </div>
+        {ac && (
+          <div data-testid="ac-breakdown" className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {hasOverride ? 'manual override' : formatAcBreakdown(ac.breakdown)}
+          </div>
+        )}
+        {editable &&
+          ac &&
+          (hasOverride ? (
+            <button
+              type="button"
+              aria-label="Use derived AC"
+              onClick={() => patch({ armorClass: null })}
+              disabled={isSaving}
+              className="mt-2 px-2 py-1 text-xs font-medium rounded border border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50"
+            >
+              Use derived ({ac.derived})
+            </button>
+          ) : (
+            <div className="mt-2 flex justify-center gap-1">
+              <input
+                type="number"
+                min={1}
+                aria-label="AC override"
+                value={acOverride}
+                disabled={isSaving}
+                onChange={e => setAcOverride(e.target.value)}
+                className="w-14 px-1 py-1 text-xs text-center rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={applyAcOverride}
+                disabled={isSaving}
+                className="px-2 py-1 text-xs font-medium rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50"
+              >
+                Override
+              </button>
+            </div>
+          ))}
       </div>
 
       {/* Hit Points */}

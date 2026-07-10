@@ -323,6 +323,201 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         ?.children?.[0]?.children?.find(c => c.property === 'name');
       expect(name?.constraints).toHaveProperty('isString');
     });
+
+    // Gear snapshots (VEG-410): the catalog picker PATCHes inventory items
+    // carrying armor/weapon metadata, so `gear` must be whitelisted end to end
+    // (the VEG-349 lesson) and its shape bounded per discriminator type.
+    describe('gear (VEG-410)', () => {
+      it('accepts an armor gear snapshot (not rejected as unwhitelisted)', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'Chain Mail',
+              quantity: 1,
+              equipped: true,
+              gear: {
+                type: 'armor',
+                armorType: 'heavy',
+                baseArmorClass: 16,
+                stealthDisadvantage: true,
+                strengthRequirement: 13,
+              },
+            },
+          ],
+        });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+      });
+
+      it('accepts a weapon gear snapshot (not rejected as unwhitelisted)', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'Longbow',
+              quantity: 1,
+              equipped: true,
+              gear: {
+                type: 'weapon',
+                damage: '1d8',
+                damageType: 'Piercing',
+                properties: ['Ammunition (Range 150/600; Arrow)', 'Heavy', 'Two-Handed'],
+                ranged: true,
+              },
+            },
+          ],
+        });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+      });
+
+      it('rejects an unknown gear type with the isIn constraint', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [{ name: 'X', gear: { type: 'wand', baseArmorClass: 3 } }],
+        });
+        const errors = await validate(dto);
+        const type = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')
+          ?.children?.find(c => c.property === 'type');
+        expect(type?.constraints).toHaveProperty('isIn');
+      });
+
+      it('rejects a fractional or negative baseArmorClass', async () => {
+        for (const baseArmorClass of [2.5, -1]) {
+          const dto = toDto({
+            ...baseDto,
+            inventory: [{ name: 'X', gear: { type: 'armor', armorType: 'light', baseArmorClass } }],
+          });
+          const errors = await validate(dto);
+          const base = errors
+            .find(e => e.property === 'inventory')
+            ?.children?.[0]?.children?.find(c => c.property === 'gear')
+            ?.children?.find(c => c.property === 'baseArmorClass');
+          expect(base?.constraints).toBeDefined();
+        }
+      });
+
+      it('rejects a fractional, negative, or absurd strengthRequirement', async () => {
+        for (const strengthRequirement of [-3.7, -1, 1e308]) {
+          const dto = toDto({
+            ...baseDto,
+            inventory: [
+              {
+                name: 'X',
+                gear: {
+                  type: 'armor',
+                  armorType: 'heavy',
+                  baseArmorClass: 16,
+                  strengthRequirement,
+                },
+              },
+            ],
+          });
+          const errors = await validate(dto);
+          const str = errors
+            .find(e => e.property === 'inventory')
+            ?.children?.[0]?.children?.find(c => c.property === 'gear')
+            ?.children?.find(c => c.property === 'strengthRequirement');
+          expect(str?.constraints).toBeDefined();
+        }
+      });
+
+      it('rejects armor gear missing its baseArmorClass', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [{ name: 'X', gear: { type: 'armor', armorType: 'light' } }],
+        });
+        const errors = await validate(dto);
+        const base = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')
+          ?.children?.find(c => c.property === 'baseArmorClass');
+        expect(base?.constraints).toHaveProperty('isInt');
+      });
+
+      it('rejects armor gear with an unknown armorType', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            { name: 'X', gear: { type: 'armor', armorType: 'exotic', baseArmorClass: 12 } },
+          ],
+        });
+        const errors = await validate(dto);
+        const armorType = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')
+          ?.children?.find(c => c.property === 'armorType');
+        expect(armorType?.constraints).toHaveProperty('isIn');
+      });
+
+      it('rejects cross-branch junk: armor gear with a malformed weapon field', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'X',
+              gear: {
+                type: 'armor',
+                armorType: 'light',
+                baseArmorClass: 11,
+                damage: { huge: 'object' },
+              },
+            },
+          ],
+        });
+        const errors = await validate(dto);
+        const damage = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')
+          ?.children?.find(c => c.property === 'damage');
+        expect(damage?.constraints).toHaveProperty('isString');
+      });
+
+      it('rejects cross-branch junk: weapon gear with a malformed armor field', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'X',
+              gear: {
+                type: 'weapon',
+                damage: '1d8',
+                damageType: 'Slashing',
+                properties: [],
+                ranged: false,
+                baseArmorClass: 'very high',
+              },
+            },
+          ],
+        });
+        const errors = await validate(dto);
+        const base = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')
+          ?.children?.find(c => c.property === 'baseArmorClass');
+        expect(base?.constraints).toHaveProperty('isInt');
+      });
+
+      it('rejects weapon gear missing damage fields', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [{ name: 'X', gear: { type: 'weapon', ranged: false, properties: [] } }],
+        });
+        const errors = await validate(dto);
+        const gearErrors = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')?.children;
+        expect(gearErrors?.find(c => c.property === 'damage')?.constraints).toHaveProperty(
+          'isString'
+        );
+        expect(gearErrors?.find(c => c.property === 'damageType')?.constraints).toHaveProperty(
+          'isString'
+        );
+      });
+    });
   });
 
   describe('feats (VEG-430)', () => {

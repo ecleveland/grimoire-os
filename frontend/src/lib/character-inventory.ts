@@ -110,3 +110,17 @@ export function updateInventoryItemAt(
 export function toggleEquippedAt(inventory: InventoryItem[], index: number): InventoryItem[] {
   return updateInventoryItemAt(inventory, index, { equipped: !inventory[index]?.equipped });
 }
+
+/**
+ * Drop the catalog link and gear snapshot from the item at `index` (new
+ * array). Renaming a row repurposes it, so keeping the invisible snapshot
+ * would let a "Traveler's Clothes" row silently keep contributing Chain
+ * Mail's AC (VEG-410) — mirrors the add form clearing both on a name edit.
+ */
+export function stripCatalogLinkAt(inventory: InventoryItem[], index: number): InventoryItem[] {
+  return inventory.map((item, i) => {
+    if (i !== index) return item;
+    const { itemId: _itemId, gear: _gear, ...rest } = item;
+    return rest;
+  });
+}

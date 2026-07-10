@@ -3,6 +3,7 @@ export * from './embedded';
 export * from './coin';
 export * from './computed';
 export * from './encounter-difficulty';
+export * from './gear';
 export * from './entities';
 export * from './loot';
 export * from './pagination';

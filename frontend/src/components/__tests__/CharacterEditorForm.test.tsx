@@ -231,6 +231,25 @@ describe('pure helpers', () => {
     });
   });
 
+  // VEG-410: a null armorClass means "no manual override — AC derives from
+  // equipped gear". The editor must round-trip that null instead of silently
+  // materializing an override of 10 on every save.
+  it('characterToFormValues keeps a null armorClass blank (derived AC)', () => {
+    expect(characterToFormValues(makeCharacter({ armorClass: null })).armorClass).toBe('');
+  });
+
+  it('characterFormPayload submits null for a blank armorClass', () => {
+    const payload = characterFormPayload(
+      characterToFormValues(makeCharacter({ armorClass: null }))
+    );
+    expect(payload.armorClass).toBeNull();
+  });
+
+  it('characterFormPayload keeps a numeric armorClass as the manual override', () => {
+    const payload = characterFormPayload(characterToFormValues(makeCharacter({ armorClass: 18 })));
+    expect(payload.armorClass).toBe(18);
+  });
+
   it('characterFormPayload drops weapon/feature rows with no name', () => {
     const v = emptyCharacterFormValues();
     v.weapons = [
