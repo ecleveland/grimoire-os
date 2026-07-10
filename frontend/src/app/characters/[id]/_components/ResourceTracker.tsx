@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Character, CharacterResource, ResourceRecharge } from '@/lib/types';
 import { RECHARGE_KINDS } from '@/lib/types';
 import { parseNonNegativeInt, togglePip } from '@/lib/character-play';
@@ -33,6 +33,10 @@ interface ResourceFormState {
 
 const EMPTY_FORM: ResourceFormState = { name: '', max: '', recharge: 'short' };
 
+/** Value identity for rows in the editable JSON array (they carry no id). */
+const sameResource = (a: CharacterResource, b: CharacterResource) =>
+  a.name === b.name && a.max === b.max && a.used === b.used && a.recharge === b.recharge;
+
 export default function ResourceTracker(props: ResourceTrackerProps) {
   const { character } = props;
   const { editable, patch, isSaving } = resolvePlayControls(props);
@@ -40,12 +44,33 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   const resources = character.resources ?? [];
 
   const [addForm, setAddForm] = useState<ResourceFormState>(EMPTY_FORM);
-  // Index of the row being edited, with its draft; null when no editor is open.
-  const [editIndex, setEditIndex] = useState<number | null>(null);
+  // The add PATCH is fire-and-forget; clearing the form immediately would
+  // discard the typed draft if the write 409s. `pendingAdd` remembers what was
+  // submitted, and the form resets only once the refetched list contains it.
+  const [pendingAdd, setPendingAdd] = useState<CharacterResource | null>(null);
+  // The resource being edited, snapshotted at open. Identity-keyed (not
+  // index-keyed) so a refetch that reshuffles the list — e.g. a 409-conflict
+  // reload after another tab deleted a row — can't make Save silently
+  // overwrite a different resource. If the snapshot no longer matches any row
+  // (edited or deleted elsewhere), the editor closes rather than guessing.
+  const [editTarget, setEditTarget] = useState<CharacterResource | null>(null);
   const [editForm, setEditForm] = useState<ResourceFormState>(EMPTY_FORM);
+
+  const resourcesKey = JSON.stringify(resources);
+  useEffect(() => {
+    if (pendingAdd && resources.some(r => sameResource(r, pendingAdd))) {
+      setPendingAdd(null);
+      setAddForm(EMPTY_FORM);
+    }
+    // resourcesKey stands in for the freshly-allocated `resources` array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resourcesKey, pendingAdd]);
 
   // A viewer with nothing to see gets no empty card taking up sheet space.
   if (!editable && resources.length === 0) return null;
+
+  const editIndex =
+    editTarget === null ? null : resources.findIndex(r => sameResource(r, editTarget));
 
   const setUsed = (index: number, used: number) => {
     // editResource clamps used into 0..max — the single home for the rule, so
@@ -58,52 +83,50 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   };
 
   const removeAt = (index: number) => {
-    // The inline editor is keyed by index; removing any row shifts indexes
-    // under it, so Save would silently overwrite a different resource once the
-    // refetched list lands. Close it — removing mid-edit is rare.
-    setEditIndex(null);
+    // Same-tab removal mid-edit: close the editor rather than let it hop rows.
+    setEditTarget(null);
     patch({ resources: removeResource(resources, index) });
   };
 
-  // Mirrors the backend ResourceDto bounds (name non-empty, max 1–99): the
-  // HTML max attr doesn't block typed input, and a 400 would arrive after the
-  // form already cleared.
+  // Mirrors the backend ResourceDto bounds (name non-blank, max an integer
+  // 1–99): the HTML max attr doesn't block typed input, decimals would be
+  // silently floored by parseNonNegativeInt, and a 400 would arrive only
+  // after the user thinks the write went through.
   const isFormValid = (form: ResourceFormState) => {
-    const max = parseNonNegativeInt(form.max);
-    return form.name.trim().length > 0 && max >= 1 && max <= 99;
+    const max = Number(form.max);
+    return form.name.trim().length > 0 && Number.isInteger(max) && max >= 1 && max <= 99;
   };
   // Backend @ArrayMaxSize(30).
   const atResourceCap = resources.length >= 30;
 
   const submitAdd = () => {
     if (!isFormValid(addForm) || atResourceCap) return;
-    patch({
-      resources: addResource(resources, {
-        name: addForm.name.trim(),
-        max: parseNonNegativeInt(addForm.max),
-        used: 0,
-        recharge: addForm.recharge,
-      }),
-    });
-    setAddForm(EMPTY_FORM);
+    const added: CharacterResource = {
+      name: addForm.name.trim(),
+      max: Number(addForm.max),
+      used: 0,
+      recharge: addForm.recharge,
+    };
+    setPendingAdd(added);
+    patch({ resources: addResource(resources, added) });
   };
 
   const openEditor = (index: number) => {
     const r = resources[index];
-    setEditIndex(index);
+    setEditTarget(r);
     setEditForm({ name: r.name, max: String(r.max), recharge: r.recharge });
   };
 
   const submitEdit = () => {
-    if (editIndex === null || !isFormValid(editForm)) return;
+    if (editIndex === null || editIndex < 0 || !isFormValid(editForm)) return;
     patch({
       resources: editResource(resources, editIndex, {
         name: editForm.name.trim(),
-        max: parseNonNegativeInt(editForm.max),
+        max: Number(editForm.max),
         recharge: editForm.recharge,
       }),
     });
-    setEditIndex(null);
+    setEditTarget(null);
   };
 
   const inputClass =
@@ -251,7 +274,7 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
                   type="button"
                   aria-label="Cancel edit"
                   disabled={isSaving}
-                  onClick={() => setEditIndex(null)}
+                  onClick={() => setEditTarget(null)}
                   className={iconButtonClass}
                 >
                   Cancel

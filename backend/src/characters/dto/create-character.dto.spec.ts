@@ -538,10 +538,11 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       expect(recharge?.constraints).toHaveProperty('isIn');
     });
 
-    it('rejects a missing or empty name', async () => {
+    it('rejects a missing, empty, or whitespace-only name', async () => {
       for (const bad of [
         { ...ki, name: undefined },
         { ...ki, name: '' },
+        { ...ki, name: '   ' },
       ]) {
         const dto = toDto({ ...baseDto, resources: [bad] });
         const errors = await validate(dto);

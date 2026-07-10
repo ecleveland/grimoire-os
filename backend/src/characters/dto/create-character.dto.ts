@@ -4,7 +4,6 @@ import {
   IsNumber,
   IsInt,
   Min,
-  MinLength,
   Max,
   IsArray,
   ArrayMaxSize,
@@ -27,6 +26,7 @@ import {
 } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
+import { IsNonBlankString } from '../../common/validators/non-blank-string.decorator';
 import { ConcentrationDto } from '../../common/dto/concentration.dto';
 
 class AbilityScoresDto {
@@ -184,8 +184,9 @@ class HitDiceDto {
 
 class ResourceDto {
   @ApiProperty({ example: 'Ki Points' })
-  @IsString()
-  @MinLength(1)
+  // Non-blank, not just non-empty: a whitespace-only name would render an
+  // unidentifiable row whose Edit/Remove aria-labels collapse to bare verbs.
+  @IsNonBlankString()
   name!: string;
 
   @ApiProperty({ example: 5, minimum: 1, maximum: 99 })

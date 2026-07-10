@@ -335,16 +335,21 @@ describe('CombatBar', () => {
       });
     });
 
-    it('short rest with no resources is a no-op (no empty write burning the lock version)', () => {
+    it('disables Short Rest when the character has no resources (nothing to recover, no silent no-op)', () => {
       const onPatch = renderOwner({ resources: null as unknown as Character['resources'] });
+      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
       fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
       expect(onPatch).not.toHaveBeenCalled();
     });
 
-    it('short rest with only long-recharge resources is a no-op (nothing to recover)', () => {
-      const onPatch = renderOwner({ resources: [rage] });
-      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
-      expect(onPatch).not.toHaveBeenCalled();
+    it('disables Short Rest when only long-recharge resources exist or short pools are already full', () => {
+      renderOwner({ resources: [rage, { ...ki, used: 0 }] });
+      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
+    });
+
+    it('enables Short Rest when a short-recharge resource has spent uses', () => {
+      renderOwner({ resources: [ki] });
+      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeEnabled();
     });
 
     it('disables Short Rest while a write is in flight', () => {

@@ -55,6 +55,23 @@ describe('ResourceTracker', () => {
       expect(screen.getByText('16/20')).toBeInTheDocument();
       expect(screen.queryAllByTestId(/resource-0-pip-/)).toHaveLength(0);
     });
+
+    it('switches idiom exactly at the pip limit: max 10 renders pips, max 11 a counter', () => {
+      render(
+        <ResourceTracker
+          character={makeCharacter({
+            resources: [
+              { ...ki, name: 'At Limit', max: 10 },
+              { ...ki, name: 'Over Limit', max: 11 },
+            ],
+          })}
+          {...editable}
+        />
+      );
+      expect(screen.getAllByTestId(/resource-0-pip-/)).toHaveLength(10);
+      expect(screen.queryAllByTestId(/resource-1-pip-/)).toHaveLength(0);
+      expect(screen.getByLabelText('Spend Over Limit')).toBeInTheDocument();
+    });
   });
 
   describe('spend/restore', () => {
@@ -109,18 +126,47 @@ describe('ResourceTracker', () => {
   });
 
   describe('add', () => {
-    it('adds a resource with used 0 and clears the form', async () => {
+    it('adds a resource with used 0, keeping the form until the write lands in the refetched list', async () => {
+      // The PATCH is fire-and-forget: clearing the form immediately would
+      // discard the typed draft if the write 409s. The form clears only once
+      // the refetched character actually contains the new resource.
       const user = userEvent.setup();
-      render(<ResourceTracker character={makeCharacter({ resources: [ki] })} {...editable} />);
+      const added = { name: 'Bardic Inspiration', max: 4, used: 0, recharge: 'long' as const };
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [ki] })} {...editable} />
+      );
       const name = screen.getByLabelText('New resource name');
       await user.type(name, 'Bardic Inspiration');
       fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '4' } });
       await user.selectOptions(screen.getByLabelText('New resource recharge'), 'long');
       await user.click(screen.getByRole('button', { name: 'Add resource' }));
+      expect(onPatch).toHaveBeenCalledWith({ resources: [ki, added] });
+      // Write not yet confirmed: the draft survives (a 409 would need a retry).
+      expect(name).toHaveValue('Bardic Inspiration');
+      // Refetch lands with the new row → the form resets.
+      rerender(
+        <ResourceTracker character={makeCharacter({ resources: [ki, added] })} {...editable} />
+      );
+      expect(screen.getByLabelText('New resource name')).toHaveValue('');
+    });
+
+    it('disables Add for a non-integer max instead of silently flooring it', async () => {
+      const user = userEvent.setup();
+      render(<ResourceTracker character={makeCharacter()} {...editable} />);
+      await user.type(screen.getByLabelText('New resource name'), 'Arrows');
+      fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '7.5' } });
+      expect(screen.getByRole('button', { name: 'Add resource' })).toBeDisabled();
+    });
+
+    it("defaults a new resource's recharge to short when the select is untouched", async () => {
+      const user = userEvent.setup();
+      render(<ResourceTracker character={makeCharacter({ resources: [] })} {...editable} />);
+      await user.type(screen.getByLabelText('New resource name'), 'Channel Divinity');
+      fireEvent.change(screen.getByLabelText('New resource max'), { target: { value: '2' } });
+      await user.click(screen.getByRole('button', { name: 'Add resource' }));
       expect(onPatch).toHaveBeenCalledWith({
-        resources: [ki, { name: 'Bardic Inspiration', max: 4, used: 0, recharge: 'long' }],
+        resources: [{ name: 'Channel Divinity', max: 2, used: 0, recharge: 'short' }],
       });
-      expect(name).toHaveValue('');
     });
 
     it('disables Add until a name is entered', () => {
@@ -172,6 +218,36 @@ describe('ResourceTracker', () => {
       expect(onPatch).toHaveBeenCalledWith({
         resources: [{ ...ki, max: 1, used: 1 }],
       });
+    });
+
+    it('keeps targeting the edited resource when a row above it disappears via refetch', async () => {
+      // A 409-conflict refetch (another tab deleted a row) can shift indexes
+      // under an open editor; the editor is keyed by resource identity, not
+      // index, so Save must still write to the row the user was editing.
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [ki, rage] })} {...editable} />
+      );
+      await user.click(screen.getByLabelText('Edit Rage'));
+      fireEvent.change(screen.getByLabelText('Edit resource name'), {
+        target: { value: 'Rages' },
+      });
+      // Refetch lands without Ki Points: Rage is now index 0.
+      rerender(<ResourceTracker character={makeCharacter({ resources: [rage] })} {...editable} />);
+      await user.click(screen.getByRole('button', { name: 'Save resource' }));
+      expect(onPatch).toHaveBeenCalledWith({
+        resources: [{ ...rage, name: 'Rages' }],
+      });
+    });
+
+    it('closes the editor when the edited resource no longer exists after a refetch', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(
+        <ResourceTracker character={makeCharacter({ resources: [ki, rage] })} {...editable} />
+      );
+      await user.click(screen.getByLabelText('Edit Rage'));
+      rerender(<ResourceTracker character={makeCharacter({ resources: [ki] })} {...editable} />);
+      expect(screen.queryByLabelText('Edit resource name')).not.toBeInTheDocument();
     });
 
     it('cancel closes the editor without patching', async () => {

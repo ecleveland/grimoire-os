@@ -78,11 +78,13 @@ export default function CombatBar(props: CombatBarProps) {
   const longRest = () => patch(applyLongRest(character));
 
   // Short rest (VEG-409) only recharges `recharge: 'short'` resources; HP and
-  // hit-die spending stay manual. No-op when there's nothing to recharge — an
-  // empty PATCH would burn an optimistic-lock version for nothing.
+  // hit-die spending stay manual. The button disables when nothing would
+  // change — an always-clickable control that silently does nothing (and an
+  // empty PATCH would burn an optimistic-lock version) both mislead.
+  const shortRestPatch = applyShortRest(character);
+  const canShortRest = shortRestPatch.resources !== undefined;
   const shortRest = () => {
-    const rested = applyShortRest(character);
-    if (rested.resources) patch(rested);
+    if (canShortRest) patch(shortRestPatch);
   };
 
   const renderPips = (track: 'successes' | 'failures', filledClass: string) => {
@@ -186,7 +188,7 @@ export default function CombatBar(props: CombatBarProps) {
               <button
                 type="button"
                 onClick={shortRest}
-                disabled={isSaving}
+                disabled={isSaving || !canShortRest}
                 className="flex-1 px-1 py-1 text-xs font-medium rounded border border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50"
               >
                 Short Rest
