@@ -38,6 +38,9 @@ export interface CharacterComputeInput {
   spellcastingAbility: string | null;
   /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
   armorClass: number | null;
+  /** The character's own proficiency strings (weapon/tool, free text); unioned
+   * with the class weapon proficiencies to resolve weapon grants (VEG-463). */
+  proficiencies: string[];
   /** Inventory rows; equipped items with gear metadata drive AC/weapons (VEG-410). */
   inventory: InventoryItem[];
   /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
@@ -178,7 +181,11 @@ function resolveSpellSlots(
  */
 export function computeCharacterStats(
   character: CharacterComputeInput,
-  classSpellcasting?: ClassSpellcasting | null
+  classSpellcasting?: ClassSpellcasting | null,
+  // Class-catalog data resolved by the service, like classSpellcasting; the
+  // union with the character's own list happens here so the grant semantics
+  // stay in the pure compute layer (VEG-463).
+  classWeaponProficiencies: string[] = []
 ): ComputedStats {
   const {
     level,
@@ -188,6 +195,7 @@ export function computeCharacterStats(
     skills,
     spellcastingAbility,
     armorClass,
+    proficiencies,
     inventory,
     weapons,
   } = character;
@@ -250,6 +258,12 @@ export function computeCharacterStats(
     spellSlots: resolveSpellSlots(level, classSpellcasting),
     xp: computeXp(level, experiencePoints),
     armorClass: deriveArmorClass(inventory, abilityModifiers.dexterity, armorClass),
-    weapons: deriveWeapons(inventory, abilityModifiers, profBonus, weapons),
+    weapons: deriveWeapons(
+      inventory,
+      abilityModifiers,
+      profBonus,
+      [...classWeaponProficiencies, ...proficiencies],
+      weapons
+    ),
   };
 }

@@ -86,12 +86,22 @@ export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
 
   if (item.category.endsWith('Weapon')) {
     if (!item.damage || !item.damageType) return null;
+    // Tier from the category's leading word (VEG-463) — whole word, so a
+    // homebrew "Simpler Weapon" isn't stamped simple-tier. A "… Weapon"
+    // category that is neither Simple nor Martial snapshots no tier, and the
+    // derivation falls back to assuming proficiency rather than guessing.
+    const weaponCategory = item.category.startsWith('Simple ')
+      ? ('simple' as const)
+      : item.category.startsWith('Martial ')
+        ? ('martial' as const)
+        : undefined;
     return {
       type: 'weapon',
       damage: item.damage,
       damageType: item.damageType,
       properties: item.properties ?? [],
       ranged: item.category.includes('Ranged'),
+      ...(weaponCategory && { weaponCategory }),
     };
   }
 
@@ -215,9 +225,47 @@ function weaponKey(name: string): string {
 }
 
 /**
+ * Casefold, collapse whitespace, and singularize so class-grant phrasings
+ * meet catalog names on a shared key: "Longswords" and "Longsword" both
+ * become "longsword", "Light crossbows" meets "Light Crossbow", and the tier
+ * phrases "Simple/Martial weapons" become "simple/martial weapon". The
+ * irregular "-ves" plural folds to "-ff" for the staff family
+ * ("Quarterstaves" → "quarterstaff"); otherwise one trailing "s" is stripped.
+ * (No SRD weapon's singular name ends in "s", so the strip is safe.)
+ */
+function proficiencyKey(text: string): string {
+  const collapsed = text.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (collapsed.endsWith('ves')) return `${collapsed.slice(0, -3)}ff`;
+  return collapsed.endsWith('s') ? collapsed.slice(0, -1) : collapsed;
+}
+
+/** Normalized grant keys, computed once per derivation. Non-string entries
+ * (corrupt column) are skipped, never crash. */
+function grantKeysOf(grants: string[]): Set<string> {
+  return new Set(
+    grants.flatMap(grant => (typeof grant === 'string' ? [proficiencyKey(grant)] : []))
+  );
+}
+
+/**
+ * Whether the grant keys (class weapon proficiencies ∪ the character's own
+ * proficiency strings, VEG-463) cover an equipped weapon: a tier phrase
+ * grants the snapshot's whole tier, anything else must match the weapon's
+ * name. A snapshot without a tier (pre-VEG-463 row, homebrew category) is
+ * assumed proficient — without a tier non-proficiency can't be proven, and
+ * e.g. a Fighter's grants are tier phrases only, so any stricter rule would
+ * strip a bonus that character legitimately has.
+ */
+function isProficientWith(gear: WeaponGear, name: string, grantKeys: Set<string>): boolean {
+  if (gear.weaponCategory !== 'simple' && gear.weaponCategory !== 'martial') return true;
+  return grantKeys.has(`${gear.weaponCategory} weapon`) || grantKeys.has(proficiencyKey(name));
+}
+
+/**
  * Build weapon attack rows from equipped weapons (VEG-410): Str for melee,
- * Dex for ranged, the higher of the two for Finesse. Proficiency is assumed
- * for v1 — proficiencies are free text, so a reliable match isn't possible;
+ * Dex for ranged, the higher of the two for Finesse. The proficiency bonus
+ * applies only when `weaponProficiencies` covers the weapon (VEG-463) — a
+ * non-proficient row derives without it and carries a "Not proficient" note;
  * the manual `Character.weapons` path stays the escape hatch. Rows use the
  * stored `Weapon` shape so the sheet's table and roll buttons work unchanged.
  *
@@ -230,6 +278,9 @@ export function deriveWeapons(
   inventory: InventoryItem[],
   modifiers: Pick<Record<keyof AbilityScores, number>, 'strength' | 'dexterity'>,
   proficiencyBonus: number,
+  // Required (no default) on purpose: a call site must decide what grants
+  // apply, so none can silently regress every tiered weapon to non-proficient.
+  weaponProficiencies: string[],
   manualWeapons: Weapon[] = []
 ): Weapon[] {
   // Both name sources come out of Json columns guarded only for array-ness,
@@ -237,6 +288,7 @@ export function deriveWeapons(
   const manualNames = new Set(
     manualWeapons.flatMap(w => (typeof w?.name === 'string' ? [weaponKey(w.name)] : []))
   );
+  const grantKeys = grantKeysOf(weaponProficiencies);
   return equippedGear(inventory, 'weapon')
     .filter(
       ({ item, gear }) =>
@@ -253,13 +305,14 @@ export function deriveWeapons(
         : gear.ranged
           ? modifiers.dexterity
           : modifiers.strength;
-      const properties = propertiesOf(gear);
+      const proficient = isProficientWith(gear, item.name, grantKeys);
+      const noteParts = [...(proficient ? [] : ['Not proficient']), ...propertiesOf(gear)];
       return {
         name: item.name,
-        attackBonus: formatSigned(mod + proficiencyBonus),
+        attackBonus: formatSigned(mod + (proficient ? proficiencyBonus : 0)),
         damage: mod === 0 ? gear.damage : `${gear.damage}${formatSigned(mod)}`,
         damageType: gear.damageType,
-        notes: properties.length > 0 ? properties.join(', ') : undefined,
+        notes: noteParts.length > 0 ? noteParts.join(', ') : undefined,
       };
     });
 }

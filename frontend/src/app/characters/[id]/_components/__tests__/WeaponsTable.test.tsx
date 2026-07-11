@@ -147,6 +147,36 @@ describe('WeaponsTable', () => {
       expect(mockMessage).toHaveBeenLastCalledWith(expect.stringContaining('Longbow damage'));
     });
 
+    // Weapon proficiency (VEG-463): the derivation withholds the proficiency
+    // bonus and prepends a "Not proficient" note when nothing grants the
+    // weapon's tier or name.
+    it('shows a "Not proficient" note and no proficiency bonus for an ungranted tiered weapon (VEG-463)', () => {
+      const martialBow = {
+        ...equippedBow,
+        gear: { ...equippedBow.gear, weaponCategory: 'martial' as const },
+      };
+      const char = makeCharacter({ weapons: [], inventory: [martialBow], proficiencies: [] });
+      render(<WeaponsTable character={char} />);
+      // Dex 12 → +1; the +3 proficiency bonus is withheld.
+      expect(screen.getByText('+1')).toBeInTheDocument();
+      expect(screen.getByText(/Not proficient, Heavy, Two-Handed/)).toBeInTheDocument();
+    });
+
+    it('applies the bonus without a note when the proficiencies list grants the weapon (VEG-463)', () => {
+      const martialBow = {
+        ...equippedBow,
+        gear: { ...equippedBow.gear, weaponCategory: 'martial' as const },
+      };
+      const char = makeCharacter({
+        weapons: [],
+        inventory: [martialBow],
+        proficiencies: ['Martial weapons'],
+      });
+      render(<WeaponsTable character={char} />);
+      expect(screen.getByText('+4')).toBeInTheDocument();
+      expect(screen.queryByText(/Not proficient/)).toBeNull();
+    });
+
     it('shows only the manual row when an equipped weapon shares its name (manual wins)', () => {
       // The player's own entry may carry magic/fighting-style bonuses the
       // derivation can't know about — a duplicate derived row would offer a

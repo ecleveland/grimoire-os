@@ -40,6 +40,7 @@ export function deriveComputed(
     | 'skills'
     | 'spellcastingAbility'
     | 'armorClass'
+    | 'proficiencies'
     | 'inventory'
     | 'weapons'
   >
@@ -95,7 +96,16 @@ export function deriveComputed(
     // Same shared derivations the backend compute layer uses (VEG-410), so
     // fixture AC/weapons stay consistent with stored inventory/armorClass.
     armorClass: deriveArmorClass(c.inventory ?? [], abilityModifiers.dexterity, c.armorClass),
-    weapons: deriveWeapons(c.inventory ?? [], abilityModifiers, prof, c.weapons ?? []),
+    // Grants come from the character's own proficiencies column only: the
+    // frontend has no class catalog, and guided-built characters carry the
+    // class weapon-proficiency strings there anyway (VEG-463).
+    weapons: deriveWeapons(
+      c.inventory ?? [],
+      abilityModifiers,
+      prof,
+      c.proficiencies ?? [],
+      c.weapons ?? []
+    ),
   };
 }
 
@@ -138,7 +148,11 @@ export function makeCharacter(over: Partial<Character> = {}): Character {
     armorClass: 18,
     speed: 25,
     initiative: 1,
-    proficiencies: [],
+    // Mirrors the backend fixture Fighter: the class weapon strings live on
+    // the character row (as the guided builder writes them), so derived
+    // weapon rows stay proficient like the real API's class-grant union
+    // renders them (VEG-463). Specs exercising non-proficiency override this.
+    proficiencies: ['All armor', 'Shields', 'Simple weapons', 'Martial weapons'],
     languages: [],
     savingThrows: [],
     skills: [],

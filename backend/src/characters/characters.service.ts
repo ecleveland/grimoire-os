@@ -57,29 +57,34 @@ export class CharactersService {
     }
   }
 
-  // Spell-slot maxima need the class's progression table (VEG-346). Looked up
-  // by name (srd_classes.name is unique); homebrew/unknown classes resolve to
-  // null, in which case slots are omitted but DC/attack still derive from the
-  // character's own spellcastingAbility column.
-  private async loadClassSpellcasting(
+  // Spell-slot maxima need the class's progression table (VEG-346) and weapon
+  // proficiency grants need its weapon list (VEG-463) — one lookup serves
+  // both. Looked up by name (srd_classes.name is unique); homebrew/unknown
+  // classes resolve to nothing, in which case slots are omitted and weapon
+  // grants fall back to the character's own proficiencies column.
+  private async loadClassData(
     className: string | null,
     characterId: string
-  ): Promise<ClassSpellcasting | null> {
-    if (!className) return null;
+  ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
+    const none = { spellcasting: null, weaponProficiencies: [] };
+    if (!className) return none;
     const cls = await this.prisma.srdClass.findUnique({
       where: { name: className },
-      select: { spellcasting: true },
+      select: { spellcasting: true, weaponProficiencies: true },
     });
     if (!cls) {
       // A non-null class with no matching row (typo or homebrew not in the
       // catalog) silently drops spell slots — log so it's diagnosable rather
       // than presenting as an inexplicably slot-less caster.
       this.logger.warn(
-        `Character ${characterId}: class "${className}" not found in srd_classes; spell slots omitted`
+        `Character ${characterId}: class "${className}" not found in srd_classes; spell slots and class weapon proficiencies omitted`
       );
-      return null;
+      return none;
     }
-    return (cls.spellcasting as ClassSpellcasting | null) ?? null;
+    return {
+      spellcasting: (cls.spellcasting as ClassSpellcasting | null) ?? null,
+      weaponProficiencies: cls.weaponProficiencies ?? [],
+    };
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -94,7 +99,7 @@ export class CharactersService {
         `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
       );
     }
-    const classSpellcasting = await this.loadClassSpellcasting(character.class, character.id);
+    const classData = await this.loadClassData(character.class, character.id);
     const computed = computeCharacterStats(
       {
         level: character.level,
@@ -104,10 +109,12 @@ export class CharactersService {
         skills: character.skills,
         spellcastingAbility: character.spellcastingAbility,
         armorClass: character.armorClass,
+        proficiencies: character.proficiencies,
         inventory: inventoryFromJson(character.inventory),
         weapons: Array.isArray(character.weapons) ? (character.weapons as unknown as Weapon[]) : [],
       },
-      classSpellcasting
+      classData.spellcasting,
+      classData.weaponProficiencies
     );
     return toDto(CharacterDto, { ...character, computed });
   }

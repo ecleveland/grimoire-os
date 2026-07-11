@@ -244,7 +244,7 @@ describe('CharactersService', () => {
 
       expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
         where: { name: 'Wizard' },
-        select: { spellcasting: true },
+        select: { spellcasting: true, weaponProficiencies: true },
       });
       // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
       expect(result.computed.spellcasting).toEqual({
@@ -288,6 +288,77 @@ describe('CharactersService', () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('class "Homebrew Warlock" not found')
       );
+    });
+
+    // ── Weapon proficiency grants (VEG-463) — match rules live in gear.spec;
+    // these pin that the class catalog row and the character's own column both
+    // reach the derivation.
+    const tieredLongsword = {
+      name: 'Longsword',
+      quantity: 1,
+      equipped: true,
+      gear: {
+        type: 'weapon',
+        damage: '1d8',
+        damageType: 'Slashing',
+        properties: [],
+        ranged: false,
+        weaponCategory: 'martial',
+      },
+    };
+
+    it('resolves weapon proficiency from the class weapon-proficiency grants (VEG-463)', async () => {
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        // Nothing on the character row itself — the class grant must cover it.
+        proficiencies: [],
+        inventory: [tieredLongsword],
+      });
+      prisma.srdClass.findUnique.mockResolvedValue({
+        spellcasting: null,
+        weaponProficiencies: ['Simple weapons', 'Martial weapons'],
+      });
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      // STR 16 → +3, prof +3 granted by the class list.
+      expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
+      expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
+        where: { name: 'Fighter' },
+        select: { spellcasting: true, weaponProficiencies: true },
+      });
+    });
+
+    it('derives a non-proficient row when neither class nor character covers the weapon (VEG-463)', async () => {
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        class: 'Homebrew Warlock',
+        proficiencies: [],
+        inventory: [tieredLongsword],
+      });
+      // Class not present in the catalog → no class grants.
+      prisma.srdClass.findUnique.mockResolvedValue(null);
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      expect(result.computed.weapons[0]).toMatchObject({
+        attackBonus: '+3',
+        notes: 'Not proficient',
+      });
+    });
+
+    it("resolves weapon proficiency from the character's own proficiencies column (VEG-463)", async () => {
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        class: 'Homebrew Warlock',
+        proficiencies: ['Longswords'],
+        inventory: [tieredLongsword],
+      });
+      prisma.srdClass.findUnique.mockResolvedValue(null);
+
+      const result = await service.findOne(CHARACTER_ID);
+
+      expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
     });
 
     it('warns when the spellcastingAbility column is not a recognized ability', async () => {

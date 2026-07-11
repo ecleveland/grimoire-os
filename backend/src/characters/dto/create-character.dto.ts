@@ -25,6 +25,7 @@ import {
   MAX_EXPERIENCE_POINTS,
   RECHARGE_KINDS,
   SpellEntry,
+  WEAPON_CATEGORIES,
 } from '@grimoire-os/shared';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
@@ -171,6 +172,13 @@ class GearMetaDto {
   @ValidateIf(o => o.type === 'weapon' || o.ranged !== undefined)
   @IsStrictBoolean()
   ranged?: boolean;
+
+  // Present-only validation (not required for type === 'weapon'): pre-VEG-463
+  // snapshots carry no tier and must keep round-tripping through PATCH.
+  @ApiPropertyOptional({ enum: WEAPON_CATEGORIES })
+  @ValidateIf(o => o.weaponCategory !== undefined)
+  @IsIn(WEAPON_CATEGORIES)
+  weaponCategory?: string;
 }
 
 class InventoryItemDto {
