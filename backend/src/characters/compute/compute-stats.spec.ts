@@ -27,6 +27,7 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     skills: [],
     spellcastingAbility: null,
     armorClass: null,
+    proficiencies: [],
     inventory: [],
     weapons: [],
     ...over,
@@ -379,6 +380,45 @@ describe('computeCharacterStats', () => {
         })
       );
       expect(stats.weapons).toEqual([]);
+    });
+
+    // ── Weapon proficiency wiring (VEG-463) — match rules live in gear.spec;
+    // these pin that grants reach the derivation from both inputs.
+    const tieredLongsword: InventoryItem = {
+      name: 'Longsword',
+      quantity: 1,
+      equipped: true,
+      gear: {
+        type: 'weapon',
+        damage: '1d8',
+        damageType: 'Slashing',
+        properties: ['Versatile (1d10)'],
+        ranged: false,
+        weaponCategory: 'martial',
+      },
+    };
+
+    it('derives a tiered weapon without the bonus when nothing grants it (VEG-463)', () => {
+      const stats = computeCharacterStats(input({ inventory: [tieredLongsword] }));
+      expect(stats.weapons[0]).toMatchObject({
+        attackBonus: '+3',
+        notes: 'Not proficient, Versatile (1d10)',
+      });
+    });
+
+    it("resolves proficiency from the character's own proficiencies list (VEG-463)", () => {
+      const stats = computeCharacterStats(
+        input({ inventory: [tieredLongsword], proficiencies: ['Martial weapons'] })
+      );
+      expect(stats.weapons[0]).toMatchObject({ attackBonus: '+6', notes: 'Versatile (1d10)' });
+    });
+
+    it('unions class weapon proficiencies into the grants (VEG-463)', () => {
+      const stats = computeCharacterStats(input({ inventory: [tieredLongsword] }), null, [
+        'Simple weapons',
+        'Longswords',
+      ]);
+      expect(stats.weapons[0]).toMatchObject({ attackBonus: '+6' });
     });
   });
 });

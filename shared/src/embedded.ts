@@ -83,6 +83,10 @@ export interface ArmorGear {
   strengthRequirement?: number;
 }
 
+/** Weapon proficiency tiers the attack derivation distinguishes (VEG-463). */
+export const WEAPON_CATEGORIES = ['simple', 'martial'] as const;
+export type WeaponCategory = (typeof WEAPON_CATEGORIES)[number];
+
 /**
  * Weapon stats snapshotted onto an inventory item at catalog-add time
  * (VEG-410). The attack bonus is deliberately NOT stored — it derives from
@@ -96,6 +100,11 @@ export interface WeaponGear {
   damageType: string;
   properties: string[];
   ranged: boolean;
+  /** Proficiency tier from the catalog category ("Simple/Martial … Weapon"),
+   * VEG-463. Absent on pre-VEG-463 snapshots and on homebrew weapons with a
+   * non-standard category — such rows are assumed proficient (see
+   * `deriveWeapons`), since without a tier non-proficiency can't be proven. */
+  weaponCategory?: WeaponCategory;
 }
 
 /**

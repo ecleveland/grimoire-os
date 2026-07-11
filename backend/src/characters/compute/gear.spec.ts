@@ -152,6 +152,7 @@ describe('gearMetaFromItem', () => {
       damageType: 'Slashing',
       properties: ['Versatile (1d10)'],
       ranged: false,
+      weaponCategory: 'martial',
     });
   });
 
@@ -163,7 +164,7 @@ describe('gearMetaFromItem', () => {
         damageType: 'Piercing',
         properties: ['Ammunition (Range 80/320; Bolt)', 'Loading', 'Two-Handed'],
       })
-    ).toMatchObject({ type: 'weapon', ranged: true });
+    ).toMatchObject({ type: 'weapon', ranged: true, weaponCategory: 'simple' });
   });
 
   it('defaults missing weapon properties to an empty array', () => {
@@ -179,7 +180,41 @@ describe('gearMetaFromItem', () => {
       damageType: 'Bludgeoning',
       properties: [],
       ranged: false,
+      weaponCategory: 'simple',
     });
+  });
+
+  it('snapshots the proficiency tier from each catalog weapon category (VEG-463)', () => {
+    expect(
+      gearMetaFromItem({ category: 'Martial Ranged Weapon', damage: '1d8', damageType: 'Piercing' })
+    ).toMatchObject({ weaponCategory: 'martial', ranged: true });
+    expect(
+      gearMetaFromItem({ category: 'Martial Melee Weapon', damage: '1d8', damageType: 'Slashing' })
+    ).toMatchObject({ weaponCategory: 'martial', ranged: false });
+    expect(
+      gearMetaFromItem({ category: 'Simple Ranged Weapon', damage: '1d6', damageType: 'Piercing' })
+    ).toMatchObject({ weaponCategory: 'simple', ranged: true });
+  });
+
+  it('omits weaponCategory for a homebrew category that is neither simple nor martial', () => {
+    const meta = gearMetaFromItem({
+      category: 'Exotic Weapon',
+      damage: '2d6',
+      damageType: 'Psychic',
+    });
+    expect(meta).toMatchObject({ type: 'weapon' });
+    expect(meta).not.toHaveProperty('weaponCategory');
+  });
+
+  it('requires a whole-word tier prefix — "Simpler Weapon" snapshots no tier', () => {
+    // A prefix-only match would wrongly stamp homebrew "Simpler Weapon" as
+    // simple-tier and derive "Not proficient" where the documented fallback
+    // for non-standard categories is to assume proficiency.
+    for (const category of ['Simpler Weapon', 'Martialarts Weapon']) {
+      const meta = gearMetaFromItem({ category, damage: '1d8', damageType: 'Slashing' });
+      expect(meta).toMatchObject({ type: 'weapon' });
+      expect(meta).not.toHaveProperty('weaponCategory');
+    }
   });
 
   it('returns null for a weapon missing damage or damage type', () => {
@@ -384,11 +419,11 @@ describe('deriveArmorClass', () => {
 describe('deriveWeapons', () => {
   const mods = { strength: 3, dexterity: 1 };
 
-  it('derives a melee weapon from Strength with proficiency assumed', () => {
+  it('derives a melee weapon from Strength (legacy tierless snapshot: proficiency assumed)', () => {
     const inv = [
       item({ name: 'Longsword', gear: weaponGear({ properties: ['Versatile (1d10)'] }) }),
     ];
-    expect(deriveWeapons(inv, mods, 3)).toEqual([
+    expect(deriveWeapons(inv, mods, 3, [])).toEqual([
       {
         name: 'Longsword',
         attackBonus: '+6',
@@ -406,7 +441,7 @@ describe('deriveWeapons', () => {
         gear: weaponGear({ damage: '1d8', damageType: 'Piercing', ranged: true }),
       }),
     ];
-    expect(deriveWeapons(inv, mods, 2)).toEqual([
+    expect(deriveWeapons(inv, mods, 2, [])).toEqual([
       {
         name: 'Longbow',
         attackBonus: '+3',
@@ -429,9 +464,12 @@ describe('deriveWeapons', () => {
       }),
     ];
     // Str 3 > Dex 1 → melee finesse still uses Str here.
-    expect(deriveWeapons(inv, mods, 2)[0]).toMatchObject({ attackBonus: '+5', damage: '1d4+3' });
+    expect(deriveWeapons(inv, mods, 2, [])[0]).toMatchObject({
+      attackBonus: '+5',
+      damage: '1d4+3',
+    });
     // Dex-favoured character flips it.
-    expect(deriveWeapons(inv, { strength: 0, dexterity: 4 }, 2)[0]).toMatchObject({
+    expect(deriveWeapons(inv, { strength: 0, dexterity: 4 }, 2, [])[0]).toMatchObject({
       attackBonus: '+6',
       damage: '1d4+4',
     });
@@ -441,7 +479,7 @@ describe('deriveWeapons', () => {
     const inv = [
       item({ name: 'Mace', gear: weaponGear({ damage: '1d6', damageType: 'Bludgeoning' }) }),
     ];
-    expect(deriveWeapons(inv, { strength: 0, dexterity: 0 }, 2)[0]).toMatchObject({
+    expect(deriveWeapons(inv, { strength: 0, dexterity: 0 }, 2, [])[0]).toMatchObject({
       attackBonus: '+2',
       damage: '1d6',
     });
@@ -451,7 +489,7 @@ describe('deriveWeapons', () => {
     const inv = [
       item({ name: 'Club', gear: weaponGear({ damage: '1d4', damageType: 'Bludgeoning' }) }),
     ];
-    expect(deriveWeapons(inv, { strength: -1, dexterity: 0 }, 2)[0]).toMatchObject({
+    expect(deriveWeapons(inv, { strength: -1, dexterity: 0 }, 2, [])[0]).toMatchObject({
       attackBonus: '+1',
       damage: '1d4-1',
     });
@@ -463,7 +501,7 @@ describe('deriveWeapons', () => {
       item({ name: 'Leather Armor', gear: armorGear() }),
       item({ name: 'Rope' }),
     ];
-    expect(deriveWeapons(inv, mods, 2)).toEqual([]);
+    expect(deriveWeapons(inv, mods, 2, [])).toEqual([]);
   });
 
   it('preserves inventory order', () => {
@@ -471,7 +509,7 @@ describe('deriveWeapons', () => {
       item({ name: 'Longsword', gear: weaponGear() }),
       item({ name: 'Dagger', gear: weaponGear({ damage: '1d4', damageType: 'Piercing' }) }),
     ];
-    expect(deriveWeapons(inv, mods, 2).map(w => w.name)).toEqual(['Longsword', 'Dagger']);
+    expect(deriveWeapons(inv, mods, 2, []).map(w => w.name)).toEqual(['Longsword', 'Dagger']);
   });
 
   it('tolerates weapon gear missing its properties array (hand-edited row)', () => {
@@ -481,7 +519,7 @@ describe('deriveWeapons', () => {
         gear: { type: 'weapon', damage: '1d8', damageType: 'Slashing', ranged: false } as never,
       }),
     ];
-    expect(deriveWeapons(inv, mods, 2)[0]).toMatchObject({
+    expect(deriveWeapons(inv, mods, 2, [])[0]).toMatchObject({
       name: 'Old Sword',
       attackBonus: '+5',
       notes: undefined,
@@ -502,7 +540,7 @@ describe('deriveWeapons', () => {
       }),
     ];
     // A string is not a properties array: no crash, no accidental finesse.
-    expect(deriveWeapons(stringProps, mods, 2)[0]).toMatchObject({
+    expect(deriveWeapons(stringProps, mods, 2, [])[0]).toMatchObject({
       attackBonus: '+5',
       notes: undefined,
     });
@@ -520,7 +558,7 @@ describe('deriveWeapons', () => {
       }),
     ];
     // Non-string elements are dropped; the valid Finesse entry still counts.
-    expect(deriveWeapons(mixedProps, { strength: 0, dexterity: 4 }, 2)[0]).toMatchObject({
+    expect(deriveWeapons(mixedProps, { strength: 0, dexterity: 4 }, 2, [])[0]).toMatchObject({
       attackBonus: '+6',
       notes: 'Finesse',
     });
@@ -536,13 +574,13 @@ describe('deriveWeapons', () => {
     ];
     // Case/whitespace-insensitive match: the player's own entry (which may
     // carry magic/fighting-style bonuses) stays authoritative.
-    expect(deriveWeapons(inv, mods, 2, manual).map(w => w.name)).toEqual(['Dagger']);
+    expect(deriveWeapons(inv, mods, 2, [], manual).map(w => w.name)).toEqual(['Dagger']);
   });
 
   it('tolerates null / name-less manual weapon entries (corrupt weapons column)', () => {
     const inv = [item({ name: 'Longsword', gear: weaponGear() })];
     const manual = [null, { damage: '1d8' }] as never;
-    expect(deriveWeapons(inv, mods, 2, manual).map(w => w.name)).toEqual(['Longsword']);
+    expect(deriveWeapons(inv, mods, 2, [], manual).map(w => w.name)).toEqual(['Longsword']);
   });
 
   it('skips equipped weapon rows with a non-string name or missing damage fields', () => {
@@ -556,6 +594,250 @@ describe('deriveWeapons', () => {
       }),
       item({ name: 'Dagger', gear: weaponGear({ damage: '1d4', damageType: 'Piercing' }) }),
     ];
-    expect(deriveWeapons(inv, mods, 2).map(w => w.name)).toEqual(['Dagger']);
+    expect(deriveWeapons(inv, mods, 2, []).map(w => w.name)).toEqual(['Dagger']);
+  });
+
+  describe('weapon proficiency (VEG-463)', () => {
+    const martialSword = item({
+      name: 'Longsword',
+      gear: weaponGear({ weaponCategory: 'martial', properties: ['Versatile (1d10)'] }),
+    });
+
+    it('applies the proficiency bonus via a tier grant ("Martial weapons")', () => {
+      expect(deriveWeapons([martialSword], mods, 3, ['Martial weapons'])[0]).toMatchObject({
+        attackBonus: '+6',
+        notes: 'Versatile (1d10)',
+      });
+    });
+
+    it('matches tier grants case- and whitespace-insensitively', () => {
+      expect(deriveWeapons([martialSword], mods, 3, ['  martial WEAPONS '])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+    });
+
+    it('applies the bonus via a pluralized name grant ("Longswords" → Longsword)', () => {
+      expect(
+        deriveWeapons([martialSword], mods, 3, ['Simple weapons', 'Longswords'])[0]
+      ).toMatchObject({ attackBonus: '+6' });
+    });
+
+    it('matches the irregular "-ves" plural ("Quarterstaves" → Quarterstaff)', () => {
+      const staff = item({
+        name: 'Quarterstaff',
+        gear: weaponGear({ damage: '1d6', damageType: 'Bludgeoning', weaponCategory: 'simple' }),
+      });
+      expect(deriveWeapons([staff], mods, 2, ['Quarterstaves'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+      // The regular "-s" plural the class seed data uses keeps working.
+      expect(deriveWeapons([staff], mods, 2, ['Quarterstaffs'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+    });
+
+    it('keeps regular "-ve" plurals intact ("Glaives" → Glaive)', () => {
+      // The "-ves" → "-ff" staff-family fold must not consume the only "-ve"
+      // weapon in the catalog: both singular candidates are kept.
+      const glaive = item({
+        name: 'Glaive',
+        gear: weaponGear({ damage: '1d10', damageType: 'Slashing', weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([glaive], mods, 2, ['Glaives'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+    });
+
+    it('honors melee/ranged tier qualifiers ("Martial melee weapons")', () => {
+      expect(deriveWeapons([martialSword], mods, 3, ['Martial melee weapons'])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+      // The qualifier binds: a melee-only grant does not cover a ranged weapon.
+      const bow = item({
+        name: 'Longbow',
+        gear: weaponGear({
+          damage: '1d8',
+          damageType: 'Piercing',
+          ranged: true,
+          weaponCategory: 'martial',
+        }),
+      });
+      expect(deriveWeapons([bow], mods, 3, ['Martial melee weapons'])[0]).toMatchObject({
+        attackBonus: '+1',
+        notes: 'Not proficient',
+      });
+    });
+
+    it('reorders 2014-style comma phrasing ("Crossbows, light" → Light Crossbow)', () => {
+      const crossbow = item({
+        name: 'Light Crossbow',
+        gear: weaponGear({
+          damage: '1d8',
+          damageType: 'Piercing',
+          ranged: true,
+          weaponCategory: 'simple',
+        }),
+      });
+      expect(deriveWeapons([crossbow], mods, 2, ['Crossbows, light'])[0]).toMatchObject({
+        attackBonus: '+3',
+      });
+    });
+
+    it('matches a name grant at a word boundary ("Longswords" covers variant names)', () => {
+      // Adjective prefix ("Silvered Longsword") and trailing modifier
+      // ("Longsword +1", "Dagger of Venom") both keep the base-weapon grant.
+      for (const name of ['Silvered Longsword', 'Longsword +1']) {
+        const variant = item({ name, gear: weaponGear({ weaponCategory: 'martial' }) });
+        expect(deriveWeapons([variant], mods, 2, ['Longswords'])[0]).toMatchObject({
+          attackBonus: '+5',
+        });
+      }
+      const venomDagger = item({
+        name: 'Dagger of Venom',
+        gear: weaponGear({ damage: '1d4', damageType: 'Piercing', weaponCategory: 'simple' }),
+      });
+      expect(deriveWeapons([venomDagger], mods, 2, ['Daggers'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+      // Word boundary only — a grant does not cover a name that merely
+      // contains it mid-word ("Swords" is not a Greatsword grant).
+      const greatsword = item({
+        name: 'Greatsword',
+        gear: weaponGear({ damage: '2d6', weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([greatsword], mods, 2, ['Swords'])[0]).toMatchObject({
+        notes: 'Not proficient',
+      });
+    });
+
+    it('splits comma-separated grant lists ("Simple weapons, shortswords")', () => {
+      // TokenListEditor stores a pasted SRD line as ONE token; both the tier
+      // part and the name part must still grant, and a trailing comma is inert.
+      const club = item({
+        name: 'Club',
+        gear: weaponGear({ damage: '1d4', damageType: 'Bludgeoning', weaponCategory: 'simple' }),
+      });
+      const shortsword = item({
+        name: 'Shortsword',
+        gear: weaponGear({ damage: '1d6', damageType: 'Piercing', weaponCategory: 'martial' }),
+      });
+      const grants = ['Simple weapons, shortswords'];
+      expect(deriveWeapons([club, shortsword], mods, 2, grants)).toEqual([
+        expect.objectContaining({ name: 'Club', attackBonus: '+5' }),
+        expect.objectContaining({ name: 'Shortsword', attackBonus: '+5' }),
+      ]);
+      expect(deriveWeapons([club], mods, 2, ['Simple weapons,'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+    });
+
+    it('accepts common tier-phrase variants ("All martial weapons", "Simple and martial weapons", trailing punctuation)', () => {
+      const club = item({
+        name: 'Club',
+        gear: weaponGear({ damage: '1d4', damageType: 'Bludgeoning', weaponCategory: 'simple' }),
+      });
+      expect(deriveWeapons([martialSword], mods, 3, ['All martial weapons'])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+      expect(deriveWeapons([martialSword], mods, 3, ['Martial weapons.'])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+      expect(
+        deriveWeapons([club, martialSword], mods, 3, ['Simple and martial weapons']).map(
+          w => w.attackBonus
+        )
+      ).toEqual(['+6', '+6']);
+    });
+
+    it('does not let a non-weapon grant confer proficiency by word-boundary coincidence', () => {
+      // "Shields" is an armor grant; a homebrew martial "Spiked Shield" must
+      // not inherit weapon proficiency from it.
+      const spikedShield = item({
+        name: 'Spiked Shield',
+        gear: weaponGear({ damage: '1d6', damageType: 'Piercing', weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([spikedShield], mods, 2, ['Shields'])[0]).toMatchObject({
+        notes: 'Not proficient',
+      });
+    });
+
+    it('matches multi-word name grants ("Light crossbows" → Light Crossbow)', () => {
+      const crossbow = item({
+        name: 'Light Crossbow',
+        gear: weaponGear({
+          damage: '1d8',
+          damageType: 'Piercing',
+          ranged: true,
+          weaponCategory: 'simple',
+        }),
+      });
+      expect(deriveWeapons([crossbow], mods, 2, ['Light crossbows'])[0]).toMatchObject({
+        attackBonus: '+3',
+      });
+    });
+
+    it('derives without the bonus and notes "Not proficient" when nothing grants the tiered weapon', () => {
+      // A wizard's grants: specific simple weapons only — no martial tier, no longsword.
+      const wizardGrants = ['Daggers', 'Darts', 'Slings', 'Quarterstaffs', 'Light crossbows'];
+      expect(deriveWeapons([martialSword], mods, 3, wizardGrants)).toEqual([
+        {
+          name: 'Longsword',
+          attackBonus: '+3',
+          damage: '1d8+3',
+          damageType: 'Slashing',
+          notes: 'Not proficient, Versatile (1d10)',
+        },
+      ]);
+    });
+
+    it('does not let a simple-tier grant cover a martial weapon', () => {
+      expect(deriveWeapons([martialSword], mods, 3, ['Simple weapons'])[0]).toMatchObject({
+        attackBonus: '+3',
+        notes: 'Not proficient, Versatile (1d10)',
+      });
+    });
+
+    it('notes "Not proficient" alone on a property-less weapon lacking a grant', () => {
+      const club = item({
+        name: 'Club',
+        gear: weaponGear({ damage: '1d4', damageType: 'Bludgeoning', weaponCategory: 'simple' }),
+      });
+      expect(deriveWeapons([club], mods, 2, [])[0]).toMatchObject({
+        attackBonus: '+3',
+        notes: 'Not proficient',
+      });
+    });
+
+    it('still applies the finesse/ranged ability rules to a non-proficient weapon', () => {
+      const rapier = item({
+        name: 'Rapier',
+        gear: weaponGear({
+          damage: '1d8',
+          damageType: 'Piercing',
+          properties: ['Finesse'],
+          weaponCategory: 'martial',
+        }),
+      });
+      expect(deriveWeapons([rapier], { strength: 0, dexterity: 4 }, 2, [])[0]).toMatchObject({
+        attackBonus: '+4',
+        damage: '1d8+4',
+        notes: 'Not proficient, Finesse',
+      });
+    });
+
+    it('assumes proficiency for a legacy snapshot without a tier (pre-VEG-463 rows)', () => {
+      // Without a tier we cannot prove non-proficiency; stripping the bonus
+      // would wrongly hit e.g. a Fighter, whose grants are tier phrases only.
+      const legacy = item({ name: 'Longsword', gear: weaponGear() });
+      expect(deriveWeapons([legacy], mods, 3, [])[0]).toMatchObject({ attackBonus: '+6' });
+    });
+
+    it('tolerates non-string grant entries without crashing or granting', () => {
+      const grants = [null, 7, "Thieves' tools"] as never;
+      expect(deriveWeapons([martialSword], mods, 3, grants)[0]).toMatchObject({
+        attackBonus: '+3',
+        notes: 'Not proficient, Versatile (1d10)',
+      });
+    });
   });
 });

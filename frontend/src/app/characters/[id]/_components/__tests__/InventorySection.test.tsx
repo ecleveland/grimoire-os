@@ -544,6 +544,8 @@ describe('InventorySection', () => {
             damageType: 'Piercing',
             properties: ['Ammunition (Range 150/600; Arrow)', 'Heavy', 'Two-Handed'],
             ranged: true,
+            // Tier snapshotted from the "Martial Ranged Weapon" category (VEG-463).
+            weaponCategory: 'martial',
           },
         });
       });

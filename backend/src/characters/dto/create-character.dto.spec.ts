@@ -372,6 +372,56 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
       });
 
+      // The weapon snapshot above carries no weaponCategory: it doubles as the
+      // legacy-row round-trip guard (pre-VEG-463 snapshots must keep PATCHing).
+      it('accepts a weapon gear snapshot carrying a weaponCategory tier (VEG-463)', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'Longsword',
+              quantity: 1,
+              equipped: true,
+              gear: {
+                type: 'weapon',
+                damage: '1d8',
+                damageType: 'Slashing',
+                properties: ['Versatile (1d10)'],
+                ranged: false,
+                weaponCategory: 'martial',
+              },
+            },
+          ],
+        });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+      });
+
+      it('rejects an unknown weaponCategory with the isIn constraint (VEG-463)', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'X',
+              gear: {
+                type: 'weapon',
+                damage: '1d8',
+                damageType: 'Slashing',
+                properties: [],
+                ranged: false,
+                weaponCategory: 'exotic',
+              },
+            },
+          ],
+        });
+        const errors = await validate(dto);
+        const category = errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'gear')
+          ?.children?.find(c => c.property === 'weaponCategory');
+        expect(category?.constraints).toHaveProperty('isIn');
+      });
+
       it('rejects an unknown gear type with the isIn constraint', async () => {
         const dto = toDto({
           ...baseDto,
