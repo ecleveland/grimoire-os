@@ -683,20 +683,80 @@ describe('deriveWeapons', () => {
       });
     });
 
-    it('matches a name grant as a whole-word suffix ("Longswords" covers Silvered Longsword)', () => {
-      const silvered = item({
-        name: 'Silvered Longsword',
-        gear: weaponGear({ weaponCategory: 'martial' }),
+    it('matches a name grant at a word boundary ("Longswords" covers variant names)', () => {
+      // Adjective prefix ("Silvered Longsword") and trailing modifier
+      // ("Longsword +1", "Dagger of Venom") both keep the base-weapon grant.
+      for (const name of ['Silvered Longsword', 'Longsword +1']) {
+        const variant = item({ name, gear: weaponGear({ weaponCategory: 'martial' }) });
+        expect(deriveWeapons([variant], mods, 2, ['Longswords'])[0]).toMatchObject({
+          attackBonus: '+5',
+        });
+      }
+      const venomDagger = item({
+        name: 'Dagger of Venom',
+        gear: weaponGear({ damage: '1d4', damageType: 'Piercing', weaponCategory: 'simple' }),
       });
-      expect(deriveWeapons([silvered], mods, 2, ['Longswords'])[0]).toMatchObject({
+      expect(deriveWeapons([venomDagger], mods, 2, ['Daggers'])[0]).toMatchObject({
         attackBonus: '+5',
       });
-      // Suffix only — a grant does not cover a name that merely contains it.
-      const hilt = item({
-        name: 'Longsword Hilt Blade',
-        gear: weaponGear({ weaponCategory: 'martial' }),
+      // Word boundary only — a grant does not cover a name that merely
+      // contains it mid-word ("Swords" is not a Greatsword grant).
+      const greatsword = item({
+        name: 'Greatsword',
+        gear: weaponGear({ damage: '2d6', weaponCategory: 'martial' }),
       });
-      expect(deriveWeapons([hilt], mods, 2, ['Longswords'])[0]).toMatchObject({
+      expect(deriveWeapons([greatsword], mods, 2, ['Swords'])[0]).toMatchObject({
+        notes: 'Not proficient',
+      });
+    });
+
+    it('splits comma-separated grant lists ("Simple weapons, shortswords")', () => {
+      // TokenListEditor stores a pasted SRD line as ONE token; both the tier
+      // part and the name part must still grant, and a trailing comma is inert.
+      const club = item({
+        name: 'Club',
+        gear: weaponGear({ damage: '1d4', damageType: 'Bludgeoning', weaponCategory: 'simple' }),
+      });
+      const shortsword = item({
+        name: 'Shortsword',
+        gear: weaponGear({ damage: '1d6', damageType: 'Piercing', weaponCategory: 'martial' }),
+      });
+      const grants = ['Simple weapons, shortswords'];
+      expect(deriveWeapons([club, shortsword], mods, 2, grants)).toEqual([
+        expect.objectContaining({ name: 'Club', attackBonus: '+5' }),
+        expect.objectContaining({ name: 'Shortsword', attackBonus: '+5' }),
+      ]);
+      expect(deriveWeapons([club], mods, 2, ['Simple weapons,'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+    });
+
+    it('accepts common tier-phrase variants ("All martial weapons", "Simple and martial weapons", trailing punctuation)', () => {
+      const club = item({
+        name: 'Club',
+        gear: weaponGear({ damage: '1d4', damageType: 'Bludgeoning', weaponCategory: 'simple' }),
+      });
+      expect(deriveWeapons([martialSword], mods, 3, ['All martial weapons'])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+      expect(deriveWeapons([martialSword], mods, 3, ['Martial weapons.'])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+      expect(
+        deriveWeapons([club, martialSword], mods, 3, ['Simple and martial weapons']).map(
+          w => w.attackBonus
+        )
+      ).toEqual(['+6', '+6']);
+    });
+
+    it('does not let a non-weapon grant confer proficiency by word-boundary coincidence', () => {
+      // "Shields" is an armor grant; a homebrew martial "Spiked Shield" must
+      // not inherit weapon proficiency from it.
+      const spikedShield = item({
+        name: 'Spiked Shield',
+        gear: weaponGear({ damage: '1d6', damageType: 'Piercing', weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([spikedShield], mods, 2, ['Shields'])[0]).toMatchObject({
         notes: 'Not proficient',
       });
     });

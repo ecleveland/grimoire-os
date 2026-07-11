@@ -223,19 +223,9 @@ function weaponKey(name: string): string {
   return name.trim().toLowerCase();
 }
 
-/**
- * Casefold, collapse whitespace, and fold the 2014-SRD comma phrasing
- * ("Crossbow, light" → "light crossbow") so free-text grants meet catalog
- * names on the same normalized form.
- */
+/** Casefold, collapse whitespace, and drop trailing punctuation. */
 function normalizeGrant(text: string): string {
-  const collapsed = text.trim().toLowerCase().replace(/\s+/g, ' ');
-  if (!collapsed.includes(',')) return collapsed;
-  return collapsed
-    .split(',')
-    .map(part => part.trim())
-    .reverse()
-    .join(' ');
+  return text.trim().toLowerCase().replace(/\s+/g, ' ').replace(/[.]+$/, '');
 }
 
 /**
@@ -253,49 +243,112 @@ function singularKeys(normalized: string): string[] {
   return keys;
 }
 
-/** A tier phrase like "Simple weapons" or "Martial melee weapons": grants a
- * whole tier, optionally narrowed to melee or ranged. */
-const TIER_PHRASE = /^(simple|martial)( melee| ranged)? weapons?$/;
+/** Connector words allowed inside a tier phrase ("All simple and martial
+ * weapons"); any other non-tier word means the string is not a tier grant. */
+const TIER_FILLER_WORDS = new Set(['all', 'and', '&', 'weapon', 'weapons']);
+
+interface TierGrant {
+  tier: WeaponCategory;
+  /** `null` covers both melee and ranged. */
+  ranged: boolean | null;
+}
+
+/**
+ * Parse a normalized phrase as a tier grant, or null when it isn't one. A
+ * tier grant ends in "weapon(s)" and contains only tier words (from
+ * WEAPON_CATEGORIES — the single source of the tier list), an optional
+ * melee/ranged qualifier, and connector words: "Simple weapons", "All
+ * martial weapons", "Simple and martial weapons", "Martial melee weapons".
+ */
+function tierGrantsOf(phrase: string): TierGrant[] | null {
+  const words = phrase.split(' ');
+  if (!/^weapons?$/.test(words[words.length - 1])) return null;
+  const tiers: WeaponCategory[] = [];
+  let ranged: boolean | null = null;
+  for (const word of words) {
+    if ((WEAPON_CATEGORIES as readonly string[]).includes(word)) {
+      tiers.push(word as WeaponCategory);
+    } else if (word === 'melee') {
+      ranged = false;
+    } else if (word === 'ranged') {
+      ranged = true;
+    } else if (!TIER_FILLER_WORDS.has(word)) {
+      return null;
+    }
+  }
+  return tiers.length > 0 ? tiers.map(tier => ({ tier, ranged })) : null;
+}
 
 interface WeaponGrantIndex {
   /** Singularized name-grant keys ("longsword", "light crossbow"). */
   names: Set<string>;
-  /** Tier grants; `ranged: null` covers both melee and ranged. */
-  tiers: { tier: WeaponCategory; ranged: boolean | null }[];
+  tiers: TierGrant[];
 }
 
-/** Parse a grant list once per derivation. Non-string entries (corrupt
- * column) are skipped, never crash; unrecognized strings (tool/armor
- * proficiencies mixed into the same column) become inert name keys. */
+/**
+ * Parse a grant list once per derivation. A comma-separated entry (the
+ * proficiencies editor stores a pasted SRD line as one token) is read both
+ * ways: each part as its own grant ("Simple weapons, shortswords") and the
+ * reversed join as a 2014-SRD name phrasing ("Crossbow, light" → "light
+ * crossbow"); whichever interpretation fits contributes, the other is inert.
+ * Non-string entries (corrupt column) are skipped, never crash; unrecognized
+ * strings (tool/armor proficiencies mixed into the same column) become inert
+ * name keys.
+ */
 function weaponGrantIndexOf(grants: string[]): WeaponGrantIndex {
   const names = new Set<string>();
-  const tiers: WeaponGrantIndex['tiers'] = [];
+  const tiers: TierGrant[] = [];
+  const addPhrase = (phrase: string): void => {
+    if (!phrase) return;
+    const tierGrants = tierGrantsOf(phrase);
+    if (tierGrants) {
+      tiers.push(...tierGrants);
+    } else {
+      for (const key of singularKeys(phrase)) names.add(key);
+    }
+  };
   for (const grant of grants) {
     if (typeof grant !== 'string') continue;
     const normalized = normalizeGrant(grant);
-    const tierMatch = TIER_PHRASE.exec(normalized);
-    if (tierMatch) {
-      tiers.push({
-        tier: tierMatch[1] as WeaponCategory,
-        ranged: tierMatch[2] ? tierMatch[2].trim() === 'ranged' : null,
-      });
+    const parts = normalized
+      .split(',')
+      .map(part => normalizeGrant(part))
+      .filter(Boolean);
+    if (parts.length > 1) {
+      for (const part of parts) addPhrase(part);
+      addPhrase([...parts].reverse().join(' '));
     } else {
-      for (const key of singularKeys(normalized)) names.add(key);
+      addPhrase(parts[0] ?? '');
     }
   }
   return { names, tiers };
+}
+
+/** Grant keys that name non-weapon proficiencies sharing the column (armor,
+ * shields, tools): excluded from word-boundary matching so "Shields" can't
+ * confer weapon proficiency on a homebrew "Spiked Shield". Exact-name
+ * matches are unaffected. */
+function isNonWeaponGrantKey(key: string): boolean {
+  return (
+    key === 'shield' ||
+    key === 'armor' ||
+    key.endsWith(' armor') ||
+    key.endsWith(' tool') ||
+    key.endsWith(' kit') ||
+    key.endsWith(' supplies')
+  );
 }
 
 /**
  * Whether the grants (class weapon proficiencies ∪ the character's own
  * proficiency strings, VEG-463) cover an equipped weapon: a tier phrase
  * grants the snapshot's tier (respecting a melee/ranged qualifier), anything
- * else must match the weapon's name — exactly or as a whole-word suffix, so
- * "Longswords" still covers a "Silvered Longsword" snapshot. A snapshot
- * without a recognized tier (pre-VEG-463 row, homebrew category) is assumed
- * proficient — without a tier non-proficiency can't be proven, and e.g. a
- * Fighter's grants are tier phrases only, so any stricter rule would strip a
- * bonus that character legitimately has.
+ * else must match the weapon's name — exactly, or at a word boundary so
+ * "Longswords" still covers a "Silvered Longsword" or "Longsword +1"
+ * snapshot. A snapshot without a recognized tier (pre-VEG-463 row, homebrew
+ * category) is assumed proficient — without a tier non-proficiency can't be
+ * proven, and e.g. a Fighter's grants are tier phrases only, so any stricter
+ * rule would strip a bonus that character legitimately has.
  */
 function isProficientWith(gear: WeaponGear, name: string, grants: WeaponGrantIndex): boolean {
   const tier = gear.weaponCategory;
@@ -310,7 +363,8 @@ function isProficientWith(gear: WeaponGear, name: string, grants: WeaponGrantInd
   const nameKey = normalizeGrant(name);
   if (singularKeys(nameKey).some(key => grants.names.has(key))) return true;
   for (const grantKey of grants.names) {
-    if (nameKey.endsWith(` ${grantKey}`)) return true;
+    if (isNonWeaponGrantKey(grantKey)) continue;
+    if (nameKey.endsWith(` ${grantKey}`) || nameKey.startsWith(`${grantKey} `)) return true;
   }
   return false;
 }
