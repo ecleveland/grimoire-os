@@ -90,19 +90,8 @@ export class SrdController {
     return this.srdService.findSubrace(id);
   }
 
-  // ── Backgrounds ─────────────────────────────────────
-
-  @Get('backgrounds')
-  @ApiOperation({ summary: 'List SRD backgrounds' })
-  searchBackgrounds(@Query('q') query?: string) {
-    return this.srdService.searchBackgrounds(query);
-  }
-
-  @Get('backgrounds/:id')
-  @ApiOperation({ summary: 'Get background by ID' })
-  findBackground(@Param('id') id: string) {
-    return this.srdService.findBackground(id);
-  }
+  // Backgrounds moved to BackgroundsController (VEG-431): responses vary per
+  // user, so they can't sit behind this controller's blanket URL-keyed cache.
 
   // ── Conditions ──────────────────────────────────────
 

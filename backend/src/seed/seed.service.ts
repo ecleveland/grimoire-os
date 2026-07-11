@@ -332,20 +332,30 @@ export class SeedService {
   private async seedBackgrounds(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
     if (!data.backgrounds.length) return;
     // Resolve each background's canonical origin feat (VEG-429) and write the FK
-    // in the same upsert, so reseed both links new mappings and clears stale ones
-    // (a background that loses its `feat` upserts originFeatId back to null).
+    // in the same write, so reseed both links new mappings and clears stale ones
+    // (a background that loses its `feat` writes originFeatId back to null).
+    //
+    // findFirst→update/create rather than upsert-by-name because `name` is no
+    // longer globally unique (homebrew backgrounds may reuse SRD names —
+    // VEG-431); scoping every read and write to contentSource='srd' guarantees
+    // a re-seed can never read, update, or delete a user's homebrew row. Kept
+    // bespoke (not seedSrdByName) because of the per-row origin-feat merge.
     const originFeatByBackground = await this.resolveBackgroundOriginFeats(tx);
     for (const background of data.backgrounds) {
       const origin = originFeatByBackground.get(background.name) ?? {
         originFeatId: null,
         originFeatOption: null,
       };
-      const row = { ...background, ...origin };
-      await tx.background.upsert({
-        where: { name: background.name },
-        create: row,
-        update: row,
+      const row = { ...background, ...origin, contentSource: 'srd' as const };
+      const existing = await tx.background.findFirst({
+        where: { name: background.name, contentSource: 'srd' },
+        select: { id: true },
       });
+      if (existing) {
+        await tx.background.update({ where: { id: existing.id }, data: row });
+      } else {
+        await tx.background.create({ data: row });
+      }
     }
     this.logger.log(`  Backgrounds: ${data.backgrounds.length} entries`);
   }
@@ -468,9 +478,12 @@ export class SeedService {
   }
 
   private async seedBackgroundFeatures(tx: Prisma.TransactionClient): Promise<void> {
+    // Pinned to the srd partition so a homebrew background reusing an SRD name
+    // can never receive the seed's child feature rows (VEG-431).
     const backgroundIdByName = await this.resolveIdsByName(
       nameLookupDelegate(tx.background),
-      srdBackgrounds.map(b => b.name)
+      srdBackgrounds.map(b => b.name),
+      'srd'
     );
     const backgroundFeatureRows: Prisma.BackgroundFeatureCreateManyInput[] = [];
     for (const bg of srdBackgrounds) {

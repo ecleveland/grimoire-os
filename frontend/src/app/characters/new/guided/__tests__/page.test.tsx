@@ -484,6 +484,7 @@ describe('GuidedCharacterPage — cross-step grant reconciliation', () => {
       id: 'acolyte',
       name: 'Acolyte',
       skillProficiencies: ['Insight', 'Religion'],
+      contentSource: 'srd',
       toolProficiencies: [],
       languages: 0,
       originFeat: { id: 'feat-mi', name: 'Magic Initiate' },

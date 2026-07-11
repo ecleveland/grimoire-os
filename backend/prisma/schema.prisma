@@ -76,6 +76,7 @@ model User {
   homebrewSpells            Spell[]
   homebrewItems             Item[]
   homebrewFeats             Feat[]
+  homebrewBackgrounds       Background[]
 
   @@map("users")
 }
@@ -483,18 +484,27 @@ model Subrace {
 }
 
 model Background {
-  id                 String   @id @default(uuid())
-  name               String   @unique
+  id                 String        @id @default(uuid())
+  name               String
   description        String?
   skillProficiencies String[]
   toolProficiencies  String[]
-  languages          Int      @default(0)
+  languages          Int           @default(0)
   equipment          String?
   personalityTraits  String[]
   ideals             String[]
   bonds              String[]
   flaws              String[]
-  source             String   @default("SRD 5.2.1")
+  source             String        @default("SRD 5.2.1")
+  contentSource      ContentSource @default(srd)
+  createdById        String?
+  campaignId         String?
+
+  // SetNull (not Cascade): admin-published `shared` rows are global catalog
+  // content and must survive their author's deletion. Homebrew rows are
+  // deleted at the service layer (UsersService.remove) and backstopped by a
+  // hand-authored DB CHECK: homebrew must always have a creator (VEG-317).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   // Canonical SRD origin feat (VEG-429). The option captures the chosen
   // parameter for repeatable feats (e.g. Magic Initiate "Cleric"); null for
@@ -506,7 +516,11 @@ model Background {
 
   features BackgroundFeature[]
 
+  // Name uniqueness is enforced by partial unique indexes (per-source) added by
+  // hand in the add_background_content_source migration; Prisma cannot model them.
   @@index([originFeatId])
+  @@index([contentSource])
+  @@index([createdById])
   @@map("backgrounds")
 }
 

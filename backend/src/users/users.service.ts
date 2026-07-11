@@ -170,6 +170,7 @@ export class UsersService {
         await tx.monster.deleteMany(homebrewByUser);
         await tx.item.deleteMany(homebrewByUser);
         await tx.feat.deleteMany(homebrewByUser);
+        await tx.background.deleteMany(homebrewByUser);
         await tx.user.delete({ where: { id } });
       });
     } catch (error: unknown) {

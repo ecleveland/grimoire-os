@@ -376,12 +376,19 @@ describe('UsersService', () => {
       prisma.monster.deleteMany.mockResolvedValue({ count: 0 });
       prisma.item.deleteMany.mockResolvedValue({ count: 2 });
       prisma.feat.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.background.deleteMany.mockResolvedValue({ count: 1 });
       prisma.user.delete.mockResolvedValue(mockUser);
 
       await service.remove(USER_ID);
 
       expect(prisma.$transaction).toHaveBeenCalled();
-      for (const model of [prisma.spell, prisma.monster, prisma.item, prisma.feat]) {
+      for (const model of [
+        prisma.spell,
+        prisma.monster,
+        prisma.item,
+        prisma.feat,
+        prisma.background,
+      ]) {
         expect(model.deleteMany).toHaveBeenCalledWith({
           where: { createdById: USER_ID, contentSource: 'homebrew' },
         });

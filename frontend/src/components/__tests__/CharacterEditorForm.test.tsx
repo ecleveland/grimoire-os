@@ -82,6 +82,7 @@ const srdBackgrounds: SrdBackground[] = [
     id: 'bg-sage',
     name: 'Sage',
     skillProficiencies: ['Arcana', 'History'],
+    contentSource: 'srd',
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 2,
     personalityTraits: ['I am eager to learn.', 'I speak only in quotes.'],
