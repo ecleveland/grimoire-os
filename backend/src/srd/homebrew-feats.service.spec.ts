@@ -213,6 +213,22 @@ describe('HomebrewFeatsService', () => {
       expect(prisma.feat.delete).toHaveBeenCalledWith({ where: { id: 'f1' } });
     });
 
+    it('clears originFeatOption on backgrounds that used the feat — SET NULL only nulls the id (VEG-431)', async () => {
+      prisma.feat.findUnique.mockResolvedValue(homebrewRow);
+      prisma.feat.delete.mockResolvedValue(homebrewRow);
+      prisma.background.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.remove('f1', OWNER);
+
+      expect(prisma.background.updateMany).toHaveBeenCalledWith({
+        where: { originFeatId: 'f1' },
+        data: { originFeatOption: null },
+      });
+      // The option clear and the delete ride one transaction so a failed
+      // delete can't leave the referencing backgrounds half-updated.
+      expect(prisma.$transaction).toHaveBeenCalled();
+    });
+
     it('throws NotFound when the feat does not exist', async () => {
       prisma.feat.findUnique.mockResolvedValue(null);
 

@@ -236,6 +236,35 @@ describe('HomebrewBackgroundsService', () => {
       expect(prisma.feat.findFirst).not.toHaveBeenCalled();
     });
 
+    it('drops an option-only PATCH when the background has no linked feat (no orphan option)', async () => {
+      prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: null });
+      prisma.background.update.mockResolvedValue(homebrewRow);
+
+      await service.update('bg1', { originFeatOption: 'Cleric' } as never, OWNER);
+
+      const data = prisma.background.update.mock.calls[0][0].data;
+      expect(data.originFeatOption).toBeNull();
+    });
+
+    it('allows an option-only PATCH to retarget the option of an already-linked feat', async () => {
+      prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: 'feat-srd' });
+      prisma.background.update.mockResolvedValue(homebrewRow);
+
+      await service.update('bg1', { originFeatOption: 'Wizard' } as never, OWNER);
+
+      const data = prisma.background.update.mock.calls[0][0].data;
+      expect(data.originFeatOption).toBe('Wizard');
+    });
+
+    it('rejects clearing name to null with 400 — the column is non-nullable and required', async () => {
+      prisma.background.findUnique.mockResolvedValue(homebrewRow);
+
+      await expect(service.update('bg1', { name: null } as never, OWNER)).rejects.toThrow(
+        BadRequestException
+      );
+      expect(prisma.background.update).not.toHaveBeenCalled();
+    });
+
     it('leaves the origin feat untouched when the key is absent', async () => {
       prisma.background.findUnique.mockResolvedValue(homebrewRow);
       prisma.background.update.mockResolvedValue(homebrewRow);

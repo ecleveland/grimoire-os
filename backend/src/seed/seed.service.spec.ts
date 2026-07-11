@@ -781,6 +781,19 @@ describe('SeedService', () => {
     );
   });
 
+  it('guards background seed data against duplicate names (would otherwise silently clobber)', async () => {
+    const guards = jest.requireActual<typeof import('./seed-guards')>('./seed-guards');
+    const spy = jest.spyOn(guards, 'assertUniqueSeedNames');
+
+    await service.seed();
+
+    expect(spy).toHaveBeenCalledWith(
+      'background',
+      expect.objectContaining({ background: srdBackgrounds.map(b => b.name) })
+    );
+    spy.mockRestore();
+  });
+
   it('seeds backgrounds scoped to the srd partition so homebrew rows are never touched', async () => {
     await service.seed();
 

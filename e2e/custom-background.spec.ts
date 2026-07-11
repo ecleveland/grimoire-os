@@ -122,6 +122,37 @@ test.describe('Custom backgrounds (VEG-431)', () => {
     await expect(grants).toContainText(featName);
   });
 
+  test('a homebrew background may reuse an SRD name (per-tier partial unique indexes)', async ({
+    page,
+  }) => {
+    // The migration's core promise: the global name unique is gone, replaced by
+    // per-source partial indexes — so a user's own "Acolyte" must coexist with
+    // the SRD row. Only a real database proves the indexes; unit specs mock Prisma.
+    await registerAndLogin(page, 'bg-reuse', 'E2E Name Reuser');
+    const headers = await csrfHeaders(page);
+
+    const create = await page.request.post(`${BACKEND}/api/srd/backgrounds`, {
+      data: { name: 'Acolyte', skillProficiencies: ['Stealth'] },
+      headers,
+    });
+    expect(create.status(), await create.text()).toBe(201);
+
+    // Both rows ride the owner's list: the SRD Acolyte and the homebrew one.
+    const list = await page.request.get(`${BACKEND}/api/srd/backgrounds`);
+    const acolytes = ((await list.json()) as { name: string; contentSource: string }[]).filter(
+      b => b.name === 'Acolyte'
+    );
+    expect(acolytes.map(a => a.contentSource).sort()).toEqual(['homebrew', 'srd']);
+
+    // A second homebrew row with the same name (same owner) is the case the
+    // per-owner partial index rejects: 409, not a silent overwrite.
+    const dup = await page.request.post(`${BACKEND}/api/srd/backgrounds`, {
+      data: { name: 'Acolyte' },
+      headers,
+    });
+    expect(dup.status()).toBe(409);
+  });
+
   test("another user's homebrew background is invisible and immutable to them", async ({
     page,
   }) => {

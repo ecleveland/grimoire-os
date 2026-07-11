@@ -53,6 +53,16 @@ describe('NpcRefDataLoader', () => {
     );
   });
 
+  it('pins the background pool to the global tiers so user homebrew never enters NPC generation (VEG-431)', async () => {
+    await loader.load();
+
+    expect(prisma.background.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { contentSource: { in: ['srd', 'shared'] } },
+      })
+    );
+  });
+
   it('pins the monster pool to the global tiers so user homebrew never enters NPC generation (VEG-335)', async () => {
     await loader.load();
 

@@ -13,10 +13,15 @@ import { UpdateBackgroundDto } from './dto/update-background.dto';
  * themselves; rows are writable per their tier (owner for homebrew, admins for
  * shared, never for SRD).
  *
- * The one background-specific rule: `originFeatId` may reference an SRD feat
- * or one of the actor's own homebrew feats. The lookup is visibility-scoped
- * (`visibleTo`), so another owner's homebrew feat is simply unresolvable —
- * rejected as 400 without leaking its existence.
+ * The one background-specific rule: `originFeatId` may reference any feat
+ * visible to the actor — SRD, admin-published shared, or their own homebrew.
+ * The lookup is visibility-scoped (`visibleTo`), so another owner's homebrew
+ * feat is simply unresolvable — rejected as 400 without leaking its existence.
+ *
+ * The "option never without a feat" invariant is enforced in three places
+ * that must stay in sync: create()'s guard, update()'s row-aware guard, and
+ * toColumnData's explicit-null clear (plus the feat-delete cleanup in
+ * {@link HomebrewFeatsService.remove}).
  */
 @Injectable()
 export class HomebrewBackgroundsService {
@@ -50,6 +55,12 @@ export class HomebrewBackgroundsService {
   async update(id: string, dto: UpdateBackgroundDto, actor: ContentActor): Promise<Background> {
     const row = await this.findWritableRow(id, actor);
     const data = this.toColumnData(dto);
+    // Row-aware sibling of the create() guard (option ⇒ feat, see toColumnData):
+    // an option-only PATCH may retarget the option of an already-linked feat,
+    // but on a row with no linked feat it would persist an orphan.
+    if (data.originFeatId === undefined && row.originFeatId === null) {
+      if ('originFeatOption' in data) data.originFeatOption = null;
+    }
     await this.assertOriginFeatVisible(data, actor);
 
     try {
@@ -114,10 +125,11 @@ export class HomebrewBackgroundsService {
    * the string-array columns are non-nullable, so a null clear (the client's
    * way of resetting an optional field, VEG-316) becomes their empty default.
    * Blank optional strings (reachable only via raw API writes — the form
-   * already clears to null) normalize to null. Clearing `originFeatId` also
-   * clears `originFeatOption` — an option without a feat is meaningless — and
-   * an option supplied on a write that carries no feat id is dropped the same
-   * way.
+   * already clears to null) normalize to null. Clearing `originFeatId` (an
+   * explicit null) also clears `originFeatOption` — an option without a feat
+   * is meaningless. Writes that omit the feat id entirely are handled by the
+   * per-operation guards in create()/update(), which know whether a feat is
+   * (or stays) linked.
    */
   private toColumnData(dto: CreateBackgroundDto | UpdateBackgroundDto): Record<string, unknown> {
     const {
@@ -129,6 +141,11 @@ export class HomebrewBackgroundsService {
       ...data
     } = dto as Record<string, unknown>;
 
+    // `name` is required and non-nullable; a null "clear" (valid for optional
+    // fields per VEG-316) would otherwise reach Prisma and 500.
+    if ('name' in data && data.name === null) {
+      throw new BadRequestException('Name cannot be cleared');
+    }
     if ('languages' in data && data.languages === null) data.languages = 0;
     for (const field of [
       'skillProficiencies',

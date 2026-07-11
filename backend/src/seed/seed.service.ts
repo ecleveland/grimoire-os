@@ -340,6 +340,9 @@ export class SeedService {
     // VEG-431); scoping every read and write to contentSource='srd' guarantees
     // a re-seed can never read, update, or delete a user's homebrew row. Kept
     // bespoke (not seedSrdByName) because of the per-row origin-feat merge.
+    // Same duplicate-name guard seedSrdByName applies: without it a duplicate
+    // background name silently last-write-wins clobbers the earlier entry.
+    assertUniqueSeedNames('background', { background: data.backgrounds.map(b => b.name) });
     const originFeatByBackground = await this.resolveBackgroundOriginFeats(tx);
     for (const background of data.backgrounds) {
       const origin = originFeatByBackground.get(background.name) ?? {
