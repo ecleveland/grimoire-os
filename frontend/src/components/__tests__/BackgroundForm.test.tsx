@@ -79,9 +79,9 @@ describe('BackgroundForm', () => {
       />
     );
 
-    // Re-type the linked feat's name while options are still in flight.
+    // Re-entering the linked feat's exact name while options are still in
+    // flight must keep the pick+option — the merge keeps it resolvable.
     const picker = screen.getByLabelText(/^Origin feat$/);
-    fireEvent.change(picker, { target: { value: 'Magic Initiat' } });
     fireEvent.change(picker, { target: { value: 'Magic Initiate' } });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -128,6 +128,46 @@ describe('BackgroundForm', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({ originFeatId: null, originFeatOption: null })
+    );
+  });
+
+  it('drops the old feat’s option when the feat is retargeted to a different one', async () => {
+    // Editing a background linked to Magic Initiate (Cleric): picking Alert
+    // instead must not carry "Cleric" onto Alert — an option belongs to a feat.
+    const initial = {
+      id: 'bg-1',
+      name: 'Gravedigger',
+      skillProficiencies: [],
+      toolProficiencies: [],
+      languages: 0,
+      personalityTraits: [],
+      ideals: [],
+      bonds: [],
+      flaws: [],
+      originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+      originFeatOption: 'Cleric',
+      source: 'Homebrew',
+      contentSource: 'homebrew' as const,
+      createdById: 'u1',
+    };
+    const user = userEvent.setup();
+    render(
+      <BackgroundForm
+        initial={initial}
+        submitting={false}
+        submitLabel="Save changes"
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />
+    );
+
+    await user.click(screen.getByLabelText(/^Origin feat$/));
+    await user.click(await screen.findByRole('option', { name: 'Alert' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ originFeatId: 'feat-alert', originFeatOption: null })
     );
   });
 

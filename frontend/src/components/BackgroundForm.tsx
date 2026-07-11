@@ -60,6 +60,22 @@ export default function BackgroundForm({
     setForm(prev => ({ ...prev, [key]: value }));
   };
 
+  // Point the origin-feat link at (name, resolved id) and reset the option
+  // whenever the feat actually changes to a *different* one — an option is
+  // specific to a feat, so carrying the old one onto a newly-picked feat would
+  // render e.g. "Alert (Cleric)" for an option that only ever belonged to Magic
+  // Initiate. A null id (an incomplete/ambiguous type) leaves the option parked:
+  // a transient no-match mid-type mustn't wipe a still-valid option, and
+  // formStateToPayload drops the option anyway when the id ends up null.
+  const setOriginFeat = (name: string, id: string | null) => {
+    setForm(prev => ({
+      ...prev,
+      originFeatName: name,
+      originFeatId: id,
+      originFeatOption: id !== null && id !== prev.originFeatId ? '' : prev.originFeatOption,
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const result = formStateToPayload(form);
@@ -125,20 +141,14 @@ export default function BackgroundForm({
         <SrdCombobox
           label="Origin feat"
           value={form.originFeatName}
-          onChange={v =>
-            setForm(prev => {
-              // Typing binds to the id only while the text names exactly one
-              // option (an SRD and a homebrew feat may share a name — an
-              // ambiguous match must be resolved by an explicit pick).
-              const matches = featOptions.filter(o => o.name === v.trim());
-              return {
-                ...prev,
-                originFeatName: v,
-                originFeatId: matches.length === 1 ? matches[0].id : null,
-              };
-            })
-          }
-          onSelect={o => setForm(prev => ({ ...prev, originFeatName: o.name, originFeatId: o.id }))}
+          onChange={v => {
+            // Typing binds to the id only while the text names exactly one
+            // option (an SRD and a homebrew feat may share a name — an
+            // ambiguous match must be resolved by an explicit pick).
+            const matches = featOptions.filter(o => o.name === v.trim());
+            setOriginFeat(v, matches.length === 1 ? matches[0].id : null);
+          }}
+          onSelect={o => setOriginFeat(o.name, o.id)}
           options={featOptions}
           loading={featsQuery.isLoading}
           placeholder="Search feats…"
