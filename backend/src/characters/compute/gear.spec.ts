@@ -636,6 +636,71 @@ describe('deriveWeapons', () => {
       });
     });
 
+    it('keeps regular "-ve" plurals intact ("Glaives" → Glaive)', () => {
+      // The "-ves" → "-ff" staff-family fold must not consume the only "-ve"
+      // weapon in the catalog: both singular candidates are kept.
+      const glaive = item({
+        name: 'Glaive',
+        gear: weaponGear({ damage: '1d10', damageType: 'Slashing', weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([glaive], mods, 2, ['Glaives'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+    });
+
+    it('honors melee/ranged tier qualifiers ("Martial melee weapons")', () => {
+      expect(deriveWeapons([martialSword], mods, 3, ['Martial melee weapons'])[0]).toMatchObject({
+        attackBonus: '+6',
+      });
+      // The qualifier binds: a melee-only grant does not cover a ranged weapon.
+      const bow = item({
+        name: 'Longbow',
+        gear: weaponGear({
+          damage: '1d8',
+          damageType: 'Piercing',
+          ranged: true,
+          weaponCategory: 'martial',
+        }),
+      });
+      expect(deriveWeapons([bow], mods, 3, ['Martial melee weapons'])[0]).toMatchObject({
+        attackBonus: '+1',
+        notes: 'Not proficient',
+      });
+    });
+
+    it('reorders 2014-style comma phrasing ("Crossbows, light" → Light Crossbow)', () => {
+      const crossbow = item({
+        name: 'Light Crossbow',
+        gear: weaponGear({
+          damage: '1d8',
+          damageType: 'Piercing',
+          ranged: true,
+          weaponCategory: 'simple',
+        }),
+      });
+      expect(deriveWeapons([crossbow], mods, 2, ['Crossbows, light'])[0]).toMatchObject({
+        attackBonus: '+3',
+      });
+    });
+
+    it('matches a name grant as a whole-word suffix ("Longswords" covers Silvered Longsword)', () => {
+      const silvered = item({
+        name: 'Silvered Longsword',
+        gear: weaponGear({ weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([silvered], mods, 2, ['Longswords'])[0]).toMatchObject({
+        attackBonus: '+5',
+      });
+      // Suffix only — a grant does not cover a name that merely contains it.
+      const hilt = item({
+        name: 'Longsword Hilt Blade',
+        gear: weaponGear({ weaponCategory: 'martial' }),
+      });
+      expect(deriveWeapons([hilt], mods, 2, ['Longswords'])[0]).toMatchObject({
+        notes: 'Not proficient',
+      });
+    });
+
     it('matches multi-word name grants ("Light crossbows" → Light Crossbow)', () => {
       const crossbow = item({
         name: 'Light Crossbow',
