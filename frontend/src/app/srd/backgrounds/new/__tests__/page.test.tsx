@@ -6,7 +6,7 @@ import NewBackgroundPage from '../page';
 
 const mockApiFetch = vi.fn();
 const mockUseAuth = vi.fn();
-const mockUseApiQuery = vi.fn();
+const mockUseApiQueryAll = vi.fn();
 const mockPush = vi.fn();
 const mockBack = vi.fn();
 
@@ -27,10 +27,10 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush, back: mockBack }),
 }));
 
-// The embedded BackgroundForm loads the feat picker options via useApiQuery.
+// The embedded BackgroundForm loads the feat picker options via useApiQueryAll.
 vi.mock('@/lib/query', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/query')>()),
-  useApiQuery: (path: string) => mockUseApiQuery(path),
+  useApiQueryAll: (path: string) => mockUseApiQueryAll(path),
   invalidateApiPath: vi.fn(),
 }));
 
@@ -47,7 +47,7 @@ describe('NewBackgroundPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUseAuth.mockReturnValue({ isAuthenticated: true, user: { userId: 'u1' } });
-    mockUseApiQuery.mockReturnValue({ data: { data: [] }, isLoading: false, isError: false });
+    mockUseApiQueryAll.mockReturnValue({ data: [], isLoading: false, isError: false });
   });
 
   it('renders nothing while auth is still hydrating (no sign-in flash)', () => {

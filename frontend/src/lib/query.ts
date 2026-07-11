@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from './api';
+import type { PaginatedResponse } from '@grimoire-os/shared';
 
 /**
  * Cache-key shape for every query in this layer: a 2-tuple of the literal
@@ -80,6 +81,50 @@ export function useApiQuery<T>(
       toast.error(errorToast.message, errorToast.id ? { id: errorToast.id } : undefined);
     }
   }, [isError, error, errorUpdatedAt, errorToast, path]);
+
+  return query;
+}
+
+/**
+ * Fetch EVERY page of a paginated endpoint and return the flattened rows.
+ * For pickers that must offer the complete set (e.g. the origin-feat combobox,
+ * VEG-431): a single capped page would silently make rows past the cap
+ * unpickable. `basePath` must already carry a query string (the page param is
+ * appended with `&`). The server caps `limit` at 100, so request that.
+ */
+export function useApiQueryAll<T>(
+  basePath: string,
+  options: UseApiQueryOptions<T[]> = {}
+): UseQueryResult<T[], Error> {
+  const { errorToast, ...queryOptions } = options;
+
+  const query = useQuery<T[], Error, T[], ApiQueryKey>({
+    queryKey: apiQueryKey(`${basePath}&__all-pages`),
+    queryFn: async () => {
+      const first = await apiFetch<PaginatedResponse<T>>(`${basePath}&page=1`);
+      const rows = [...first.data];
+      for (let page = 2; page <= first.lastPage; page++) {
+        const next = await apiFetch<PaginatedResponse<T>>(`${basePath}&page=${page}`);
+        rows.push(...next.data);
+      }
+      return rows;
+    },
+    ...queryOptions,
+  });
+
+  const { isError, error, errorUpdatedAt } = query;
+  const lastToastedAt = useRef(0);
+  useEffect(() => {
+    if (!isError || !errorToast) return;
+    if (errorUpdatedAt === lastToastedAt.current) return;
+    lastToastedAt.current = errorUpdatedAt;
+    console.error(`Failed to fetch ${basePath}:`, error);
+    if (typeof errorToast === 'string') {
+      toast.error(errorToast);
+    } else {
+      toast.error(errorToast.message, errorToast.id ? { id: errorToast.id } : undefined);
+    }
+  }, [isError, error, errorUpdatedAt, errorToast, basePath]);
 
   return query;
 }

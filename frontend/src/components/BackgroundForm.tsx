@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
-import { useApiQuery } from '@/lib/query';
-import type { PaginatedResponse, SrdBackground, SrdFeat } from '@/lib/types';
+import { useApiQueryAll } from '@/lib/query';
+import type { SrdBackground, SrdFeat } from '@/lib/types';
 import {
   emptyBackgroundFormState,
   backgroundToFormState,
@@ -43,12 +43,18 @@ export default function BackgroundForm({
     initial ? backgroundToFormState(initial) : emptyBackgroundFormState()
   );
 
-  // The feat catalog is small (SRD ~18 + the user's homebrew); one page of 100
-  // comfortably covers the picker.
-  const featsQuery = useApiQuery<PaginatedResponse<SrdFeat>>('/srd/feats?limit=100', {
+  // Every page of the catalog: a capped single page would silently make feats
+  // past the cap unpickable (and un-editable on a background linked to one).
+  const featsQuery = useApiQueryAll<SrdFeat>('/srd/feats?limit=100', {
     errorToast: { message: 'Failed to load feats', id: 'load-origin-feats' },
   });
-  const featOptions = (featsQuery.data?.data ?? []).map(f => ({ id: f.id, name: f.name }));
+  const featOptions = (featsQuery.data ?? []).map(f => ({ id: f.id, name: f.name }));
+  // The already-linked feat is always a valid option, even while the list is
+  // still loading (or if it somehow drops out of the fetched set) — otherwise
+  // one keystroke during load would invalidate a legitimate prefilled pick.
+  if (initial?.originFeat && !featOptions.some(o => o.id === initial.originFeat?.id)) {
+    featOptions.push({ id: initial.originFeat.id, name: initial.originFeat.name });
+  }
 
   const update = <K extends keyof BackgroundFormState>(key: K, value: BackgroundFormState[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -120,16 +126,17 @@ export default function BackgroundForm({
           label="Origin feat"
           value={form.originFeatName}
           onChange={v =>
-            setForm(prev => ({
-              ...prev,
-              originFeatName: v,
-              // Typing invalidates a previous pick unless the text still names it.
-              originFeatId:
-                prev.originFeatId &&
-                featOptions.some(o => o.id === prev.originFeatId && o.name === v.trim())
-                  ? prev.originFeatId
-                  : null,
-            }))
+            setForm(prev => {
+              // Typing binds to the id only while the text names exactly one
+              // option (an SRD and a homebrew feat may share a name — an
+              // ambiguous match must be resolved by an explicit pick).
+              const matches = featOptions.filter(o => o.name === v.trim());
+              return {
+                ...prev,
+                originFeatName: v,
+                originFeatId: matches.length === 1 ? matches[0].id : null,
+              };
+            })
           }
           onSelect={o => setForm(prev => ({ ...prev, originFeatName: o.name, originFeatId: o.id }))}
           options={featOptions}

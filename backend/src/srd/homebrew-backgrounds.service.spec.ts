@@ -246,6 +246,36 @@ describe('HomebrewBackgroundsService', () => {
       expect(data.originFeatOption).toBeNull();
     });
 
+    it('clears the option when retargeting to a different feat without resending it', async () => {
+      // A stale option belongs to the OLD feat; carrying it onto the new one
+      // would render e.g. "Alert (Cleric)" — an option that was never chosen
+      // for Alert.
+      prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: 'feat-old' });
+      prisma.feat.findFirst.mockResolvedValue(SRD_FEAT);
+      prisma.background.update.mockResolvedValue(homebrewRow);
+
+      await service.update('bg1', { originFeatId: 'feat-srd' } as never, OWNER);
+
+      const data = prisma.background.update.mock.calls[0][0].data;
+      expect(data.originFeatId).toBe('feat-srd');
+      expect(data.originFeatOption).toBeNull();
+    });
+
+    it('keeps an explicitly-sent option when retargeting the feat', async () => {
+      prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: 'feat-old' });
+      prisma.feat.findFirst.mockResolvedValue(SRD_FEAT);
+      prisma.background.update.mockResolvedValue(homebrewRow);
+
+      await service.update(
+        'bg1',
+        { originFeatId: 'feat-srd', originFeatOption: 'Wizard' } as never,
+        OWNER
+      );
+
+      const data = prisma.background.update.mock.calls[0][0].data;
+      expect(data.originFeatOption).toBe('Wizard');
+    });
+
     it('allows an option-only PATCH to retarget the option of an already-linked feat', async () => {
       prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: 'feat-srd' });
       prisma.background.update.mockResolvedValue(homebrewRow);

@@ -55,11 +55,20 @@ export class HomebrewBackgroundsService {
   async update(id: string, dto: UpdateBackgroundDto, actor: ContentActor): Promise<Background> {
     const row = await this.findWritableRow(id, actor);
     const data = this.toColumnData(dto);
-    // Row-aware sibling of the create() guard (option ⇒ feat, see toColumnData):
+    // Row-aware siblings of the create() guard (option ⇒ feat, see toColumnData):
     // an option-only PATCH may retarget the option of an already-linked feat,
-    // but on a row with no linked feat it would persist an orphan.
+    // but on a row with no linked feat it would persist an orphan — and a
+    // PATCH that retargets the feat without resending the option must not
+    // carry the OLD feat's option onto the new one.
     if (data.originFeatId === undefined && row.originFeatId === null) {
       if ('originFeatOption' in data) data.originFeatOption = null;
+    }
+    if (
+      typeof data.originFeatId === 'string' &&
+      data.originFeatId !== row.originFeatId &&
+      !('originFeatOption' in data)
+    ) {
+      data.originFeatOption = null;
     }
     await this.assertOriginFeatVisible(data, actor);
 

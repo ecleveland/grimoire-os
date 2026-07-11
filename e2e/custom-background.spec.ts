@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { BACKEND, csrfHeaders, registerAndLogin } from './helpers';
+import { BACKEND, csrfHeaders, escapeRegExp, registerAndLogin } from './helpers';
 
 /** Literal-match regex for names carrying regex metacharacters (e.g. "(Exhumed)"). */
 function exact(text: string): RegExp {
-  return new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(escapeRegExp(text));
 }
 
 // Golden path for homebrew backgrounds (VEG-431): create one via the form —

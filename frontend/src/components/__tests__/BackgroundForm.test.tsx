@@ -3,10 +3,10 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BackgroundForm from '@/components/BackgroundForm';
 
-const mockUseApiQuery = vi.fn();
+const mockUseApiQueryAll = vi.fn();
 vi.mock('@/lib/query', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/query')>()),
-  useApiQuery: (path: string) => mockUseApiQuery(path),
+  useApiQueryAll: (path: string) => mockUseApiQueryAll(path),
 }));
 
 vi.mock('sonner', () => ({
@@ -24,8 +24,8 @@ describe('BackgroundForm', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUseApiQuery.mockReturnValue({
-      data: { data: FEATS },
+    mockUseApiQueryAll.mockReturnValue({
+      data: FEATS,
       isLoading: false,
       isError: false,
     });
@@ -42,10 +42,53 @@ describe('BackgroundForm', () => {
     );
   }
 
-  it('feeds the origin-feat picker from the credentialed feat list (SRD + own homebrew)', () => {
+  it('feeds the origin-feat picker every page of the credentialed feat list (SRD + own homebrew)', () => {
     renderForm();
 
-    expect(mockUseApiQuery).toHaveBeenCalledWith('/srd/feats?limit=100');
+    expect(mockUseApiQueryAll).toHaveBeenCalledWith('/srd/feats?limit=100');
+  });
+
+  it('keeps a prefilled origin feat pickable while the feat list is still loading', async () => {
+    // One keystroke during load must not invalidate a legitimate saved link
+    // (the fetched options are empty until the query resolves).
+    mockUseApiQueryAll.mockReturnValue({ data: undefined, isLoading: true, isError: false });
+    const initial = {
+      id: 'bg-1',
+      name: 'Gravedigger',
+      skillProficiencies: [],
+      toolProficiencies: [],
+      languages: 0,
+      personalityTraits: [],
+      ideals: [],
+      bonds: [],
+      flaws: [],
+      originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+      originFeatOption: 'Cleric',
+      source: 'Homebrew',
+      contentSource: 'homebrew' as const,
+      createdById: 'u1',
+    };
+    const user = userEvent.setup();
+    render(
+      <BackgroundForm
+        initial={initial}
+        submitting={false}
+        submitLabel="Save changes"
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />
+    );
+
+    // Re-type the linked feat's name while options are still in flight.
+    const picker = screen.getByLabelText(/^Origin feat$/);
+    fireEvent.change(picker, { target: { value: 'Magic Initiat' } });
+    fireEvent.change(picker, { target: { value: 'Magic Initiate' } });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ originFeatId: 'feat-mi', originFeatOption: 'Cleric' })
+    );
   });
 
   it('submits the picked feat id, not just its display name', async () => {

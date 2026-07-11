@@ -7,7 +7,7 @@ import type { SrdBackground } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
 const mockUseAuth = vi.fn();
-const mockUseApiQuery = vi.fn();
+const mockUseApiQueryAll = vi.fn();
 const mockPush = vi.fn();
 const mockBack = vi.fn();
 
@@ -29,10 +29,10 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'bg-hb' }),
 }));
 
-// The embedded BackgroundForm loads the feat picker options via useApiQuery.
+// The embedded BackgroundForm loads the feat picker options via useApiQueryAll.
 vi.mock('@/lib/query', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/query')>()),
-  useApiQuery: (path: string) => mockUseApiQuery(path),
+  useApiQueryAll: (path: string) => mockUseApiQueryAll(path),
   invalidateApiPath: vi.fn(),
 }));
 
@@ -68,8 +68,8 @@ describe('EditBackgroundPage', () => {
       isLoading: false,
       user: { userId: 'u1' },
     });
-    mockUseApiQuery.mockReturnValue({
-      data: { data: [{ id: 'feat-alert', name: 'Alert' }] },
+    mockUseApiQueryAll.mockReturnValue({
+      data: [{ id: 'feat-alert', name: 'Alert' }],
       isLoading: false,
       isError: false,
     });

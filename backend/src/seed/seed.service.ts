@@ -331,35 +331,21 @@ export class SeedService {
 
   private async seedBackgrounds(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
     if (!data.backgrounds.length) return;
-    // Resolve each background's canonical origin feat (VEG-429) and write the FK
-    // in the same write, so reseed both links new mappings and clears stale ones
-    // (a background that loses its `feat` writes originFeatId back to null).
-    //
-    // findFirst→update/create rather than upsert-by-name because `name` is no
-    // longer globally unique (homebrew backgrounds may reuse SRD names —
-    // VEG-431); scoping every read and write to contentSource='srd' guarantees
-    // a re-seed can never read, update, or delete a user's homebrew row. Kept
-    // bespoke (not seedSrdByName) because of the per-row origin-feat merge.
-    // Same duplicate-name guard seedSrdByName applies: without it a duplicate
-    // background name silently last-write-wins clobbers the earlier entry.
-    assertUniqueSeedNames('background', { background: data.backgrounds.map(b => b.name) });
+    // Resolve each background's canonical origin feat (VEG-429) and merge the
+    // FK into the row before the shared write pass, so reseed both links new
+    // mappings and clears stale ones (a background that loses its `feat`
+    // writes originFeatId back to null). The write itself rides seedSrdByName:
+    // duplicate-name guard + srd-partition-scoped findFirst→update/create, so
+    // a re-seed can never touch a homebrew background reusing an SRD name.
     const originFeatByBackground = await this.resolveBackgroundOriginFeats(tx);
-    for (const background of data.backgrounds) {
-      const origin = originFeatByBackground.get(background.name) ?? {
+    const rows = data.backgrounds.map(background => ({
+      ...background,
+      ...(originFeatByBackground.get(background.name) ?? {
         originFeatId: null,
         originFeatOption: null,
-      };
-      const row = { ...background, ...origin, contentSource: 'srd' as const };
-      const existing = await tx.background.findFirst({
-        where: { name: background.name, contentSource: 'srd' },
-        select: { id: true },
-      });
-      if (existing) {
-        await tx.background.update({ where: { id: existing.id }, data: row });
-      } else {
-        await tx.background.create({ data: row });
-      }
-    }
+      }),
+    }));
+    await this.seedSrdByName(srdDelegate(tx.background), rows, 'background');
     this.logger.log(`  Backgrounds: ${data.backgrounds.length} entries`);
   }
 

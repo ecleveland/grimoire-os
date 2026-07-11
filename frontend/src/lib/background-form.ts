@@ -1,5 +1,7 @@
 import type { SrdBackground } from '@/lib/types';
-import { optionalText } from '@/lib/form-helpers';
+import { optionalText, parseIntInRange, parseLines } from '@/lib/form-helpers';
+
+export { parseLines };
 
 /**
  * Form-state <-> API-payload mapping for the homebrew background form
@@ -52,14 +54,6 @@ export interface BackgroundPayload {
 
 export type BackgroundFormResult = { payload: BackgroundPayload } | { error: string };
 
-/** One entry per line; lines are trimmed and blank lines dropped. */
-export function parseLines(input: string): string[] {
-  return input
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean);
-}
-
 export function emptyBackgroundFormState(): BackgroundFormState {
   return {
     name: '',
@@ -100,9 +94,10 @@ export function formStateToPayload(s: BackgroundFormState): BackgroundFormResult
   const name = s.name.trim();
   if (!name) return { error: 'Name is required' };
 
-  const languagesText = s.languages.trim();
-  const languages = languagesText ? Number(languagesText) : 0;
-  if (!Number.isInteger(languages) || languages < 0) {
+  // parseIntInRange returns 0 for a blank input (Number('') === 0), which is
+  // exactly the blank-defaults-to-none behavior the field wants.
+  const languages = parseIntInRange(s.languages, 0);
+  if (languages === null) {
     return { error: 'Languages must be a whole number of 0 or more' };
   }
 

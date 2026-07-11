@@ -2,6 +2,11 @@ import { expect, type Page } from '@playwright/test';
 
 export const BACKEND = process.env.E2E_API_URL ?? 'http://localhost:3001';
 
+/** Escape regex metacharacters so a display name can be matched literally. */
+export function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // Register via page.request so the Set-Cookie authenticates later navigations.
 export async function registerAndLogin(
   page: Page,
