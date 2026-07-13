@@ -28,7 +28,11 @@ export function resolveBackground<T extends IdName>(
 ): T | undefined {
   if (selection.id) return backgrounds.find(b => b.id === selection.id);
   if (!selection.name) return undefined;
-  const matches = backgrounds.filter(b => b.name === selection.name);
+  // Collision test is case-insensitive to match backgroundOptions' labelling, so a
+  // case-variant duplicate ("Acolyte" vs "acolyte") the dropdown flags can't slip
+  // through the guard and silently resolve to one tier.
+  const key = selection.name.toLowerCase();
+  const matches = backgrounds.filter(b => b.name.toLowerCase() === key);
   return matches.length === 1 ? matches[0] : undefined;
 }
 

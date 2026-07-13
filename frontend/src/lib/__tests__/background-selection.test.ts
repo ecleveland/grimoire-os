@@ -47,6 +47,14 @@ describe('resolveBackground', () => {
     expect(resolveBackground(catalog, { id: '', name: 'Acolyte' })).toBeUndefined();
   });
 
+  it('treats a case-variant duplicate as a collision (consistent with the dropdown labels)', () => {
+    // backgroundOptions flags "Acolyte"/"acolyte" as colliding case-insensitively;
+    // the name-fallback must agree, or it would silently resolve one and re-introduce
+    // the wrong-tier grant the dropdown warned about.
+    const lower = makeBackground({ id: 'bg-lower', name: 'acolyte', contentSource: 'homebrew' });
+    expect(resolveBackground([srd, lower], { id: '', name: 'Acolyte' })).toBeUndefined();
+  });
+
   it('returns undefined for an unknown id even when the name matches', () => {
     expect(resolveBackground(catalog, { id: 'missing', name: 'Acolyte' })).toBeUndefined();
   });
