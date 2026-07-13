@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/query';
 import {
   SIZES,
@@ -9,6 +9,7 @@ import {
   type SrdRace,
 } from '@/lib/types';
 import SrdCombobox from '@/components/SrdCombobox';
+import { backgroundOptions, resolveBackground } from '@/lib/background-selection';
 import { useDraftGrants } from '../useCharacterDraft';
 import type { WizardStepProps } from './types';
 
@@ -45,8 +46,16 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
   const backgroundsQuery = useApiQuery<SrdBackground[]>('/srd/backgrounds');
   const races = racesQuery.data ?? [];
   const backgrounds = backgroundsQuery.data ?? [];
+  // Memoized so re-typing in the combobox doesn't rebuild the collision-count map
+  // on every keystroke.
+  const bgOptions = useMemo(() => backgroundOptions(backgrounds), [backgrounds]);
   const selectedRace = races.find(r => r.name === value.race);
-  const selectedBackground = backgrounds.find(b => b.name === value.background);
+  // Resolve by id, not name: a homebrew background may share an SRD name, and
+  // grants (skills/tools/origin feat) must follow the exact selection (VEG-473).
+  const selectedBackground = resolveBackground(backgrounds, {
+    id: value.backgroundId,
+    name: value.background,
+  });
 
   // Species reconciliation. Languages are a source slice; the species' traits are
   // single-source features reconciled by their `source` tag (drop every
@@ -135,8 +144,11 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
       <SrdCombobox
         label="Background"
         value={value.background}
-        onChange={v => onChange({ background: v })}
-        options={backgrounds.map(b => ({ id: b.id, name: b.name }))}
+        // Picking captures the id; typing clears it so a stale id can't linger and
+        // silently grant the wrong background (VEG-473).
+        onChange={v => onChange({ background: v, backgroundId: '' })}
+        onSelect={opt => onChange({ backgroundId: opt.id })}
+        options={bgOptions}
         loading={backgroundsQuery.isLoading}
         placeholder="Search backgrounds…"
         helperText="Grants skill and tool proficiencies."

@@ -125,6 +125,7 @@ export type {
   SrdSubclass,
   SrdSubrace,
   SrdBackground,
+  ContentSource,
   SrdFeat,
   SrdSpecies,
   SrdCondition,

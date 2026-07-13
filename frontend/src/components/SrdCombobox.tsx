@@ -5,6 +5,13 @@ import { useEffect, useId, useRef, useState } from 'react';
 export interface SrdComboboxOption {
   id: string;
   name: string;
+  /**
+   * Optional display text for the dropdown row, shown instead of `name` when set
+   * (e.g. "Acolyte (Homebrew)" to disambiguate duplicate names — VEG-473).
+   * Filtering, exact-match, and the committed value all stay keyed on `name`, so
+   * the label is purely cosmetic and never persisted.
+   */
+  label?: string;
 }
 
 interface SrdComboboxProps {
@@ -177,7 +184,7 @@ export default function SrdCombobox({
                     : 'text-gray-900 dark:text-gray-100'
                 }`}
               >
-                {option.name}
+                {option.label ?? option.name}
               </li>
             ))
           )}

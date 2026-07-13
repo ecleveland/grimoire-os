@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import type {
   AbilityScores,
@@ -35,6 +35,7 @@ import {
 } from '@/components/RecommendedAbilities';
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
+import { backgroundOptions, resolveBackground } from '@/lib/background-selection';
 import ToggleChips from '@/components/ToggleChips';
 import TokenListEditor from '@/components/TokenListEditor';
 import WeaponsEditor from '@/components/WeaponsEditor';
@@ -52,6 +53,14 @@ export interface CharacterFormValues {
   subclass: string;
   level: number;
   background: string;
+  /**
+   * In-memory-only resolution key for the selected SRD/homebrew background (VEG-473).
+   * Homebrew backgrounds may share an SRD name, so grants must resolve by id, not
+   * name. `''` when free-typed or loaded from a name-only character. Deliberately
+   * absent from `CharacterWriteFields`/the payload — the persisted `Character.background`
+   * column stays the display string, so this is never sent to the API.
+   */
+  backgroundId: string;
   alignment: string;
   size: Size;
   abilityScores: AbilityScores;
@@ -130,6 +139,7 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     subclass: '',
     level: 1,
     background: '',
+    backgroundId: '',
     alignment: '',
     size: 'Medium',
     abilityScores: { ...DEFAULT_ABILITY_SCORES },
@@ -171,6 +181,9 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     subclass: c.subclass ?? '',
     level: c.level,
     background: c.background ?? '',
+    // A loaded character carries only the display string (no id column), so start
+    // empty and resolve by name until the user re-picks (VEG-473).
+    backgroundId: '',
     alignment: c.alignment ?? '',
     // Server-side `size` is free-text; coerce to the canonical union, falling
     // back to Medium for absent/legacy values outside the set.
@@ -259,6 +272,8 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     class: v.class,
     subclass: v.subclass,
     level: v.level,
+    // `background` is the display string; `backgroundId` is intentionally omitted
+    // (client-only resolution key — the column stays a name, VEG-473).
     background: v.background,
     alignment: v.alignment,
     size: v.size,
@@ -599,6 +614,9 @@ export default function CharacterEditorForm({
   const classes = useApiQuery<SrdClass[]>('/srd/classes').data ?? [];
   const races = useApiQuery<SrdRace[]>('/srd/races').data ?? [];
   const backgrounds = useApiQuery<SrdBackground[]>('/srd/backgrounds').data ?? [];
+  // Memoized so typing in the background combobox doesn't rebuild the
+  // collision-count map on every keystroke.
+  const bgOptions = useMemo(() => backgroundOptions(backgrounds), [backgrounds]);
   const languageSuggestions = (useApiQuery<SrdLanguage[]>('/srd/languages').data ?? []).map(
     l => l.name
   );
@@ -608,7 +626,12 @@ export default function CharacterEditorForm({
   // just picked from the list or loaded an existing character.
   const selectedClass = classes.find(c => c.name === values.class);
   const selectedRace = races.find(r => r.name === values.race);
-  const selectedBackground = backgrounds.find(b => b.name === values.background);
+  // id-first so a duplicate-named homebrew background resolves unambiguously once
+  // picked; falls back to name for a loaded character that has no id (VEG-473).
+  const selectedBackground = resolveBackground(backgrounds, {
+    id: values.backgroundId,
+    name: values.background,
+  });
 
   // Recommended primary abilities for the selected class (VEG-447) — purely
   // informational; resolves to none for a free-typed/homebrew class.
@@ -694,8 +717,11 @@ export default function CharacterEditorForm({
           <SrdCombobox
             label="Background"
             value={values.background}
-            options={backgrounds}
-            onChange={v => set('background', v)}
+            options={bgOptions}
+            // Picking captures the id (unambiguous even for a duplicate name);
+            // any typed edit clears it so a stale id can't linger (VEG-473).
+            onChange={v => setValues(prev => ({ ...prev, background: v, backgroundId: '' }))}
+            onSelect={opt => set('backgroundId', opt.id)}
             helperText="Pick from the SRD or type a custom background."
           />
           <FormField
