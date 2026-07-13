@@ -16,6 +16,7 @@ describe('SrdHubPage', () => {
       Monsters: '/srd/monsters',
       Spells: '/srd/spells',
       Feats: '/srd/feats',
+      Backgrounds: '/srd/backgrounds',
       Items: '/srd/items',
       Classes: '/srd/classes',
       Races: '/srd/races',

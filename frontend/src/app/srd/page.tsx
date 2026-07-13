@@ -25,6 +25,12 @@ const categories = [
     description: 'Browse feats by category and prerequisite — including your homebrew.',
   },
   {
+    href: '/srd/backgrounds',
+    title: 'Backgrounds',
+    description:
+      'Browse backgrounds, their proficiencies, and origin feats — including your homebrew.',
+  },
+  {
     href: '/srd/items',
     title: 'Items',
     description: 'Search weapons, armor, adventuring gear, and more — including your homebrew.',
