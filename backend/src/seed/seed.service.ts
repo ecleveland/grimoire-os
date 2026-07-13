@@ -331,22 +331,21 @@ export class SeedService {
 
   private async seedBackgrounds(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
     if (!data.backgrounds.length) return;
-    // Resolve each background's canonical origin feat (VEG-429) and write the FK
-    // in the same upsert, so reseed both links new mappings and clears stale ones
-    // (a background that loses its `feat` upserts originFeatId back to null).
+    // Resolve each background's canonical origin feat (VEG-429) and merge the
+    // FK into the row before the shared write pass, so reseed both links new
+    // mappings and clears stale ones (a background that loses its `feat`
+    // writes originFeatId back to null). The write itself rides seedSrdByName:
+    // duplicate-name guard + srd-partition-scoped findFirst→update/create, so
+    // a re-seed can never touch a homebrew background reusing an SRD name.
     const originFeatByBackground = await this.resolveBackgroundOriginFeats(tx);
-    for (const background of data.backgrounds) {
-      const origin = originFeatByBackground.get(background.name) ?? {
+    const rows = data.backgrounds.map(background => ({
+      ...background,
+      ...(originFeatByBackground.get(background.name) ?? {
         originFeatId: null,
         originFeatOption: null,
-      };
-      const row = { ...background, ...origin };
-      await tx.background.upsert({
-        where: { name: background.name },
-        create: row,
-        update: row,
-      });
-    }
+      }),
+    }));
+    await this.seedSrdByName(srdDelegate(tx.background), rows, 'background');
     this.logger.log(`  Backgrounds: ${data.backgrounds.length} entries`);
   }
 
@@ -468,9 +467,12 @@ export class SeedService {
   }
 
   private async seedBackgroundFeatures(tx: Prisma.TransactionClient): Promise<void> {
+    // Pinned to the srd partition so a homebrew background reusing an SRD name
+    // can never receive the seed's child feature rows (VEG-431).
     const backgroundIdByName = await this.resolveIdsByName(
       nameLookupDelegate(tx.background),
-      srdBackgrounds.map(b => b.name)
+      srdBackgrounds.map(b => b.name),
+      'srd'
     );
     const backgroundFeatureRows: Prisma.BackgroundFeatureCreateManyInput[] = [];
     for (const bg of srdBackgrounds) {

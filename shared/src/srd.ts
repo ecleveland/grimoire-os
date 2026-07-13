@@ -76,7 +76,8 @@ export type ContentSource = 'srd' | 'shared' | 'homebrew';
 
 /**
  * Authorship/scope fields carried by every content type that can originate from
- * the SRD seed, an admin, or a user (monsters, spells, feats, magic items).
+ * the SRD seed, an admin, or a user (monsters, spells, feats, magic items,
+ * backgrounds).
  *
  * - SRD rows have `contentSource: 'srd'` and a null `createdById`.
  * - Shared rows have `contentSource: 'shared'` and `createdById` set to the
@@ -256,7 +257,7 @@ export interface SrdReference {
   name: string;
 }
 
-export interface SrdBackground {
+export interface SrdBackground extends ContentOwnership {
   id: string;
   name: string;
   description?: string;

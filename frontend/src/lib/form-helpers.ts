@@ -10,6 +10,14 @@ export function optionalText(input: string): string | null {
   return input.trim() || null;
 }
 
+/** One entry per line; lines are trimmed and blank lines dropped. */
+export function parseLines(input: string): string[] {
+  return input
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 /** "cold, fire" -> ['cold', 'fire']; blank entries dropped. */
 export function parseCommaList(input: string): string[] {
   return input

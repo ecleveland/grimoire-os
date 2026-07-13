@@ -1,5 +1,5 @@
 import type { SrdFeat } from '@/lib/types';
-import { optionalText } from '@/lib/form-helpers';
+import { optionalText, parseLines } from '@/lib/form-helpers';
 
 /**
  * Form-state <-> API-payload mapping for the homebrew feat form (VEG-295).
@@ -35,13 +35,8 @@ export interface FeatPayload {
 
 export type FeatFormResult = { payload: FeatPayload } | { error: string };
 
-/** One benefit per line; lines are trimmed and blank lines dropped. */
-export function parseBenefitLines(input: string): string[] {
-  return input
-    .split('\n')
-    .map(s => s.trim())
-    .filter(Boolean);
-}
+/** One benefit per line — the shared line splitter under its historical name. */
+export const parseBenefitLines = parseLines;
 
 export function emptyFeatFormState(): FeatFormState {
   return {

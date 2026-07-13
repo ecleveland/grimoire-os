@@ -66,9 +66,11 @@ describe('SeedService', () => {
     prisma.srdClass.createMany.mockResolvedValue({ count: 0 });
     prisma.race.createMany.mockResolvedValue({ count: 0 });
     prisma.background.createMany.mockResolvedValue({ count: 0 });
-    prisma.background.upsert.mockImplementation((args: any) =>
-      Promise.resolve({ id: `bg-${args.where.name}`, name: args.where.name })
+    prisma.background.findFirst.mockResolvedValue(null);
+    prisma.background.create.mockImplementation((args: any) =>
+      Promise.resolve({ id: `bg-${args.data.name}`, name: args.data.name })
     );
+    prisma.background.update.mockResolvedValue({});
     prisma.condition.createMany.mockResolvedValue({ count: 0 });
     prisma.skill.createMany.mockResolvedValue({ count: 0 });
     prisma.language.createMany.mockResolvedValue({ count: 0 });
@@ -604,12 +606,20 @@ describe('SeedService', () => {
   it('does not write feature field on backgrounds anymore', async () => {
     await service.seed();
 
-    expect(prisma.background.upsert).toHaveBeenCalled();
-    for (const call of prisma.background.upsert.mock.calls) {
-      const args = call[0];
-      expect(args.create).not.toHaveProperty('feature');
-      expect(args.update).not.toHaveProperty('feature');
+    expect(prisma.background.create).toHaveBeenCalled();
+    for (const call of prisma.background.create.mock.calls) {
+      expect(call[0].data).not.toHaveProperty('feature');
     }
+  });
+
+  it('resolves background-feature parent ids from the SRD partition (contentSource=srd)', async () => {
+    await service.seed();
+
+    // A homebrew background reusing an SRD name must never receive the seed's
+    // child feature rows — the parent lookup is pinned to the srd partition.
+    expect(prisma.background.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ contentSource: 'srd' }) })
+    );
   });
 
   // ── Background origin feats (VEG-429) ──────────────────
@@ -622,24 +632,42 @@ describe('SeedService', () => {
     );
   });
 
-  it('writes the origin-feat FK into the same background upsert (Acolyte→Magic Initiate/Cleric, Criminal→Alert)', async () => {
+  it('writes the origin-feat FK into the background create (Acolyte→Magic Initiate/Cleric, Criminal→Alert)', async () => {
     await service.seed();
 
-    const upsertByName = new Map(
-      prisma.background.upsert.mock.calls.map((c: any) => [c[0].where.name, c[0]])
+    const createByName = new Map(
+      prisma.background.create.mock.calls.map((c: any) => [c[0].data.name, c[0].data])
     );
 
-    // The link is written to both create and update so reseed is idempotent.
-    for (const branch of ['create', 'update'] as const) {
-      expect(upsertByName.get('Acolyte')[branch]).toMatchObject({
-        originFeatId: 'feat-Magic Initiate',
-        originFeatOption: 'Cleric',
-      });
-      expect(upsertByName.get('Criminal')[branch]).toMatchObject({
-        originFeatId: 'feat-Alert',
-        originFeatOption: null,
-      });
-    }
+    expect(createByName.get('Acolyte')).toMatchObject({
+      originFeatId: 'feat-Magic Initiate',
+      originFeatOption: 'Cleric',
+    });
+    expect(createByName.get('Criminal')).toMatchObject({
+      originFeatId: 'feat-Alert',
+      originFeatOption: null,
+    });
+  });
+
+  it('updates an existing SRD background in place, keeping the origin-feat link (reseed idempotency)', async () => {
+    prisma.background.findFirst.mockImplementation((args: any) =>
+      Promise.resolve({ id: `bg-${args.where.name}` })
+    );
+
+    await service.seed();
+
+    expect(prisma.background.create).not.toHaveBeenCalled();
+    const updateByName = new Map(
+      prisma.background.update.mock.calls.map((c: any) => [c[0].data.name, c[0]])
+    );
+    const acolyte = updateByName.get('Acolyte');
+    // Updates target the resolved SRD row id, never a bare name (which could
+    // collide with a user's homebrew background of the same name).
+    expect(acolyte.where).toEqual({ id: 'bg-Acolyte' });
+    expect(acolyte.data).toMatchObject({
+      originFeatId: 'feat-Magic Initiate',
+      originFeatOption: 'Cleric',
+    });
   });
 
   it('aborts the seed when a background origin feat does not resolve', async () => {
@@ -753,16 +781,35 @@ describe('SeedService', () => {
     );
   });
 
-  it('upserts backgrounds by name so reseed overwrites personality arrays', async () => {
+  it('guards background seed data against duplicate names (would otherwise silently clobber)', async () => {
+    const guards = jest.requireActual<typeof import('./seed-guards')>('./seed-guards');
+    const spy = jest.spyOn(guards, 'assertUniqueSeedNames');
+
     await service.seed();
 
-    expect(prisma.background.upsert).toHaveBeenCalled();
-    for (const call of prisma.background.upsert.mock.calls) {
-      const args = call[0];
-      expect(args.where).toHaveProperty('name');
-      expect(args.create).toEqual(args.update);
-      expect(Array.isArray(args.create.personalityTraits)).toBe(true);
-      expect(args.create.personalityTraits.length).toBeGreaterThanOrEqual(6);
+    expect(spy).toHaveBeenCalledWith(
+      'background',
+      expect.objectContaining({ background: srdBackgrounds.map(b => b.name) })
+    );
+    spy.mockRestore();
+  });
+
+  it('seeds backgrounds scoped to the srd partition so homebrew rows are never touched', async () => {
+    await service.seed();
+
+    expect(prisma.background.findFirst).toHaveBeenCalled();
+    for (const call of prisma.background.findFirst.mock.calls) {
+      expect(call[0].where).toMatchObject({
+        name: expect.any(String),
+        contentSource: 'srd',
+      });
+    }
+    expect(prisma.background.create).toHaveBeenCalled();
+    for (const call of prisma.background.create.mock.calls) {
+      const data = call[0].data;
+      expect(data.contentSource).toBe('srd');
+      expect(Array.isArray(data.personalityTraits)).toBe(true);
+      expect(data.personalityTraits.length).toBeGreaterThanOrEqual(6);
     }
   });
 

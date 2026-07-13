@@ -32,7 +32,11 @@ export class NpcRefDataLoader {
       gameRules,
     ] = await Promise.all([
       this.prisma.race.findMany({ select: { name: true, size: true } }),
+      // Pinned to the global catalog (VEG-431): backgrounds are homebrew-capable
+      // now, so an owner-scoped row here would leak one user's private
+      // background name and personality tables into every user's generated NPCs.
       this.prisma.background.findMany({
+        where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
         select: {
           name: true,
           personalityTraits: true,

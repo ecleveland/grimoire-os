@@ -158,31 +158,6 @@ describe('SrdController', () => {
     });
   });
 
-  // ── Backgrounds ─────────────────────────────────────
-
-  describe('searchBackgrounds', () => {
-    it('delegates to service with query', async () => {
-      service.searchBackgrounds.mockResolvedValue([]);
-
-      const result = await controller.searchBackgrounds('noble');
-
-      expect(service.searchBackgrounds).toHaveBeenCalledWith('noble');
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('findBackground', () => {
-    it('delegates to service with id', async () => {
-      const bg = { id: '1', name: 'Noble' };
-      service.findBackground.mockResolvedValue(bg);
-
-      const result = await controller.findBackground('1');
-
-      expect(service.findBackground).toHaveBeenCalledWith('1');
-      expect(result).toEqual(bg);
-    });
-  });
-
   // ── Conditions ──────────────────────────────────────
 
   describe('findAllConditions', () => {

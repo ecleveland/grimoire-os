@@ -170,7 +170,7 @@ export class PrintableCardsService {
       case 'species':
         return this.hydrateRaces(ids, type);
       case 'background':
-        return this.hydrateBackgrounds(ids);
+        return this.hydrateBackgrounds(ids, userId);
       case 'feature':
         return this.hydrateFeatures(ids);
     }
@@ -297,9 +297,9 @@ export class PrintableCardsService {
     }));
   }
 
-  private async hydrateBackgrounds(ids: string[]): Promise<PrintableCard[]> {
+  private async hydrateBackgrounds(ids: string[], userId?: string): Promise<PrintableCard[]> {
     const rows = await this.prisma.background.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, ...this.contentAccess.visibleTo(userId) },
       select: {
         id: true,
         name: true,

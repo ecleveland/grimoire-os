@@ -509,9 +509,10 @@ describe('PrintableCardsService', () => {
         { type: 'monster', ids: ['mon-1'] },
         { type: 'spell', ids: ['sp-1'] },
         { type: 'item', ids: ['it-1'] },
+        { type: 'background', ids: ['bg-1'] },
       ]);
 
-      for (const model of [prisma.monster, prisma.spell, prisma.item]) {
+      for (const model of [prisma.monster, prisma.spell, prisma.item, prisma.background]) {
         expect(model.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
             where: expect.objectContaining({ contentSource: { in: ['srd', 'shared'] } }),
@@ -526,11 +527,12 @@ describe('PrintableCardsService', () => {
           { type: 'monster', ids: ['mon-1'] },
           { type: 'spell', ids: ['sp-1'] },
           { type: 'item', ids: ['it-1'] },
+          { type: 'background', ids: ['bg-1'] },
         ],
         'u1'
       );
 
-      for (const model of [prisma.monster, prisma.spell, prisma.item]) {
+      for (const model of [prisma.monster, prisma.spell, prisma.item, prisma.background]) {
         expect(model.findMany).toHaveBeenCalledWith(
           expect.objectContaining({
             where: expect.objectContaining({

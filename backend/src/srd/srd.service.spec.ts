@@ -747,16 +747,50 @@ describe('SrdService', () => {
   // ── Backgrounds ─────────────────────────────────────
 
   describe('searchBackgrounds', () => {
-    it('passes empty where when no query', async () => {
+    it('scopes anonymous callers to the global catalog (VEG-431)', async () => {
       prisma.background.findMany.mockResolvedValue([]);
 
       await service.searchBackgrounds();
 
       expect(prisma.background.findMany).toHaveBeenCalledWith({
-        where: {},
+        where: { ...GLOBAL_WHERE },
         orderBy: { name: 'asc' },
         include: { originFeat: { select: { id: true, name: true } } },
       });
+    });
+
+    it("includes the caller's own homebrew when a userId is passed", async () => {
+      prisma.background.findMany.mockResolvedValue([]);
+
+      await service.searchBackgrounds(undefined, 'u1');
+
+      expect(prisma.background.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        })
+      );
+    });
+
+    it('AND-joins visibility with the free-text query so neither clobbers the other', async () => {
+      prisma.background.findMany.mockResolvedValue([]);
+
+      await service.searchBackgrounds('grave', 'u1');
+
+      expect(prisma.background.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+              {
+                OR: [
+                  { name: { contains: 'grave', mode: 'insensitive' } },
+                  { description: { contains: 'grave', mode: 'insensitive' } },
+                ],
+              },
+            ],
+          },
+        })
+      );
     });
 
     it('surfaces the structured origin-feat reference (VEG-429)', async () => {
@@ -1120,7 +1154,7 @@ describe('SrdService', () => {
   });
 
   describe('findBackground', () => {
-    it('returns background by id with features and origin feat included', async () => {
+    it('returns background by id with features and origin feat included, scoped to the global catalog for anonymous callers', async () => {
       const bg = {
         id: '1',
         name: 'Acolyte',
@@ -1129,18 +1163,38 @@ describe('SrdService', () => {
         originFeatOption: 'Cleric',
         originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
       };
-      prisma.background.findUnique.mockResolvedValue(bg);
+      prisma.background.findFirst.mockResolvedValue(bg);
 
       const result = await service.findBackground('1');
 
-      expect(prisma.background.findUnique).toHaveBeenCalledWith({
-        where: { id: '1' },
+      expect(prisma.background.findFirst).toHaveBeenCalledWith({
+        where: { id: '1', ...GLOBAL_WHERE },
         include: {
           features: { orderBy: { name: 'asc' } },
           originFeat: { select: { id: true, name: true } },
         },
       });
       expect(result).toEqual(bg);
+    });
+
+    it("resolves the caller's own homebrew when a userId is passed (VEG-431)", async () => {
+      const bg = { id: 'bg1', name: 'Gravedigger', contentSource: 'homebrew' };
+      prisma.background.findFirst.mockResolvedValue(bg);
+
+      const result = await service.findBackground('bg1', 'u1');
+
+      expect(prisma.background.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'bg1', OR: [GLOBAL_WHERE, { createdById: 'u1' }] },
+        })
+      );
+      expect(result).toEqual(bg);
+    });
+
+    it("returns null for another user's homebrew — invisible rows must not leak", async () => {
+      prisma.background.findFirst.mockResolvedValue(null);
+
+      await expect(service.findBackground('bg-foreign', 'u2')).resolves.toBeNull();
     });
   });
 

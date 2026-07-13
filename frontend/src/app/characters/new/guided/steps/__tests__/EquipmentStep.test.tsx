@@ -73,6 +73,7 @@ const ACOLYTE: SrdBackground = {
   id: 'acolyte',
   name: 'Acolyte',
   skillProficiencies: ['Insight', 'Religion'],
+  contentSource: 'srd',
   toolProficiencies: [],
   languages: 2,
   equipment: 'Choose A or B: (A) Holy Symbol, Book (prayers), 8 GP; or (B) 50 GP',

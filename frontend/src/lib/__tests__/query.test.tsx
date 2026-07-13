@@ -2,7 +2,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { useApiQuery, useApiMutation, apiQueryKey, invalidateApiPath } from '../query';
+import {
+  useApiQuery,
+  useApiQueryAll,
+  useApiMutation,
+  apiQueryKey,
+  invalidateApiPath,
+} from '../query';
+
+function page<T>(data: T[], pageNum: number, lastPage: number) {
+  return { data, total: 0, page: pageNum, lastPage };
+}
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -117,6 +127,54 @@ describe('useApiQuery', () => {
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mockToastError).not.toHaveBeenCalled();
+  });
+});
+
+describe('useApiQueryAll', () => {
+  it('fetches every page and returns the flattened rows in order', async () => {
+    mockApiFetch
+      .mockResolvedValueOnce(page([{ id: 'a' }, { id: 'b' }], 1, 3))
+      .mockResolvedValueOnce(page([{ id: 'c' }], 2, 3))
+      .mockResolvedValueOnce(page([{ id: 'd' }], 3, 3));
+
+    const { result } = renderHook(() => useApiQueryAll<{ id: string }>('/srd/feats?limit=100'), {
+      wrapper: wrapperFor(makeClient()),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]);
+    expect(mockApiFetch).toHaveBeenCalledWith('/srd/feats?limit=100&page=1');
+    expect(mockApiFetch).toHaveBeenCalledWith('/srd/feats?limit=100&page=2');
+    expect(mockApiFetch).toHaveBeenCalledWith('/srd/feats?limit=100&page=3');
+  });
+
+  it('makes no further requests when the first page is the last', async () => {
+    mockApiFetch.mockResolvedValueOnce(page([{ id: 'a' }], 1, 1));
+
+    const { result } = renderHook(() => useApiQueryAll<{ id: string }>('/srd/feats?limit=100'), {
+      wrapper: wrapperFor(makeClient()),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual([{ id: 'a' }]);
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a fetch failure and toasts once', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+
+    const { result } = renderHook(
+      () =>
+        useApiQueryAll('/srd/feats?limit=100', {
+          errorToast: { message: 'Failed to load feats', id: 'load-origin-feats' },
+        }),
+      { wrapper: wrapperFor(makeClient()) }
+    );
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(mockToastError).toHaveBeenCalledWith('Failed to load feats', {
+      id: 'load-origin-feats',
+    });
   });
 });
 

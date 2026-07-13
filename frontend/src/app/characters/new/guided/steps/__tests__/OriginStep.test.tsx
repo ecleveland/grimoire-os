@@ -46,6 +46,7 @@ function makeBackground(over: Partial<SrdBackground> = {}): SrdBackground {
     id: 'acolyte',
     name: 'Acolyte',
     skillProficiencies: ['Insight', 'Religion'],
+    contentSource: 'srd',
     toolProficiencies: ["Calligrapher's Supplies"],
     languages: 0,
     originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
@@ -209,6 +210,29 @@ describe('OriginStep — background + species', () => {
     // And it's surfaced in the grants card.
     const card = screen.getByRole('group', { name: /background grants/i });
     expect(card).toHaveTextContent('Magic Initiate (Cleric)');
+  });
+
+  it("offers the caller's homebrew background and grants its origin feat (VEG-431)", async () => {
+    // The endpoint applies per-user visibility, so an authenticated caller's
+    // homebrew rides along in the same array — no picker code special-cases it.
+    const user = userEvent.setup();
+    const homebrew = makeBackground({
+      id: 'bg-hb',
+      name: 'Gravedigger',
+      contentSource: 'homebrew',
+      createdById: 'u1',
+      skillProficiencies: ['Insight'],
+      originFeat: { id: 'feat-hb', name: 'Corpse Whisperer' },
+      originFeatOption: null,
+    });
+    renderStep([], [makeBackground(), homebrew]);
+
+    await pickBackground(user, 'Gravedigger');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('feats')).toHaveTextContent('Corpse Whisperer||Gravedigger')
+    );
+    expect(screen.getByTestId('skills')).toHaveTextContent('Insight');
   });
 
   it('replaces the previous background feat when the background is switched', async () => {

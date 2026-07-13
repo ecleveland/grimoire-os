@@ -53,7 +53,17 @@ export class HomebrewFeatsService {
   async remove(id: string, actor: ContentActor): Promise<void> {
     const row = await this.findWritableRow(id, actor);
     try {
-      await this.prisma.feat.delete({ where: { id } });
+      // The Background→originFeat FK is SET NULL, which nulls only the id on
+      // delete; the sibling originFeatOption would be left orphaned (an option
+      // is meaningless without a feat — VEG-431). Clear it in the same
+      // transaction so a failed delete can't half-update referencing rows.
+      await this.prisma.$transaction(async tx => {
+        await tx.background.updateMany({
+          where: { originFeatId: id },
+          data: { originFeatOption: null },
+        });
+        await tx.feat.delete({ where: { id } });
+      });
     } catch (err) {
       mapWriteError(err, row.contentSource, 'feat');
     }

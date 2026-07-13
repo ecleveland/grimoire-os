@@ -500,14 +500,25 @@ export class SrdService {
 
   // ── Backgrounds ─────────────────────────────────────
 
-  async searchBackgrounds(query?: string) {
-    const where: Record<string, unknown> = {};
-    if (query) {
-      where.OR = [
-        { name: { contains: query, mode: 'insensitive' } },
-        { description: { contains: query, mode: 'insensitive' } },
-      ];
-    }
+  // Backgrounds are tier-scoped like feats (VEG-431): anonymous callers see the
+  // global catalog, an authenticated caller's own homebrew rides along. The
+  // response deliberately stays a bare (unpaginated) array — the catalog is a
+  // small closed set and the builder/editor pickers are typed against it.
+  async searchBackgrounds(query?: string, userId?: string) {
+    const visible = this.contentAccess.visibleTo(userId);
+    const where: Record<string, unknown> = query
+      ? {
+          AND: [
+            { ...visible },
+            {
+              OR: [
+                { name: { contains: query, mode: 'insensitive' } },
+                { description: { contains: query, mode: 'insensitive' } },
+              ],
+            },
+          ],
+        }
+      : { ...visible };
     return this.prisma.background.findMany({
       where,
       orderBy: { name: 'asc' },
@@ -515,9 +526,11 @@ export class SrdService {
     });
   }
 
-  async findBackground(id: string) {
-    return this.prisma.background.findUnique({
-      where: { id },
+  async findBackground(id: string, userId?: string) {
+    // findFirst (not findUnique) so an out-of-visibility id resolves to null —
+    // another user's homebrew background must not leak its existence.
+    return this.prisma.background.findFirst({
+      where: { id, ...this.contentAccess.visibleTo(userId) },
       include: {
         features: { orderBy: NAME_ORDER },
         originFeat: { select: { id: true, name: true } },
