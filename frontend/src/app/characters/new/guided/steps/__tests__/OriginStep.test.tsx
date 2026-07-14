@@ -86,6 +86,8 @@ function Harness({ seed }: { seed?: Seed }) {
     <DraftProvider api={api}>
       <OriginStep value={api.draft} onChange={api.onChange} />
       <div data-testid="race">{api.draft.race}</div>
+      <div data-testid="background">{api.draft.background}</div>
+      <div data-testid="backgroundId">{api.draft.backgroundId}</div>
       <div data-testid="speed">{api.draft.speed}</div>
       <div data-testid="size">{api.draft.size}</div>
       <div data-testid="languages">{api.draft.languages.join(',')}</div>
@@ -265,6 +267,81 @@ describe('OriginStep — background + species', () => {
     await waitFor(() => expect(screen.getByTestId('skills')).toHaveTextContent('Insight'));
     expect(screen.getByTestId('feats')).toBeEmptyDOMElement();
     expect(screen.getByRole('group', { name: /background grants/i })).toHaveTextContent('Feat—');
+  });
+
+  it('resolves a duplicate-named background by id, granting the picked one (VEG-473)', async () => {
+    const user = userEvent.setup();
+    // A homebrew "Acolyte" shares the SRD name but grants different skills/feat.
+    // It sorts first in the array — the exact ordering that made name-based
+    // resolution grant the wrong one.
+    const homebrew = makeBackground({
+      id: 'bg-hb',
+      name: 'Acolyte',
+      contentSource: 'homebrew',
+      createdById: 'u1',
+      skillProficiencies: ['Deception'],
+      toolProficiencies: ["Thieves' Tools"],
+      originFeat: { id: 'feat-hb', name: 'Corpse Whisperer' },
+      originFeatOption: null,
+    });
+    renderStep([], [homebrew, makeBackground()]);
+
+    // Both rows carry a disambiguating source suffix; pick the homebrew one.
+    await user.type(screen.getByRole('combobox', { name: /background/i }), 'Acolyte');
+    await user.click(await screen.findByRole('option', { name: 'Acolyte (Homebrew)' }));
+
+    // The homebrew's exclusive grants apply — not the SRD Acolyte's.
+    await waitFor(() => expect(screen.getByTestId('skills')).toHaveTextContent('Deception'));
+    expect(screen.getByTestId('skills')).not.toHaveTextContent('Religion');
+    expect(screen.getByTestId('profs')).toHaveTextContent("Thieves' Tools");
+    expect(screen.getByTestId('feats')).toHaveTextContent('Corpse Whisperer||Acolyte');
+    // The committed display value is the bare name; the id disambiguates.
+    expect(screen.getByTestId('background')).toHaveTextContent('Acolyte');
+    expect(screen.getByTestId('backgroundId')).toHaveTextContent('bg-hb');
+  });
+
+  it('grants nothing (not the wrong duplicate) when a picked name is edited back into a collision (VEG-473)', async () => {
+    const user = userEvent.setup();
+    const homebrew = makeBackground({
+      id: 'bg-hb',
+      name: 'Acolyte',
+      contentSource: 'homebrew',
+      createdById: 'u1',
+      skillProficiencies: ['Deception'],
+      originFeat: null,
+      originFeatOption: null,
+    });
+    renderStep([], [homebrew, makeBackground()]);
+
+    await user.type(screen.getByRole('combobox', { name: /background/i }), 'Acolyte');
+    await user.click(await screen.findByRole('option', { name: 'Acolyte (Homebrew)' }));
+    await waitFor(() => expect(screen.getByTestId('skills')).toHaveTextContent('Deception'));
+
+    // Re-type the name so it once again collides with the SRD Acolyte but has no
+    // id. The fallback must NOT silently swap to the SRD Acolyte's grants — it
+    // resolves to nothing, so the grant is cleared rather than made wrong.
+    await user.clear(screen.getByRole('combobox', { name: /background/i }));
+    await user.type(screen.getByRole('combobox', { name: /background/i }), 'Acolyte');
+    await waitFor(() => expect(screen.getByTestId('backgroundId')).toBeEmptyDOMElement());
+    expect(screen.getByTestId('skills')).not.toHaveTextContent('Deception');
+    expect(screen.getByTestId('skills')).not.toHaveTextContent('Religion');
+  });
+
+  it('clears the captured background id (and grants) when the name is edited (VEG-473)', async () => {
+    const user = userEvent.setup();
+    renderStep([], [makeBackground()], { grants: { class: { skills: ['Acrobatics'] } } });
+
+    await pickBackground(user, 'Acolyte');
+    await waitFor(() => expect(screen.getByTestId('backgroundId')).toHaveTextContent('acolyte'));
+    expect(screen.getByTestId('skills')).toHaveTextContent('Religion');
+
+    // Editing the committed name into a custom value drops the id so a stale id
+    // can't keep granting the old background.
+    await user.type(screen.getByRole('combobox', { name: /background/i }), ' the Bold');
+    await waitFor(() => expect(screen.getByTestId('backgroundId')).toBeEmptyDOMElement());
+    expect(screen.getByTestId('skills')).not.toHaveTextContent('Religion');
+    // The class skill pick survives.
+    expect(screen.getByTestId('skills')).toHaveTextContent('Acrobatics');
   });
 
   it('does not duplicate species traits when re-entered with a race already set', async () => {

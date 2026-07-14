@@ -308,6 +308,14 @@ describe('pure helpers', () => {
     ]);
   });
 
+  it('never sends backgroundId in the payload (client-only resolution key, VEG-473)', () => {
+    const v = characterToFormValues(makeCharacter({ background: 'Sage' }));
+    v.backgroundId = 'bg-sage'; // even a client-set id must not leak into the write body
+    const payload = characterFormPayload(v);
+    expect('backgroundId' in payload).toBe(false);
+    expect(payload.background).toBe('Sage');
+  });
+
   it('characterToFormValues seeds inventory/currency, defaulting an absent purse', () => {
     const withCoin = characterToFormValues(
       makeCharacter({
@@ -475,6 +483,40 @@ describe('CharacterEditorForm autofill', () => {
     const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
     expect(submitted.skills).toEqual(['Arcana', 'History']);
     expect(submitted.proficiencies).toEqual(["Calligrapher's Supplies"]);
+  });
+
+  it('resolves a duplicate-named background by id when picked from the list (VEG-473)', async () => {
+    // A homebrew "Sage" shares the SRD name but grants different skills. Both rows
+    // carry a source suffix so they're distinguishable; picking captures the id.
+    const homebrewSage: SrdBackground = {
+      ...srdBackgrounds[0],
+      id: 'bg-sage-hb',
+      contentSource: 'homebrew',
+      skillProficiencies: ['Deception', 'Stealth'],
+      toolProficiencies: ["Thieves' Tools"],
+    };
+    srdBackgrounds.push(homebrewSage);
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.name = 'Hero';
+      const { onSubmit } = renderForm({ initialValues: initial });
+      const user = userEvent.setup();
+
+      await user.click(screen.getByLabelText(/^background/i));
+      await user.click(await screen.findByRole('option', { name: 'Sage (Homebrew)' }));
+      // The committed value stays the bare name; the id disambiguates behind it.
+      expect((screen.getByLabelText(/^background/i) as HTMLInputElement).value).toBe('Sage');
+
+      // The Apply button folds the HOMEBREW Sage's grants (resolved by id), not the SRD one's.
+      await user.click(await screen.findByRole('button', { name: /apply sage traits/i }));
+      await user.click(screen.getByRole('button', { name: /create character/i }));
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.skills).toEqual(['Deception', 'Stealth']);
+      expect(submitted.proficiencies).toEqual(["Thieves' Tools"]);
+      expect(submitted.background).toBe('Sage');
+    } finally {
+      srdBackgrounds.pop();
+    }
   });
 
   it('re-applying the same grants is a no-op (idempotent + "already applied" toast)', async () => {

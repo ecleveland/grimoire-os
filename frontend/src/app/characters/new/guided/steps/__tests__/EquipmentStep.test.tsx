@@ -214,6 +214,36 @@ describe('EquipmentStep — starting equipment vs gold', () => {
     expect(inventory()).toBe("Explorer's pack:1");
   });
 
+  it('resolves a duplicate-named background by id, using the picked equipment (VEG-473)', async () => {
+    // A homebrew "Acolyte" shares the SRD name but grants different equipment, and
+    // sorts first — the ordering that made name-based resolution pick the wrong one.
+    const homebrew: SrdBackground = {
+      ...ACOLYTE,
+      id: 'bg-hb',
+      contentSource: 'homebrew',
+      equipment: 'Choose A or B: (A) Grave Shovel, 3 GP; or (B) 100 GP',
+    };
+    routeApiFetch([FIGHTER], [homebrew, ACOLYTE]);
+    // The Origin step wrote the homebrew id into the draft; equipment must follow it.
+    renderStep({ class: 'Fighter', background: 'Acolyte', backgroundId: 'bg-hb' });
+
+    await waitFor(() => expect(inventory()).toBe("Explorer's pack:1,Grave Shovel:1"));
+    expect(gp()).toBe('3');
+    // The SRD Acolyte's equipment (Holy Symbol / 8 gp) is not what resolved.
+    expect(inventory()).not.toContain('Holy Symbol');
+  });
+
+  it('falls back to name resolution when no background id is set (VEG-473)', async () => {
+    // A character loaded from the API carries the name but no id; a single match
+    // still resolves so equipment keeps working.
+    routeApiFetch([FIGHTER], [ACOLYTE]);
+    renderStep({ class: 'Fighter', background: 'Acolyte', backgroundId: '' });
+    await waitFor(() =>
+      expect(inventory()).toBe("Explorer's pack:1,Holy Symbol:1,Book (prayers):1")
+    );
+    expect(gp()).toBe('8');
+  });
+
   it('shows the background equipment verbatim when it is not a parseable A/B choice', async () => {
     const freeform: SrdBackground = {
       ...ACOLYTE,

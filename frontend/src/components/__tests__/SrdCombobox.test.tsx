@@ -139,6 +139,46 @@ describe('SrdCombobox', () => {
     expect(screen.getByRole('option', { name: 'Fighter' })).toBeInTheDocument();
   });
 
+  it('renders an option label but commits the bare name on pick (VEG-473)', async () => {
+    const onChange = vi.fn();
+    const onSelect = vi.fn();
+    const labeled: SrdComboboxOption[] = [
+      { id: 'srd', name: 'Acolyte', label: 'Acolyte (SRD)' },
+      { id: 'hb', name: 'Acolyte', label: 'Acolyte (Homebrew)' },
+    ];
+    render(
+      <SrdCombobox
+        label="Background"
+        value=""
+        options={labeled}
+        onChange={onChange}
+        onSelect={onSelect}
+      />
+    );
+    await userEvent.click(screen.getByLabelText('Background'));
+    // The decorated labels are what the user sees in the list…
+    expect(screen.getByRole('option', { name: 'Acolyte (Homebrew)' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('option', { name: 'Acolyte (Homebrew)' }));
+    // …but the committed value is the bare name, and onSelect carries the id.
+    expect(onChange).toHaveBeenLastCalledWith('Acolyte');
+    expect(onSelect).toHaveBeenCalledWith({
+      id: 'hb',
+      name: 'Acolyte',
+      label: 'Acolyte (Homebrew)',
+    });
+  });
+
+  it('filters labeled options by their bare name, not the label', async () => {
+    const labeled: SrdComboboxOption[] = [
+      { id: 'srd', name: 'Acolyte', label: 'Acolyte (SRD)' },
+      { id: 'x', name: 'Sailor' },
+    ];
+    render(<SrdCombobox label="Background" value="acol" options={labeled} onChange={vi.fn()} />);
+    await userEvent.click(screen.getByLabelText('Background'));
+    expect(screen.getByRole('option', { name: 'Acolyte (SRD)' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Sailor' })).not.toBeInTheDocument();
+  });
+
   it('closes when clicking outside', async () => {
     render(
       <div>
