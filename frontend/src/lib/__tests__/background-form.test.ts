@@ -138,6 +138,24 @@ describe('formStateToPayload', () => {
     });
   });
 
+  it('trims, drops blanks, and removes exact-duplicate proficiencies from legacy data (VEG-474)', () => {
+    // The pickers keep the live value clean, but a background saved in the
+    // free-text era can carry blanks/dupes; re-saving must not write them back.
+    const result = formStateToPayload(
+      makeState({
+        skillProficiencies: ['Insight', '', ' Insight ', 'Religion'],
+        toolProficiencies: ["Mason's Tools", "Mason's Tools"],
+      })
+    );
+
+    expect(result).toEqual({
+      payload: expect.objectContaining({
+        skillProficiencies: ['Insight', 'Religion'],
+        toolProficiencies: ["Mason's Tools"],
+      }),
+    });
+  });
+
   it('never sends an option without a feat — clearing the feat clears the option', () => {
     const result = formStateToPayload(
       makeState({ originFeatName: '', originFeatId: null, originFeatOption: 'Cleric' })

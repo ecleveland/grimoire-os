@@ -123,8 +123,8 @@ export default function BackgroundForm({
           label="Tool proficiencies"
           value={form.toolProficiencies}
           onChange={next => update('toolProficiencies', next)}
-          placeholder="Thieves' Tools, Mason's Tools…"
-          helperText="Type a tool and press Enter or Add."
+          placeholder="Thieves' Tools"
+          helperText="Add one tool at a time — press Enter or Add after each."
         />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField
