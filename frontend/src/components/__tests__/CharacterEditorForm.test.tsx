@@ -232,6 +232,33 @@ describe('pure helpers', () => {
     });
   });
 
+  // VEG-476: a loaded character now carries backgroundId so its background
+  // resolves by id even when the display name collides with a homebrew row
+  // (VEG-473). The editor must seed it on load and send it on save.
+  it('characterToFormValues seeds backgroundId from the character', () => {
+    const v = characterToFormValues(makeCharacter({ backgroundId: 'bg-123' }));
+    expect(v.backgroundId).toBe('bg-123');
+  });
+
+  it('characterToFormValues leaves backgroundId blank when the character has none', () => {
+    const v = characterToFormValues(makeCharacter({ backgroundId: undefined }));
+    expect(v.backgroundId).toBe('');
+  });
+
+  it('characterFormPayload sends the selected backgroundId', () => {
+    const payload = characterFormPayload(
+      characterToFormValues(makeCharacter({ backgroundId: 'bg-123' }))
+    );
+    expect(payload.backgroundId).toBe('bg-123');
+  });
+
+  it('characterFormPayload sends null for a free-typed background (no id)', () => {
+    const payload = characterFormPayload(
+      characterToFormValues(makeCharacter({ backgroundId: undefined }))
+    );
+    expect(payload.backgroundId).toBeNull();
+  });
+
   // VEG-410: a null armorClass means "no manual override — AC derives from
   // equipped gear". The editor must round-trip that null instead of silently
   // materializing an override of 10 on every save.
@@ -308,11 +335,11 @@ describe('pure helpers', () => {
     ]);
   });
 
-  it('never sends backgroundId in the payload (client-only resolution key, VEG-473)', () => {
+  it('persists a selected backgroundId alongside the display name (VEG-476)', () => {
     const v = characterToFormValues(makeCharacter({ background: 'Sage' }));
-    v.backgroundId = 'bg-sage'; // even a client-set id must not leak into the write body
+    v.backgroundId = 'bg-sage';
     const payload = characterFormPayload(v);
-    expect('backgroundId' in payload).toBe(false);
+    expect(payload.backgroundId).toBe('bg-sage');
     expect(payload.background).toBe('Sage');
   });
 

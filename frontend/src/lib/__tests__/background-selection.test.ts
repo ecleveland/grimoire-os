@@ -55,7 +55,19 @@ describe('resolveBackground', () => {
     expect(resolveBackground([srd, lower], { id: '', name: 'Acolyte' })).toBeUndefined();
   });
 
-  it('returns undefined for an unknown id even when the name matches', () => {
+  it('falls back to an unambiguous name when the id is stale/unknown (VEG-476)', () => {
+    // A character persisted a homebrew backgroundId (VEG-476) whose row was later
+    // deleted, but its display name still uniquely resolves. The stale id must not
+    // block that fallback, or the load would blank the grants for no reason.
+    const unique = makeBackground({ id: 'sage', name: 'Sage', contentSource: 'srd' });
+    expect(resolveBackground([...catalog, unique], { id: 'deleted-hb', name: 'Sage' })).toBe(
+      unique
+    );
+  });
+
+  it('returns undefined for a stale/unknown id when the name is also ambiguous', () => {
+    // Both "Acolyte"s remain, so the name can't disambiguate either — resolve to
+    // nothing rather than guessing the wrong tier (the VEG-473 safety invariant).
     expect(resolveBackground(catalog, { id: 'missing', name: 'Acolyte' })).toBeUndefined();
   });
 

@@ -77,6 +77,21 @@ describe('CharactersService', () => {
       expect(result.exhaustion).toBe(3);
     });
 
+    it('round-trips backgroundId through the response DTO (VEG-476)', async () => {
+      // Guards the @Expose whitelist: the editor sends backgroundId to
+      // disambiguate duplicate-named backgrounds on load (VEG-473), so a
+      // dropped column would silently break re-resolution.
+      const backgroundId = '123e4567-e89b-42d3-a456-426614174000';
+      prisma.character.create.mockResolvedValue({ ...mockCharacter, backgroundId });
+
+      const result = await service.create(USER_ID, { ...createCharacterDto, backgroundId });
+
+      expect(prisma.character.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ backgroundId }),
+      });
+      expect(result.backgroundId).toBe(backgroundId);
+    });
+
     it('does not check campaign membership when no campaignId is given', async () => {
       prisma.character.create.mockResolvedValue(mockCharacter);
 

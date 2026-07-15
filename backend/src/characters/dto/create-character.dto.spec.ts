@@ -852,6 +852,26 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('backgroundId (VEG-476)', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted):
+    // the editor now sends backgroundId alongside the display name to disambiguate
+    // duplicate-named backgrounds on load (VEG-473). A plain validate() would
+    // silently accept it even if the DTO never whitelisted it (the VEG-349 trap).
+    it('accepts a background id string (not rejected as unwhitelisted)', async () => {
+      const dto = toDto({ ...baseDto, backgroundId: '123e4567-e89b-42d3-a456-426614174000' });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'backgroundId')).toHaveLength(0);
+    });
+
+    it('rejects a non-string backgroundId', async () => {
+      const dto = toDto({ ...baseDto, backgroundId: 123 });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'backgroundId')?.constraints).toHaveProperty(
+        'isString'
+      );
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);

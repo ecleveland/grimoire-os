@@ -57,6 +57,14 @@ export interface Character {
   level: number;
   subclass?: string;
   background?: string;
+  /**
+   * Resolution key for the selected background (VEG-476). Lets a loaded character
+   * resolve its background by id when a homebrew row reuses an SRD name (VEG-473);
+   * `background` (the display string) stays authoritative for free-typed names.
+   * Nullable at the API boundary (the column is `String?`); `undefined` when the
+   * client never sends it.
+   */
+  backgroundId?: string | null;
   alignment?: string;
   experiencePoints: number;
   // Nullable to match the backend `CharacterDto` and the underlying `Json?` /
