@@ -54,11 +54,11 @@ export interface CharacterFormValues {
   level: number;
   background: string;
   /**
-   * In-memory-only resolution key for the selected SRD/homebrew background (VEG-473).
-   * Homebrew backgrounds may share an SRD name, so grants must resolve by id, not
-   * name. `''` when free-typed or loaded from a name-only character. Deliberately
-   * absent from `CharacterWriteFields`/the payload — the persisted `Character.background`
-   * column stays the display string, so this is never sent to the API.
+   * Resolution key for the selected SRD/homebrew background (VEG-473). Homebrew
+   * backgrounds may share an SRD name, so grants must resolve by id, not name.
+   * `''` when free-typed (no catalog row). Persisted to `Character.backgroundId`
+   * (VEG-476) so a loaded character re-resolves by id instead of a name that may
+   * now collide with a homebrew row; `background` stays the display string.
    */
   backgroundId: string;
   alignment: string;
@@ -181,9 +181,11 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     subclass: c.subclass ?? '',
     level: c.level,
     background: c.background ?? '',
-    // A loaded character carries only the display string (no id column), so start
-    // empty and resolve by name until the user re-picks (VEG-473).
-    backgroundId: '',
+    // Seed the persisted id (VEG-476) so the background resolves by id on load,
+    // even when its display name now collides with a homebrew row (VEG-473).
+    // Blank for legacy characters saved before the column existed, or free-typed
+    // names — those fall back to the unambiguous-name resolver.
+    backgroundId: c.backgroundId ?? '',
     alignment: c.alignment ?? '',
     // Server-side `size` is free-text; coerce to the canonical union, falling
     // back to Medium for absent/legacy values outside the set.
@@ -231,6 +233,7 @@ type CharacterWriteFields = Pick<
   | 'subclass'
   | 'level'
   | 'background'
+  | 'backgroundId'
   | 'alignment'
   | 'size'
   | 'abilityScores'
@@ -272,9 +275,11 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     class: v.class,
     subclass: v.subclass,
     level: v.level,
-    // `background` is the display string; `backgroundId` is intentionally omitted
-    // (client-only resolution key — the column stays a name, VEG-473).
+    // `background` is the display string; `backgroundId` (VEG-476) is the
+    // resolution key. A free-typed background has no catalog row, so send null
+    // rather than an empty string to keep the column a clean soft ref.
     background: v.background,
+    backgroundId: v.backgroundId === '' ? null : v.backgroundId,
     alignment: v.alignment,
     size: v.size,
     abilityScores: v.abilityScores,

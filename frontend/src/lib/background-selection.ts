@@ -14,19 +14,26 @@ interface IdName {
  * background's name (per-tier partial unique indexes, VEG-431), so a non-empty
  * `id` is the only unambiguous key — resolving by name would return whichever
  * duplicate sorts first and silently grant the wrong skills/feat/equipment. Only
- * when no id is known — a character loaded from the API carries `background` (the
- * display string) but no id, and a free-typed custom name never had one — does it
- * fall back to a name match, and then only when that name is *unambiguous*: a
- * colliding name with no id resolves to nothing (undefined) rather than guessing
- * the wrong tier, so the fallback can never re-introduce the wrong-grant bug this
- * fix targets. Returns undefined when nothing matches (an unknown/stale id
- * likewise clears grants rather than falling back to name).
+ * when no id resolves — a character loaded from the API before VEG-476 carries
+ * `background` (the display string) but no id, a free-typed custom name never had
+ * one, and a persisted id can go stale when its homebrew row is deleted (VEG-476)
+ * — does it fall back to a name match, and then only when that name is
+ * *unambiguous*: a colliding name resolves to nothing (undefined) rather than
+ * guessing the wrong tier, so the fallback can never re-introduce the wrong-grant
+ * bug this fix targets. A stale/unknown id therefore degrades to the same
+ * unambiguous-name path as no id at all, not to a blank — the deleted-homebrew
+ * character keeps its suggestions as long as the name stays unique.
  */
 export function resolveBackground<T extends IdName>(
   backgrounds: T[],
   selection: { id: string; name: string }
 ): T | undefined {
-  if (selection.id) return backgrounds.find(b => b.id === selection.id);
+  if (selection.id) {
+    const byId = backgrounds.find(b => b.id === selection.id);
+    // A resolved id is authoritative; a stale/unknown one (e.g. deleted homebrew)
+    // falls through to the unambiguous-name path below rather than clearing grants.
+    if (byId) return byId;
+  }
   if (!selection.name) return undefined;
   // Collision test is case-insensitive to match backgroundOptions' labelling, so a
   // case-variant duplicate ("Acolyte" vs "acolyte") the dropdown flags can't slip

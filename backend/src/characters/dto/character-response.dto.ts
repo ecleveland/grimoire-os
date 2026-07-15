@@ -33,6 +33,7 @@ export class CharacterDto {
   @Expose() level!: number;
   @Expose() subclass!: string | null;
   @Expose() background!: string | null;
+  @Expose() backgroundId!: string | null;
   @Expose() alignment!: string | null;
   @Expose() experiencePoints!: number;
   @Expose() abilityScores!: AbilityScores | null;

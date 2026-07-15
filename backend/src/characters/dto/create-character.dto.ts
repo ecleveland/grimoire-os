@@ -446,6 +446,15 @@ export class CreateCharacterDto {
   @IsString()
   background?: string;
 
+  // VEG-476: soft ref to the selected background row so a loaded character can
+  // resolve its background by id when a homebrew row reuses an SRD name (VEG-473).
+  // Not a UUID-validated FK — homebrew rows are deletable, and the frontend
+  // resolver degrades safely on a stale/unknown id.
+  @ApiPropertyOptional({ description: 'Resolution key for the selected background (VEG-476)' })
+  @IsOptional()
+  @IsString()
+  backgroundId?: string;
+
   @ApiPropertyOptional({ example: 'Lawful Good' })
   @IsOptional()
   @IsString()

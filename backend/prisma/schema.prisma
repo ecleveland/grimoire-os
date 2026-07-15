@@ -151,6 +151,13 @@ model Character {
   level               Int      @default(1)
   subclass            String?
   background          String?
+  // Resolution key for the selected background (VEG-476). A plain soft ref, not a
+  // FK: it disambiguates a loaded character's background when a homebrew row later
+  // reuses an SRD name (VEG-473), and the frontend resolver degrades safely on a
+  // stale/unknown id (deleted homebrew) — falling back to the unambiguous-name
+  // path, exactly as a character with no id does. `background` (the display
+  // string) stays authoritative for free-typed names.
+  backgroundId        String?
   alignment           String?
   experiencePoints    Int      @default(0)
   abilityScores       Json?
