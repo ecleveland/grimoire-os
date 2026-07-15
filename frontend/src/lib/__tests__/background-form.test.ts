@@ -44,8 +44,10 @@ describe('backgroundToFormState', () => {
     expect(state).toEqual({
       name: 'Gravedigger',
       description: 'Tending the resting places of the dead.',
-      skillProficiencies: 'Insight\nReligion',
-      toolProficiencies: "Mason's Tools",
+      // Skill/tool proficiencies are structured string[] in form state (VEG-474),
+      // edited via ToggleChips / TokenListEditor — no newline round-trip.
+      skillProficiencies: ['Insight', 'Religion'],
+      toolProficiencies: ["Mason's Tools"],
       languages: '1',
       equipment: 'A shovel',
       personalityTraits: 'Quiet vigil.',
@@ -114,7 +116,8 @@ describe('formStateToPayload', () => {
     const result = formStateToPayload(
       makeState({
         description: ' Tending graves. ',
-        skillProficiencies: 'Insight\nReligion',
+        skillProficiencies: ['Insight', 'Religion'],
+        toolProficiencies: ["Mason's Tools"],
         languages: '2',
         originFeatName: 'Magic Initiate',
         originFeatId: 'feat-mi',
@@ -125,7 +128,9 @@ describe('formStateToPayload', () => {
     expect(result).toEqual({
       payload: expect.objectContaining({
         description: 'Tending graves.',
+        // Structured proficiency arrays pass straight through to the payload.
         skillProficiencies: ['Insight', 'Religion'],
+        toolProficiencies: ["Mason's Tools"],
         languages: 2,
         originFeatId: 'feat-mi',
         originFeatOption: 'Cleric',

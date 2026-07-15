@@ -21,8 +21,11 @@ export { parseLines };
 export interface BackgroundFormState {
   name: string;
   description: string;
-  skillProficiencies: string;
-  toolProficiencies: string;
+  // Structured proficiency lists (VEG-474): skills are picked from the canonical
+  // 5e set via ToggleChips; tools are open-ended chips via TokenListEditor. Both
+  // are already string[] here — no newline round-trip like the free-text tables.
+  skillProficiencies: string[];
+  toolProficiencies: string[];
   languages: string;
   equipment: string;
   personalityTraits: string;
@@ -58,8 +61,8 @@ export function emptyBackgroundFormState(): BackgroundFormState {
   return {
     name: '',
     description: '',
-    skillProficiencies: '',
-    toolProficiencies: '',
+    skillProficiencies: [],
+    toolProficiencies: [],
     languages: '',
     equipment: '',
     personalityTraits: '',
@@ -76,8 +79,11 @@ export function backgroundToFormState(bg: SrdBackground): BackgroundFormState {
   return {
     name: bg.name,
     description: bg.description ?? '',
-    skillProficiencies: bg.skillProficiencies.join('\n'),
-    toolProficiencies: bg.toolProficiencies.join('\n'),
+    // Structured lists round-trip as arrays; ToggleChips renders any saved value
+    // outside the canonical set as a removable extra, so legacy/free-typed skills
+    // stay visible and editable rather than silently vanishing (VEG-474).
+    skillProficiencies: bg.skillProficiencies ?? [],
+    toolProficiencies: bg.toolProficiencies ?? [],
     languages: String(bg.languages ?? 0),
     equipment: bg.equipment ?? '',
     personalityTraits: bg.personalityTraits.join('\n'),
@@ -113,8 +119,8 @@ export function formStateToPayload(s: BackgroundFormState): BackgroundFormResult
     payload: {
       name,
       description: optionalText(s.description),
-      skillProficiencies: parseLines(s.skillProficiencies),
-      toolProficiencies: parseLines(s.toolProficiencies),
+      skillProficiencies: s.skillProficiencies,
+      toolProficiencies: s.toolProficiencies,
       languages,
       equipment: optionalText(s.equipment),
       personalityTraits: parseLines(s.personalityTraits),
