@@ -870,6 +870,15 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         'isString'
       );
     });
+
+    it('accepts backgroundId: null (free-typed background clears the soft ref)', async () => {
+      // The editor PATCHes null when the background is free-typed or its text is
+      // edited (characterFormPayload: '' → null). @IsOptional must keep accepting
+      // it if the validator is ever tightened — the clear-payloads convention.
+      const dto = toDto({ ...baseDto, backgroundId: null });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'backgroundId')).toHaveLength(0);
+    });
   });
 
   describe('all new fields optional', () => {

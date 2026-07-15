@@ -460,6 +460,26 @@ describe('CharactersService', () => {
       expect(result.exhaustion).toBe(1);
     });
 
+    it('clears a stale backgroundId when the payload sends null (VEG-476)', async () => {
+      // Re-picking a free-typed background (or editing the text) sends
+      // backgroundId: null; update() must forward that so the soft ref is cleared
+      // rather than pinning the old id. This is the write half of the degrade-on-
+      // stale-id story — the load path only recovers if the column is honest.
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+      prisma.character.update.mockResolvedValue({ ...mockCharacter, backgroundId: null });
+
+      // Via plainToInstance so the null survives as it does from a real request
+      // (the DTO field is typed `?: string`; @IsOptional carries the null clear).
+      const dto = plainToInstance(UpdateCharacterDto, { backgroundId: null });
+      const result = await service.update(CHARACTER_ID, USER_ID, dto);
+
+      expect(prisma.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: { backgroundId: null },
+      });
+      expect(result.backgroundId).toBeNull();
+    });
+
     it('should throw ForbiddenException when non-owner tries to update', async () => {
       prisma.character.findUnique.mockResolvedValue(mockCharacter);
 
