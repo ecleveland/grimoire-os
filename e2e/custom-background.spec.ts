@@ -25,7 +25,9 @@ test.describe('Custom backgrounds (VEG-431)', () => {
 
     await page.getByLabel(/^Name/).fill(name);
     await page.getByLabel(/^Description/).fill('You spent years tending the resting places.');
-    await page.getByLabel(/Skill proficiencies/).fill('Insight\nReligion');
+    // Skills are a controlled toggle group now (VEG-474), not a free-text field.
+    await page.getByRole('button', { name: 'Insight', exact: true }).click();
+    await page.getByRole('button', { name: 'Religion', exact: true }).click();
     await page.getByLabel(/^Origin feat$/).click();
     await page.getByLabel(/^Origin feat$/).fill('Alert');
     await page.getByRole('option', { name: 'Alert' }).click();

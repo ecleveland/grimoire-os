@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
+import ToggleChips from '@/components/ToggleChips';
+import TokenListEditor from '@/components/TokenListEditor';
 import { useApiQueryAll } from '@/lib/query';
+import { SKILL_NAMES } from '@/lib/dnd-constants';
 import type { SrdBackground, SrdFeat } from '@/lib/types';
 import {
   emptyBackgroundFormState,
@@ -104,37 +107,41 @@ export default function BackgroundForm({
         />
       </section>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <FormField
-          as="textarea"
+      <section className="space-y-4">
+        {/* Canonical 5e skills only (VEG-474): a controlled toggle group replaces
+            free text so a typo can't silently fail to match downstream. */}
+        <ToggleChips
           label="Skill proficiencies"
-          helperText="One skill per line"
-          rows={3}
+          options={SKILL_NAMES}
           value={form.skillProficiencies}
-          onChange={e => update('skillProficiencies', e.target.value)}
+          onChange={next => update('skillProficiencies', next)}
+          helperText="Select the skills this background grants."
         />
-        <FormField
-          as="textarea"
+        {/* Tools have no canonical seed list (VEG-474), so they stay open-ended
+            chips — better than a textarea, but still free-typed. */}
+        <TokenListEditor
           label="Tool proficiencies"
-          helperText="One tool per line"
-          rows={3}
           value={form.toolProficiencies}
-          onChange={e => update('toolProficiencies', e.target.value)}
+          onChange={next => update('toolProficiencies', next)}
+          placeholder="Thieves' Tools"
+          helperText="Add one tool at a time — press Enter or Add after each."
         />
-        <FormField
-          label="Languages"
-          type="number"
-          min={0}
-          helperText="Number of additional languages granted"
-          value={form.languages}
-          onChange={e => update('languages', e.target.value)}
-        />
-        <FormField
-          label="Equipment"
-          placeholder="A shovel, a set of common clothes…"
-          value={form.equipment}
-          onChange={e => update('equipment', e.target.value)}
-        />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField
+            label="Languages"
+            type="number"
+            min={0}
+            helperText="Number of additional languages granted"
+            value={form.languages}
+            onChange={e => update('languages', e.target.value)}
+          />
+          <FormField
+            label="Equipment"
+            placeholder="A shovel, a set of common clothes…"
+            value={form.equipment}
+            onChange={e => update('equipment', e.target.value)}
+          />
+        </div>
       </section>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">

@@ -72,9 +72,9 @@ describe('NewBackgroundPage', () => {
 
     render(<NewBackgroundPage />);
     fillRequired();
-    fireEvent.change(screen.getByLabelText(/Skill proficiencies/), {
-      target: { value: 'Insight\nReligion' },
-    });
+    // Skills are a controlled toggle group now (VEG-474).
+    await user.click(screen.getByRole('button', { name: 'Insight', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Religion', exact: true }));
     await user.click(screen.getByRole('button', { name: 'Create background' }));
 
     await waitFor(() => {

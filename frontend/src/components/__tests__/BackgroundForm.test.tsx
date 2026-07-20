@@ -171,6 +171,87 @@ describe('BackgroundForm', () => {
     );
   });
 
+  // ── Structured skill/tool proficiencies (VEG-474) ──────────────────────
+  it('selects canonical skills via the toggle group and submits them as an array', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Gravedigger' } });
+    await user.click(screen.getByRole('button', { name: 'Insight' }));
+    await user.click(screen.getByRole('button', { name: 'Religion' }));
+    await user.click(screen.getByRole('button', { name: 'Create background' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ skillProficiencies: ['Insight', 'Religion'] })
+    );
+  });
+
+  it('deselecting a skill toggle removes it from the payload', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Gravedigger' } });
+    const insight = screen.getByRole('button', { name: 'Insight' });
+    await user.click(insight); // select
+    await user.click(insight); // deselect
+    await user.click(screen.getByRole('button', { name: 'Create background' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ skillProficiencies: [] }));
+  });
+
+  it('pre-selects the current skills when editing an existing background', () => {
+    const initial = {
+      id: 'bg-1',
+      name: 'Gravedigger',
+      skillProficiencies: ['Insight'],
+      toolProficiencies: ["Mason's Tools"],
+      languages: 0,
+      personalityTraits: [],
+      ideals: [],
+      bonds: [],
+      flaws: [],
+      originFeat: null,
+      originFeatOption: null,
+      source: 'Homebrew',
+      contentSource: 'homebrew' as const,
+      createdById: 'u1',
+    };
+    render(
+      <BackgroundForm
+        initial={initial}
+        submitting={false}
+        submitLabel="Save changes"
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />
+    );
+
+    // The saved skill is toggled on; an unselected one is not.
+    expect(screen.getByRole('button', { name: 'Insight' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Religion' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+    // The saved tool round-trips as a removable chip.
+    expect(screen.getByRole('button', { name: "Remove Mason's Tools" })).toBeInTheDocument();
+  });
+
+  it('adds an open-ended tool proficiency and submits it', async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Gravedigger' } });
+    await user.type(screen.getByLabelText(/^Tool proficiencies$/), "Thieves' Tools{Enter}");
+    await user.click(screen.getByRole('button', { name: 'Create background' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ toolProficiencies: ["Thieves' Tools"] })
+    );
+  });
+
   it('invokes onCancel from the cancel button', async () => {
     const user = userEvent.setup();
     renderForm();
