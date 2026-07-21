@@ -8,6 +8,7 @@ import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
+import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import {
   USER_ID,
   USER_ID_2,
@@ -21,16 +22,21 @@ describe('CharactersService', () => {
   let service: CharactersService;
   let prisma: MockPrismaService;
   let campaignAuth: { assertCampaignMember: jest.Mock };
+  let inventoryResolver: { resolveInventory: jest.Mock };
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
     campaignAuth = { assertCampaignMember: jest.fn() };
+    // Default: pass inventory through untouched, so tests that don't care
+    // about resolution assert the same payloads they always have.
+    inventoryResolver = { resolveInventory: jest.fn(inv => Promise.resolve(inv)) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CharactersService,
         { provide: PrismaService, useValue: prisma },
         { provide: CampaignAuthService, useValue: campaignAuth },
+        { provide: InventoryResolverService, useValue: inventoryResolver },
       ],
     }).compile();
 
@@ -98,6 +104,52 @@ describe('CharactersService', () => {
       await service.create(USER_ID, createCharacterDto);
 
       expect(campaignAuth.assertCampaignMember).not.toHaveBeenCalled();
+    });
+
+    it('persists the resolved inventory (VEG-462)', async () => {
+      // The guided builder emits bare {name, quantity} lines; the resolver
+      // backfills the catalog link and gear snapshot before the row is written.
+      const submitted = [{ name: 'Chain mail', quantity: 1, equipped: false }];
+      const resolved = [
+        {
+          name: 'Chain mail',
+          quantity: 1,
+          equipped: false,
+          itemId: '11111111-1111-4111-8111-111111111111',
+          gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+        },
+      ];
+      inventoryResolver.resolveInventory.mockResolvedValue(resolved);
+      prisma.character.create.mockResolvedValue({ ...mockCharacter, inventory: resolved });
+
+      await service.create(USER_ID, { ...createCharacterDto, inventory: submitted });
+
+      expect(inventoryResolver.resolveInventory).toHaveBeenCalledWith(submitted);
+      expect(prisma.character.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ inventory: resolved }),
+      });
+    });
+
+    it('resolves a free-typed inventory line from the classic editor (VEG-462)', async () => {
+      // Deliberate: resolution is not gated to builder-originated payloads,
+      // since no client-supplied flag could be trusted to mark them. Every
+      // create path — classic editor, raw API — gets the same backfill.
+      prisma.character.create.mockResolvedValue(mockCharacter);
+
+      await service.create(USER_ID, {
+        ...createCharacterDto,
+        inventory: [{ name: 'Longsword', quantity: 1, equipped: false }],
+      });
+
+      expect(inventoryResolver.resolveInventory).toHaveBeenCalled();
+    });
+
+    it('does not invoke the resolver when no inventory is sent (VEG-462)', async () => {
+      prisma.character.create.mockResolvedValue(mockCharacter);
+
+      await service.create(USER_ID, createCharacterDto);
+
+      expect(inventoryResolver.resolveInventory).not.toHaveBeenCalled();
     });
 
     it('asserts campaign membership when campaignId is provided', async () => {
@@ -440,6 +492,24 @@ describe('CharactersService', () => {
       expect(result.level).toBe(6);
       // The write response carries the recomputed block.
       expect(result.computed.proficiencyBonus).toBe(3);
+    });
+
+    it('persists inventory unchanged, without re-resolving (VEG-462)', async () => {
+      // A PATCH sends the whole array, so the server can't distinguish a
+      // newly-typed line from one the user deliberately renamed or unlinked.
+      // Re-resolving here would re-bind the rename and resurrect gear they
+      // had removed — so create is the only resolution point.
+      const edited = [{ name: 'Grandfather’s mail', quantity: 1, equipped: true }];
+      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+      prisma.character.update.mockResolvedValue({ ...mockCharacter, inventory: edited });
+
+      await service.update(CHARACTER_ID, USER_ID, { inventory: edited });
+
+      expect(inventoryResolver.resolveInventory).not.toHaveBeenCalled();
+      expect(prisma.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: { inventory: edited },
+      });
     });
 
     it('round-trips status fields through the response DTO on update (VEG-408)', async () => {

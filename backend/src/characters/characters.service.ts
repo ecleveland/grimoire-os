@@ -17,6 +17,7 @@ import { UpdateCharacterDto } from './dto/update-character.dto';
 import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { computeCharacterStats, isKnownAbilityName } from './compute/compute-stats';
+import { InventoryResolverService } from './inventory/inventory-resolver.service';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -37,7 +38,8 @@ export class CharactersService {
 
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService
+    private campaignAuth: CampaignAuthService,
+    private inventoryResolver: InventoryResolverService
   ) {}
 
   // Lightweight ownership/existence guard for write paths (VEG-346). Selects
@@ -126,12 +128,20 @@ export class CharactersService {
     if (dto.campaignId) {
       await this.campaignAuth.assertCampaignMember(dto.campaignId, userId);
     }
+    // Backfill catalog links + gear snapshots on starting equipment (VEG-462).
+    // Applies to every create path, not just the guided builder: no
+    // client-supplied "this came from the builder" flag would be trustworthy.
+    const inventory = dto.inventory
+      ? await this.inventoryResolver.resolveInventory(dto.inventory)
+      : undefined;
+
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
       // Prisma's InputJsonValue for JSON fields (abilityScores, hitPoints, etc.).
       // Safe because CreateCharacterDto only declares whitelisted fields.
       data: {
         ...(dto as unknown as Prisma.CharacterUncheckedCreateInput),
+        ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
         userId,
       },
     });
