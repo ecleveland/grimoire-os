@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { InventoryResolverService } from './inventory-resolver.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -126,16 +127,50 @@ describe('InventoryResolverService', () => {
   });
 
   describe('trust rule (VEG-410 snapshot preservation)', () => {
-    it('never overwrites a gear snapshot the client already sent', async () => {
-      const clientSnapshot = {
-        type: 'armor' as const,
-        armorType: 'light' as const,
-        baseArmorClass: 11,
-      };
+    const clientSnapshot = {
+      type: 'armor' as const,
+      armorType: 'light' as const,
+      baseArmorClass: 11,
+    };
 
+    it('never overwrites a gear snapshot the client already sent', async () => {
       const [resolved] = await service.resolveInventory([line({ gear: clientSnapshot })]);
 
       expect(resolved.gear).toEqual(clientSnapshot);
+    });
+
+    it('preserves a client snapshot when a sibling line needs resolving', async () => {
+      // The load-bearing case. A single snapshotted line short-circuits before
+      // resolveLine runs, so the per-line guard is only actually exercised by a
+      // MIXED array: the bare line flips needsResolution, routing the
+      // snapshotted line through resolution too. Without the guard, this
+      // picker-chosen AC 11 would be silently rewritten to the SRD's 16 —
+      // exactly the VEG-410 contract this service claims to preserve.
+      const [snapshotted, bare] = await service.resolveInventory([
+        line({ gear: clientSnapshot }),
+        line({ name: 'Longsword' }),
+      ]);
+
+      expect(snapshotted.gear).toEqual(clientSnapshot);
+      expect(bare.gear).toMatchObject({ type: 'weapon', damage: '1d8' });
+    });
+
+    it('links a snapshotted line that arrived without an itemId', async () => {
+      // Filling itemId destroys nothing, so it stays additive: the client's
+      // snapshot is preserved while the line still gains its catalog link.
+      const [resolved] = await service.resolveInventory([line({ gear: clientSnapshot })]);
+
+      expect(resolved.gear).toEqual(clientSnapshot);
+      expect(resolved.itemId).toBe(CHAIN_MAIL.id);
+    });
+
+    it('leaves a fully-resolved line alone', async () => {
+      const [resolved] = await service.resolveInventory([
+        line({ itemId: CHAIN_MAIL.id, gear: clientSnapshot }),
+      ]);
+
+      expect(resolved.gear).toEqual(clientSnapshot);
+      expect(resolved.itemId).toBe(CHAIN_MAIL.id);
     });
 
     it('fills gear from the linked row when itemId is present but gear is not', async () => {
@@ -214,18 +249,57 @@ describe('InventoryResolverService', () => {
     });
   });
 
+  describe('observability', () => {
+    // These degradations are permanent: resolution runs only on create, so a
+    // character built while the catalog is empty or a name is ambiguous stays
+    // gear-less even after the underlying cause is fixed. Silent is not an
+    // option; the operator needs a signal.
+    it('warns once when the srd catalog is empty', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      prisma.item.findMany.mockResolvedValue([]);
+
+      await service.resolveInventory([line()]);
+      await service.resolveInventory([line()]);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/catalog is empty/i);
+      warn.mockRestore();
+    });
+
+    it('warns when a name is dropped as ambiguous', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      prisma.item.findMany.mockResolvedValue([CHAIN_MAIL, { ...CHAIN_MAIL, id: 'other' }]);
+
+      await service.resolveInventory([line()]);
+
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ambiguous srd item name/i));
+      warn.mockRestore();
+    });
+  });
+
   describe('short-circuits', () => {
     it('does not query for an empty inventory', async () => {
       expect(await service.resolveInventory([])).toEqual([]);
       expect(prisma.item.findMany).not.toHaveBeenCalled();
     });
 
-    it('does not query when every line already carries gear', async () => {
+    it('does not query when every line is already fully resolved', async () => {
+      await service.resolveInventory([
+        line({
+          itemId: CHAIN_MAIL.id,
+          gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+        }),
+      ]);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+    });
+
+    it('still queries when a line has gear but no catalog link', async () => {
       await service.resolveInventory([
         line({ gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 } }),
       ]);
 
-      expect(prisma.item.findMany).not.toHaveBeenCalled();
+      expect(prisma.item.findMany).toHaveBeenCalled();
     });
   });
 });

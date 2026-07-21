@@ -107,4 +107,35 @@ describe('starting equipment ↔ catalog reconciliation (VEG-462)', () => {
       expect(gearMetaFromItem(match!)).toMatchObject({ type: 'armor' });
     }
   );
+
+  it('snapshots every gear-relevant seed name, not just the armor', () => {
+    // The armor cases above are the ticket's headline, but 15 weapons ride the
+    // same path and fail the same way: `gearMetaFromItem` returns null when
+    // `damage` or `damageType` is missing, and column-bleed in the extracted
+    // item JSON is a known hazard in this repo. Deriving the set rather than
+    // listing it means a new weapon in the seed is covered automatically.
+    const unsnapshotted = names
+      .filter(n => !EXPECTED_UNRESOLVABLE.includes(n))
+      .filter(n => gearMetaFromItem(lookupItemByName(index, n)!) === null)
+      // Packs, tools and other non-gear resolve fine and legitimately snapshot
+      // to null — only the armor/weapon categories are expected to produce one.
+      .filter(n => {
+        const category = lookupItemByName(index, n)!.category;
+        return /Armor|Shield|Weapon/.test(category);
+      });
+
+    expect(unsnapshotted).toEqual([]);
+  });
+
+  it('preserves the weapon proficiency tier (VEG-463)', () => {
+    // `weaponCategory` comes from the category's leading word, so a category
+    // reshuffle drops the tier while gearMetaFromItem still returns non-null —
+    // invisible to a type-only assertion.
+    for (const weapon of ['Longsword', 'Dagger', 'Light crossbow']) {
+      expect(gearMetaFromItem(lookupItemByName(index, weapon)!)).toMatchObject({
+        type: 'weapon',
+        weaponCategory: expect.stringMatching(/^(simple|martial)$/),
+      });
+    }
+  });
 });

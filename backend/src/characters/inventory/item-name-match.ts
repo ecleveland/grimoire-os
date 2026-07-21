@@ -19,13 +19,19 @@ export interface ResolvableItem extends GearSourceItem {
 }
 
 /**
- * Prisma projection for `ResolvableItem`. Typed as `Record<keyof
- * ResolvableItem, true>` so the two can't drift: dropping a column here is a
- * compile error rather than a silently-null gear snapshot (every
- * `GearSourceItem` field but `category` is optional, so a missing `damage`
- * would otherwise just quietly stop producing weapon stats).
+ * Prisma projection for `ResolvableItem`.
+ *
+ * The `satisfies Record<keyof ResolvableItem, true>` is load-bearing: every
+ * `GearSourceItem` field but `category` is optional, so dropping `damage: true`
+ * here would otherwise compile clean and silently stop producing weapon
+ * snapshots. Requiring every key makes that a compile error.
+ *
+ * The `Prisma.ItemSelect` constraint is an *annotation*, deliberately not part
+ * of the `satisfies` — excess-property checking against an intersection admits
+ * any key either constituent declares, which would let the select accrete
+ * columns `ResolvableItem` knows nothing about.
  */
-export const RESOLVABLE_ITEM_SELECT = {
+export const RESOLVABLE_ITEM_SELECT: Prisma.ItemSelect = {
   id: true,
   name: true,
   category: true,
@@ -35,23 +41,7 @@ export const RESOLVABLE_ITEM_SELECT = {
   properties: true,
   stealthDisadvantage: true,
   strengthRequirement: true,
-} satisfies Record<keyof ResolvableItem, true> & Prisma.ItemSelect;
-
-/**
- * Seed-name → catalog-name aliases, applied at lookup time. Deliberately
- * minimal: of the seed names that don't fold onto a catalog row, this is the
- * only one `gearMetaFromItem` would have produced stats for. The rest
- * (ammunition bundles, the Arcane/Druidic/Holy focus families, Lute,
- * Spellbook) all snapshot to null anyway, so aliasing them would be upkeep
- * for no derived-stat gain.
- */
-// A Map, not an object literal: item names are free user input, and a plain
-// object would resolve "constructor"/"__proto__" to inherited members —
-// truthy non-strings that then blow up in normalizeItemName, turning a create
-// into a 500. (Same hazard `gearMetaFromItem` guards with hasOwnProperty.)
-export const ITEM_NAME_ALIASES: ReadonlyMap<string, string> = new Map([
-  ['wooden shield', 'Shield'],
-]);
+} satisfies Record<keyof ResolvableItem, true>;
 
 /** Apostrophe glyphs the SRD extraction and the seed data disagree about. */
 const APOSTROPHES = /[‘’ʼ]/g;
@@ -61,13 +51,50 @@ export function normalizeItemName(name: string): string {
 }
 
 /**
- * Index catalog rows by normalized name. A name claimed by more than one row
- * is dropped rather than resolved to an arbitrary winner — `Item.name` carries
- * no global unique constraint (per-tier partial indexes only), so duplicates
- * are representable even within one tier. Dropping degrades that line to the
- * pre-VEG-462 behavior; guessing would snapshot the wrong stats.
+ * Seed-name → catalog-name aliases, applied at lookup time.
+ *
+ * Deliberately minimal: of the seed names that don't fold onto a catalog row,
+ * this is the only one `gearMetaFromItem` produces stats for — the rest
+ * (ammunition bundles, the Arcane/Druidic/Holy focus families, Lute,
+ * Spellbook) snapshot to null regardless, so aliasing them would be upkeep for
+ * no derived-stat gain. What *enforces* that claim is the gear-snapshot
+ * assertions in `starting-equipment-reconciliation.spec.ts`, not this comment.
+ *
+ * A Map, not an object literal: item names are free user input, and a plain
+ * object resolves "constructor"/"__proto__" to inherited members — truthy
+ * non-strings that then throw inside `normalizeItemName`, turning a create into
+ * a 500. (Same hazard `gearMetaFromItem` guards with `hasOwnProperty`.)
+ *
+ * Keys are normalized at construction because lookup passes an already-folded
+ * key; a hand-written `'Wooden Shield'` would read correctly and never match.
+ * Declared after `normalizeItemName` for that reason — it runs at module init.
  */
-export function buildItemNameIndex(items: readonly ResolvableItem[]): Map<string, ResolvableItem> {
+export const ITEM_NAME_ALIASES: ReadonlyMap<string, string> = new Map(
+  ([['wooden shield', 'Shield']] as const).map(([seedName, catalogName]) => [
+    normalizeItemName(seedName),
+    catalogName,
+  ])
+);
+
+/**
+ * Index catalog rows by normalized name. A name claimed by more than one row
+ * is dropped rather than resolved to an arbitrary winner.
+ *
+ * This branch is live even though `items_srd_name_key` (the partial unique
+ * index on `name` where `contentSource = 'srd'`) makes *exact* srd names
+ * unique — because the key this index is built on is strictly looser than the
+ * one Postgres enforces. Normalization folds case, apostrophe glyph and
+ * whitespace, so "Chain Mail" and "chain mail" are two perfectly legal srd rows
+ * that still collide here. Don't read the unique index as proof this is dead
+ * code; the case-variant tests in `item-name-match.spec.ts` are what pin it.
+ *
+ * Dropping degrades that line to the pre-VEG-462 behavior; guessing would
+ * snapshot the wrong stats.
+ */
+export function buildItemNameIndex(
+  items: readonly ResolvableItem[],
+  onAmbiguous?: (normalizedName: string) => void
+): Map<string, ResolvableItem> {
   const index = new Map<string, ResolvableItem>();
   const ambiguous = new Set<string>();
   for (const item of items) {
@@ -76,6 +103,10 @@ export function buildItemNameIndex(items: readonly ResolvableItem[]): Map<string
     if (index.has(key)) {
       index.delete(key);
       ambiguous.add(key);
+      // Reported, not swallowed: every character built while a name is
+      // ambiguous loses that line's gear permanently, since resolution runs
+      // only on create.
+      onAmbiguous?.(key);
       continue;
     }
     index.set(key, item);

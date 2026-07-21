@@ -86,6 +86,11 @@ test.describe('starting equipment gear snapshots (VEG-462)', () => {
     // VEG-410 established that `gear` is snapshotted at pick time. Resolution
     // is additive only: a line that already carries a snapshot keeps it, even
     // when its name would resolve to a catalog row with different stats.
+    //
+    // The inventory is deliberately MIXED — a snapshotted line plus a bare one.
+    // A lone snapshotted line short-circuits before per-line resolution runs,
+    // so it would pass even if the preservation guard were deleted; the bare
+    // sibling is what forces the snapshotted line through the resolver.
     const custom = { type: 'armor', armorType: 'heavy', baseArmorClass: 99 };
 
     const create = await page.request.post(`${BACKEND}/api/characters`, {
@@ -93,13 +98,21 @@ test.describe('starting equipment gear snapshots (VEG-462)', () => {
         name: 'Snapshot Keeper',
         class: 'Fighter',
         level: 1,
-        inventory: [{ name: 'Chain mail', quantity: 1, equipped: false, gear: custom }],
+        inventory: [
+          { name: 'Chain mail', quantity: 1, equipped: false, gear: custom },
+          { name: 'Longsword', quantity: 1, equipped: false },
+        ],
       },
       headers,
     });
     expect(create.status(), await create.text()).toBe(201);
 
-    const [line] = (await create.json()).inventory;
-    expect(line.gear).toMatchObject({ baseArmorClass: 99 });
+    const [snapshotted, bare] = (await create.json()).inventory;
+    // The client's AC 99 survives; the SRD's 16 does not overwrite it.
+    expect(snapshotted.gear).toMatchObject({ baseArmorClass: 99 });
+    // ...and the line still gained its catalog link, since that destroys nothing.
+    expect(snapshotted.itemId).toBeTruthy();
+    // The sibling resolved normally.
+    expect(bare.gear).toMatchObject({ type: 'weapon', damage: '1d8' });
   });
 });
