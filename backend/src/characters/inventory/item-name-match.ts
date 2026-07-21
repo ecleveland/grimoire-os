@@ -26,12 +26,16 @@ export interface ResolvableItem extends GearSourceItem {
  * here would otherwise compile clean and silently stop producing weapon
  * snapshots. Requiring every key makes that a compile error.
  *
- * The `Prisma.ItemSelect` constraint is an *annotation*, deliberately not part
- * of the `satisfies` — excess-property checking against an intersection admits
- * any key either constituent declares, which would let the select accrete
- * columns `ResolvableItem` knows nothing about.
+ * The two constraints are *chained*, not intersected and not annotated:
+ * intersecting them defeats excess-property checking (an intersection admits
+ * any key either constituent declares, letting the select accrete columns
+ * `ResolvableItem` knows nothing about), while annotating `Prisma.ItemSelect`
+ * widens the declared type — and Prisma computes the payload from the declared
+ * type, so `findMany` would silently be typed as returning every column on
+ * `Item` rather than these nine. Chaining keeps both checks and the narrow
+ * projection.
  */
-export const RESOLVABLE_ITEM_SELECT: Prisma.ItemSelect = {
+export const RESOLVABLE_ITEM_SELECT = {
   id: true,
   name: true,
   category: true,
@@ -41,7 +45,7 @@ export const RESOLVABLE_ITEM_SELECT: Prisma.ItemSelect = {
   properties: true,
   stealthDisadvantage: true,
   strengthRequirement: true,
-} satisfies Record<keyof ResolvableItem, true>;
+} satisfies Record<keyof ResolvableItem, true> satisfies Prisma.ItemSelect;
 
 /** Apostrophe glyphs the SRD extraction and the seed data disagree about. */
 const APOSTROPHES = /[‘’ʼ]/g;

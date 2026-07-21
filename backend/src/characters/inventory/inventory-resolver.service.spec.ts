@@ -254,8 +254,17 @@ describe('InventoryResolverService', () => {
     // character built while the catalog is empty or a name is ambiguous stays
     // gear-less even after the underlying cause is fixed. Silent is not an
     // option; the operator needs a signal.
+    let warn: jest.SpyInstance;
+
+    beforeEach(() => {
+      warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    });
+
+    // Restored here rather than at the end of each test body, so a failing
+    // assertion can't leak a silenced logger into unrelated suites.
+    afterEach(() => warn.mockRestore());
+
     it('warns once when the srd catalog is empty', async () => {
-      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
       prisma.item.findMany.mockResolvedValue([]);
 
       await service.resolveInventory([line()]);
@@ -263,17 +272,14 @@ describe('InventoryResolverService', () => {
 
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn.mock.calls[0][0]).toMatch(/catalog is empty/i);
-      warn.mockRestore();
     });
 
     it('warns when a name is dropped as ambiguous', async () => {
-      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
       prisma.item.findMany.mockResolvedValue([CHAIN_MAIL, { ...CHAIN_MAIL, id: 'other' }]);
 
       await service.resolveInventory([line()]);
 
       expect(warn).toHaveBeenCalledWith(expect.stringMatching(/ambiguous srd item name/i));
-      warn.mockRestore();
     });
   });
 
