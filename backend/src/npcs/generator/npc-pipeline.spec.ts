@@ -23,6 +23,32 @@ const baseConstraints = (
   ...extra,
 });
 
+// A pool where an srd and a shared "Acolyte" legally share a name (VEG-431) with
+// disjoint personality tables, so id-first resolution (VEG-481) is observable:
+// each row's traits are unique, so the tier chosen is provable from the output.
+function duplicateAcolyteData() {
+  return buildSeedRefData({
+    backgrounds: [
+      {
+        id: 'srd-acolyte',
+        name: 'Acolyte',
+        personalityTraits: ['__SRD_TRAIT__'],
+        ideals: ['__SRD_IDEAL__'],
+        bonds: ['__SRD_BOND__'],
+        flaws: ['__SRD_FLAW__'],
+      },
+      {
+        id: 'shared-acolyte',
+        name: 'Acolyte',
+        personalityTraits: ['__SHARED_TRAIT__'],
+        ideals: ['__SHARED_IDEAL__'],
+        bonds: ['__SHARED_BOND__'],
+        flaws: ['__SHARED_FLAW__'],
+      },
+    ],
+  });
+}
+
 describe('NpcPipeline — pickRace', () => {
   it('honors the race constraint', () => {
     const result = pipeline().pickRace(newRng('a'), baseConstraints({ race: 'Tiefling' }), {});
@@ -59,17 +85,44 @@ describe('NpcPipeline — pickRace', () => {
 });
 
 describe('NpcPipeline — pickBackground', () => {
-  it('honors the background constraint', () => {
-    const result = pipeline().pickBackground(
+  it('honors the background constraint and resolves its id when the name is unambiguous', () => {
+    const data = buildSeedRefData();
+    const acolyte = data.backgrounds.find(b => b.name === 'Acolyte')!;
+    const result = new NpcPipeline(data).pickBackground(
       newRng('a'),
       baseConstraints({ background: 'Acolyte' })
     );
-    expect(result).toBe('Acolyte');
+    expect(result).toEqual({ name: 'Acolyte', id: acolyte.id });
   });
 
-  it('returns one of the seeded backgrounds when unconstrained', () => {
-    const result = pipeline().pickBackground(newRng('b'), baseConstraints());
-    expect(['Acolyte', 'Criminal', 'Sage', 'Soldier']).toContain(result);
+  it('keeps a free-typed custom background name with a null id', () => {
+    const result = pipeline().pickBackground(
+      newRng('a'),
+      baseConstraints({ background: 'Lighthouse Keeper' })
+    );
+    expect(result).toEqual({ name: 'Lighthouse Keeper', id: null });
+  });
+
+  it('leaves the id null for a constrained name that collides across tiers', () => {
+    const data = duplicateAcolyteData();
+    const result = new NpcPipeline(data).pickBackground(
+      newRng('a'),
+      baseConstraints({ background: 'Acolyte' })
+    );
+    expect(result).toEqual({ name: 'Acolyte', id: null });
+  });
+
+  it('returns one of the seeded backgrounds — with its id — when unconstrained', () => {
+    const data = buildSeedRefData();
+    const result = new NpcPipeline(data).pickBackground(newRng('b'), baseConstraints());
+    expect(['Acolyte', 'Criminal', 'Sage', 'Soldier']).toContain(result?.name);
+    const row = data.backgrounds.find(b => b.name === result?.name);
+    expect(result?.id).toBe(row?.id);
+  });
+
+  it('returns null when the background pool is empty', () => {
+    const data = buildSeedRefData({ backgrounds: [] });
+    expect(new NpcPipeline(data).pickBackground(newRng('b'), baseConstraints())).toBeNull();
   });
 });
 
@@ -268,6 +321,46 @@ describe('NpcPipeline — pickPersonality', () => {
       background: 'Acolyte',
     });
     expect(result.bonds).not.toContain('__SAGE_ONLY__');
+  });
+
+  it('resolves the exact tier by id when two backgrounds share a name (VEG-481)', () => {
+    const p = new NpcPipeline(duplicateAcolyteData());
+    const shared = p.pickPersonality(newRng('a'), baseConstraints(), {
+      background: 'Acolyte',
+      backgroundId: 'shared-acolyte',
+    });
+    expect(shared).toEqual({
+      traits: ['__SHARED_TRAIT__'],
+      ideals: ['__SHARED_IDEAL__'],
+      bonds: ['__SHARED_BOND__'],
+      flaws: ['__SHARED_FLAW__'],
+    });
+
+    const srd = p.pickPersonality(newRng('a'), baseConstraints(), {
+      background: 'Acolyte',
+      backgroundId: 'srd-acolyte',
+    });
+    expect(srd.traits).toEqual(['__SRD_TRAIT__']);
+    // The id disambiguated the tiers: no cross-tier bleed either way.
+    expect(shared.traits).not.toEqual(srd.traits);
+  });
+
+  it('returns empty personality for an ambiguous name with no id, rather than guessing a tier', () => {
+    const result = new NpcPipeline(duplicateAcolyteData()).pickPersonality(
+      newRng('a'),
+      baseConstraints(),
+      { background: 'Acolyte' }
+    );
+    expect(result).toEqual({ traits: [], ideals: [], bonds: [], flaws: [] });
+  });
+
+  it('falls back to an unambiguous name when a legacy decision carries no backgroundId', () => {
+    // Pre-VEG-481 persisted decisions have `background` but no `backgroundId`.
+    const result = pipeline().pickPersonality(newRng('a'), baseConstraints(), {
+      background: 'Acolyte',
+    });
+    expect(result.traits).toHaveLength(1);
+    expect(result.ideals).toHaveLength(1);
   });
 });
 
@@ -549,6 +642,20 @@ describe('NpcPipeline — generate (full pipeline)', () => {
     expect(npc.generationParams.constraints).toEqual(constraints);
     expect(npc.lootOverrides).toEqual({ trinketChance: 0.3 });
   });
+
+  it('persists the picked backgroundId and resolves personality from that exact tier (VEG-481)', () => {
+    // Pool holds two same-named "Acolyte" rows; whichever is picked, the NPC's
+    // personality must come from that row's tier — never a cross-tier mix.
+    const npc = new NpcPipeline(duplicateAcolyteData()).generate(baseConstraints(), 'dup-seed');
+    expect(npc.background).toBe('Acolyte');
+    const id = npc.generationParams.decisions.backgroundId;
+    expect(['srd-acolyte', 'shared-acolyte']).toContain(id);
+    const tier = id === 'srd-acolyte' ? 'SRD' : 'SHARED';
+    expect(npc.personalityTraits).toEqual([`__${tier}_TRAIT__`]);
+    expect(npc.ideals).toEqual([`__${tier}_IDEAL__`]);
+    expect(npc.bonds).toEqual([`__${tier}_BOND__`]);
+    expect(npc.flaws).toEqual([`__${tier}_FLAW__`]);
+  });
 });
 
 describe('NpcPipeline — reroll', () => {
@@ -593,6 +700,28 @@ describe('NpcPipeline — reroll', () => {
     const before = buildBase();
     const after = pipeline().reroll('name', before.generationParams, ['name']);
     expect(after.name).toBe(before.name);
+  });
+
+  it('carries backgroundId forward so a personality reroll stays on the picked tier (VEG-481)', () => {
+    const p = new NpcPipeline(duplicateAcolyteData());
+    const before = p.generate(baseConstraints(), 'dup-reroll-seed');
+    const pickedId = before.generationParams.decisions.backgroundId;
+    // A single-field personality reroll keeps the persisted background + its id.
+    const after = p.reroll('personality', before.generationParams, []);
+    expect(after.generationParams.decisions.backgroundId).toBe(pickedId);
+    expect(after.background).toBe('Acolyte');
+    const tier = pickedId === 'srd-acolyte' ? 'SRD' : 'SHARED';
+    expect(after.personalityTraits).toEqual([`__${tier}_TRAIT__`]);
+  });
+
+  it('reroll("all") with background locked preserves the resolved tier (VEG-481)', () => {
+    const p = new NpcPipeline(duplicateAcolyteData());
+    const before = p.generate(baseConstraints(), 'dup-lock-seed');
+    const pickedId = before.generationParams.decisions.backgroundId;
+    const after = p.reroll('all', before.generationParams, ['background']);
+    expect(after.generationParams.decisions.backgroundId).toBe(pickedId);
+    const tier = pickedId === 'srd-acolyte' ? 'SRD' : 'SHARED';
+    expect(after.personalityTraits).toEqual([`__${tier}_TRAIT__`]);
   });
 
   it('generate produces a stat block when combatRelevant is true', () => {

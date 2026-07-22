@@ -98,6 +98,12 @@ export type NpcStatBlock = {
 export type NpcGenerationDecisions = {
   race?: string;
   background?: string | null;
+  // Persisted alongside the display `background` name so personality resolution
+  // is id-first (VEG-481): a name alone is ambiguous once srd/shared tiers can
+  // share it. Null when the background is a free-typed name with no matching
+  // pool row. Absent on decisions persisted before this field existed — those
+  // degrade to the unambiguous-name resolution path.
+  backgroundId?: string | null;
   profession?: string | null;
   alignment?: string;
   name?: GeneratedName;

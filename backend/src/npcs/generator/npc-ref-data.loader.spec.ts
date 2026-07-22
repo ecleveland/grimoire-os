@@ -63,6 +63,16 @@ describe('NpcRefDataLoader', () => {
     );
   });
 
+  it('selects the background id so personality resolution can be id-first (VEG-481)', async () => {
+    await loader.load();
+
+    expect(prisma.background.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ id: true }),
+      })
+    );
+  });
+
   it('pins the monster pool to the global tiers so user homebrew never enters NPC generation (VEG-335)', async () => {
     await loader.load();
 
