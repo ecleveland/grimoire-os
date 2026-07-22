@@ -372,7 +372,10 @@ describe('SeedService', () => {
 
       const call = prisma.race.upsert.mock.calls[0][0];
       expect(call.where).toEqual({ name: expect.any(String) });
-      expect(Object.keys(call.update).length).toBeGreaterThan(0);
+      // Assert a substantive field, not just a non-empty update: a name-only
+      // `update: { name }` would be the insert-only no-op in disguise.
+      expect(call.update.size).toBeDefined();
+      expect(call.create.size).toBeDefined();
     });
 
     it('guards the class/race names for duplicates before the by-name upsert', async () => {
