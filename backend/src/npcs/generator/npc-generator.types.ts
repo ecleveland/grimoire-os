@@ -100,9 +100,10 @@ export type NpcGenerationDecisions = {
   background?: string | null;
   // Persisted alongside the display `background` name so personality resolution
   // is id-first (VEG-481): a name alone is ambiguous once srd/shared tiers can
-  // share it. Null when the background is a free-typed name with no matching
-  // pool row. Absent on decisions persisted before this field existed — those
-  // degrade to the unambiguous-name resolution path.
+  // share it. Null when the name has no single matching pool row — a free-typed
+  // custom, or a name that collides across tiers with no id to disambiguate it.
+  // Absent on decisions persisted before this field existed. Null and absent are
+  // treated identically on read (both fall through to the unambiguous-name path).
   backgroundId?: string | null;
   profession?: string | null;
   alignment?: string;

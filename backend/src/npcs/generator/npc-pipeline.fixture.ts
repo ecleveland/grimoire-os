@@ -34,8 +34,8 @@ export function buildSeedRefData(overrides: Partial<NpcRefData> = {}): NpcRefDat
     monsters: TEST_MONSTERS.slice(),
     species: srdSpecies.map(s => ({ name: s.name, size: s.size })),
     backgrounds: srdBackgrounds.map((b, i) => ({
-      // Synthetic stable ids — production ids are Prisma cuids; the pipeline only
-      // needs them to be unique per row for id-first resolution (VEG-481).
+      // Synthetic stable ids — production ids are Prisma-generated UUIDs; the
+      // pipeline only needs them unique per row for id-first resolution (VEG-481).
       id: `bg-${i}`,
       name: b.name,
       personalityTraits: b.personalityTraits,

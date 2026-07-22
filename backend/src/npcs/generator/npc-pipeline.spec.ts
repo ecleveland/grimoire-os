@@ -714,6 +714,30 @@ describe('NpcPipeline — reroll', () => {
     expect(after.personalityTraits).toEqual([`__${tier}_TRAIT__`]);
   });
 
+  it('single-field reroll("background") captures the newly picked row\'s id (VEG-481)', () => {
+    // A pool of two distinct-name rows so a background reroll lands on a definite
+    // row; assert its id (not just its name) is written onto the decision.
+    const data = buildSeedRefData({
+      backgrounds: [
+        {
+          id: 'bg-alpha',
+          name: 'Alpha',
+          personalityTraits: ['a'],
+          ideals: [],
+          bonds: [],
+          flaws: [],
+        },
+        { id: 'bg-beta', name: 'Beta', personalityTraits: ['b'], ideals: [], bonds: [], flaws: [] },
+      ],
+    });
+    const p = new NpcPipeline(data);
+    const before = p.generate(baseConstraints(), 'bg-reroll-seed');
+    const after = p.reroll('background', before.generationParams, []);
+    const row = data.backgrounds.find(b => b.name === after.background);
+    expect(after.generationParams.decisions.backgroundId).toBe(row?.id);
+    expect(after.generationParams.decisions.backgroundId).toBeTruthy();
+  });
+
   it('reroll("all") with background locked preserves the resolved tier (VEG-481)', () => {
     const p = new NpcPipeline(duplicateAcolyteData());
     const before = p.generate(baseConstraints(), 'dup-lock-seed');
