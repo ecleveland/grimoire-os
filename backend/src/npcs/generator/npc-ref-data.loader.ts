@@ -38,6 +38,10 @@ export class NpcRefDataLoader {
       this.prisma.background.findMany({
         where: { contentSource: { in: [...GLOBAL_CONTENT_SOURCES] } },
         select: {
+          // id is required so personality resolution is id-first (VEG-481): srd
+          // and shared tiers can legally share a name, so a name-only lookup can
+          // bind to the wrong tier's personality tables.
+          id: true,
           name: true,
           personalityTraits: true,
           ideals: true,

@@ -16,6 +16,7 @@ import {
   RerollField,
   StatBlockAction,
 } from './npc-generator.types';
+import { resolveBackgroundRef } from './resolve-background';
 import { SeededRng } from '../../common/helpers/seeded-rng';
 import { LootRoller } from '../../loot/loot-roller';
 import { normalizeLootOverrides } from '../../loot/loot-overrides';
@@ -41,12 +42,18 @@ import { NPC_APPEARANCE_CATEGORIES } from '../../seed/data/npc-appearance-traits
 export type SpeciesRef = { name: string; size: string | null };
 
 export type BackgroundRef = {
+  id: string;
   name: string;
   personalityTraits: string[];
   ideals: string[];
   bonds: string[];
   flaws: string[];
 };
+
+// A chosen background: the display name plus the id of the pool row it resolved
+// to (VEG-481). id is null when the name is a free-typed custom with no matching
+// pool row, or an ambiguous name no id can disambiguate.
+export type BackgroundPick = { name: string; id: string | null };
 
 export type AlignmentPriorRef = {
   race: string;
@@ -165,7 +172,10 @@ export class NpcPipeline {
   generate(constraints: NpcGenerationConstraints, seed: string): GeneratedNpc {
     const decisions: NpcGenerationDecisions = {};
     decisions.race = this.pickRace(this.subRng(seed, 'race'), constraints, decisions);
-    decisions.background = this.pickBackground(this.subRng(seed, 'background'), constraints);
+    this.applyBackgroundPick(
+      decisions,
+      this.pickBackground(this.subRng(seed, 'background'), constraints)
+    );
     decisions.profession = this.pickProfession(
       this.subRng(seed, 'profession'),
       constraints,
@@ -278,10 +288,32 @@ export class NpcPipeline {
   }
 
   // ── Step 2 ────────────────────────────────────────────────────────────────
-  pickBackground(rng: SeededRng, constraints: NpcGenerationConstraints): string | null {
-    if (constraints.background) return constraints.background;
+  pickBackground(rng: SeededRng, constraints: NpcGenerationConstraints): BackgroundPick | null {
+    if (constraints.background) {
+      // A user-typed name: keep it verbatim, but resolve it to a pool row's id
+      // when the name unambiguously matches one so personality stays id-first and
+      // correct even if a same-named tier is added later. A free-typed custom or
+      // an ambiguous name resolves to no row → id null, degrading to the
+      // unambiguous-name read path (which yields no personality for a collision).
+      const row = resolveBackgroundRef(this.data.backgrounds, { name: constraints.background });
+      return { name: constraints.background, id: row?.id ?? null };
+    }
     if (this.data.backgrounds.length === 0) return null;
-    return rng.pickOne(this.data.backgrounds.map(b => b.name));
+    // Pick a row (not a name) so the exact tier's id is captured — a duplicate
+    // name would otherwise lose its row identity here. Picking over the row array
+    // draws the same RNG index as the prior name-array pick, so seeds are stable.
+    const row = rng.pickOne(this.data.backgrounds);
+    return { name: row.name, id: row.id };
+  }
+
+  // Writes a background pick onto the decisions, keeping name and id in lockstep
+  // (VEG-481). A null pick (empty pool) clears both.
+  private applyBackgroundPick(
+    decisions: NpcGenerationDecisions,
+    pick: BackgroundPick | null
+  ): void {
+    decisions.background = pick?.name ?? null;
+    decisions.backgroundId = pick?.id ?? null;
   }
 
   // ── Step 3 ────────────────────────────────────────────────────────────────
@@ -404,8 +436,17 @@ export class NpcPipeline {
     const bg = decisions.background;
     const empty: GeneratedPersonality = { traits: [], ideals: [], bonds: [], flaws: [] };
     if (!bg) return empty;
-    const ref = this.data.backgrounds.find(b => b.name === bg);
+    // id-first (VEG-481): resolve the exact pool row the background was chosen
+    // from, not whichever duplicate name sorts first. A legacy decision with no
+    // persisted id, or an ambiguous name, degrades to the unambiguous-name path.
+    const ref = resolveBackgroundRef(this.data.backgrounds, {
+      id: decisions.backgroundId,
+      name: bg,
+    });
     if (!ref) return empty;
+    // The custom-personality overlay stays name-keyed: NpcCustomPersonality has no
+    // background FK (it's an admin-global, name-scoped overlay), so there is no id
+    // to resolve by. The id-first fix above covers the base tables — the tier bug.
     const customForBg = this.data.customPersonality.filter(c => c.background === bg);
     const customByKind = (kind: CustomPersonalityRef['kind']) =>
       customForBg.filter(c => c.kind === kind).map(c => c.value);
@@ -534,7 +575,7 @@ export class NpcPipeline {
         decisions.race = this.pickRace(rng, constraints, decisions);
         break;
       case 'background':
-        decisions.background = this.pickBackground(rng, constraints);
+        this.applyBackgroundPick(decisions, this.pickBackground(rng, constraints));
         break;
       case 'profession':
         decisions.profession = this.pickProfession(rng, constraints, decisions);
@@ -571,6 +612,7 @@ export class NpcPipeline {
         break;
       case 'background':
         to.background = from.background;
+        to.backgroundId = from.backgroundId;
         break;
       case 'profession':
         to.profession = from.profession;
