@@ -403,18 +403,41 @@ export class SeedService {
   // ── Classes / races (parents) and their child tables ──
 
   private async seedClasses(tx: Prisma.TransactionClient): Promise<void> {
-    // Strip embedded feature arrays before insert; those live in their own
+    // Strip embedded feature arrays before writing; those live in their own
     // table, seeded by seedClassFeatures().
+    //
+    // Upsert by name, not createMany({ skipDuplicates }) (VEG-480): the latter
+    // is insert-only, so edits to class data silently no-op on any database
+    // that already has the rows. `SrdClass.name` is globally unique and carries
+    // no contentSource, so a plain upsert-by-name is safe (no homebrew tier to
+    // clobber). Upsert also preserves the row id, which child ClassFeature and
+    // Subclass FKs resolve back to by name — a delete-and-recreate would orphan
+    // them.
     const classRows = srdClasses.map(({ features: _features, ...rest }) => rest);
-    await tx.srdClass.createMany({ data: classRows, skipDuplicates: true });
+    // Upsert-by-name is last-write-wins, so a duplicate name would silently
+    // clobber rather than the createMany first-wins skip. Guard it like every
+    // other by-name-upserted table (seedSrdByName does the same at the item/
+    // spell/etc. layer).
+    assertUniqueSeedNames('class', { 'classes.ts': classRows.map(r => r.name) });
+    for (const row of classRows) {
+      await tx.srdClass.upsert({ where: { name: row.name }, update: row, create: row });
+    }
     this.logger.log(`  Classes: ${classRows.length} entries`);
   }
 
   private async seedRaces(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
-    // Strip embedded trait arrays before insert; those live in their own table,
-    // seeded by seedRaceTraits().
+    // Strip embedded trait arrays before writing; those live in their own
+    // table, seeded by seedRaceTraits(). Upsert by name for the same reason as
+    // seedClasses (VEG-480): `Race.name` is globally unique with no
+    // contentSource, and the row id must survive re-seed for RaceTrait/Subrace
+    // FKs.
     const raceRows = data.races.map(({ traits: _traits, ...rest }) => rest);
-    await tx.race.createMany({ data: raceRows, skipDuplicates: true });
+    // See seedClasses: guard the by-name upsert against a silent last-write-wins
+    // clobber from a duplicate species name.
+    assertUniqueSeedNames('race', { 'species.json': raceRows.map(r => r.name) });
+    for (const row of raceRows) {
+      await tx.race.upsert({ where: { name: row.name }, update: row, create: row });
+    }
     this.logger.log(`  Races: ${raceRows.length} entries`);
   }
 

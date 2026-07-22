@@ -5,6 +5,7 @@ import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { srdBackgrounds } from './data/backgrounds';
+import * as seedGuards from './seed-guards';
 
 // Mock the JSON loader module
 jest.mock('./srd-json.loader', () => ({
@@ -64,7 +65,13 @@ describe('SeedService', () => {
       model.update.mockResolvedValue({});
     }
     prisma.srdClass.createMany.mockResolvedValue({ count: 0 });
+    prisma.srdClass.upsert.mockImplementation((args: any) =>
+      Promise.resolve({ id: `id-${args.where.name}`, name: args.where.name })
+    );
     prisma.race.createMany.mockResolvedValue({ count: 0 });
+    prisma.race.upsert.mockImplementation((args: any) =>
+      Promise.resolve({ id: `id-${args.where.name}`, name: args.where.name })
+    );
     prisma.background.createMany.mockResolvedValue({ count: 0 });
     prisma.background.findFirst.mockResolvedValue(null);
     prisma.background.create.mockImplementation((args: any) =>
@@ -296,12 +303,10 @@ describe('SeedService', () => {
     expect(prisma.language.createMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
     );
-    expect(prisma.srdClass.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skipDuplicates: true })
-    );
-    expect(prisma.race.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skipDuplicates: true })
-    );
+    // Classes and races are upserted by name (VEG-480), not createMany'd —
+    // see the dedicated re-seed block below.
+    expect(prisma.srdClass.upsert).toHaveBeenCalled();
+    expect(prisma.race.upsert).toHaveBeenCalled();
   });
 
   it('merges extracted equipment with magic items from JSON (no hand-authored stub)', async () => {
@@ -333,6 +338,71 @@ describe('SeedService', () => {
 
     await expect(service.seed()).rejects.toThrow(/Longsword/);
     expect(prisma.item.create).not.toHaveBeenCalled();
+  });
+
+  // ── Class / race parent rows re-seed idempotently (VEG-480) ────────────
+  //
+  // These parents were createMany({ skipDuplicates: true }) — insert-only, so
+  // edits to class/race data silently no-op'd on any database that already had
+  // the rows. Upserting by name propagates corrections while preserving the
+  // row id (child ClassFeature/RaceTrait/Subclass FKs resolve back to it by
+  // name, so a delete-and-recreate would orphan them).
+  describe('class/race parent re-seed (VEG-480)', () => {
+    it('upserts each class by name rather than insert-only createMany', async () => {
+      await service.seed();
+
+      // createMany can only insert; on an existing DB it skips, so edits never
+      // land. The upsert is what makes a re-seed actually update.
+      expect(prisma.srdClass.createMany).not.toHaveBeenCalled();
+      expect(prisma.srdClass.upsert).toHaveBeenCalled();
+
+      const call = prisma.srdClass.upsert.mock.calls[0][0];
+      expect(call.where).toEqual({ name: expect.any(String) });
+      // The update branch must carry the row's fields — an empty update would
+      // reproduce the insert-only no-op the ticket fixes.
+      expect(call.update.hitDie).toBeDefined();
+      expect(call.create.hitDie).toBeDefined();
+    });
+
+    it('upserts each race by name rather than insert-only createMany', async () => {
+      await service.seed();
+
+      expect(prisma.race.createMany).not.toHaveBeenCalled();
+      expect(prisma.race.upsert).toHaveBeenCalled();
+
+      const call = prisma.race.upsert.mock.calls[0][0];
+      expect(call.where).toEqual({ name: expect.any(String) });
+      expect(Object.keys(call.update).length).toBeGreaterThan(0);
+    });
+
+    it('guards the class/race names for duplicates before the by-name upsert', async () => {
+      // Upsert-by-name silently clobbers on a duplicate where createMany
+      // first-wins skipped; the guard (used by every other by-name table)
+      // makes a collision fail loudly instead. Assert the wiring is present so
+      // it can't be dropped again.
+      const guard = jest.spyOn(seedGuards, 'assertUniqueSeedNames');
+
+      await service.seed();
+
+      expect(guard).toHaveBeenCalledWith(
+        'class',
+        expect.objectContaining({
+          'classes.ts': expect.arrayContaining(['Fighter']),
+        })
+      );
+      expect(guard).toHaveBeenCalledWith('race', expect.any(Object));
+    });
+
+    it('seeds items before classes so equipment resolution can find them', async () => {
+      // Unchanged by this ticket, but the parent upsert must not reorder the
+      // phases: class starting-equipment resolution (VEG-462) reads the item
+      // catalog, which seedItems must have populated first.
+      await service.seed();
+
+      const firstItemCreate = prisma.item.create.mock.invocationCallOrder[0];
+      const firstClassUpsert = prisma.srdClass.upsert.mock.invocationCallOrder[0];
+      expect(firstItemCreate).toBeLessThan(firstClassUpsert);
+    });
   });
 
   it('seeds pack bundle entries in a second pass with resolved component ids', async () => {
@@ -460,9 +530,9 @@ describe('SeedService', () => {
   it('uses species JSON data for races', async () => {
     await service.seed();
 
-    const racesCall = prisma.race.createMany.mock.calls[0][0];
-    expect(racesCall.data).toHaveLength(1);
-    expect(racesCall.data[0].name).toBe('Test Species');
+    const raceRows = prisma.race.upsert.mock.calls.map(([args]: [any]) => args.create);
+    expect(raceRows).toHaveLength(1);
+    expect(raceRows[0].name).toBe('Test Species');
   });
 
   it('resolves FK references for subclasses via upsert', async () => {
@@ -515,9 +585,9 @@ describe('SeedService', () => {
   it('does not write features field on srd_classes anymore', async () => {
     await service.seed();
 
-    const classesCall = prisma.srdClass.createMany.mock.calls[0][0];
-    for (const row of classesCall.data) {
-      expect(row).not.toHaveProperty('features');
+    for (const [args] of prisma.srdClass.upsert.mock.calls) {
+      expect(args.create).not.toHaveProperty('features');
+      expect(args.update).not.toHaveProperty('features');
     }
   });
 
@@ -572,9 +642,9 @@ describe('SeedService', () => {
   it('does not write traits field on races anymore', async () => {
     await service.seed();
 
-    const racesCall = prisma.race.createMany.mock.calls[0][0];
-    for (const row of racesCall.data) {
-      expect(row).not.toHaveProperty('traits');
+    for (const [args] of prisma.race.upsert.mock.calls) {
+      expect(args.create).not.toHaveProperty('traits');
+      expect(args.update).not.toHaveProperty('traits');
     }
   });
 
