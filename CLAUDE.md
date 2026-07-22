@@ -25,6 +25,7 @@ JWT_SECRET=your-secret docker compose up --build
 cd backend && npm run start:dev   # Dev server
 cd backend && npm test            # Unit tests
 cd backend && npm run test:cov    # Unit tests + coverage (enforces thresholds)
+cd backend && npm run test:db     # Real-DB seed-idempotency tests (needs Postgres up)
 cd backend && npm run seed        # Seed SRD data
 
 # Frontend
@@ -52,9 +53,11 @@ Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0
 
 ## CI & pre-merge verification
 
-GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, and the Playwright E2E suite against a compose-provisioned Postgres. Docker images are built on pushes to `main`.
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. Docker images are built on pushes to `main`.
 
-Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E. The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
+Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E and the real-DB seed tests (both need a live Postgres). The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
+
+**Real-DB tests (`backend/test/db/`, VEG-484).** The default backend Jest suite runs without Postgres and can only mock Prisma, so seed/DB-round-trip properties (id stability across re-seed, child FK survival, edit propagation) live in a separate `*.db-spec.ts` suite run by `npm run test:db` against a disposable `grimoire_os_seedtest` database (auto-created + migrated by the jest `globalSetup`). It's isolated from the coverage-gated unit run (outside `src/`, non-matching suffix, own jest config) and runs as the dedicated `backend-db` CI job. `db-harness.ts` (`createSeedContext`/`truncateAll`) is the reusable seam for future real-DB regression tests. A destructive-op guard refuses any database whose name doesn't contain `test`.
 
 ## Environment Variables
 

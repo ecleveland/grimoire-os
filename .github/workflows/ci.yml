@@ -85,6 +85,53 @@ jobs:
           node-version: 22
       - run: node --test scripts/lib/*.test.mjs
 
+  backend-db:
+    name: Backend — seed DB regression tests
+    runs-on: ubuntu-latest
+    # Real-DB seed idempotency tests (VEG-484) need Postgres, which the coverage-
+    # gated Backend job deliberately runs without. Its own service container +
+    # dedicated database keep it isolated from the Playwright e2e database.
+    services:
+      postgres:
+        image: postgres:16-alpine@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
+        env:
+          POSTGRES_USER: grimoire
+          POSTGRES_PASSWORD: grimoire
+          POSTGRES_DB: grimoire_os_seedtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U grimoire"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      JWT_SECRET: ci-db-secret
+      TEST_DATABASE_URL: postgresql://grimoire:grimoire@localhost:5432/grimoire_os_seedtest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            shared/package-lock.json
+            backend/package-lock.json
+      - name: Install shared deps (prepare builds dist)
+        working-directory: shared
+        run: npm ci
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npx prisma generate
+      # global-setup provisions + migrates grimoire_os_seedtest; the service
+      # container already created the empty database.
+      - name: Seed idempotency (real DB) tests
+        working-directory: backend
+        run: npm run test:db
+
   e2e:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
