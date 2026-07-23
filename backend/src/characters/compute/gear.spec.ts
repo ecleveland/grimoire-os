@@ -5,6 +5,7 @@
 
 import {
   gearMetaFromItem,
+  isGearCategory,
   deriveArmorClass,
   deriveWeapons,
   inventoryFromJson,
@@ -108,6 +109,39 @@ describe('gearMetaFromItem', () => {
       armorType: 'shield',
       baseArmorClass: 2,
     });
+  });
+
+  it('recognizes a magic shield (category "Armor", subcategory "Shield", overlaid "+2") as a shield', () => {
+    // VEG-460: the SRD files magic shields under category "Armor" with
+    // subcategory "Shield" (→ properties ["Shield"]); the seed overlay stamps a
+    // "+2". Derive the flat shield bonus without reclassifying the category.
+    expect(
+      gearMetaFromItem({ category: 'Armor', armorClass: '+2', properties: ['Shield'] })
+    ).toEqual({ type: 'armor', armorType: 'shield', baseArmorClass: 2 });
+  });
+
+  it('does not treat an unstamped "Armor"/"Shield" row as derivable', () => {
+    // No overlaid "+N" (e.g. the generic "Shield, +1, +2, or +3" template or a
+    // homebrew "Armor" row) → underivable, covered by the picker hint.
+    expect(gearMetaFromItem({ category: 'Armor', properties: ['Shield'] })).toBeNull();
+  });
+
+  it('does not treat magic body armor (category "Armor", non-shield subcategory) as a shield', () => {
+    // "Adamantine Armor" etc. carry a non-"Shield" subcategory and no base AC —
+    // an overlaid "+N" must not turn body armor into a shield.
+    expect(
+      gearMetaFromItem({
+        category: 'Armor',
+        armorClass: '+2',
+        properties: ['Any Medium or Heavy, Except Hide Armor'],
+      })
+    ).toBeNull();
+  });
+
+  it('returns null for a cursed minus-form magic shield', () => {
+    expect(
+      gearMetaFromItem({ category: 'Armor', armorClass: '-1', properties: ['Shield'] })
+    ).toBeNull();
   });
 
   it('returns null for armor with a missing or unparseable AC string', () => {
@@ -241,6 +275,29 @@ describe('gearMetaFromItem', () => {
     // Object.prototype and snapshot a function as the armorType.
     for (const category of ['constructor', 'toString', 'valueOf']) {
       expect(gearMetaFromItem({ category, armorClass: '16', properties: [] })).toBeNull();
+    }
+  });
+});
+
+describe('isGearCategory', () => {
+  it('is true for armor and weapon categories the derivation reads', () => {
+    for (const category of [
+      'Armor', // magic body armor + shields
+      'Light Armor',
+      'Medium Armor',
+      'Heavy Armor',
+      'Shield',
+      'Weapon', // magic weapons
+      'Simple Melee Weapon',
+      'Martial Ranged Weapon',
+    ]) {
+      expect(isGearCategory(category)).toBe(true);
+    }
+  });
+
+  it('is false for non-gear categories', () => {
+    for (const category of ['Adventuring Gear', 'Equipment Pack', 'Potion', 'Wondrous Item']) {
+      expect(isGearCategory(category)).toBe(false);
     }
   });
 });

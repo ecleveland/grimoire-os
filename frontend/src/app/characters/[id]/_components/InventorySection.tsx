@@ -9,7 +9,7 @@ import type {
   InventoryItem,
   SrdItem,
 } from '@/lib/types';
-import { gearMetaFromItem } from '@grimoire-os/shared';
+import { gearMetaFromItem, isGearCategory } from '@grimoire-os/shared';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
 import {
@@ -97,6 +97,9 @@ export default function InventorySection(props: InventorySectionProps) {
   const [addItemId, setAddItemId] = useState<string | undefined>(undefined);
   const [addDetail, setAddDetail] = useState<string | null>(null);
   const [addGear, setAddGear] = useState<GearMeta | undefined>(undefined);
+  // Set when a picked gear-category item yields no snapshot (VEG-460), so the
+  // equip-does-nothing behavior (magic weapons, "+N" body armor) is discoverable.
+  const [addGearHint, setAddGearHint] = useState<string | null>(null);
 
   // Add-attunement form drafts (separate from the inventory add form).
   const [attuneName, setAttuneName] = useState('');
@@ -167,7 +170,16 @@ export default function InventorySection(props: InventorySectionProps) {
     setAddDetail(item.category + (item.rarity ? ` · ${item.rarity}` : ''));
     // Snapshot armor/weapon stats at pick time (VEG-410) so equipping the item
     // can drive derived AC/weapons; non-gear items map to null → no snapshot.
-    setAddGear(gearMetaFromItem(item) ?? undefined);
+    const meta = gearMetaFromItem(item);
+    setAddGear(meta ?? undefined);
+    // A gear-category item that yields no snapshot (magic weapons, "+N" body
+    // armor) contributes nothing to derived stats — surface that so it's not a
+    // silent no-op (VEG-460).
+    setAddGearHint(
+      !meta && isGearCategory(item.category)
+        ? 'No derivable stats — manage AC/weapons manually.'
+        : null
+    );
   };
 
   const resetAddForm = () => {
@@ -177,6 +189,7 @@ export default function InventorySection(props: InventorySectionProps) {
     setAddItemId(undefined);
     setAddDetail(null);
     setAddGear(undefined);
+    setAddGearHint(null);
   };
 
   const addItem = () => {
@@ -449,6 +462,7 @@ export default function InventorySection(props: InventorySectionProps) {
                     setAddItemId(undefined);
                     setAddDetail(null);
                     setAddGear(undefined);
+                    setAddGearHint(null);
                   }}
                   className={`flex-1 min-w-[8rem] ${textInputClass}`}
                 />
@@ -486,6 +500,14 @@ export default function InventorySection(props: InventorySectionProps) {
                   className="text-xs text-indigo-600 dark:text-indigo-400"
                 >
                   Linked to catalog: {addDetail}
+                </p>
+              )}
+              {addGearHint && (
+                <p
+                  data-testid="catalog-gear-hint"
+                  className="text-xs text-amber-600 dark:text-amber-400"
+                >
+                  {addGearHint}
                 </p>
               )}
               <SrdItemSearch

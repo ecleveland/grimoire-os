@@ -64,9 +64,24 @@ function leadingInt(text: string): number | null {
 export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
   // Own-property lookup: homebrew categories are free text, so "constructor"
   // must not resolve Object.prototype members into an armorType.
-  const armorType = Object.prototype.hasOwnProperty.call(ARMOR_CATEGORY_TYPES, item.category)
+  const mappedArmorType = Object.prototype.hasOwnProperty.call(ARMOR_CATEGORY_TYPES, item.category)
     ? ARMOR_CATEGORY_TYPES[item.category]
     : undefined;
+  // Magic shields (VEG-460): the SRD files a magic shield under category "Armor"
+  // (not "Shield") with subcategory "Shield" — surfaced as properties ["Shield"]
+  // — and the seed overlay stamps its flat "+N" AC. Recognize that exact shape
+  // as a shield without reclassifying the catalog category (which would move it
+  // between the catalog's exact-match filters). The overlaid "+N" is the gate:
+  // the generic "Shield, +1, +2, or +3" template and homebrew "Armor" rows carry
+  // no stamp and stay underivable (the picker surfaces a "no derivable stats"
+  // hint for them).
+  const isMagicShield =
+    mappedArmorType === undefined &&
+    item.category === 'Armor' &&
+    (item.properties ?? []).includes('Shield') &&
+    !!item.armorClass &&
+    /^\s*\+\s*\d/.test(item.armorClass);
+  const armorType = mappedArmorType ?? (isMagicShield ? 'shield' : undefined);
   if (armorType) {
     // A signed AC string is a bonus/penalty, not a base — leadingInt strips
     // the sign, so "+1" body armor would snapshot base 1 (AC ~3) and a cursed
@@ -105,6 +120,22 @@ export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
   }
 
   return null;
+}
+
+/**
+ * Whether a catalog category is one the derived-stats system tries to read
+ * (VEG-460). Lets the picker tell "gear that produced no snapshot" (magic
+ * weapons, "+N" body armor — worth a "manage stats manually" hint) apart from
+ * ordinary non-gear (packs, potions, tools). Kept beside `gearMetaFromItem` so
+ * the two notions can't drift: the magic "Armor"/"Weapon" catalog categories
+ * and every mapped armor/weapon category are gear.
+ */
+export function isGearCategory(category: string): boolean {
+  return (
+    category === 'Armor' ||
+    Object.prototype.hasOwnProperty.call(ARMOR_CATEGORY_TYPES, category) ||
+    category.endsWith('Weapon')
+  );
 }
 
 /**
