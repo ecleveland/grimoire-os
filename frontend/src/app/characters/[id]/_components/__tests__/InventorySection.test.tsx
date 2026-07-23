@@ -600,6 +600,8 @@ describe('InventorySection', () => {
         expect(screen.getByTestId('catalog-gear-hint')).toHaveTextContent(/no derivable stats/i);
         await user.click(screen.getByRole('button', { name: 'Add item' }));
         expect(onPatch.mock.calls[0][0].inventory.at(-1)).not.toHaveProperty('gear');
+        // The hint clears on add (resetAddForm) so it can't bleed into the next pick.
+        expect(screen.queryByTestId('catalog-gear-hint')).toBeNull();
       });
 
       it('shows no hint and snapshots shield gear for an enriched magic shield', async () => {

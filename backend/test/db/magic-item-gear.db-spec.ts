@@ -37,6 +37,18 @@ describe('magic-item gear enrichment — real DB (VEG-460)', () => {
     });
   });
 
+  it('stamps Shield of the Cavalier as "+4" (its unconditional bonus stacks with the base)', async () => {
+    const shield = await ctx.prisma.item.findFirstOrThrow({
+      where: { name: 'Shield of the Cavalier' },
+    });
+    expect(shield.armorClass).toBe('+4');
+    expect(gearMetaFromItem(shield)).toEqual({
+      type: 'armor',
+      armorType: 'shield',
+      baseArmorClass: 4,
+    });
+  });
+
   it('leaves excluded magic gear unenriched (still no derivable stats)', async () => {
     // Body armor with no concrete base, a "+N" weapon, and the generic shield
     // variant all stay null → underivable (the picker hint covers them).

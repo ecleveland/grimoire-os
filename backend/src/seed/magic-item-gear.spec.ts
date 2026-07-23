@@ -54,10 +54,10 @@ describe('assertMagicItemGearOverlay', () => {
     expect(() => assertMagicItemGearOverlay(items)).not.toThrow();
   });
 
-  it('enriches every overlaid shield with its "+2" AC in the real catalog', () => {
+  it('enriches every overlaid shield with its AC in the real catalog', () => {
     const byName = new Map(loadMagicItemsFromJson().map(i => [i.name, i]));
-    for (const name of Object.keys(MAGIC_ITEM_GEAR_OVERLAY)) {
-      expect(byName.get(name)).toMatchObject({ armorClass: '+2' });
+    for (const [name, overlay] of Object.entries(MAGIC_ITEM_GEAR_OVERLAY)) {
+      expect(byName.get(name)).toMatchObject({ armorClass: overlay.armorClass });
     }
   });
 });

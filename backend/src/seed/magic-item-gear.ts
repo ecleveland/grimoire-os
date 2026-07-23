@@ -16,17 +16,20 @@ export interface MagicItemGearOverlay {
   armorClass?: string;
 }
 
-// Keyed by exact magic-item name. All six are ordinary +2 shields in SRD 5.2.1:
-// their magic is a special property (animation, missile attraction, spell
-// guarding, …), not an AC bonus beyond the base shield. The generic
-// "Shield, +1, +2, or +3" variant is intentionally excluded — like
-// "Armor, +1, +2, or +3", it names no single bonus to snapshot.
+// Keyed by exact magic-item name. Each value is the shield's *unconditional* AC
+// contribution in SRD 5.2.1: "+2" for an ordinary shield whose magic is non-AC
+// (animation, missile attraction, spell guarding, …), and "+4" for Shield of the
+// Cavalier, whose "+2 to AC ... in addition to the Shield's normal bonus" is an
+// always-on bonus that stacks with the base. Conditional AC (Arrow-Catching
+// Shield's +2 only vs ranged attacks) and non-AC magic are deliberately omitted
+// — the manual AC override covers those. The generic "Shield, +1, +2, or +3"
+// variant is excluded — like "Armor, +1, +2, or +3", it names no single bonus.
 export const MAGIC_ITEM_GEAR_OVERLAY: Record<string, MagicItemGearOverlay> = {
   'Animated Shield': { armorClass: '+2' },
   'Arrow-Catching Shield': { armorClass: '+2' },
   'Sentinel Shield': { armorClass: '+2' },
   'Shield of Missile Attraction': { armorClass: '+2' },
-  'Shield of the Cavalier': { armorClass: '+2' },
+  'Shield of the Cavalier': { armorClass: '+4' },
   'Spellguard Shield': { armorClass: '+2' },
 };
 
