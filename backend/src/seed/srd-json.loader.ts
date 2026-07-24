@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { applyMagicItemGearOverlay } from './magic-item-gear';
 
 const JSON_DIR = path.resolve(__dirname, '../../../docs/extracted-srd-json');
 
@@ -693,7 +694,7 @@ export function loadMonstersFromJson() {
 export function loadMagicItemsFromJson() {
   const data = readJsonFile<{ magic_items: JsonMagicItem[] }>('magic_items.json');
   validateMagicItemData(data.magic_items);
-  return data.magic_items.map(item => ({
+  const items = data.magic_items.map(item => ({
     name: item.name,
     category: item.category,
     description: item.description,
@@ -702,6 +703,11 @@ export function loadMagicItemsFromJson() {
     isMagic: true,
     properties: item.subcategory ? [item.subcategory] : [],
   }));
+  // VEG-460: enrich the derivable subset (fixed-base magic shields) with usable
+  // gear stats. The overlay no-ops on any item it doesn't name, so this is safe
+  // over a test fixture; `assertMagicItemGearOverlay` (exercised against the real
+  // catalog in magic-item-gear.spec.ts) guards against SRD-data drift.
+  return items.map(applyMagicItemGearOverlay);
 }
 
 /**

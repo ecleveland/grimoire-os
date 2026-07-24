@@ -36,7 +36,32 @@ const catalogWeapon = {
   damageType: 'Piercing',
   properties: ['Ammunition (Range 150/600; Arrow)', 'Heavy', 'Two-Handed'],
 };
-type CatalogFixture = typeof catalogItem | typeof catalogArmor | typeof catalogWeapon;
+// VEG-460: a magic weapon with no structured damage — a gear category that maps
+// to no snapshot, so the picker must show a "no derivable stats" hint.
+const catalogMagicWeapon = {
+  id: '423e4567-e89b-42d3-a456-426614174000',
+  name: 'Flame Tongue',
+  category: 'Weapon',
+  weight: 3,
+  rarity: 'Rare',
+  properties: [],
+};
+// VEG-460: a magic shield the seed overlay enriched to "+2" — derives shield
+// gear, so NO hint.
+const catalogMagicShield = {
+  id: '523e4567-e89b-42d3-a456-426614174000',
+  name: 'Sentinel Shield',
+  category: 'Armor',
+  weight: 6,
+  armorClass: '+2',
+  properties: ['Shield'],
+};
+type CatalogFixture =
+  | typeof catalogItem
+  | typeof catalogArmor
+  | typeof catalogWeapon
+  | typeof catalogMagicWeapon
+  | typeof catalogMagicShield;
 vi.mock('@/components/SrdItemSearch', () => ({
   default: ({ onSelect }: { onSelect: (item: CatalogFixture) => void }) => (
     <>
@@ -48,6 +73,12 @@ vi.mock('@/components/SrdItemSearch', () => ({
       </button>
       <button type="button" onClick={() => onSelect(catalogWeapon)}>
         stub-pick-weapon
+      </button>
+      <button type="button" onClick={() => onSelect(catalogMagicWeapon)}>
+        stub-pick-magic-weapon
+      </button>
+      <button type="button" onClick={() => onSelect(catalogMagicShield)}>
+        stub-pick-magic-shield
       </button>
     </>
   ),
@@ -557,6 +588,51 @@ describe('InventorySection', () => {
         await user.click(within(form).getByRole('button', { name: 'stub-pick-catalog' }));
         await user.click(screen.getByRole('button', { name: 'Add item' }));
         expect(onPatch.mock.calls[0][0].inventory.at(-1)).not.toHaveProperty('gear');
+      });
+
+      // VEG-460: a gear-category pick that yields no snapshot must tell the user,
+      // so the equip-does-nothing behavior isn't a silent no-op.
+      it('shows a "no derivable stats" hint for a gear item that yields no snapshot', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-magic-weapon' }));
+        expect(screen.getByTestId('catalog-gear-hint')).toHaveTextContent(/no derivable stats/i);
+        await user.click(screen.getByRole('button', { name: 'Add item' }));
+        expect(onPatch.mock.calls[0][0].inventory.at(-1)).not.toHaveProperty('gear');
+        // The hint clears on add (resetAddForm) so it can't bleed into the next pick.
+        expect(screen.queryByTestId('catalog-gear-hint')).toBeNull();
+      });
+
+      it('shows no hint and snapshots shield gear for an enriched magic shield', async () => {
+        const user = userEvent.setup();
+        const onPatch = renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-magic-shield' }));
+        expect(screen.queryByTestId('catalog-gear-hint')).toBeNull();
+        await user.click(screen.getByRole('button', { name: 'Add item' }));
+        expect(onPatch.mock.calls[0][0].inventory.at(-1)).toMatchObject({
+          name: 'Sentinel Shield',
+          gear: { type: 'armor', armorType: 'shield', baseArmorClass: 2 },
+        });
+      });
+
+      it('shows no hint for a non-gear catalog item', async () => {
+        const user = userEvent.setup();
+        renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-catalog' }));
+        expect(screen.queryByTestId('catalog-gear-hint')).toBeNull();
+      });
+
+      it('clears the gear hint when the name is hand-edited after a hinted pick', async () => {
+        const user = userEvent.setup();
+        renderOwner({ inventory: [] });
+        const form = screen.getByTestId('add-item-form');
+        await user.click(within(form).getByRole('button', { name: 'stub-pick-magic-weapon' }));
+        expect(screen.getByTestId('catalog-gear-hint')).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('New item name'), { target: { value: 'Custom' } });
+        expect(screen.queryByTestId('catalog-gear-hint')).toBeNull();
       });
 
       it('drops gear + itemId when a row is renamed inline (stale-snapshot guard)', async () => {
