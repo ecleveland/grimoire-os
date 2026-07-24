@@ -580,7 +580,7 @@ describe('CampaignsService', () => {
               name: 'Shield',
               quantity: 1,
               equipped: true,
-              gear: { type: 'armor', armorType: 'shield', baseArmorClass: 2 },
+              gear: { type: 'armor', armorType: 'shield', armorClassBonus: 2 },
             },
           ],
         },

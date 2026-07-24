@@ -33,7 +33,7 @@ describe('magic-item gear enrichment — real DB (VEG-460)', () => {
     expect(gearMetaFromItem(shield)).toEqual({
       type: 'armor',
       armorType: 'shield',
-      baseArmorClass: 2,
+      armorClassBonus: 2,
     });
   });
 
@@ -45,7 +45,7 @@ describe('magic-item gear enrichment — real DB (VEG-460)', () => {
     expect(gearMetaFromItem(shield)).toEqual({
       type: 'armor',
       armorType: 'shield',
-      baseArmorClass: 4,
+      armorClassBonus: 4,
     });
   });
 
