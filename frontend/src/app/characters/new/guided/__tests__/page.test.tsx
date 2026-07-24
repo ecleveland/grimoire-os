@@ -313,6 +313,19 @@ describe('GuidedCharacterPage — wizard shell', () => {
     expect(mockToastSuccess).toHaveBeenCalledWith('Character created!');
   });
 
+  it('opts the create into auto-equipping starting armor (VEG-483)', async () => {
+    routeApiFetch();
+    const user = userEvent.setup();
+    renderPage();
+
+    await advanceToReview(user, 'Fighter');
+    await user.type(screen.getByRole('textbox', { name: /name/i }), 'Mialee');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
+    expect(lastPostBody()).toMatchObject({ autoEquipStartingGear: true });
+  });
+
   it('omits campaignId from the payload when the user has no campaigns to attach', async () => {
     routeApiFetch({ campaigns: [] });
     const user = userEvent.setup();

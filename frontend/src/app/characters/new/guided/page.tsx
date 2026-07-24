@@ -85,6 +85,10 @@ export default function GuidedCharacterPage() {
         method: 'POST',
         body: JSON.stringify({
           ...characterFormPayload(draft),
+          // Auto-equip the resolved starting armor + shield so derived AC is
+          // right immediately on a fresh build (VEG-483). Guided-builder only —
+          // the server strips this transient flag before persisting.
+          autoEquipStartingGear: true,
           ...(campaignId ? { campaignId } : {}),
         }),
       }),

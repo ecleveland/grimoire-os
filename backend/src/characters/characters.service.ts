@@ -18,6 +18,7 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { computeCharacterStats, isKnownAbilityName } from './compute/compute-stats';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
+import { autoEquipStartingArmor } from './inventory/auto-equip';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -128,19 +129,31 @@ export class CharactersService {
     if (dto.campaignId) {
       await this.campaignAuth.assertCampaignMember(dto.campaignId, userId);
     }
+    // autoEquipStartingGear is a transient control flag, not a column — pull it
+    // off before the DTO is spread into Prisma (VEG-483).
+    const { autoEquipStartingGear, ...persisted } = dto;
+
     // Backfill catalog links + gear snapshots on starting equipment (VEG-462).
     // Applies to every create path, not just the guided builder: no
     // client-supplied "this came from the builder" flag would be trustworthy.
-    const inventory = dto.inventory
+    let inventory = dto.inventory
       ? await this.inventoryResolver.resolveInventory(dto.inventory)
       : undefined;
+
+    // Auto-equip is opt-in (VEG-483): only the guided builder sets the flag, so
+    // a classic-editor or API create that deliberately left armor unequipped is
+    // untouched. Runs after resolution, where the gear snapshot (and its
+    // baseArmorClass) is present to rank body armor by.
+    if (autoEquipStartingGear && inventory) {
+      inventory = autoEquipStartingArmor(inventory);
+    }
 
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
       // Prisma's InputJsonValue for JSON fields (abilityScores, hitPoints, etc.).
       // Safe because CreateCharacterDto only declares whitelisted fields.
       data: {
-        ...(dto as unknown as Prisma.CharacterUncheckedCreateInput),
+        ...(persisted as unknown as Prisma.CharacterUncheckedCreateInput),
         ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
         userId,
       },

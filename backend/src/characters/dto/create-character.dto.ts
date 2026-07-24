@@ -721,4 +721,16 @@ export class CreateCharacterDto {
   @IsOptional()
   @IsUUID()
   campaignId?: string;
+
+  // Transient create-only control flag (VEG-483): when the guided builder sends
+  // it, the service auto-equips the resolved starting armor + shield so derived
+  // AC fires on a fresh build. Consumed by the service and stripped before the
+  // row is written — it is not a persisted column. Omitted from
+  // UpdateCharacterDto's inherited fields so it can never reach a PATCH.
+  @ApiPropertyOptional({
+    description: 'Guided-builder only: auto-equip resolved starting armor + shield on create',
+  })
+  @IsOptional()
+  @IsStrictBoolean()
+  autoEquipStartingGear?: boolean;
 }
