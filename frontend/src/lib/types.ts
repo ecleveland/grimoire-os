@@ -54,6 +54,8 @@ export type {
   InventoryItem,
   GearMeta,
   ArmorGear,
+  BodyArmorGear,
+  ShieldGear,
   WeaponGear,
   ArmorType,
   AttunedItem,

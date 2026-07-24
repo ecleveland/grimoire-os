@@ -350,6 +350,58 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
       });
 
+      it('accepts a new shield gear snapshot carrying armorClassBonus, not baseArmorClass (VEG-461)', async () => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'Shield',
+              quantity: 1,
+              equipped: true,
+              gear: { type: 'armor', armorType: 'shield', armorClassBonus: 2 },
+            },
+          ],
+        });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+      });
+
+      it('accepts a legacy shield snapshot still carrying baseArmorClass (VEG-461 round-trip)', async () => {
+        // Pre-VEG-461 shields persisted their bonus as baseArmorClass; the
+        // frontend resends the whole inventory on every equip-toggle PATCH, so
+        // the DTO must keep accepting that shape or those PATCHes 400.
+        const dto = toDto({
+          ...baseDto,
+          inventory: [
+            {
+              name: 'Shield',
+              quantity: 1,
+              equipped: true,
+              gear: { type: 'armor', armorType: 'shield', baseArmorClass: 2 },
+            },
+          ],
+        });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+      });
+
+      it('rejects a fractional or negative shield armorClassBonus (VEG-461)', async () => {
+        for (const armorClassBonus of [1.5, -1]) {
+          const dto = toDto({
+            ...baseDto,
+            inventory: [
+              { name: 'X', gear: { type: 'armor', armorType: 'shield', armorClassBonus } },
+            ],
+          });
+          const errors = await validate(dto);
+          const bonus = errors
+            .find(e => e.property === 'inventory')
+            ?.children?.[0]?.children?.find(c => c.property === 'gear')
+            ?.children?.find(c => c.property === 'armorClassBonus');
+          expect(bonus?.constraints).toBeDefined();
+        }
+      });
+
       it('accepts a weapon gear snapshot (not rejected as unwhitelisted)', async () => {
         const dto = toDto({
           ...baseDto,

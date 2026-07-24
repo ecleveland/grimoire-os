@@ -63,25 +63,50 @@ export interface AttunedItem {
   itemId?: string;
 }
 
-/** Wearable-armor categories the AC derivation distinguishes (VEG-410). */
-export const ARMOR_TYPES = ['light', 'medium', 'heavy', 'shield'] as const;
+/**
+ * Body-armor categories the AC Dex-cap distinguishes (VEG-410). 'shield' is
+ * intentionally absent: a shield is a separate gear kind (see {@link ShieldGear},
+ * VEG-461) whose flat bonus carries no Dex semantics, so it can never be a
+ * breakdown `armorType` either.
+ */
+export const ARMOR_TYPES = ['light', 'medium', 'heavy'] as const;
 export type ArmorType = (typeof ARMOR_TYPES)[number];
 
 /**
- * Armor stats snapshotted onto an inventory item at catalog-add time
- * (VEG-410). `baseArmorClass` is the flat base for body armor and the bonus
- * for a shield; the Dex rule (full / capped at 2 / none) follows from
- * `armorType`, so no cap is stored. `stealthDisadvantage` /
- * `strengthRequirement` are captured for future derivations even though the
- * AC math doesn't read them yet.
+ * Body-armor stats snapshotted onto an inventory item at catalog-add time
+ * (VEG-410). `baseArmorClass` is the flat armor base; the Dex rule (full /
+ * capped at 2 / none) follows from `armorType`, so no cap is stored.
+ * `stealthDisadvantage` / `strengthRequirement` are captured for future
+ * derivations even though the AC math doesn't read them yet.
  */
-export interface ArmorGear {
+export interface BodyArmorGear {
   type: 'armor';
   armorType: ArmorType;
   baseArmorClass: number;
   stealthDisadvantage?: boolean;
   strengthRequirement?: number;
 }
+
+/**
+ * Shield stats snapshotted onto an inventory item (VEG-410, split out of the
+ * old overloaded `ArmorGear` in VEG-461). A shield's AC contribution is an
+ * additive `armorClassBonus` (typically +2), NOT a base — modelling it as its
+ * own union member makes the former base-vs-bonus overload of
+ * `baseArmorClass` unrepresentable: a shield carries no `baseArmorClass`, and
+ * body armor can never be `armorType: 'shield'`. Rows persisted before VEG-461
+ * instead carry `baseArmorClass`; the derivation reads that as the bonus for
+ * back-compat (`deriveArmorClass`), but new snapshots never write it. The
+ * on-disk `type: 'armor'` discriminant is kept (the split is on the nested
+ * `armorType`) so legacy rows and the equipped-armor query still match.
+ */
+export interface ShieldGear {
+  type: 'armor';
+  armorType: 'shield';
+  armorClassBonus: number;
+}
+
+/** Armor gear: worn body armor or a shield (VEG-461). */
+export type ArmorGear = BodyArmorGear | ShieldGear;
 
 /** Weapon proficiency tiers the attack derivation distinguishes (VEG-463). */
 export const WEAPON_CATEGORIES = ['simple', 'martial'] as const;

@@ -9,8 +9,10 @@ import {
   deriveArmorClass,
   deriveWeapons,
   inventoryFromJson,
+  BodyArmorGear,
   GearMeta,
   InventoryItem,
+  ShieldGear,
 } from '@grimoire-os/shared';
 
 const item = (over: Partial<InventoryItem> = {}): InventoryItem => ({
@@ -20,10 +22,18 @@ const item = (over: Partial<InventoryItem> = {}): InventoryItem => ({
   ...over,
 });
 
-const armorGear = (over: Partial<Extract<GearMeta, { type: 'armor' }>> = {}): GearMeta => ({
+const bodyArmorGear = (over: Partial<BodyArmorGear> = {}): BodyArmorGear => ({
   type: 'armor',
   armorType: 'light',
   baseArmorClass: 11,
+  ...over,
+});
+
+// A shield carries an additive armorClassBonus, never a baseArmorClass (VEG-461).
+const shieldGear = (over: Partial<ShieldGear> = {}): ShieldGear => ({
+  type: 'armor',
+  armorType: 'shield',
+  armorClassBonus: 2,
   ...over,
 });
 
@@ -99,7 +109,7 @@ describe('gearMetaFromItem', () => {
     expect(gearMetaFromItem({ category: 'Shield', armorClass: '+2', properties: [] })).toEqual({
       type: 'armor',
       armorType: 'shield',
-      baseArmorClass: 2,
+      armorClassBonus: 2,
     });
   });
 
@@ -107,7 +117,7 @@ describe('gearMetaFromItem', () => {
     expect(gearMetaFromItem({ category: 'Shield', properties: [] })).toEqual({
       type: 'armor',
       armorType: 'shield',
-      baseArmorClass: 2,
+      armorClassBonus: 2,
     });
   });
 
@@ -117,7 +127,7 @@ describe('gearMetaFromItem', () => {
     // "+2". Derive the flat shield bonus without reclassifying the category.
     expect(
       gearMetaFromItem({ category: 'Armor', armorClass: '+2', properties: ['Shield'] })
-    ).toEqual({ type: 'armor', armorType: 'shield', baseArmorClass: 2 });
+    ).toEqual({ type: 'armor', armorType: 'shield', armorClassBonus: 2 });
   });
 
   it('does not treat an unstamped "Armor"/"Shield" row as derivable', () => {
@@ -329,7 +339,7 @@ describe('deriveArmorClass', () => {
   });
 
   it('applies full Dex to light armor', () => {
-    const inv = [item({ name: 'Leather Armor', gear: armorGear({ baseArmorClass: 11 }) })];
+    const inv = [item({ name: 'Leather Armor', gear: bodyArmorGear({ baseArmorClass: 11 }) })];
     expect(deriveArmorClass(inv, 3, null)).toMatchObject({
       derived: 14,
       breakdown: { base: 11, dexApplied: 3, shield: 0, armorType: 'light' },
@@ -338,7 +348,10 @@ describe('deriveArmorClass', () => {
 
   it('caps Dex at +2 for medium armor', () => {
     const inv = [
-      item({ name: 'Chain Shirt', gear: armorGear({ armorType: 'medium', baseArmorClass: 13 }) }),
+      item({
+        name: 'Chain Shirt',
+        gear: bodyArmorGear({ armorType: 'medium', baseArmorClass: 13 }),
+      }),
     ];
     expect(deriveArmorClass(inv, 3, null)).toMatchObject({
       derived: 15,
@@ -348,7 +361,10 @@ describe('deriveArmorClass', () => {
 
   it('applies a negative Dex modifier to medium armor (the cap is an upper bound)', () => {
     const inv = [
-      item({ name: 'Chain Shirt', gear: armorGear({ armorType: 'medium', baseArmorClass: 13 }) }),
+      item({
+        name: 'Chain Shirt',
+        gear: bodyArmorGear({ armorType: 'medium', baseArmorClass: 13 }),
+      }),
     ];
     expect(deriveArmorClass(inv, -1, null)).toMatchObject({
       derived: 12,
@@ -358,7 +374,10 @@ describe('deriveArmorClass', () => {
 
   it('ignores Dex entirely for heavy armor', () => {
     const inv = [
-      item({ name: 'Plate Armor', gear: armorGear({ armorType: 'heavy', baseArmorClass: 18 }) }),
+      item({
+        name: 'Plate Armor',
+        gear: bodyArmorGear({ armorType: 'heavy', baseArmorClass: 18 }),
+      }),
     ];
     expect(deriveArmorClass(inv, 3, null)).toMatchObject({
       derived: 18,
@@ -368,8 +387,8 @@ describe('deriveArmorClass', () => {
 
   it('stacks a shield on top of body armor', () => {
     const inv = [
-      item({ name: 'Chain Mail', gear: armorGear({ armorType: 'heavy', baseArmorClass: 16 }) }),
-      item({ name: 'Shield', gear: armorGear({ armorType: 'shield', baseArmorClass: 2 }) }),
+      item({ name: 'Chain Mail', gear: bodyArmorGear({ armorType: 'heavy', baseArmorClass: 16 }) }),
+      item({ name: 'Shield', gear: shieldGear() }),
     ];
     expect(deriveArmorClass(inv, 1, null)).toMatchObject({
       derived: 18,
@@ -378,9 +397,7 @@ describe('deriveArmorClass', () => {
   });
 
   it('stacks a shield on unarmored AC', () => {
-    const inv = [
-      item({ name: 'Shield', gear: armorGear({ armorType: 'shield', baseArmorClass: 2 }) }),
-    ];
+    const inv = [item({ name: 'Shield', gear: shieldGear() })];
     expect(deriveArmorClass(inv, 1, null)).toMatchObject({
       derived: 13,
       breakdown: { base: 10, dexApplied: 1, shield: 2, armorType: 'unarmored' },
@@ -389,8 +406,8 @@ describe('deriveArmorClass', () => {
 
   it('counts only the best shield when several are equipped', () => {
     const inv = [
-      item({ name: 'Shield', gear: armorGear({ armorType: 'shield', baseArmorClass: 2 }) }),
-      item({ name: 'Shield +1', gear: armorGear({ armorType: 'shield', baseArmorClass: 3 }) }),
+      item({ name: 'Shield', gear: shieldGear() }),
+      item({ name: 'Shield +1', gear: shieldGear({ armorClassBonus: 3 }) }),
     ];
     expect(deriveArmorClass(inv, 0, null)).toMatchObject({
       derived: 13,
@@ -401,8 +418,11 @@ describe('deriveArmorClass', () => {
   it('picks the body armor with the highest resulting AC when several are equipped', () => {
     const inv = [
       // Studded leather with Dex +3 → 15; plate → 18. Plate wins.
-      item({ name: 'Studded Leather', gear: armorGear({ baseArmorClass: 12 }) }),
-      item({ name: 'Plate Armor', gear: armorGear({ armorType: 'heavy', baseArmorClass: 18 }) }),
+      item({ name: 'Studded Leather', gear: bodyArmorGear({ baseArmorClass: 12 }) }),
+      item({
+        name: 'Plate Armor',
+        gear: bodyArmorGear({ armorType: 'heavy', baseArmorClass: 18 }),
+      }),
     ];
     expect(deriveArmorClass(inv, 3, null)).toMatchObject({
       derived: 18,
@@ -415,7 +435,7 @@ describe('deriveArmorClass', () => {
       item({
         name: 'Plate Armor',
         equipped: false,
-        gear: armorGear({ armorType: 'heavy', baseArmorClass: 18 }),
+        gear: bodyArmorGear({ armorType: 'heavy', baseArmorClass: 18 }),
       }),
       item({ name: 'Rope' }),
     ];
@@ -426,7 +446,7 @@ describe('deriveArmorClass', () => {
   });
 
   it('lets a manual override win while still reporting the derived value', () => {
-    const inv = [item({ name: 'Leather Armor', gear: armorGear({ baseArmorClass: 11 }) })];
+    const inv = [item({ name: 'Leather Armor', gear: bodyArmorGear({ baseArmorClass: 11 }) })];
     expect(deriveArmorClass(inv, 3, 17)).toEqual({
       derived: 14,
       override: 17,
@@ -438,7 +458,7 @@ describe('deriveArmorClass', () => {
   it('uses worn body armor even when unarmored 10 + Dex would score higher (5e RAW)', () => {
     // Dex +5 in Ring Mail (heavy 14): armor wins at 14, never unarmored 15.
     const inv = [
-      item({ name: 'Ring Mail', gear: armorGear({ armorType: 'heavy', baseArmorClass: 14 }) }),
+      item({ name: 'Ring Mail', gear: bodyArmorGear({ armorType: 'heavy', baseArmorClass: 14 }) }),
     ];
     expect(deriveArmorClass(inv, 5, null)).toMatchObject({
       derived: 14,
@@ -446,7 +466,10 @@ describe('deriveArmorClass', () => {
     });
     // Same for medium below the unarmored line: Hide 12 + capped 2 = 14, not 15.
     const hide = [
-      item({ name: 'Hide Armor', gear: armorGear({ armorType: 'medium', baseArmorClass: 12 }) }),
+      item({
+        name: 'Hide Armor',
+        gear: bodyArmorGear({ armorType: 'medium', baseArmorClass: 12 }),
+      }),
     ];
     expect(deriveArmorClass(hide, 5, null)).toMatchObject({
       derived: 14,
@@ -469,6 +492,23 @@ describe('deriveArmorClass', () => {
     expect(deriveArmorClass(inv, 1, null)).toMatchObject({
       derived: 11,
       breakdown: { base: 10, dexApplied: 1, shield: 0, armorType: 'unarmored' },
+    });
+  });
+
+  it('still counts a legacy shield snapshot that carries baseArmorClass, not armorClassBonus (VEG-461)', () => {
+    // Pre-VEG-461 rows persisted a shield's bonus as `baseArmorClass` (the old
+    // overloaded field). Real snapshot data with this exact shape already lives
+    // in character inventory JSON, so the derivation must keep reading it — a
+    // regression here would silently drop +2 AC off every affected character.
+    const legacyShield = {
+      type: 'armor',
+      armorType: 'shield',
+      baseArmorClass: 2,
+    } as unknown as ShieldGear;
+    const inv = [item({ name: 'Shield', gear: legacyShield })];
+    expect(deriveArmorClass(inv, 1, null)).toMatchObject({
+      derived: 13,
+      breakdown: { base: 10, dexApplied: 1, shield: 2, armorType: 'unarmored' },
     });
   });
 });
@@ -555,7 +595,7 @@ describe('deriveWeapons', () => {
   it('ignores unequipped weapons, armor, and gearless items', () => {
     const inv = [
       item({ name: 'Longsword', equipped: false, gear: weaponGear() }),
-      item({ name: 'Leather Armor', gear: armorGear() }),
+      item({ name: 'Leather Armor', gear: bodyArmorGear() }),
       item({ name: 'Rope' }),
     ];
     expect(deriveWeapons(inv, mods, 2, [])).toEqual([]);

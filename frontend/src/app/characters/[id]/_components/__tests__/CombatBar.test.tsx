@@ -34,7 +34,7 @@ describe('CombatBar', () => {
       name: 'Shield',
       quantity: 1,
       equipped: true,
-      gear: { type: 'armor' as const, armorType: 'shield' as const, baseArmorClass: 2 },
+      gear: { type: 'armor' as const, armorType: 'shield' as const, armorClassBonus: 2 },
     };
 
     it('shows the derived AC with its breakdown when no override is set', () => {

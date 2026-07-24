@@ -613,7 +613,7 @@ describe('InventorySection', () => {
         await user.click(screen.getByRole('button', { name: 'Add item' }));
         expect(onPatch.mock.calls[0][0].inventory.at(-1)).toMatchObject({
           name: 'Sentinel Shield',
-          gear: { type: 'armor', armorType: 'shield', baseArmorClass: 2 },
+          gear: { type: 'armor', armorType: 'shield', armorClassBonus: 2 },
         });
       });
 

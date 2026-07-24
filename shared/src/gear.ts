@@ -9,8 +9,11 @@
 import type {
   AbilityScores,
   ArmorGear,
+  ArmorType,
+  BodyArmorGear,
   GearMeta,
   InventoryItem,
+  ShieldGear,
   Weapon,
   WeaponCategory,
   WeaponGear,
@@ -82,20 +85,24 @@ export function gearMetaFromItem(item: GearSourceItem): GearMeta | null {
     !!item.armorClass &&
     /^\s*\+\s*\d/.test(item.armorClass);
   const armorType = mappedArmorType ?? (isMagicShield ? 'shield' : undefined);
-  if (armorType) {
-    // A signed AC string is a bonus/penalty, not a base — leadingInt strips
-    // the sign, so "+1" body armor would snapshot base 1 (AC ~3) and a cursed
-    // "-1" shield would snapshot +1. Only the shield "+N" bonus form is
-    // representable; everything else signed degrades to no snapshot (the
-    // manual override covers it).
+  if (armorType === 'shield') {
+    // A shield's AC contribution is an additive bonus (the "+N" form). A cursed
+    // "-N" penalty isn't representable as a flat bonus — leadingInt strips the
+    // sign, so "-1" would snapshot +1 — so it degrades to no snapshot (the
+    // manual AC override covers it). A shield row with no AC text at all takes
+    // the 5e default +2.
     if (item.armorClass && /^\s*-/.test(item.armorClass)) return null;
-    if (armorType !== 'shield' && item.armorClass && /^\s*\+/.test(item.armorClass)) {
-      return null;
-    }
     const parsed = item.armorClass ? leadingInt(item.armorClass) : null;
-    const baseArmorClass = parsed ?? (armorType === 'shield' ? DEFAULT_SHIELD_BONUS : null);
-    if (baseArmorClass === null) return null;
-    const meta: ArmorGear = { type: 'armor', armorType, baseArmorClass };
+    return { type: 'armor', armorType: 'shield', armorClassBonus: parsed ?? DEFAULT_SHIELD_BONUS };
+  }
+  if (armorType) {
+    // A signed AC string is a bonus/penalty, not a base — leadingInt strips the
+    // sign, so "+1"/"-1" body armor would snapshot base 1 (AC ~3). Body armor
+    // takes only an absolute base; any signed form degrades to no snapshot.
+    if (item.armorClass && /^\s*[+-]/.test(item.armorClass)) return null;
+    const parsed = item.armorClass ? leadingInt(item.armorClass) : null;
+    if (parsed === null) return null;
+    const meta: BodyArmorGear = { type: 'armor', armorType, baseArmorClass: parsed };
     if (item.stealthDisadvantage) meta.stealthDisadvantage = true;
     if (item.strengthRequirement != null) meta.strengthRequirement = item.strengthRequirement;
     return meta;
@@ -163,11 +170,25 @@ function equippedGear<T extends GearMeta['type']>(
 }
 
 /** Dex actually applied for an armor type: full / capped at +2 / none. A
- * negative modifier always applies in full — the medium cap is an upper bound. */
-function dexFor(armorType: ArmorGear['armorType'] | 'unarmored', dexModifier: number): number {
+ * negative modifier always applies in full — the medium cap is an upper bound.
+ * Only ever called for body armor (+ the unarmored fallback); shields carry no
+ * Dex semantics and never reach here. */
+function dexFor(armorType: ArmorType | 'unarmored', dexModifier: number): number {
   if (armorType === 'heavy') return 0;
   if (armorType === 'medium') return Math.min(dexModifier, 2);
   return dexModifier;
+}
+
+/**
+ * A shield's AC contribution. New snapshots carry `armorClassBonus`; rows
+ * persisted before VEG-461 carry `baseArmorClass` (the old overloaded field) —
+ * read both so legacy shields keep counting toward AC. A non-number (corrupt
+ * out-of-band write) yields NaN, filtered by the caller's finite guard, same
+ * posture as body armor.
+ */
+function shieldBonusOf(gear: ShieldGear): number {
+  const raw = gear.armorClassBonus ?? (gear as { baseArmorClass?: unknown }).baseArmorClass;
+  return typeof raw === 'number' ? raw : NaN;
 }
 
 /**
@@ -182,20 +203,18 @@ export function deriveArmorClass(
   dexModifier: number,
   override: number | null
 ): ComputedArmorClass {
-  // A corrupt snapshot (baseArmorClass persisted as a string by an
-  // out-of-band write) must not string-concatenate into the AC; it simply
-  // contributes nothing, like any other unusable gear.
-  const armors = equippedGear(inventory, 'armor').filter(({ gear }) =>
-    Number.isFinite(gear.baseArmorClass)
-  );
+  const armors = equippedGear(inventory, 'armor');
 
   // Worn body armor always wins over the unarmored 10 + Dex baseline (5e:
   // wearing armor means using its calculation, even when that's worse); the
   // baseline applies only when no body armor is equipped. Among several
-  // equipped body armors, the highest resulting AC counts.
-  let best: { base: number; armorType: ArmorGear['armorType'] } | null = null;
+  // equipped body armors, the highest resulting AC counts. A corrupt snapshot
+  // (baseArmorClass persisted as a string by an out-of-band write) must not
+  // string-concatenate into the AC; it simply contributes nothing.
+  let best: { base: number; armorType: ArmorType } | null = null;
   for (const { gear } of armors) {
-    if (gear.armorType === 'shield') continue;
+    if (gear.armorType === 'shield') continue; // narrows to BodyArmorGear
+    if (!Number.isFinite(gear.baseArmorClass)) continue;
     const candidate = gear.baseArmorClass + dexFor(gear.armorType, dexModifier);
     if (!best || candidate > best.base + dexFor(best.armorType, dexModifier)) {
       best = { base: gear.baseArmorClass, armorType: gear.armorType };
@@ -204,10 +223,15 @@ export function deriveArmorClass(
   const base = best?.base ?? 10;
   const armorType: ComputedArmorClass['breakdown']['armorType'] = best?.armorType ?? 'unarmored';
 
-  // Shields don't stack with each other (5e): only the best one counts.
+  // Shields don't stack with each other (5e): only the best one counts. Read
+  // both the new `armorClassBonus` and the legacy `baseArmorClass` (via
+  // shieldBonusOf); a non-finite (corrupt) bonus drops, like any other
+  // unusable gear.
   const shield = armors
     .filter(({ gear }) => gear.armorType === 'shield')
-    .reduce((bestShield, { gear }) => Math.max(bestShield, gear.baseArmorClass), 0);
+    .map(({ gear }) => shieldBonusOf(gear as ShieldGear))
+    .filter(bonus => Number.isFinite(bonus))
+    .reduce((bestShield, bonus) => Math.max(bestShield, bonus), 0);
 
   const dexApplied = dexFor(armorType, dexModifier);
   const derived = base + dexApplied + shield;

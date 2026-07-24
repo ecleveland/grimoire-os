@@ -113,13 +113,26 @@ class SpellSlotDto {
   used?: number;
 }
 
+// The gear DTO still accepts armorType:'shield' inbound even though the shared
+// ARMOR_TYPES no longer lists it (VEG-461): both new and legacy-persisted
+// shields carry it, and the frontend round-trips the whole inventory array on
+// every equip-toggle PATCH, so a character owning a shield must keep passing
+// validation. 'shield' is the only value beyond the three body-armor tiers.
+const GEAR_ARMOR_TYPES = [...ARMOR_TYPES, 'shield'] as const;
+
 /**
  * Armor/weapon metadata snapshotted from the catalog at add time (VEG-410).
  * A discriminated union in the shared type; class-validator can't switch DTO
- * classes on `type`, so one class carries both branches. Each branch field is
+ * classes on `type`, so one class carries every branch. Each branch field is
  * required when its `type` matches AND validated whenever present — otherwise
  * a whitelisted cross-branch field (weapon `damage` on armor gear) would
  * persist completely unvalidated junk into the inventory JSON.
+ *
+ * Shields (VEG-461) are `armorType:'shield'` and carry an additive
+ * `armorClassBonus` instead of a `baseArmorClass`. Both fields are present-only
+ * for shields rather than required, because a shield can arrive in either the
+ * new (`armorClassBonus`) or the legacy (`baseArmorClass`) shape and both must
+ * round-trip; `baseArmorClass` stays required for body armor.
  */
 class GearMetaDto {
   @ApiProperty({ enum: ['armor', 'weapon'] })
@@ -127,17 +140,30 @@ class GearMetaDto {
   type!: string;
 
   // ── armor branch ──
-  @ApiPropertyOptional({ enum: ARMOR_TYPES })
+  @ApiPropertyOptional({ enum: GEAR_ARMOR_TYPES })
   @ValidateIf(o => o.type === 'armor' || o.armorType !== undefined)
-  @IsIn(ARMOR_TYPES)
+  @IsIn(GEAR_ARMOR_TYPES)
   armorType?: string;
 
+  // Required for body armor; present-only for shields (which carry
+  // armorClassBonus instead, or baseArmorClass on a legacy-persisted row).
   @ApiPropertyOptional({ example: 16 })
-  @ValidateIf(o => o.type === 'armor' || o.baseArmorClass !== undefined)
+  @ValidateIf(
+    o => (o.type === 'armor' && o.armorType !== 'shield') || o.baseArmorClass !== undefined
+  )
   @IsInt()
   @Min(0)
   @Max(99)
   baseArmorClass?: number;
+
+  // A shield's additive AC bonus (VEG-461). Present-only, not required for
+  // shields: a legacy shield arrives with baseArmorClass and no armorClassBonus.
+  @ApiPropertyOptional({ example: 2 })
+  @ValidateIf(o => o.armorClassBonus !== undefined)
+  @IsInt()
+  @Min(0)
+  @Max(99)
+  armorClassBonus?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

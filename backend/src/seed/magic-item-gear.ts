@@ -4,12 +4,13 @@
 // derivable subset onto the loaded rows at seed time.
 //
 // Scope (VEG-460): fixed-base magic *shields* only. A shield's AC contribution
-// is a flat "+2" bonus (`deriveArmorClass` treats a shield's baseArmorClass as a
-// bonus), so these are fully representable in the current model. Magic weapons
-// and "+N" body armor are deliberately left unenriched — a "+1 weapon" needs a
-// magic-bonus + proficiency-tier model this ticket doesn't add (deferred to
-// VEG-461), and "+N" body armor is meaningless without the base armor it
-// enchants. The inventory picker surfaces a "no derivable stats" hint for them.
+// is a flat "+2" bonus (`gearMetaFromItem` maps the overlaid "+N" to a
+// ShieldGear.armorClassBonus, split out of the old ArmorGear in VEG-461), so
+// these are fully representable in the current model. Magic weapons and "+N"
+// body armor are deliberately left unenriched — a "+1 weapon" needs a
+// magic-bonus + proficiency-tier model, and "+N" body armor is meaningless
+// without the base armor it enchants. The inventory picker surfaces a "no
+// derivable stats" hint for them.
 
 export interface MagicItemGearOverlay {
   /** Self-describing AC text merged onto the item, e.g. "+2" for a shield. */
