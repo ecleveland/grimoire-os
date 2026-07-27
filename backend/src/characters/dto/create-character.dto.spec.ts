@@ -933,6 +933,26 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('autoEquipStartingGear (VEG-483)', () => {
+    it('accepts a boolean', async () => {
+      const dto = toDto({ ...baseDto, autoEquipStartingGear: true });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'autoEquipStartingGear')).toHaveLength(0);
+    });
+
+    it('rejects a non-boolean', async () => {
+      const dto = toDto({ ...baseDto, autoEquipStartingGear: 'yes' });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'autoEquipStartingGear')).toBeDefined();
+    });
+
+    it('is whitelisted so the guided-builder create passes forbidNonWhitelisted', async () => {
+      const dto = toDto({ ...baseDto, autoEquipStartingGear: true });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'autoEquipStartingGear')).toHaveLength(0);
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);

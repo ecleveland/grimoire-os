@@ -152,6 +152,67 @@ describe('CharactersService', () => {
       expect(inventoryResolver.resolveInventory).not.toHaveBeenCalled();
     });
 
+    it('auto-equips the resolved starting armor when the guided-builder flag is set (VEG-483)', async () => {
+      // The resolver has attached the gear snapshot; auto-equip then flips the
+      // best body armor to equipped so derived AC fires without a manual toggle.
+      const resolved = [
+        {
+          name: 'Chain Mail',
+          quantity: 1,
+          equipped: false,
+          itemId: '11111111-1111-4111-8111-111111111111',
+          gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+        },
+        { name: 'Longsword', quantity: 1, equipped: false, gear: { type: 'weapon' } },
+      ];
+      inventoryResolver.resolveInventory.mockResolvedValue(resolved);
+      prisma.character.create.mockResolvedValue(mockCharacter);
+
+      await service.create(USER_ID, {
+        ...createCharacterDto,
+        inventory: [{ name: 'Chain mail', quantity: 1, equipped: false }],
+        autoEquipStartingGear: true,
+      });
+
+      const persisted = prisma.character.create.mock.calls[0][0].data.inventory;
+      expect(persisted).toEqual([
+        expect.objectContaining({ name: 'Chain Mail', equipped: true }),
+        expect.objectContaining({ name: 'Longsword', equipped: false }),
+      ]);
+    });
+
+    it('never persists the transient autoEquipStartingGear flag (VEG-483)', async () => {
+      prisma.character.create.mockResolvedValue(mockCharacter);
+
+      await service.create(USER_ID, { ...createCharacterDto, autoEquipStartingGear: true });
+
+      expect(prisma.character.create.mock.calls[0][0].data).not.toHaveProperty(
+        'autoEquipStartingGear'
+      );
+    });
+
+    it('leaves equipped state untouched when the flag is absent (VEG-483)', async () => {
+      const resolved = [
+        {
+          name: 'Chain Mail',
+          quantity: 1,
+          equipped: false,
+          gear: { type: 'armor', armorType: 'heavy', baseArmorClass: 16 },
+        },
+      ];
+      inventoryResolver.resolveInventory.mockResolvedValue(resolved);
+      prisma.character.create.mockResolvedValue(mockCharacter);
+
+      await service.create(USER_ID, {
+        ...createCharacterDto,
+        inventory: [{ name: 'Chain mail', quantity: 1, equipped: false }],
+      });
+
+      expect(prisma.character.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ inventory: resolved }),
+      });
+    });
+
     it('asserts campaign membership when campaignId is provided', async () => {
       const campaignId = '123e4567-e89b-42d3-a456-426614174000';
       campaignAuth.assertCampaignMember.mockResolvedValue({ id: campaignId });

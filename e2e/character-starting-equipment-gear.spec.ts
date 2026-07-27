@@ -115,4 +115,57 @@ test.describe('starting equipment gear snapshots (VEG-462)', () => {
     // The sibling resolved normally.
     expect(bare.gear).toMatchObject({ type: 'weapon', damage: '1d8' });
   });
+
+  // VEG-483: the guided builder opts its create into auto-equip
+  // (autoEquipStartingGear: true) so a fresh Fighter's derived AC is right the
+  // moment the sheet loads — no manual equip toggle. Only a real DB proves the
+  // whole chain: name→catalog resolution, gear snapshot, auto-equip, and the AC
+  // derivation reading the now-equipped snapshot.
+  test('a flag-created Fighter has starting armor equipped and derived AC without a toggle', async ({
+    page,
+  }) => {
+    await registerAndLogin(page, 'start-gear-autoequip', 'E2E Auto-Equip Builder');
+    const headers = await csrfHeaders(page);
+
+    const create = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Auto Fighter',
+        race: 'Human',
+        class: 'Fighter',
+        level: 1,
+        abilityScores: {
+          strength: 16,
+          dexterity: 12,
+          constitution: 14,
+          intelligence: 10,
+          wisdom: 10,
+          charisma: 8,
+        },
+        inventory: [
+          { name: 'Chain mail', quantity: 1, equipped: false },
+          { name: 'Any martial weapon', quantity: 1, equipped: false },
+        ],
+        // The single bit this ticket adds to the guided-builder create.
+        autoEquipStartingGear: true,
+      },
+      headers,
+    });
+    expect(create.status(), await create.text()).toBe(201);
+    const character = await create.json();
+
+    const [armor, placeholder] = character.inventory;
+
+    // Auto-equipped on create — the payoff over VEG-462's unequipped parity.
+    expect(armor.equipped).toBe(true);
+    // A weapon placeholder is left alone: auto-equip only touches armor/shields.
+    expect(placeholder.equipped).toBe(false);
+
+    // Heavy armor ignores Dex, so AC is pinned at chain mail's base 16 — and it
+    // reads that way straight off the create response, with no PATCH.
+    expect(character.computed.armorClass.derived).toBe(16);
+    expect(character.computed.armorClass.effective).toBe(16);
+
+    // The transient flag never became a column on the persisted row.
+    expect(character).not.toHaveProperty('autoEquipStartingGear');
+  });
 });
