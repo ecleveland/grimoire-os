@@ -160,6 +160,108 @@ export interface ComputedArmorClass {
 }
 
 /**
+ * Default walking speed (ft) for a character with no stored `speed`. Mastered
+ * here beside {@link resolveSpeed}, which applies it, so the computed block
+ * never reports a null base. `frontend/src/lib/character-defaults` keeps a
+ * local mirror — app code can't value-import this package under Turbopack — and
+ * a frontend spec pins the two together.
+ */
+export const DEFAULT_SPEED = 30;
+
+/**
+ * Walking speed after derived penalties (VEG-449). `base` is the stored column
+ * (or {@link DEFAULT_SPEED}), `penalty` is the total reduction in feet, and
+ * `effective` is what the sheet displays — floored at 0, since a creature never
+ * has negative speed.
+ *
+ * Exhaustion is the only penalty folded in today; the inventory section applies
+ * its encumbrance reduction separately, client-side.
+ */
+export interface ComputedSpeed {
+  base: number;
+  penalty: number;
+  effective: number;
+}
+
+/**
+ * Mechanical effect of the Exhaustion condition (VEG-449), present only while
+ * the character is exhausted — `null` is "no exhaustion", so a consumer can't
+ * mistake an inert level-0 block for an active penalty.
+ *
+ * SRD 5.2: a D20 Test is reduced by 2 × level and Speed by 5 ft × level; level
+ * 6 is death. Derived from the seeded `exhaustion/levels` rule, not hardcoded.
+ */
+export interface ComputedExhaustion {
+  /** Current level, 1–6 (a stored 0/null yields no block at all). */
+  level: number;
+  /** Reduction applied to every d20 Test, as a negative number (e.g. -6). */
+  d20Penalty: number;
+  /** Speed reduction in feet, as a positive magnitude (e.g. 15). */
+  speedPenalty: number;
+  /** Level 6 means death. Advisory only — nothing auto-kills the character. */
+  dead: boolean;
+}
+
+/** The per-level scaling factors the exhaustion derivation needs. */
+export interface ExhaustionRule {
+  maxLevel: number;
+  d20PenaltyPerLevel: number;
+  speedPenaltyFeetPerLevel: number;
+}
+
+/**
+ * SRD 5.2 exhaustion scaling. Master copy for the frontend test fixtures; the
+ * seeded `exhaustion/levels` rule carries the same numbers and a backend
+ * drift-guard test pins the two together — the same arrangement as
+ * {@link XP_LEVEL_THRESHOLDS}.
+ */
+export const EXHAUSTION_RULE: Readonly<ExhaustionRule> = {
+  maxLevel: 6,
+  d20PenaltyPerLevel: 2,
+  speedPenaltyFeetPerLevel: 5,
+};
+
+/**
+ * Resolve the active exhaustion effect, or `null` when the character isn't
+ * exhausted (VEG-449). Pure math shared by the backend compute layer (which
+ * passes the seeded rule) and the frontend test fixtures (which pass
+ * {@link EXHAUSTION_RULE}), so the derivation exists once and only the rule
+ * *data* is ever mirrored.
+ *
+ * A stored `0` and a stored `null` both mean "not exhausted" — the sheet's
+ * track normalizes a cleared level to null, but rows written before that
+ * convention (and the encounter tracker's 0) must read the same way. Levels past
+ * the rule's maximum clamp rather than scaling beyond death, matching how the
+ * other table lookups treat out-of-range input; a fractional level floors.
+ */
+export function computeExhaustionEffect(
+  rule: ExhaustionRule,
+  level: number | null | undefined
+): ComputedExhaustion | null {
+  if (!level || !Number.isFinite(level) || level < 1) return null;
+  const lvl = Math.min(rule.maxLevel, Math.floor(level));
+  return {
+    level: lvl,
+    d20Penalty: -(rule.d20PenaltyPerLevel * lvl),
+    speedPenalty: rule.speedPenaltyFeetPerLevel * lvl,
+    dead: lvl >= rule.maxLevel,
+  };
+}
+
+/**
+ * Walking speed after the exhaustion reduction; never negative.
+ * `speed` is the stored column, falling back to {@link DEFAULT_SPEED}.
+ */
+export function resolveSpeed(
+  speed: number | null | undefined,
+  exhaustion: ComputedExhaustion | null
+): ComputedSpeed {
+  const base = speed ?? DEFAULT_SPEED;
+  const penalty = exhaustion?.speedPenalty ?? 0;
+  return { base, penalty, effective: Math.max(0, base - penalty) };
+}
+
+/**
  * Authoritative derived values for a character. Everything here is a pure
  * function of the character's stored inputs — recomputed per read, never
  * persisted. Spellcasting fields are null for non-casters.
@@ -167,13 +269,28 @@ export interface ComputedArmorClass {
 export interface ComputedStats {
   /** Proficiency bonus for the character's level (clamped to 1–20). */
   proficiencyBonus: number;
+  /**
+   * Raw ability modifiers. Deliberately *not* reduced by exhaustion (VEG-449):
+   * the penalty applies to a d20 Test's roll, not to the modifier itself, and
+   * the level-up / short-rest HP math reads these for the CON modifier.
+   *
+   * For the bonus to a bare ability *check*, use {@link ComputedStats.abilityChecks}.
+   */
   abilityModifiers: ComputedAbilityModifiers;
-  /** Initiative = Dexterity modifier. */
+  /**
+   * Bonus for a bare ability check — the ability modifier less any exhaustion
+   * penalty (VEG-449). Separate from {@link ComputedStats.abilityModifiers}
+   * because an ability check *is* a d20 Test and takes the penalty, while the
+   * modifier feeding HP math is not and must not.
+   */
+  abilityChecks: ComputedAbilityModifiers;
+  /** Initiative = Dexterity modifier, less any exhaustion penalty. */
   initiative: number;
-  /** Keyed by ability full name (e.g. "Strength"). */
+  /** Keyed by ability full name (e.g. "Strength"); exhaustion-adjusted. */
   savingThrows: Record<string, ComputedSave>;
-  /** Keyed by skill name (e.g. "Athletics"). */
+  /** Keyed by skill name (e.g. "Athletics"); exhaustion-adjusted. */
   skills: Record<string, ComputedSkill>;
+  /** 10 + the (already exhaustion-adjusted) Perception skill bonus. */
   passivePerception: number;
   /** Spell save DC / attack bonus / modifier, or null for non-casters. */
   spellcasting: ComputedSpellcasting | null;
@@ -185,4 +302,8 @@ export interface ComputedStats {
   armorClass: ComputedArmorClass;
   /** Attack rows derived from equipped weapons (VEG-410); manual `Character.weapons` entries are separate. */
   weapons: Weapon[];
+  /** Walking speed after derived penalties (VEG-449). */
+  speed: ComputedSpeed;
+  /** Active exhaustion effect, or null when the character isn't exhausted. */
+  exhaustion: ComputedExhaustion | null;
 }

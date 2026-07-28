@@ -2,21 +2,25 @@ import type {
   AbilityScores,
   ClassSpellcasting,
   ComputedAbilityModifiers,
+  ComputedExhaustion,
   ComputedSave,
   ComputedSkill,
   ComputedSpellcasting,
   ComputedSpellSlots,
   ComputedStats,
   ComputedXp,
+  ExhaustionRule,
   InventoryItem,
   SpellcasterType,
   Weapon,
 } from '@grimoire-os/shared';
 import {
   abilityModifier,
+  computeExhaustionEffect,
   computeXpBand,
   deriveArmorClass,
   deriveWeapons,
+  resolveSpeed,
 } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 
@@ -45,6 +49,10 @@ export interface CharacterComputeInput {
   inventory: InventoryItem[];
   /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
   weapons: Weapon[];
+  /** Exhaustion level 1–6, penalizing d20 Tests and Speed (VEG-449). */
+  exhaustion: number | null;
+  /** Stored walking speed in feet; null falls back to {@link DEFAULT_SPEED}. */
+  speed: number | null;
 }
 
 // ── Game-rules source (single source of truth, mirrors GET /srd/rules) ──
@@ -66,6 +74,7 @@ const XP_LEVEL_THRESHOLDS = ruleValue('experience-points', 'level-thresholds') a
   string,
   number
 >;
+const EXHAUSTION_RULE = ruleValue('exhaustion', 'levels') as unknown as ExhaustionRule;
 
 const ABILITY_KEYS: (keyof AbilityScores)[] = [
   'strength',
@@ -119,6 +128,13 @@ function abilityKeyFromName(name: string): keyof AbilityScores | null {
  */
 export function isKnownAbilityName(name: string): boolean {
   return abilityKeyFromName(name) !== null;
+}
+
+// ── Exhaustion ─────────────────────────────────────────────────────────
+
+/** The shared exhaustion math applied to the seeded rule (VEG-449). */
+export function computeExhaustion(level: number | null): ComputedExhaustion | null {
+  return computeExhaustionEffect(EXHAUSTION_RULE, level);
 }
 
 // ── XP progress ────────────────────────────────────────────────────────
@@ -198,12 +214,26 @@ export function computeCharacterStats(
     proficiencies,
     inventory,
     weapons,
+    exhaustion: exhaustionLevel,
+    speed,
   } = character;
   const profBonus = proficiencyBonus(level);
 
+  // Exhaustion reduces every d20 Test (SRD 5.2, VEG-449). It is folded into each
+  // derived roll bonus below exactly once — `passivePerception` and the derived
+  // weapon rows inherit it from the values they're built on rather than adding
+  // it again. Ability modifiers, the spell save DC and AC are deliberately
+  // untouched: none of them is a d20 Test the character rolls.
+  const exhaustion = computeExhaustion(exhaustionLevel);
+  const d20Penalty = exhaustion?.d20Penalty ?? 0;
+
   const abilityModifiers = {} as ComputedAbilityModifiers;
+  const abilityChecks = {} as ComputedAbilityModifiers;
   for (const key of ABILITY_KEYS) {
     abilityModifiers[key] = abilityModifier(scoreFor(abilityScores, key));
+    // A bare ability check is a d20 Test, so it takes the penalty — unlike the
+    // modifier itself, which feeds HP math and must stay raw.
+    abilityChecks[key] = abilityModifiers[key] + d20Penalty;
   }
 
   const savingThrowBonuses: Record<string, ComputedSave> = {};
@@ -212,7 +242,7 @@ export function computeCharacterStats(
     const proficient = savingThrows.includes(name);
     savingThrowBonuses[name] = {
       proficient,
-      bonus: abilityModifiers[key] + (proficient ? profBonus : 0),
+      bonus: abilityModifiers[key] + (proficient ? profBonus : 0) + d20Penalty,
     };
   }
 
@@ -224,7 +254,7 @@ export function computeCharacterStats(
     skillBonuses[skill] = {
       ability,
       proficient,
-      bonus: mod + (proficient ? profBonus : 0),
+      bonus: mod + (proficient ? profBonus : 0) + d20Penalty,
     };
   }
 
@@ -242,15 +272,19 @@ export function computeCharacterStats(
     spellcasting = {
       ability: resolvedAbility,
       modifier: mod,
+      // The save DC is a static number the *target* rolls against, not a d20
+      // Test the caster makes, so exhaustion leaves it alone. The spell attack
+      // bonus is a roll, so it takes the penalty.
       saveDC: 8 + profBonus + mod,
-      attackBonus: profBonus + mod,
+      attackBonus: profBonus + mod + d20Penalty,
     };
   }
 
   return {
     proficiencyBonus: profBonus,
     abilityModifiers,
-    initiative: abilityModifiers.dexterity,
+    abilityChecks,
+    initiative: abilityModifiers.dexterity + d20Penalty,
     savingThrows: savingThrowBonuses,
     skills: skillBonuses,
     passivePerception,
@@ -263,7 +297,10 @@ export function computeCharacterStats(
       abilityModifiers,
       profBonus,
       [...classWeaponProficiencies, ...proficiencies],
-      weapons
+      weapons,
+      d20Penalty
     ),
+    speed: resolveSpeed(speed, exhaustion),
+    exhaustion,
   };
 }

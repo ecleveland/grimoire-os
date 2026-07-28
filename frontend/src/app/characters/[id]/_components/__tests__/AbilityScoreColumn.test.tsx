@@ -233,6 +233,8 @@ describe('computed block is the source of truth (VEG-412)', () => {
     computed: {
       ...mockCharacter.computed,
       abilityModifiers: { ...mockCharacter.computed.abilityModifiers, strength: 9 },
+      // The card's headline number is the ability *check* bonus (VEG-449).
+      abilityChecks: { ...mockCharacter.computed.abilityChecks, strength: 9 },
       savingThrows: {
         ...mockCharacter.computed.savingThrows,
         // Stored lists say STR is proficient (+6); computed disagrees.
@@ -248,11 +250,25 @@ describe('computed block is the source of truth (VEG-412)', () => {
     },
   };
 
-  it('renders ability modifiers from computed, not score math', () => {
+  it('renders the ability check bonus from computed, not score math', () => {
     // STR 16 would derive +3; computed says +9. Raw score display unchanged.
     render(<AbilityScoreColumn character={divergent} />);
     expect(screen.getByTestId('modifier-strength')).toHaveTextContent('+9');
     expect(screen.getByTestId('score-strength')).toHaveTextContent('(16)');
+  });
+
+  it('falls back to the raw modifier when computed.abilityChecks is absent', () => {
+    // Version skew: a pre-VEG-449 backend has no `abilityChecks`. Degrade to
+    // the modifier rather than rendering "undefined".
+    const legacy: Character = {
+      ...divergent,
+      computed: {
+        ...divergent.computed,
+        abilityChecks: undefined as unknown as Character['computed']['abilityChecks'],
+      },
+    };
+    render(<AbilityScoreColumn character={legacy} />);
+    expect(screen.getByTestId('modifier-strength')).toHaveTextContent('+9');
   });
 
   it('renders save bonus and proficiency dot from computed', () => {
@@ -291,5 +307,62 @@ describe('computed block is the source of truth (VEG-412)', () => {
     const stealthRow = screen.getByTestId('skill-row-stealth');
     expect(within(stealthRow).getByText('+1')).toBeInTheDocument();
     expect(screen.getByTestId('skill-dot-stealth').className).toContain('bg-gray-300');
+  });
+});
+
+describe('exhaustion penalties reach saves and skills (VEG-449)', () => {
+  // Exhaustion reduces every d20 Test by 2 × level. These readouts render the
+  // computed bonuses directly, so the penalty must arrive already folded in —
+  // the component does no rule math of its own.
+  const exhausted = makeCharacter({
+    savingThrows: ['Strength', 'Constitution'],
+    skills: ['Athletics', 'Intimidation'],
+    exhaustion: 3,
+  });
+
+  it('reduces proficient and unproficient saving throws alike', () => {
+    render(<AbilityScoreColumn character={exhausted} />);
+    // STR: mod +3, prof +3, −6 = +0
+    const strSaveRow = within(screen.getByTestId('ability-card-strength')).getByTestId(
+      'save-row-strength'
+    );
+    expect(within(strSaveRow).getByText('+0')).toBeInTheDocument();
+
+    // DEX (unproficient): mod +1, −6 = −5
+    const dexSaveRow = within(screen.getByTestId('ability-card-dexterity')).getByTestId(
+      'save-row-dexterity'
+    );
+    expect(within(dexSaveRow).getByText('-5')).toBeInTheDocument();
+  });
+
+  it('reduces skill bonuses', () => {
+    render(<AbilityScoreColumn character={exhausted} />);
+    // Athletics (STR, proficient): +3 +3 −6 = +0
+    expect(within(screen.getByTestId('skill-row-athletics')).getByText('+0')).toBeInTheDocument();
+    // Stealth (DEX, unproficient): +1 −6 = −5
+    expect(within(screen.getByTestId('skill-row-stealth')).getByText('-5')).toBeInTheDocument();
+  });
+
+  it('penalizes the headline ability-check bonus, since its roll button rolls a check', () => {
+    // STR 16 → +3 modifier, but a bare Strength *check* at exhaustion 3 rolls
+    // at −3. The card shows what it rolls, matching the save/skill rows below
+    // it — the raw modifier stays unpenalized in `computed.abilityModifiers`
+    // for HP math (pinned in the backend compute spec).
+    render(<AbilityScoreColumn character={exhausted} />);
+    expect(screen.getByTestId('modifier-strength')).toHaveTextContent('-3');
+    // The stored score is untouched — only the derived roll bonus moves.
+    expect(screen.getByTestId('score-strength')).toHaveTextContent('(16)');
+  });
+
+  it('rolls the ability check with the penalized bonus', async () => {
+    const user = userEvent.setup();
+    mockMessage.mockReset();
+    render(<AbilityScoreColumn character={exhausted} canRoll />);
+    await user.click(screen.getByRole('button', { name: 'Roll Strength check' }));
+
+    // The d20 face is random, so assert the arithmetic: +3 − 6 = −3.
+    const message = mockMessage.mock.calls[0][0] as string;
+    const [, face, total] = message.match(/Strength check: (\d+) . 3 = (-?\d+)/)!;
+    expect(Number(total)).toBe(Number(face) - 3);
   });
 });

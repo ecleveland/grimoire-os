@@ -498,21 +498,33 @@ export const srdGameRules = [
       hpRecovery: 'Regain all lost hit points',
       hitDiceRecovery: 'Regain spent Hit Dice up to half total (minimum 1)',
       spellSlotRecovery: 'Regain all expended spell slots',
-      exhaustionRecovery: 'Reduce exhaustion level by 1 (if fed)',
+      exhaustionRecovery: 'Remove 1 exhaustion level',
       frequency: 'Once per 24-hour period',
       description: 'A period of extended downtime, at least 8 hours long',
     },
   },
   {
+    // SRD 5.2 exhaustion (VEG-449): a single flat penalty that scales with the
+    // level, replacing the 2014 tiered table (disadvantage / speed halved / HP
+    // max halved) this row used to carry. The per-level *numbers* are the
+    // authoritative source the compute layer reads — `effects` is display prose
+    // derived from them, never parsed. Structured for the same reason
+    // `proficiency-bonus/table` is: a rule the compute layer can't read is a
+    // rule it will end up hardcoding and drifting from.
     category: 'exhaustion',
     key: 'levels',
     value: {
-      '1': 'Disadvantage on ability checks',
-      '2': 'Speed halved',
-      '3': 'Disadvantage on attack rolls and saving throws',
-      '4': 'Hit point maximum halved',
-      '5': 'Speed reduced to 0',
-      '6': 'Death',
+      maxLevel: 6,
+      d20PenaltyPerLevel: 2,
+      speedPenaltyFeetPerLevel: 5,
+      effects: {
+        '1': 'D20 Tests reduced by 2; Speed reduced by 5 feet',
+        '2': 'D20 Tests reduced by 4; Speed reduced by 10 feet',
+        '3': 'D20 Tests reduced by 6; Speed reduced by 15 feet',
+        '4': 'D20 Tests reduced by 8; Speed reduced by 20 feet',
+        '5': 'D20 Tests reduced by 10; Speed reduced by 25 feet',
+        '6': 'Death',
+      },
     },
   },
   {

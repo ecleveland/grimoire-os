@@ -7,7 +7,13 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AbilityScores, Combatant } from '@grimoire-os/shared';
-import { abilityModifier, deriveArmorClass, inventoryFromJson } from '@grimoire-os/shared';
+import {
+  abilityModifier,
+  computeExhaustionEffect,
+  deriveArmorClass,
+  EXHAUSTION_RULE,
+  inventoryFromJson,
+} from '@grimoire-os/shared';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
 import { PrismaService } from '../prisma/prisma.service';
@@ -62,6 +68,9 @@ const partyCharacterSelect = {
   // whitelist drops both, so members still never see each other's inventory.
   abilityScores: true,
   inventory: true,
+  // Loaded only to apply the exhaustion penalty to the initiative modifier
+  // (VEG-449); dropped by the DTO whitelist like the two above.
+  exhaustion: true,
 } satisfies Prisma.CharacterSelect;
 
 /**
@@ -81,6 +90,25 @@ function withEffectiveArmorClass<
     null
   );
   return { ...character, armorClass: derived };
+}
+
+/**
+ * Apply the exhaustion penalty to the initiative modifier the roster exposes
+ * (VEG-449). The encounter party-add rolls `d20 + initiative`, so without this
+ * an exhausted PC is placed in the turn order at a modifier their own sheet
+ * says they don't have.
+ *
+ * Deliberately narrow: it adjusts whatever initiative the projection already
+ * ships rather than re-deriving from Dex. Reconciling the stored column with
+ * the computed block is VEG-452's job, and doing it here would silently change
+ * the roster's numbers for every unexhausted character too.
+ */
+function withEffectiveInitiative<
+  T extends { initiative: number | null; exhaustion: number | null },
+>(character: T): T {
+  const effect = computeExhaustionEffect(EXHAUSTION_RULE, character.exhaustion);
+  if (!effect || character.initiative === null) return character;
+  return { ...character, initiative: character.initiative + effect.d20Penalty };
 }
 
 function serialize(campaign: any): CampaignDto {
@@ -229,7 +257,10 @@ export class CampaignsService {
       orderBy: { name: 'asc' },
       select: partyCharacterSelect,
     });
-    return toDtoArray(PartyCharacterDto, characters.map(withEffectiveArmorClass));
+    return toDtoArray(
+      PartyCharacterDto,
+      characters.map(c => withEffectiveInitiative(withEffectiveArmorClass(c)))
+    );
   }
 
   /**
@@ -250,7 +281,10 @@ export class CampaignsService {
       orderBy: { name: 'asc' },
       select: partyCharacterSelect,
     });
-    return toDtoArray(PartyCharacterDto, characters.map(withEffectiveArmorClass));
+    return toDtoArray(
+      PartyCharacterDto,
+      characters.map(c => withEffectiveInitiative(withEffectiveArmorClass(c)))
+    );
   }
 
   /**

@@ -1,5 +1,10 @@
-import type { AbilityScores, ClassSpellcasting, InventoryItem } from '@grimoire-os/shared';
-import { computeXpBand, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
+import type {
+  AbilityScores,
+  ClassSpellcasting,
+  ExhaustionRule,
+  InventoryItem,
+} from '@grimoire-os/shared';
+import { computeXpBand, EXHAUSTION_RULE, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 import {
   abilityModifier,
@@ -30,6 +35,8 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     proficiencies: [],
     inventory: [],
     weapons: [],
+    exhaustion: null,
+    speed: null,
     ...over,
   };
 }
@@ -420,5 +427,221 @@ describe('computeCharacterStats', () => {
       ]);
       expect(stats.weapons[0]).toMatchObject({ attackBonus: '+6' });
     });
+  });
+
+  // ── Exhaustion (VEG-449) — SRD 5.2: every d20 Test reduced by 2 × level,
+  // Speed by 5 ft × level, death at 6.
+  describe('exhaustion penalties', () => {
+    const dagger: InventoryItem = {
+      name: 'Dagger',
+      quantity: 1,
+      equipped: true,
+      gear: {
+        type: 'weapon',
+        damage: '1d4',
+        damageType: 'Piercing',
+        properties: [],
+        ranged: false,
+      },
+    };
+
+    it.each([null, 0])('leaves every derived value unpenalized at exhaustion %p', level => {
+      const stats = computeCharacterStats(
+        input({ exhaustion: level, savingThrows: ['Dexterity'], skills: ['Perception'] }),
+        FULL_CASTER
+      );
+      expect(stats.exhaustion).toBeNull();
+      // Dex 12 → +1, level 5 → prof +3.
+      expect(stats.savingThrows['Dexterity'].bonus).toBe(4);
+      expect(stats.skills['Perception'].bonus).toBe(4); // Wis 13 → +1, +3 prof
+      expect(stats.initiative).toBe(1);
+      expect(stats.passivePerception).toBe(14);
+      expect(stats.speed).toEqual({ base: 30, penalty: 0, effective: 30 });
+    });
+
+    it.each([
+      [1, -2, 5],
+      [2, -4, 10],
+      [3, -6, 15],
+      [4, -8, 20],
+      [5, -10, 25],
+    ])('level %i applies %i to d20 Tests and −%i ft Speed', (level, d20Penalty, speedPenalty) => {
+      const stats = computeCharacterStats(
+        input({ exhaustion: level, savingThrows: ['Dexterity'], skills: ['Perception'] }),
+        FULL_CASTER
+      );
+
+      expect(stats.exhaustion).toEqual({ level, d20Penalty, speedPenalty, dead: false });
+      // Each unexhausted baseline (asserted above) shifted by exactly the penalty
+      // — once, never twice.
+      expect(stats.savingThrows['Dexterity'].bonus).toBe(4 + d20Penalty);
+      expect(stats.savingThrows['Strength'].bonus).toBe(3 + d20Penalty); // unproficient
+      expect(stats.skills['Perception'].bonus).toBe(4 + d20Penalty);
+      expect(stats.skills['Athletics'].bonus).toBe(3 + d20Penalty); // unproficient, Str +3
+      expect(stats.initiative).toBe(1 + d20Penalty);
+      expect(stats.passivePerception).toBe(14 + d20Penalty);
+      expect(stats.spellcasting?.attackBonus).toBe(2 + d20Penalty); // Cha 8 → −1, +3 prof
+      expect(stats.speed).toEqual({
+        base: 30,
+        penalty: speedPenalty,
+        effective: 30 - speedPenalty,
+      });
+    });
+
+    it('penalizes derived weapon attack rolls but not their damage', () => {
+      // Str 16 → +3, prof +3, exhaustion 2 → −4.
+      const stats = computeCharacterStats(input({ exhaustion: 2, inventory: [dagger] }));
+      expect(stats.weapons[0]).toMatchObject({ attackBonus: '+2', damage: '1d4+3' });
+    });
+
+    it('penalizes surviving equipped rows when a manual row shadows another', () => {
+      // The shadowing case is the one worth constructing: `deriveWeapons` only
+      // ever returns rows built from `inventory`, so asserting on an empty
+      // inventory would still pass with the d20Penalty parameter deleted. Here
+      // the equipped Dagger is suppressed by the same-named manual row, and the
+      // second equipped weapon proves the penalty reaches what survives.
+      const club: InventoryItem = {
+        name: 'Club',
+        quantity: 1,
+        equipped: true,
+        gear: {
+          type: 'weapon',
+          damage: '1d4',
+          damageType: 'Bludgeoning',
+          properties: [],
+          ranged: false,
+        },
+      };
+      const stats = computeCharacterStats(
+        input({
+          exhaustion: 2,
+          inventory: [dagger, club],
+          weapons: [{ name: 'Dagger', attackBonus: '+7', damage: '1d4+4', damageType: 'Piercing' }],
+        })
+      );
+      // Str 16 → +3, prof +3, exhaustion 2 → −4 ⇒ +2.
+      expect(stats.weapons).toEqual([expect.objectContaining({ name: 'Club', attackBonus: '+2' })]);
+    });
+
+    it('never re-emits a stored manual row from the derived list', () => {
+      // Manual rows are the player's own text and the compute layer must not
+      // rewrite them. The sheet applies the penalty at render time instead
+      // (WeaponsTable), so both row kinds agree within the one table.
+      const manual = {
+        name: 'Pact Blade',
+        attackBonus: '+7',
+        damage: '1d8+4',
+        damageType: 'Force',
+      };
+      const stats = computeCharacterStats(input({ exhaustion: 5, weapons: [manual] }));
+      expect(stats.weapons).toEqual([]);
+      expect(manual.attackBonus).toBe('+7');
+    });
+
+    it('penalizes ability checks but not the raw ability modifiers', () => {
+      const stats = computeCharacterStats(input({ exhaustion: 3 }));
+      // Str 16 → +3 modifier, check at +3 − 6 = −3.
+      expect(stats.abilityModifiers.strength).toBe(3);
+      expect(stats.abilityChecks.strength).toBe(-3);
+      // Cha 8 → −1 modifier, check at −7.
+      expect(stats.abilityModifiers.charisma).toBe(-1);
+      expect(stats.abilityChecks.charisma).toBe(-7);
+    });
+
+    it('leaves ability checks equal to the modifiers when unexhausted', () => {
+      const stats = computeCharacterStats(input());
+      expect(stats.abilityChecks).toEqual(stats.abilityModifiers);
+    });
+
+    it('leaves values that are not d20 Tests unchanged', () => {
+      const base = computeCharacterStats(input({ inventory: [dagger] }), FULL_CASTER);
+      const worn = computeCharacterStats(
+        input({ exhaustion: 4, inventory: [dagger] }),
+        FULL_CASTER
+      );
+
+      // The penalty applies to the roll, not the modifier — and the level-up /
+      // short-rest HP math reads these modifiers for CON.
+      expect(worn.abilityModifiers).toEqual(base.abilityModifiers);
+      // A save DC is rolled against by the target, not rolled by the caster.
+      expect(worn.spellcasting?.saveDC).toBe(base.spellcasting?.saveDC);
+      expect(worn.spellcasting?.modifier).toBe(base.spellcasting?.modifier);
+      expect(worn.armorClass).toEqual(base.armorClass);
+      expect(worn.proficiencyBonus).toBe(base.proficiencyBonus);
+      expect(worn.spellSlots).toEqual(base.spellSlots);
+      expect(worn.xp).toEqual(base.xp);
+    });
+
+    it('flags death at level 6', () => {
+      const stats = computeCharacterStats(input({ exhaustion: 6 }));
+      expect(stats.exhaustion).toEqual({
+        level: 6,
+        d20Penalty: -12,
+        speedPenalty: 30,
+        dead: true,
+      });
+      // Advisory only: the block still computes, nothing auto-kills the row.
+      expect(stats.savingThrows['Dexterity'].bonus).toBe(-11);
+    });
+
+    it('clamps levels past the rule maximum instead of scaling past death', () => {
+      expect(computeCharacterStats(input({ exhaustion: 9 })).exhaustion).toEqual(
+        computeCharacterStats(input({ exhaustion: 6 })).exhaustion
+      );
+    });
+
+    it.each([-2, NaN, Infinity, 0.5])('treats %p as unexhausted', level => {
+      expect(computeCharacterStats(input({ exhaustion: level })).exhaustion).toBeNull();
+    });
+
+    it('floors effective speed at zero rather than going negative', () => {
+      // Base 20 ft, level 6 → −30 ft.
+      const stats = computeCharacterStats(input({ exhaustion: 6, speed: 20 }));
+      expect(stats.speed).toEqual({ base: 20, penalty: 30, effective: 0 });
+    });
+
+    it('reports the stored speed column as the base, defaulting when absent', () => {
+      expect(computeCharacterStats(input({ speed: 40 })).speed).toEqual({
+        base: 40,
+        penalty: 0,
+        effective: 40,
+      });
+      expect(computeCharacterStats(input({ speed: null })).speed.base).toBe(30);
+    });
+  });
+});
+
+describe('exhaustion rule data', () => {
+  it('the shared EXHAUSTION_RULE constant matches the seeded rule (drift guard)', () => {
+    // Frontend test fixtures derive computed.exhaustion from the shared constant
+    // while the compute layer reads the seeded rule — this pin keeps them one
+    // rule, exactly as the XP thresholds are pinned above. `effects` is display
+    // prose the derivation never reads, so it isn't part of the contract.
+    const seeded = srdGameRules.find(r => r.category === 'exhaustion' && r.key === 'levels');
+    const { effects: _effects, ...numeric } = seeded!.value as unknown as ExhaustionRule & {
+      effects: Record<string, string>;
+    };
+    expect(numeric).toEqual(EXHAUSTION_RULE);
+  });
+
+  it('the compute layer derives penalties from the rule, not hardcoded numbers', () => {
+    const { maxLevel, d20PenaltyPerLevel, speedPenaltyFeetPerLevel } = EXHAUSTION_RULE;
+    const stats = computeCharacterStats(input({ exhaustion: 3 }));
+    expect(stats.exhaustion).toEqual({
+      level: 3,
+      d20Penalty: -(d20PenaltyPerLevel * 3),
+      speedPenalty: speedPenaltyFeetPerLevel * 3,
+      dead: 3 >= maxLevel,
+    });
+  });
+
+  it('describes every level 1–6 in the display effects map', () => {
+    const seeded = srdGameRules.find(r => r.category === 'exhaustion' && r.key === 'levels');
+    const { effects } = seeded!.value as unknown as { effects: Record<string, string> };
+    for (let level = 1; level <= 6; level++) {
+      expect(effects[String(level)]).toEqual(expect.any(String));
+      expect(effects[String(level)].length).toBeGreaterThan(0);
+    }
+    expect(effects['6']).toMatch(/death/i);
   });
 });

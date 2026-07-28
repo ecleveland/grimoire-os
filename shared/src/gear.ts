@@ -436,6 +436,11 @@ function isProficientWith(gear: WeaponGear, name: string, grants: WeaponGrantInd
  * row: the player's own entry may carry bonuses (magic, fighting style) the
  * derivation can't know about, and a duplicate row would offer a second,
  * silently-weaker attack button.
+ *
+ * `d20Penalty` (VEG-449) is a non-positive adjustment applied to every derived
+ * attack bonus — an attack roll is a d20 Test, so exhaustion reduces it. Only
+ * the derived rows take it; manual entries pass through untouched, like the
+ * stored AC override.
  */
 export function deriveWeapons(
   inventory: InventoryItem[],
@@ -444,7 +449,8 @@ export function deriveWeapons(
   // Required (no default) on purpose: a call site must decide what grants
   // apply, so none can silently regress every tiered weapon to non-proficient.
   weaponProficiencies: string[],
-  manualWeapons: Weapon[] = []
+  manualWeapons: Weapon[] = [],
+  d20Penalty = 0
 ): Weapon[] {
   // Both name sources come out of Json columns guarded only for array-ness,
   // so a null / name-less element must degrade (skip), not crash the read.
@@ -472,7 +478,7 @@ export function deriveWeapons(
       const noteParts = [...(proficient ? [] : ['Not proficient']), ...propertiesOf(gear)];
       return {
         name: item.name,
-        attackBonus: formatSigned(mod + (proficient ? proficiencyBonus : 0)),
+        attackBonus: formatSigned(mod + (proficient ? proficiencyBonus : 0) + d20Penalty),
         damage: mod === 0 ? gear.damage : `${gear.damage}${formatSigned(mod)}`,
         damageType: gear.damageType,
         notes: noteParts.length > 0 ? noteParts.join(', ') : undefined,

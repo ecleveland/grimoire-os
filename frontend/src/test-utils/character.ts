@@ -5,9 +5,12 @@ import type { AbilityScores, Character, ComputedSpellcasting, ComputedStats } fr
 // threshold table is the shared master copy, drift-guarded against the seeded
 // rule by a backend test.
 import {
+  computeExhaustionEffect,
   computeXpBand,
   deriveArmorClass,
   deriveWeapons,
+  EXHAUSTION_RULE,
+  resolveSpeed,
   XP_LEVEL_THRESHOLDS,
 } from '@grimoire-os/shared';
 import {
@@ -43,20 +46,36 @@ export function deriveComputed(
     | 'proficiencies'
     | 'inventory'
     | 'weapons'
+    | 'exhaustion'
+    | 'speed'
   >
 ): ComputedStats {
   const scores = c.abilityScores ?? DEFAULT_ABILITY_SCORES;
   const prof = proficiencyBonus(c.level);
 
+  // Exhaustion reduces every d20 Test (VEG-449). Derived from the shared rule
+  // constant, drift-guarded against the seeded rule by a backend test.
+  const exhaustion = computeExhaustionEffect(EXHAUSTION_RULE, c.exhaustion);
+  const d20Penalty = exhaustion?.d20Penalty ?? 0;
+
   const abilityModifiers = Object.fromEntries(
     ABILITY_KEYS.map(key => [key, abilityModifier(scores[key])])
   ) as ComputedStats['abilityModifiers'];
+
+  // A bare ability check is a d20 Test and takes the penalty; the modifier
+  // itself does not (VEG-449).
+  const abilityChecks = Object.fromEntries(
+    ABILITY_KEYS.map(key => [key, abilityModifiers[key] + d20Penalty])
+  ) as ComputedStats['abilityChecks'];
 
   const savingThrows = Object.fromEntries(
     ABILITY_KEYS.map(key => {
       const name = ABILITY_KEY_TO_NAME[key];
       const proficient = c.savingThrows.includes(name);
-      return [name, { proficient, bonus: abilityModifiers[key] + (proficient ? prof : 0) }];
+      return [
+        name,
+        { proficient, bonus: abilityModifiers[key] + (proficient ? prof : 0) + d20Penalty },
+      ];
     })
   );
 
@@ -66,7 +85,11 @@ export function deriveComputed(
       const proficient = c.skills.includes(skill);
       return [
         skill,
-        { ability, proficient, bonus: abilityModifiers[key] + (proficient ? prof : 0) },
+        {
+          ability,
+          proficient,
+          bonus: abilityModifiers[key] + (proficient ? prof : 0) + d20Penalty,
+        },
       ];
     })
   );
@@ -78,15 +101,17 @@ export function deriveComputed(
     spellcasting = {
       ability: c.spellcastingAbility,
       modifier: mod,
+      // A save DC is not a d20 Test the caster rolls, so exhaustion spares it.
       saveDC: 8 + prof + mod,
-      attackBonus: prof + mod,
+      attackBonus: prof + mod + d20Penalty,
     };
   }
 
   return {
     proficiencyBonus: prof,
     abilityModifiers,
-    initiative: abilityModifiers.dexterity,
+    abilityChecks,
+    initiative: abilityModifiers.dexterity + d20Penalty,
     savingThrows,
     skills,
     passivePerception: 10 + skills['Perception'].bonus,
@@ -104,8 +129,11 @@ export function deriveComputed(
       abilityModifiers,
       prof,
       c.proficiencies ?? [],
-      c.weapons ?? []
+      c.weapons ?? [],
+      d20Penalty
     ),
+    speed: resolveSpeed(c.speed, exhaustion),
+    exhaustion,
   };
 }
 

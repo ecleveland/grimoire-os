@@ -75,4 +75,72 @@ test.describe('character sheet — status tracker', () => {
     await expect(concentrationChip).not.toBeVisible();
     await expect(tracker.getByText('Level 3')).not.toBeVisible();
   });
+
+  // VEG-449 — exhaustion is no longer display-only: the server-computed block
+  // reduces every d20 Test by 2 × level and Speed by 5 ft × level, and the sheet
+  // renders those reduced values. This walks the real round-trip (PATCH → recompute
+  // → re-render), which the unit specs can only model with a fixture.
+  test('exhaustion penalties reach the sheet and clear when the track is reset', async ({
+    page,
+  }) => {
+    await registerAndLogin(page, 'exhaustion-penalty', 'Player Two');
+    const headers = await csrfHeaders(page);
+
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Bran Coldhearth',
+        class: 'Fighter',
+        level: 5,
+        // DEX 12 → +1 initiative; WIS 14 → passive perception 12 unproficient.
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14, wisdom: 14 },
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        speed: 30,
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Bran Coldhearth' })).toBeVisible();
+
+    const tracker = page.getByTestId('status-tracker');
+    const speed = page.getByTestId('stat-speed');
+    const initiative = page.getByTestId('stat-initiative');
+
+    // Unexhausted baseline.
+    await expect(speed).toContainText('30 ft');
+    await expect(initiative).toContainText('+1');
+    await expect(tracker.getByTestId('exhaustion-effect')).toHaveCount(0);
+
+    // Level 2 → −4 to d20 Tests, −10 ft Speed.
+    await tracker.getByRole('button', { name: 'Set exhaustion level 2' }).click();
+    await expect(tracker.getByTestId('exhaustion-effect')).toHaveText(
+      '−4 to d20 Tests · −10 ft Speed'
+    );
+    await expect(speed).toContainText('20 ft (−10)');
+    await expect(initiative).toContainText('-3');
+
+    // Survives a reload — the penalty is recomputed server-side, not local state.
+    await page.reload();
+    await expect(page.getByRole('heading', { name: 'Bran Coldhearth' })).toBeVisible();
+    await expect(speed).toContainText('20 ft (−10)');
+    await expect(initiative).toContainText('-3');
+
+    // Level 6 flags death *and* still reports the penalty it applies.
+    await tracker.getByRole('button', { name: 'Set exhaustion level 6' }).click();
+    await expect(tracker.getByTestId('exhaustion-effect')).toHaveText(
+      'Death · −12 to d20 Tests · −30 ft Speed'
+    );
+    // Include the reduction: a bare '0 ft' is also a substring of an unreduced
+    // '30 ft', so that assertion could never fail. (The tile wraps its label
+    // too, so an exact-text match isn't available here.)
+    await expect(speed).toContainText('0 ft (−30)');
+
+    // Clearing the track restores every value.
+    await tracker.getByRole('button', { name: 'Set exhaustion level 6' }).click();
+    await expect(tracker.getByTestId('exhaustion-effect')).toHaveCount(0);
+    await expect(speed).toContainText('30 ft');
+    await expect(initiative).toContainText('+1');
+  });
 });
