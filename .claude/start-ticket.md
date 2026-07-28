@@ -43,6 +43,8 @@ For UI tickets, also draft a Playwright spec under `e2e/<feature>.spec.ts` cover
 
 ## Verification gate
 
+Run both steps below with Bash `run_in_background: true` — `verify.sh` is eight serial stages (SRD lib tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
+
 1. `./verify.sh` from the repo root — mirrors CI exactly (backend + frontend lint, unit tests with coverage thresholds, SRD extraction-lib tests, production builds). Do not substitute plain `npm test`/`npm run build`. (Backend's `prettier.spec.ts` runs `format:check` on the frontend — prettier-format new frontend files first.)
 2. **E2E (Playwright)** — `cd e2e && npm run e2e -- <specs>`, as the last step (there is no root `package.json`).
    - The suite provisions its own stack via `dev-e2e.sh`: dedicated ports 3010/3011 and a dedicated `grimoire_os_e2e` database. Only Postgres needs to be up beforehand.
@@ -66,7 +68,10 @@ Classify the PR before running any automated review. Measure against main (`git 
 |------|------|--------|
 | **skip** | Docs/markdown-only, CI/config tweaks, dependency-pin bumps, or ≤30 changed lines across ≤3 files with no risk trigger and no behavior change beyond a localized fix | None — CI is the gate |
 | **standard** | Anything between skip and deep: typical bug fixes, small UI tweaks, single-component changes | `code-review medium --comment`, max 1 re-review |
-| **deep** | Risk trigger hit, OR full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `/pr-review-toolkit:review-pr` + `code-review high --comment`, max 3 iterations |
+| **deep** | Full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `code-review xhigh --comment` + `pr-review-toolkit:pr-test-analyzer` and `pr-review-toolkit:type-design-analyzer`, max 3 iterations |
+| **deep + risk trigger** | Any risk trigger above | Same, but `code-review max --comment` |
+
+Don't run the full `/pr-review-toolkit:review-pr` at deep tier — its `code-reviewer` and `silent-failure-hunter` passes duplicate angles `code-review` already covers at `xhigh`, and without its independent-verifier step. The two named agents are additive: neither test coverage nor type design is a `code-review` angle.
 
 Test-only and generated files (lockfiles, `tsconfig.tsbuildinfo`, snapshots) don't count toward the line/file thresholds — size the review on production-code impact. When borderline, state the tier and the numbers and let the user bump it up or down before starting.
 
