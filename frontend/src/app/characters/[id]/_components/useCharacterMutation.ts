@@ -72,7 +72,11 @@ export type PlayControlProps =
 export interface ResolvedPlayControls {
   editable: boolean;
   /** Always callable: a no-op when the section is read-only, so consumers call
-   * `patch(...)` without per-handler guards and gate only their rendering. */
+   * `patch(...)` without per-handler guards and gate only their rendering.
+   *
+   * Note the read-only no-op never invokes `options.onSuccess` — there is no
+   * write to succeed. Don't put a continuation the UI depends on there (closing
+   * a dialog, navigating); a read-only section would hang waiting for it. */
   patch: (fields: CharacterPatch, options?: PatchOptions) => void;
   isSaving: boolean;
 }

@@ -55,27 +55,33 @@ export default function ShortRestDialog({
   const die = hitDice?.dieType ?? 'd8';
   const available = hitDice ? hitDice.total - hitDice.spent : 0;
 
+  // `rolls` is dialog-local while `available` tracks the character prop, and a
+  // 409 deliberately refetches underneath an open dialog (the designed retry
+  // path). Deriving the usable rolls means a concurrent spend elsewhere drops
+  // the rows the write could never have honoured, instead of rendering a
+  // negative count and silently discarding them on confirm.
+  const usableRolls = rolls.slice(0, available);
+
   // Spending a die can't heal a sheet with no stored HP block (VEG-425), so the
   // control is withheld rather than offered as a die that vanishes for nothing.
   const canSpendDice = hasHitPoints && !!hitDice;
-  const canSpendMore = canSpendDice && rolls.length < available;
+  const canSpendMore = canSpendDice && usableRolls.length < available;
 
-  const heals = rolls.map(roll => shortRestHealPerDie(roll, conMod));
-  const totalHealing = heals.reduce((sum, hp) => sum + hp, 0);
+  const heals = usableRolls.map(roll => shortRestHealPerDie(roll, conMod));
 
-  const patch = applyShortRest(character, heals);
+  const patch = applyShortRest(character, { healPerDie: heals });
   // A rest that writes nothing shouldn't burn an optimistic-lock version.
   const canConfirm = !isSaving && Object.keys(patch).length > 0;
 
   const spendDie = () => {
     if (!canSpendMore) return;
-    setRolls(prev => [
-      ...prev,
+    setRolls([
+      ...usableRolls,
       mode === 'average' ? averageHpForDie(die) : rollDie(dieFaces(die), rng),
     ]);
   };
 
-  const removeLastDie = () => setRolls(prev => prev.slice(0, -1));
+  const removeLastDie = () => setRolls(usableRolls.slice(0, -1));
 
   const confirm = () => {
     if (!canConfirm) return;
@@ -89,9 +95,16 @@ export default function ShortRestDialog({
     });
   };
 
+  // Report what the rest actually gains, not the raw dice sum — showing "24 HP"
+  // beside a "44 → 44" preview contradicts itself. 5e still permits spending a
+  // die that overheals, so the wasted portion is a warning, not a block.
+  const rolledTotal = heals.reduce((sum, hp) => sum + hp, 0);
   const previewHp = character.hitPoints
-    ? healHitPoints(character.hitPoints, totalHealing).current
+    ? healHitPoints(character.hitPoints, rolledTotal).current
     : null;
+  const effectiveHealing =
+    previewHp !== null ? previewHp - character.hitPoints!.current : rolledTotal;
+  const wastedHealing = rolledTotal - effectiveHealing;
 
   return (
     <Modal
@@ -123,7 +136,7 @@ export default function ShortRestDialog({
               <h3 className={sectionTitleClass}>Hit Dice</h3>
               <span className="text-sm text-gray-600 dark:text-gray-400">
                 <span data-testid="dice-available" className="font-bold">
-                  {available - rolls.length}
+                  {available - usableRolls.length}
                 </span>{' '}
                 of {hitDice.total} {die} available
               </span>
@@ -152,9 +165,9 @@ export default function ShortRestDialog({
               </label>
             </div>
 
-            {rolls.length > 0 && (
+            {usableRolls.length > 0 && (
               <ul className="space-y-1">
-                {rolls.map((roll, i) => (
+                {usableRolls.map((roll, i) => (
                   <li
                     key={`die-${i}`}
                     data-testid={`die-row-${i}`}
@@ -176,7 +189,7 @@ export default function ShortRestDialog({
               >
                 Spend a Hit Die
               </button>
-              {rolls.length > 0 && (
+              {usableRolls.length > 0 && (
                 <button
                   type="button"
                   onClick={removeLastDie}
@@ -194,10 +207,17 @@ export default function ShortRestDialog({
               </p>
             )}
 
+            {wastedHealing > 0 && (
+              <p role="status" data-testid="overheal-warning" className={noteClass}>
+                {wastedHealing} HP of this roll is wasted — you&apos;re near maximum. Hit Dice are
+                spent either way.
+              </p>
+            )}
+
             <p className="text-sm text-gray-700 dark:text-gray-300">
               Healing:{' '}
               <span data-testid="heal-total" className="font-bold">
-                {totalHealing}
+                {effectiveHealing}
               </span>{' '}
               HP
               {previewHp !== null && (
@@ -224,7 +244,10 @@ export default function ShortRestDialog({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
+            // Cancelling mid-write closed the dialog as though nothing had
+            // happened while the PATCH still landed and spent the die.
+            disabled={isSaving}
+            className="px-4 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50"
           >
             Cancel
           </button>

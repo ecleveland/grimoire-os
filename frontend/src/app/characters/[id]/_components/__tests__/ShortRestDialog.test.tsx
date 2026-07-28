@@ -112,6 +112,85 @@ describe('ShortRestDialog (VEG-487)', () => {
     expect(screen.getByTestId('hp-preview')).toHaveTextContent('44');
   });
 
+  it('reports the healing actually gained, not the raw dice sum', async () => {
+    const user = userEvent.setup();
+    // 4 HP from max: a d10 average die rolls 8 of healing but only 4 lands.
+    renderDialog({ hitPoints: { max: 44, current: 40, temporary: 0 } });
+
+    await user.click(screen.getByRole('button', { name: /spend a hit die/i }));
+
+    // Showing the unclamped 8 next to a "40 → 44" preview contradicts itself.
+    expect(screen.getByTestId('heal-total')).toHaveTextContent('4');
+    expect(screen.getByTestId('hp-preview')).toHaveTextContent('44');
+  });
+
+  it('warns when spending more dice than the wound needs', async () => {
+    const user = userEvent.setup();
+    renderDialog({ hitPoints: { max: 44, current: 42, temporary: 0 } });
+
+    await user.click(screen.getByRole('button', { name: /spend a hit die/i }));
+
+    // The die is spendable (5e allows it) but the player should be told it is
+    // being wasted before they commit an irreversible resource.
+    expect(screen.getByTestId('overheal-warning')).toBeInTheDocument();
+  });
+
+  it('does not warn when every point of healing lands', async () => {
+    const user = userEvent.setup();
+    renderDialog({ hitPoints: { max: 44, current: 12, temporary: 0 } });
+
+    await user.click(screen.getByRole('button', { name: /spend a hit die/i }));
+
+    expect(screen.queryByTestId('overheal-warning')).not.toBeInTheDocument();
+  });
+
+  it('never shows a negative count when dice are consumed elsewhere mid-dialog', async () => {
+    const user = userEvent.setup();
+    // Queue three dice, then re-render as if a 409 refetch left only one.
+    const onPatch = vi.fn();
+    const onClose = vi.fn();
+    const base = {
+      hitPoints: { max: 44, current: 12, temporary: 0 },
+      hitDice: { dieType: 'd10' as const, total: 8, spent: 3 },
+      resources: [],
+    };
+    const { rerender } = render(
+      <ShortRestDialog
+        character={makeCharacter(base)}
+        onPatch={onPatch}
+        onClose={onClose}
+        isSaving={false}
+      />
+    );
+    const spend = screen.getByRole('button', { name: /spend a hit die/i });
+    await user.click(spend);
+    await user.click(spend);
+    await user.click(spend);
+    expect(screen.getAllByTestId(/^die-row-/)).toHaveLength(3);
+
+    rerender(
+      <ShortRestDialog
+        character={makeCharacter({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 7 } })}
+        onPatch={onPatch}
+        onClose={onClose}
+        isSaving={false}
+      />
+    );
+
+    // One die left, so two queued rolls are no longer honourable — drop them
+    // rather than render "-2 available" and silently discard them on write.
+    expect(screen.getByTestId('dice-available')).toHaveTextContent('0');
+    expect(screen.getAllByTestId(/^die-row-/)).toHaveLength(1);
+    expect(screen.getByTestId('heal-total')).toHaveTextContent('8');
+  });
+
+  it('disables Cancel while a write is in flight', () => {
+    // Cancelling mid-write closed the dialog as if nothing happened, while the
+    // PATCH still landed and spent the die.
+    renderDialog({}, { isSaving: true });
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeDisabled();
+  });
+
   it('dispatches one composite patch on confirm', async () => {
     const user = userEvent.setup();
     const { onPatch } = renderDialog();

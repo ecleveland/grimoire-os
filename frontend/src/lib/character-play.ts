@@ -102,8 +102,8 @@ export function hitDiceRegainedOnLongRest(total: number): number {
  *
  * `null` is the sheet's "no exhaustion" (StatusTracker reads
  * `character.exhaustion || null`), so level 1 steps down to `null`, never a
- * stored 0. An unexhausted character is returned unchanged so callers can skip
- * the field entirely.
+ * stored 0. An unexhausted character is normalized to `null` so callers can
+ * skip the field entirely.
  */
 export function exhaustionAfterLongRest(current: number | null): number | null {
   if (!current || current <= 1) return null;
@@ -167,14 +167,16 @@ export function applyLongRest(character: {
   if (exhaustion) {
     patch.exhaustion = exhaustionAfterLongRest(exhaustion);
   }
-  if (hitPoints) {
+  // Temp HP does not survive a long rest, so a character at full HP still needs
+  // the write when it has any — but one at max with no temp changes nothing.
+  if (hitPoints && (hitPoints.current < hitPoints.max || hitPoints.temporary > 0)) {
     patch.hitPoints = { ...hitPoints, current: hitPoints.max, temporary: 0 };
   }
-  if (hitDice) {
+  if (hitDice && hitDice.spent > 0) {
     const regained = hitDiceRegainedOnLongRest(hitDice.total);
     patch.hitDice = { ...hitDice, spent: Math.max(0, hitDice.spent - regained) };
   }
-  if (spellSlots && spellSlots.length > 0) {
+  if (spellSlots?.some(slot => slot.used > 0)) {
     patch.spellSlots = spellSlots.map(slot => ({ ...slot, used: 0 }));
   }
   // Only when something is actually spent: patching an identical array burns an
@@ -194,16 +196,25 @@ export function applyLongRest(character: {
  */
 export interface ShortRestPatch {
   resources?: CharacterResource[];
+  // These three travel together and are not independently producible: `hitPoints`
+  // only ever comes from a die spend, and `deathSaves` only from that heal
+  // reviving a downed character. The type can't express the coupling without a
+  // union that would break the imperative build style shared with
+  // `applyLongRest`, so it's stated here — `formatShortRestSummary` reads
+  // `hitPoints` and `hitDice` separately and is correct only because of it.
   hitPoints?: HitPoints;
   hitDice?: HitDice;
   deathSaves?: DeathSaves;
 }
 
 /**
- * `spentDice` carries the per-die heal totals the player already resolved
- * (rolled or fixed average, each via `shortRestHealPerDie`) rather than a die
- * count — keeping this pure and leaving the randomness to the caller. Omit it
- * for a resource-only rest.
+ * `healPerDie` carries the per-die heal totals the player already resolved
+ * (rolled or fixed average, each via `shortRestHealPerDie`) — not raw die faces
+ * and not a die count. It is a named field rather than a bare `number[]`
+ * precisely because callers hold both shapes: `ShortRestDialog` keeps raw faces
+ * in `rolls` and totals in `heals`, and passing the wrong one would type-check
+ * while silently under-healing by the CON modifier per die. Mirrors
+ * `applyLevelUp`'s `changes` argument. Omit it for a resource-only rest.
  *
  * 5e spends hit dice at the player's discretion, so nothing here is automatic:
  * a die that healed 0 is still spent, because the player chose to pay it.
@@ -215,9 +226,10 @@ export function applyShortRest(
     hitDice?: HitDice | null;
     deathSaves?: DeathSaves | null;
   },
-  spentDice: number[] = []
+  spend: { healPerDie?: number[] } = {}
 ): ShortRestPatch {
   const { resources, hitPoints, hitDice, deathSaves } = character;
+  const spentDice = spend.healPerDie ?? [];
   const patch: ShortRestPatch = {};
 
   // Empty when nothing would change: patching an identical array burns an
@@ -227,8 +239,10 @@ export function applyShortRest(
   }
 
   // Hit dice can only be spent by a character that has them; the clamp caps the
-  // spend at what actually remains even if the caller over-supplies rolls.
-  if (spentDice.length > 0 && hitDice) {
+  // spend at what actually remains even if the caller over-supplies rolls. When
+  // none remain the clamp is a no-op, so the field is dropped rather than
+  // written back identical (which would still read as a confirmable change).
+  if (spentDice.length > 0 && hitDice && hitDice.spent < hitDice.total) {
     patch.hitDice = adjustHitDiceSpent(hitDice, spentDice.length);
     // Only the dice the clamp actually allowed may heal.
     const allowed = patch.hitDice.spent - hitDice.spent;
@@ -272,10 +286,18 @@ export function formatLongRestSummary(
   const healed = (patch.hitPoints?.current ?? 0) - (before.hitPoints?.current ?? 0);
   if (healed > 0) parts.push(`+${healed} HP`);
 
+  // A long rest destroys temp HP. Reporting only the `current` delta made a
+  // full-HP character's rest read as "nothing changed" while consuming it.
+  const tempCleared = patch.hitPoints ? (before.hitPoints?.temporary ?? 0) : 0;
+  if (tempCleared > 0) parts.push(`${tempCleared} temp HP cleared`);
+
   const regained = (before.hitDice?.spent ?? 0) - (patch.hitDice?.spent ?? 0);
   if (regained > 0) parts.push(`${hitDiceLabel(regained)} regained`);
 
-  if (patch.spellSlots?.some(s => s.used === 0)) parts.push('spell slots restored');
+  // Each of these is present only when it actually changed (see applyLongRest),
+  // so presence is the signal — a value check can't distinguish "restored to 0"
+  // from "was already 0".
+  if (patch.spellSlots) parts.push('spell slots restored');
   if (patch.resources) parts.push('resources recharged');
 
   if (patch.exhaustion !== undefined) {

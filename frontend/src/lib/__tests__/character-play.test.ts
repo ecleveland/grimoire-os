@@ -285,6 +285,52 @@ describe('applyLongRest', () => {
     expect('resources' in applyLongRest({ ...base, resources: [] })).toBe(false);
   });
 
+  it('omits spellSlots when no slot has been spent', () => {
+    // Same defect class as the resources one below: the patch forces every slot
+    // to used:0, so a presence check on it can't tell "restored" from "already
+    // full" — and an identical array still burns an optimistic-lock version.
+    const patch = applyLongRest({
+      ...base,
+      spellSlots: [
+        { level: 1, total: 4, used: 0 },
+        { level: 2, total: 3, used: 0 },
+      ],
+    });
+    expect('spellSlots' in patch).toBe(false);
+  });
+
+  it('patches every slot when at least one was spent', () => {
+    const patch = applyLongRest({
+      ...base,
+      spellSlots: [
+        { level: 1, total: 4, used: 0 },
+        { level: 2, total: 3, used: 2 },
+      ],
+    });
+    expect(patch.spellSlots).toEqual([
+      { level: 1, total: 4, used: 0 },
+      { level: 2, total: 3, used: 0 },
+    ]);
+  });
+
+  it('omits hitPoints when already at max with no temp HP', () => {
+    const patch = applyLongRest({
+      ...base,
+      hitPoints: { max: 44, current: 44, temporary: 0 },
+    });
+    expect('hitPoints' in patch).toBe(false);
+  });
+
+  it('still patches hitPoints at max when temp HP must be cleared', () => {
+    // Temp HP does not survive a long rest (5e), so this is a real change even
+    // though `current` is untouched.
+    const patch = applyLongRest({
+      ...base,
+      hitPoints: { max: 44, current: 44, temporary: 9 },
+    });
+    expect(patch.hitPoints).toEqual({ max: 44, current: 44, temporary: 0 });
+  });
+
   it('omits resources when every pool is already full', () => {
     // Found in manual testing (VEG-487): resting twice in a row reported
     // "resources recharged" the second time. The patch carried an identical
@@ -363,7 +409,7 @@ describe('applyShortRest (VEG-409)', () => {
     };
 
     it('heals the summed dice and marks them spent', () => {
-      const patch = applyShortRest(base, [9, 5]);
+      const patch = applyShortRest(base, { healPerDie: [9, 5] });
       expect(patch.hitPoints).toEqual({ max: 44, current: 26, temporary: 0 });
       expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 4 });
     });
@@ -371,7 +417,7 @@ describe('applyShortRest (VEG-409)', () => {
     it('clamps healing at max HP', () => {
       const patch = applyShortRest(
         { ...base, hitPoints: { max: 44, current: 40, temporary: 0 } },
-        [9, 9]
+        { healPerDie: [9, 9] }
       );
       expect(patch.hitPoints).toEqual({ max: 44, current: 44, temporary: 0 });
     });
@@ -380,15 +426,27 @@ describe('applyShortRest (VEG-409)', () => {
       // 8 total, 7 already spent — only one die is actually available.
       const patch = applyShortRest(
         { ...base, hitDice: { dieType: 'd10', total: 8, spent: 7 } },
-        [6, 6, 6]
+        { healPerDie: [6, 6, 6] }
       );
       expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 8 });
+      // Only the die the clamp allowed may heal.
+      expect(patch.hitPoints).toEqual({ max: 44, current: 18, temporary: 0 });
+    });
+
+    it('omits hitDice entirely when every die is already spent', () => {
+      // Otherwise the patch carries an identical hitDice block, which is
+      // non-empty enough to look confirmable and burns a version for nothing.
+      const patch = applyShortRest(
+        { ...base, hitDice: { dieType: 'd10', total: 8, spent: 8 } },
+        { healPerDie: [6, 6] }
+      );
+      expect(patch).toEqual({});
     });
 
     it('does not heal temporary HP', () => {
       const patch = applyShortRest(
         { ...base, hitPoints: { max: 44, current: 12, temporary: 6 } },
-        [4]
+        { healPerDie: [4] }
       );
       expect(patch.hitPoints).toEqual({ max: 44, current: 16, temporary: 6 });
     });
@@ -400,14 +458,17 @@ describe('applyShortRest (VEG-409)', () => {
           hitPoints: { max: 44, current: 0, temporary: 0 },
           deathSaves: { successes: 1, failures: 2 },
         },
-        [7]
+        { healPerDie: [7] }
       );
       expect(patch.hitPoints?.current).toBe(7);
       expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
     });
 
     it('omits death saves when there are none to clear', () => {
-      const patch = applyShortRest({ ...base, deathSaves: { successes: 0, failures: 0 } }, [7]);
+      const patch = applyShortRest(
+        { ...base, deathSaves: { successes: 0, failures: 0 } },
+        { healPerDie: [7] }
+      );
       expect('deathSaves' in patch).toBe(false);
     });
 
@@ -416,34 +477,37 @@ describe('applyShortRest (VEG-409)', () => {
       // whenever a heal lands above 0 and saves are on the sheet, rather than
       // tracking whether the character was down. Saves above 0 HP are a stale
       // state, so any heal tidies them.
-      const patch = applyShortRest({ ...base, deathSaves: { successes: 1, failures: 1 } }, [7]);
+      const patch = applyShortRest(
+        { ...base, deathSaves: { successes: 1, failures: 1 } },
+        { healPerDie: [7] }
+      );
       expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
     });
 
     it('omits hitPoints for a null-HP character (never persists a fabricated block)', () => {
       // Same VEG-425 invariant `applyLongRest` holds: a minimal character has no
       // stored HP block and a rest must not fabricate one.
-      const patch = applyShortRest({ ...base, hitPoints: null }, [7]);
+      const patch = applyShortRest({ ...base, hitPoints: null }, { healPerDie: [7] });
       expect('hitPoints' in patch).toBe(false);
       // The dice are still marked spent.
       expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 3 });
     });
 
     it('omits hitDice when the character has none to spend', () => {
-      const patch = applyShortRest({ ...base, hitDice: null }, [7]);
+      const patch = applyShortRest({ ...base, hitDice: null }, { healPerDie: [7] });
       expect('hitDice' in patch).toBe(false);
       expect('hitPoints' in patch).toBe(false);
     });
 
     it('recharges short-rest resources in the same composite patch', () => {
-      const patch = applyShortRest({ ...base, resources: [ki, rage] }, [7]);
+      const patch = applyShortRest({ ...base, resources: [ki, rage] }, { healPerDie: [7] });
       expect(patch.resources).toEqual([{ ...ki, used: 0 }, rage]);
       expect(patch.hitPoints?.current).toBe(19);
     });
 
     it('ignores an empty dice list — behaves exactly like a resource-only rest', () => {
-      expect(applyShortRest(base, [])).toEqual({});
-      expect(applyShortRest({ ...base, resources: [ki] }, [])).toEqual({
+      expect(applyShortRest(base, { healPerDie: [] })).toEqual({});
+      expect(applyShortRest({ ...base, resources: [ki] }, { healPerDie: [] })).toEqual({
         resources: [{ ...ki, used: 0 }],
       });
     });
@@ -452,7 +516,7 @@ describe('applyShortRest (VEG-409)', () => {
       // A 0-heal die is a real cost the player chose to pay — swallowing it
       // would silently hand back a resource 5e says is gone. HP is left out of
       // the patch entirely, since an unchanged block is not worth a write.
-      const patch = applyShortRest(base, [0]);
+      const patch = applyShortRest(base, { healPerDie: [0] });
       expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 3 });
       expect('hitPoints' in patch).toBe(false);
     });
@@ -491,6 +555,29 @@ describe('rest summaries (VEG-487)', () => {
       expect(summary).toMatch(/nothing to recover|already/i);
     });
 
+    it('does not claim spell slots were restored when none were spent', () => {
+      const character = {
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        spellSlots: [{ level: 1, total: 4, used: 0 }],
+      };
+      const summary = formatLongRestSummary(character, applyLongRest(character));
+      expect(summary).not.toMatch(/spell slot/i);
+    });
+
+    it('reports temp HP being cleared, which is otherwise invisible', () => {
+      // A long rest destroys temp HP (5e). Reporting only the `current` delta
+      // said "already fully rested" while silently consuming a real resource.
+      const character = {
+        hitPoints: { max: 44, current: 44, temporary: 15 },
+        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        spellSlots: [],
+      };
+      const summary = formatLongRestSummary(character, applyLongRest(character));
+      expect(summary).toMatch(/temp/i);
+      expect(summary).not.toMatch(/already fully rested/i);
+    });
+
     it('does not claim a recharge when every resource is already full', () => {
       // Manual-test regression (VEG-487): a second consecutive long rest said
       // "resources recharged" with nothing spent.
@@ -508,14 +595,20 @@ describe('rest summaries (VEG-487)', () => {
   describe('formatShortRestSummary', () => {
     it('reports HP healed and dice spent', () => {
       const character = { hitPoints, hitDice };
-      const summary = formatShortRestSummary(character, applyShortRest(character, [9, 5]));
+      const summary = formatShortRestSummary(
+        character,
+        applyShortRest(character, { healPerDie: [9, 5] })
+      );
       expect(summary).toContain('+14 HP');
       expect(summary).toContain('2 hit dice');
     });
 
     it('uses the singular for a single die', () => {
       const character = { hitPoints, hitDice };
-      const summary = formatShortRestSummary(character, applyShortRest(character, [7]));
+      const summary = formatShortRestSummary(
+        character,
+        applyShortRest(character, { healPerDie: [7] })
+      );
       expect(summary).toContain('1 hit die');
       expect(summary).not.toContain('hit dice');
     });
