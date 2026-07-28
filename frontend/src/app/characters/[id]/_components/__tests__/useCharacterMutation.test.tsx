@@ -45,6 +45,47 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
+describe('useCharacterMutation onSuccess callback (VEG-487)', () => {
+  it('runs the per-call onSuccess only after the write resolves', async () => {
+    let resolveWrite: (value: Character) => void = () => {};
+    mockApiFetch.mockReturnValue(
+      new Promise<Character>(resolve => {
+        resolveWrite = resolve;
+      })
+    );
+    const onSuccess = vi.fn();
+    const { result } = renderMutation(makeCharacter());
+
+    act(() => result.current.patch({ heroicInspiration: true }, { onSuccess }));
+
+    // In flight — a summary toast fired here would claim a write that may 409.
+    expect(onSuccess).not.toHaveBeenCalled();
+
+    act(() => resolveWrite(makeCharacter({ version: 8 })));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not run onSuccess when the write fails', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+    const onSuccess = vi.fn();
+    const { result } = renderMutation(makeCharacter());
+
+    act(() => result.current.patch({ heroicInspiration: true }, { onSuccess }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('still writes when no callback is supplied', async () => {
+    mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
+    const { result } = renderMutation(makeCharacter());
+
+    act(() => result.current.patch({ heroicInspiration: true }));
+
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe('useCharacterMutation', () => {
   it('PATCHes the character with the fields and expectedVersion', async () => {
     mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));

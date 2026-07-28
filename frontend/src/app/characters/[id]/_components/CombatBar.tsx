@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { toast } from 'sonner';
 import type { Character, ComputedArmorClass, ComputedArmorClassBreakdown } from '@/lib/types';
 import { ZERO_HIT_POINTS } from '@/lib/character-defaults';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
+import ShortRestDialog from './ShortRestDialog';
 import {
   damageHitPoints,
   healHitPoints,
@@ -14,6 +16,7 @@ import {
   parseNonNegativeInt,
   applyLongRest,
   applyShortRest,
+  formatLongRestSummary,
   CLEARED_DEATH_SAVES,
 } from '@/lib/character-play';
 
@@ -97,19 +100,25 @@ export default function CombatBar(props: CombatBarProps) {
   };
 
   // One-click long rest: HP to max, temp cleared, slots reset, hit dice regained,
-  // death saves cleared, resources recharged — a single optimistic-locked
-  // composite write (VEG-407, VEG-409).
-  const longRest = () => patch(applyLongRest(character));
-
-  // Short rest (VEG-409) only recharges `recharge: 'short'` resources; HP and
-  // hit-die spending stay manual. The button disables when nothing would
-  // change — an always-clickable control that silently does nothing (and an
-  // empty PATCH would burn an optimistic-lock version) both mislead.
-  const shortRestPatch = applyShortRest(character);
-  const canShortRest = shortRestPatch.resources !== undefined;
-  const shortRest = () => {
-    if (canShortRest) patch(shortRestPatch);
+  // exhaustion reduced, death saves cleared, resources recharged — a single
+  // optimistic-locked composite write (VEG-407, VEG-409, VEG-487).
+  const longRest = () => {
+    const longRestPatch = applyLongRest(character);
+    // The summary waits on the write so it can't announce a change a 409 undid.
+    patch(longRestPatch, {
+      onSuccess: () => toast.message(formatLongRestSummary(character, longRestPatch)),
+    });
   };
+
+  // Short rest opens a dialog (VEG-487) so hit dice can be spent one at a time —
+  // 5e lets the player decide on another die after seeing each roll. The button
+  // disables when nothing could change: neither a die to spend nor a
+  // short-recharge resource to recover. An always-clickable control that
+  // silently does nothing (and an empty PATCH would burn an optimistic-lock
+  // version) both mislead.
+  const [showShortRest, setShowShortRest] = useState(false);
+  const diceAvailable = hasHitPoints && hitDice ? hitDice.total - hitDice.spent : 0;
+  const canShortRest = diceAvailable > 0 || applyShortRest(character).resources !== undefined;
 
   const renderPips = (track: 'successes' | 'failures', filledClass: string) => {
     const filled = deathSaves[track];
@@ -249,7 +258,7 @@ export default function CombatBar(props: CombatBarProps) {
             <div className="flex gap-1">
               <button
                 type="button"
-                onClick={shortRest}
+                onClick={() => setShowShortRest(true)}
                 disabled={isSaving || !canShortRest}
                 className="flex-1 px-1 py-1 text-xs font-medium rounded border border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 disabled:opacity-50"
               >
@@ -349,6 +358,15 @@ export default function CombatBar(props: CombatBarProps) {
           </div>
         )}
       </div>
+
+      {showShortRest && (
+        <ShortRestDialog
+          character={character}
+          onClose={() => setShowShortRest(false)}
+          onPatch={patch}
+          isSaving={isSaving}
+        />
+      )}
     </div>
   );
 }

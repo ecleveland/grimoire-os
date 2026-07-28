@@ -39,9 +39,18 @@ export type CharacterPatch = Partial<
   >
 >;
 
+/**
+ * Per-call hooks for a single `patch`. `onSuccess` runs only once the write has
+ * resolved — the rest summaries (VEG-487) use it so a toast can't announce a
+ * change that then 409s, which reporting at dispatch time would do.
+ */
+export interface PatchOptions {
+  onSuccess?: () => void;
+}
+
 export interface CharacterMutation {
   /** Fire-and-forget PATCH carrying the optimistic-lock `expectedVersion`. */
-  patch: (fields: CharacterPatch) => void;
+  patch: (fields: CharacterPatch, options?: PatchOptions) => void;
   /** True while a write is in flight — callers disable controls to serialize writes. */
   isSaving: boolean;
 }
@@ -54,13 +63,17 @@ export interface CharacterMutation {
  */
 export type PlayControlProps =
   | { editable?: false }
-  | { editable: true; onPatch: (fields: CharacterPatch) => void; isSaving: boolean };
+  | {
+      editable: true;
+      onPatch: (fields: CharacterPatch, options?: PatchOptions) => void;
+      isSaving: boolean;
+    };
 
 export interface ResolvedPlayControls {
   editable: boolean;
   /** Always callable: a no-op when the section is read-only, so consumers call
    * `patch(...)` without per-handler guards and gate only their rendering. */
-  patch: (fields: CharacterPatch) => void;
+  patch: (fields: CharacterPatch, options?: PatchOptions) => void;
   isSaving: boolean;
 }
 
@@ -119,5 +132,8 @@ export function useCharacterMutation(character: Character): CharacterMutation {
     }
   );
 
-  return { patch: fields => mutation.mutate(fields), isSaving: mutation.isPending };
+  return {
+    patch: (fields, options) => mutation.mutate(fields, { onSuccess: options?.onSuccess }),
+    isSaving: mutation.isPending,
+  };
 }
