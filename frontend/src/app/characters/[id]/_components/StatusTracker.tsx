@@ -37,6 +37,10 @@ export default function StatusTracker(props: StatusTrackerProps) {
   const concentration = character.concentration ?? null;
   // 0 means "none", same as the combatant convention — never show "Level 0".
   const exhaustion = character.exhaustion || null;
+  // The mechanical effect comes from the server-computed block (VEG-449), not a
+  // second client-side copy of the rule — the penalties it summarizes are the
+  // ones actually applied to the sheet's saves, skills, initiative and speed.
+  const exhaustionEffect = character.computed.exhaustion;
 
   // Concentration-spell draft, committed on blur/Enter — a per-keystroke PATCH
   // would race the optimistic lock. The commit clears the draft but parks the
@@ -233,6 +237,23 @@ export default function StatusTracker(props: StatusTrackerProps) {
           </div>
         )}
       </div>
+
+      {/* What the level actually costs. Its own row below the controls, not a
+          `basis-full` item inside them — wedged into that flex row it would push
+          the concentration controls onto a third line. Without it the sheet's
+          saves, skills, initiative and speed just drop with no visible cause
+          (VEG-449). */}
+      {exhaustionEffect && (
+        <p data-testid="exhaustion-effect" className="mt-2 text-xs text-red-600 dark:text-red-400">
+          {exhaustionEffect.dead
+            ? 'Death'
+            : // Typographic minus on both halves, matching the dice-roll
+              // formatter — `formatModifier` would render an ASCII hyphen and
+              // leave the two penalties visibly inconsistent on one line.
+              `−${Math.abs(exhaustionEffect.d20Penalty)} to d20 Tests · ` +
+              `−${exhaustionEffect.speedPenalty} ft Speed`}
+        </p>
+      )}
     </div>
   );
 }

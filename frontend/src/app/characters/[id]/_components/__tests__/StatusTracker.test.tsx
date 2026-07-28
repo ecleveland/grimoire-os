@@ -88,6 +88,62 @@ describe('StatusTracker', () => {
     });
   });
 
+  // VEG-449: the sheet's saves/skills/initiative/speed all drop while exhausted,
+  // so the track states what the level costs rather than leaving the numbers to
+  // change for no visible reason.
+  describe('exhaustion effect summary', () => {
+    it.each([
+      [1, '−2 to d20 Tests · −5 ft Speed'],
+      [3, '−6 to d20 Tests · −15 ft Speed'],
+      [5, '−10 to d20 Tests · −25 ft Speed'],
+    ])('summarizes the level-%i penalty', (level, expected) => {
+      render(<StatusTracker character={makeCharacter({ exhaustion: level })} />);
+      expect(screen.getByTestId('exhaustion-effect')).toHaveTextContent(expected);
+    });
+
+    it('renders no summary when the character is not exhausted', () => {
+      render(<StatusTracker character={makeCharacter()} />);
+      expect(screen.queryByTestId('exhaustion-effect')).not.toBeInTheDocument();
+    });
+
+    it('renders no summary at exhaustion 0', () => {
+      render(<StatusTracker character={makeCharacter({ exhaustion: 0 })} />);
+      expect(screen.queryByTestId('exhaustion-effect')).not.toBeInTheDocument();
+    });
+
+    it('reports death at level 6 instead of a penalty', () => {
+      render(<StatusTracker character={makeCharacter({ exhaustion: 6 })} />);
+      expect(screen.getByTestId('exhaustion-effect')).toHaveTextContent('Death');
+      expect(screen.getByTestId('exhaustion-effect')).not.toHaveTextContent('d20');
+    });
+
+    it('reads the computed block rather than recomputing the rule client-side', () => {
+      // Stored level 2 with a divergent computed block: the summary must follow
+      // computed, which is what the sheet's other numbers were derived from.
+      const base = makeCharacter({ exhaustion: 2 });
+      const char = {
+        ...base,
+        computed: {
+          ...base.computed,
+          exhaustion: { level: 4, d20Penalty: -8, speedPenalty: 20, dead: false },
+        },
+      };
+      render(<StatusTracker character={char} />);
+      expect(screen.getByTestId('exhaustion-effect')).toHaveTextContent(
+        '−8 to d20 Tests · −20 ft Speed'
+      );
+    });
+
+    it('survives a legacy payload with no computed exhaustion field', () => {
+      const base = makeCharacter({ exhaustion: 3 });
+      const char = { ...base, computed: { ...base.computed, exhaustion: null } };
+      render(<StatusTracker character={char} />);
+      // The track still renders; only the effect line is absent.
+      expect(screen.getByTestId('exhaustion-pip-3')).toHaveAttribute('data-filled', 'true');
+      expect(screen.queryByTestId('exhaustion-effect')).not.toBeInTheDocument();
+    });
+  });
+
   describe('viewer (read-only)', () => {
     it('shows no add-condition select, remove buttons, or concentration controls', () => {
       render(

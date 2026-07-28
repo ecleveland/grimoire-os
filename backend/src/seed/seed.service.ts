@@ -384,10 +384,27 @@ export class SeedService {
     this.logger.log(`  Feats: ${data.feats.length} entries`);
   }
 
-  // ── Simple reference tables (createMany / skipDuplicates) ──
+  // ── Simple reference tables ──
 
   private async seedSimpleReferenceTables(tx: Prisma.TransactionClient): Promise<void> {
-    await tx.condition.createMany({ data: srdConditions, skipDuplicates: true });
+    // Conditions and game rules upsert rather than createMany({ skipDuplicates })
+    // (VEG-449, same reasoning as VEG-480 for classes): insert-only seeding means
+    // an edited rule never reaches a database that already has the row, so the
+    // dev DB and every existing self-host would keep serving the old value. Both
+    // carry rule *content* the app derives from — the exhaustion rule now drives
+    // the computed-stats penalty — so a silent no-op on edit is a correctness bug,
+    // not just staleness. Neither table has a homebrew tier, so last-write-wins is
+    // safe; both are keyed by their own unique constraint, preserving row ids.
+    //
+    // Skills and languages stay insert-only: they're inert name lists nothing
+    // derives from, and their rows are user-extendable in place.
+    //
+    // Both guards below exist because last-write-wins lets a duplicate key
+    // silently clobber, where the old first-wins skip tolerated it.
+    assertUniqueSeedNames('condition', { 'conditions.ts': srdConditions.map(r => r.name) });
+    for (const row of srdConditions) {
+      await tx.condition.upsert({ where: { name: row.name }, update: row, create: row });
+    }
     this.logger.log(`  Conditions: ${srdConditions.length} entries`);
 
     await tx.skill.createMany({ data: srdSkills, skipDuplicates: true });
@@ -396,7 +413,16 @@ export class SeedService {
     await tx.language.createMany({ data: srdLanguages, skipDuplicates: true });
     this.logger.log(`  Languages: ${srdLanguages.length} entries`);
 
-    await tx.gameRule.createMany({ data: srdGameRules, skipDuplicates: true });
+    assertUniqueSeedNames('game rule', {
+      'game-rules.ts': srdGameRules.map(r => `${r.category}/${r.key}`),
+    });
+    for (const row of srdGameRules) {
+      await tx.gameRule.upsert({
+        where: { category_key: { category: row.category, key: row.key } },
+        update: row,
+        create: row,
+      });
+    }
     this.logger.log(`  Game Rules: ${srdGameRules.length} entries`);
   }
 

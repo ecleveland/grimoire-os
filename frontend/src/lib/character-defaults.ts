@@ -29,5 +29,11 @@ export const EMPTY_CURRENCY: Currency = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 /** Zeroed HP block — renders 0/0, affords no long-rest healing. */
 export const ZERO_HIT_POINTS: HitPoints = { max: 0, current: 0, temporary: 0 };
 
-/** Default walking speed (ft) when a character has no stored speed. */
+/**
+ * Default walking speed (ft) when a character has no stored speed. Mirrors
+ * `DEFAULT_SPEED` in @grimoire-os/shared, which the compute layer applies to
+ * `computed.speed.base` — defined locally as a value because Turbopack can't
+ * resolve file:-linked packages for value imports (see the types.ts header).
+ * A spec pins the two together.
+ */
 export const DEFAULT_SPEED = 30;

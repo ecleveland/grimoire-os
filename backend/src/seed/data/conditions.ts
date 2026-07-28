@@ -26,19 +26,18 @@ export const srdConditions = [
     ],
   },
   {
+    // SRD 5.2 exhaustion (VEG-449): one scaling penalty, not the 2014 tiered
+    // table. Kept in sync with the `exhaustion/levels` game rule, which carries
+    // the same rule as numbers for the compute layer.
     name: 'Exhaustion',
     description:
-      'Exhaustion is measured in six levels. An effect can give a creature one or more levels of exhaustion.',
+      'While you have the Exhaustion condition, you experience its effects in a cumulative series of levels; you die if your Exhaustion level reaches 6.',
     bullets: [
-      'Level 1: Disadvantage on ability checks',
-      'Level 2: Speed halved',
-      'Level 3: Disadvantage on attack rolls and saving throws',
-      'Level 4: Hit point maximum halved',
-      'Level 5: Speed reduced to 0',
-      'Level 6: Death',
-      "If an already exhausted creature suffers another effect that causes exhaustion, its current level of exhaustion increases by the amount specified in the effect's description.",
-      "An effect that removes exhaustion reduces its level as specified in the effect's description, with all exhaustion effects ending if a creature's exhaustion level is reduced below 1.",
-      "Finishing a long rest reduces a creature's exhaustion level by 1, provided that the creature has also ingested some food and drink.",
+      'Exhaustion Levels: this condition is cumulative. Each time you receive it, you gain 1 Exhaustion level.',
+      'D20 Tests Affected: when you make a D20 Test, the roll is reduced by 2 times your Exhaustion level.',
+      'Speed Reduced: your Speed is reduced by a number of feet equal to 5 times your Exhaustion level.',
+      'Level 6: death.',
+      'Removing Exhaustion Levels: finishing a Long Rest removes 1 of your Exhaustion levels. When your Exhaustion level reaches 0, the condition ends.',
     ],
   },
   {

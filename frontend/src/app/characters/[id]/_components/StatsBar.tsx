@@ -1,7 +1,6 @@
 'use client';
 
 import type { Character } from '@/lib/types';
-import { DEFAULT_SPEED } from '@/lib/character-defaults';
 import { formatModifier } from './utils';
 import { useDiceRoll } from './useDiceRoll';
 import RollableStat from './RollableStat';
@@ -16,15 +15,23 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
   const { rollCheck } = useDiceRoll();
   // Derived stats come from the server-computed block — the single source of
   // truth (VEG-412). Initiative deliberately ignores the stored
-  // `character.initiative` column: computed (the Dex modifier) wins on the
-  // sheet. Speed/size are stored, not derived; nullable at the API boundary
-  // (VEG-425) so they keep neutral display fallbacks.
-  const { proficiencyBonus, initiative, passivePerception } = character.computed;
+  // `character.initiative` column: computed (the Dex modifier, less any
+  // exhaustion penalty) wins on the sheet. Speed likewise reads the computed
+  // block rather than the stored column, so an exhaustion reduction shows here
+  // (VEG-449) — the block applies the no-stored-speed fallback server-side.
+  // Size is stored, not derived; nullable at the API boundary (VEG-425).
+  const { proficiencyBonus, initiative, passivePerception, speed } = character.computed;
 
   const stats: { label: string; value: string; testId: string }[] = [
     { label: 'Prof. Bonus', value: formatModifier(proficiencyBonus), testId: 'stat-prof-bonus' },
     { label: 'Initiative', value: formatModifier(initiative), testId: 'stat-initiative' },
-    { label: 'Speed', value: `${character.speed ?? DEFAULT_SPEED} ft`, testId: 'stat-speed' },
+    {
+      label: 'Speed',
+      // Show the reduction rather than only its result, so a lowered speed is
+      // self-explaining instead of looking like bad data.
+      value: speed.penalty > 0 ? `${speed.effective} ft (−${speed.penalty})` : `${speed.base} ft`,
+      testId: 'stat-speed',
+    },
     { label: 'Size', value: character.size ?? 'Medium', testId: 'stat-size' },
     {
       label: 'Passive Perception',

@@ -294,19 +294,19 @@ describe('SeedService', () => {
     expect(prisma.item.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ name: 'Test Wand' }) })
     );
-    expect(prisma.condition.createMany).toHaveBeenCalledWith(
-      expect.objectContaining({ skipDuplicates: true })
-    );
     expect(prisma.skill.createMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
     );
     expect(prisma.language.createMany).toHaveBeenCalledWith(
       expect.objectContaining({ skipDuplicates: true })
     );
-    // Classes and races are upserted by name (VEG-480), not createMany'd —
-    // see the dedicated re-seed block below.
+    // Classes and races are upserted by name (VEG-480), and conditions/game
+    // rules by their unique key (VEG-449), not createMany'd — see the dedicated
+    // re-seed block below.
     expect(prisma.srdClass.upsert).toHaveBeenCalled();
     expect(prisma.race.upsert).toHaveBeenCalled();
+    expect(prisma.condition.upsert).toHaveBeenCalled();
+    expect(prisma.gameRule.upsert).toHaveBeenCalled();
   });
 
   it('merges extracted equipment with magic items from JSON (no hand-authored stub)', async () => {
@@ -843,15 +843,52 @@ describe('SeedService', () => {
     expect(prisma.npcCustomPersonality.update).not.toHaveBeenCalled();
   });
 
-  it('seeds the four new npc-generation game-rule rows via createMany', async () => {
+  it('seeds the four npc-generation game-rule rows', async () => {
     await service.seed();
 
-    const allCalls = prisma.gameRule.createMany.mock.calls.flatMap(c => c[0].data);
+    const allCalls = prisma.gameRule.upsert.mock.calls.map(c => c[0].create);
     const npcRules = allCalls.filter((r: { category: string }) => r.category === 'npc-generation');
     const keys = npcRules.map((r: { key: string }) => r.key).sort();
     expect(keys).toEqual(
       ['coinage-multiplier', 'item-count-die', 'magic-item-chance-by-cr', 'trinket-chance'].sort()
     );
+  });
+
+  // VEG-449: both tables were insert-only (createMany + skipDuplicates), so an
+  // edited rule or condition never reached a database that already had the row.
+  // The exhaustion rule now drives the computed-stats penalty, making a silent
+  // no-op on edit a correctness bug rather than mere staleness.
+  it('upserts game rules by category+key so edited rule values reach seeded databases', async () => {
+    await service.seed();
+
+    expect(prisma.gameRule.createMany).not.toHaveBeenCalled();
+    const exhaustion = prisma.gameRule.upsert.mock.calls.find(
+      c => c[0].create.category === 'exhaustion' && c[0].create.key === 'levels'
+    );
+    expect(exhaustion).toBeDefined();
+    expect(exhaustion![0].where).toEqual({
+      category_key: { category: 'exhaustion', key: 'levels' },
+    });
+    // The update path carries the same row as the create path — an existing row
+    // is rewritten, not left at its old value.
+    expect(exhaustion![0].update).toEqual(exhaustion![0].create);
+    expect(exhaustion![0].create.value).toMatchObject({
+      maxLevel: 6,
+      d20PenaltyPerLevel: 2,
+      speedPenaltyFeetPerLevel: 5,
+    });
+  });
+
+  it('upserts conditions by name so edited condition text reaches seeded databases', async () => {
+    await service.seed();
+
+    expect(prisma.condition.createMany).not.toHaveBeenCalled();
+    const exhaustion = prisma.condition.upsert.mock.calls.find(
+      c => c[0].create.name === 'Exhaustion'
+    );
+    expect(exhaustion).toBeDefined();
+    expect(exhaustion![0].where).toEqual({ name: 'Exhaustion' });
+    expect(exhaustion![0].update).toEqual(exhaustion![0].create);
   });
 
   it('guards background seed data against duplicate names (would otherwise silently clobber)', async () => {

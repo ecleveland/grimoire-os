@@ -605,7 +605,7 @@ describe('SRD game rules seed data', () => {
         hpRecovery: 'Regain all lost hit points',
         hitDiceRecovery: 'Regain spent Hit Dice up to half total (minimum 1)',
         spellSlotRecovery: 'Regain all expended spell slots',
-        exhaustionRecovery: 'Reduce exhaustion level by 1 (if fed)',
+        exhaustionRecovery: 'Remove 1 exhaustion level',
         frequency: 'Once per 24-hour period',
         description: 'A period of extended downtime, at least 8 hours long',
       });
@@ -619,23 +619,51 @@ describe('SRD game rules seed data', () => {
 
     it('covers exhaustion levels 1 through 6', () => {
       const rule = getRule('exhaustion', 'levels')!;
-      const table = rule.value as unknown as Record<string, string>;
+      const { effects } = rule.value as unknown as { effects: Record<string, string> };
       for (let level = 1; level <= 6; level++) {
-        expect(typeof table[String(level)]).toBe('string');
-        expect(table[String(level)].length).toBeGreaterThan(0);
+        expect(typeof effects[String(level)]).toBe('string');
+        expect(effects[String(level)].length).toBeGreaterThan(0);
       }
     });
 
-    it('matches the SRD exhaustion effects per level', () => {
+    it('matches the SRD 5.2 exhaustion rule', () => {
+      // 2024 rules (VEG-449): one scaling penalty, not the 2014 tiered table.
+      // The numeric fields are what the computed-stats layer reads; `effects` is
+      // display prose derived from them.
       const rule = getRule('exhaustion', 'levels')!;
       expect(rule.value).toEqual({
-        '1': 'Disadvantage on ability checks',
-        '2': 'Speed halved',
-        '3': 'Disadvantage on attack rolls and saving throws',
-        '4': 'Hit point maximum halved',
-        '5': 'Speed reduced to 0',
-        '6': 'Death',
+        maxLevel: 6,
+        d20PenaltyPerLevel: 2,
+        speedPenaltyFeetPerLevel: 5,
+        effects: {
+          '1': 'D20 Tests reduced by 2; Speed reduced by 5 feet',
+          '2': 'D20 Tests reduced by 4; Speed reduced by 10 feet',
+          '3': 'D20 Tests reduced by 6; Speed reduced by 15 feet',
+          '4': 'D20 Tests reduced by 8; Speed reduced by 20 feet',
+          '5': 'D20 Tests reduced by 10; Speed reduced by 25 feet',
+          '6': 'Death',
+        },
       });
+    });
+
+    it('keeps the prose effects consistent with the numeric penalties', () => {
+      // The two halves of the row are written by hand; a mismatch would have the
+      // sheet's summary disagree with the math it applies.
+      const rule = getRule('exhaustion', 'levels')!;
+      const { maxLevel, d20PenaltyPerLevel, speedPenaltyFeetPerLevel, effects } =
+        rule.value as unknown as {
+          maxLevel: number;
+          d20PenaltyPerLevel: number;
+          speedPenaltyFeetPerLevel: number;
+          effects: Record<string, string>;
+        };
+      for (let level = 1; level < maxLevel; level++) {
+        expect(effects[String(level)]).toBe(
+          `D20 Tests reduced by ${d20PenaltyPerLevel * level}; ` +
+            `Speed reduced by ${speedPenaltyFeetPerLevel * level} feet`
+        );
+      }
+      expect(effects[String(maxLevel)]).toBe('Death');
     });
   });
 

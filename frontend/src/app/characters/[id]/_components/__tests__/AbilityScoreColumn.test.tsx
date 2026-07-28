@@ -293,3 +293,45 @@ describe('computed block is the source of truth (VEG-412)', () => {
     expect(screen.getByTestId('skill-dot-stealth').className).toContain('bg-gray-300');
   });
 });
+
+describe('exhaustion penalties reach saves and skills (VEG-449)', () => {
+  // Exhaustion reduces every d20 Test by 2 × level. These readouts render the
+  // computed bonuses directly, so the penalty must arrive already folded in —
+  // the component does no rule math of its own.
+  const exhausted = makeCharacter({
+    savingThrows: ['Strength', 'Constitution'],
+    skills: ['Athletics', 'Intimidation'],
+    exhaustion: 3,
+  });
+
+  it('reduces proficient and unproficient saving throws alike', () => {
+    render(<AbilityScoreColumn character={exhausted} />);
+    // STR: mod +3, prof +3, −6 = +0
+    const strSaveRow = within(screen.getByTestId('ability-card-strength')).getByTestId(
+      'save-row-strength'
+    );
+    expect(within(strSaveRow).getByText('+0')).toBeInTheDocument();
+
+    // DEX (unproficient): mod +1, −6 = −5
+    const dexSaveRow = within(screen.getByTestId('ability-card-dexterity')).getByTestId(
+      'save-row-dexterity'
+    );
+    expect(within(dexSaveRow).getByText('-5')).toBeInTheDocument();
+  });
+
+  it('reduces skill bonuses', () => {
+    render(<AbilityScoreColumn character={exhausted} />);
+    // Athletics (STR, proficient): +3 +3 −6 = +0
+    expect(within(screen.getByTestId('skill-row-athletics')).getByText('+0')).toBeInTheDocument();
+    // Stealth (DEX, unproficient): +1 −6 = −5
+    expect(within(screen.getByTestId('skill-row-stealth')).getByText('-5')).toBeInTheDocument();
+  });
+
+  it('leaves the raw ability modifiers unpenalized', () => {
+    // The penalty applies to the roll, not the score — the ability card's own
+    // modifier must still read +3 for STR 16.
+    render(<AbilityScoreColumn character={exhausted} />);
+    const strCard = screen.getByTestId('ability-card-strength');
+    expect(within(strCard).getByText('+3')).toBeInTheDocument();
+  });
+});

@@ -69,6 +69,31 @@ describe('StatsBar', () => {
       const block = screen.getByTestId('stat-speed');
       expect(within(block).getByText('25 ft')).toBeInTheDocument();
     });
+
+    it('shows the reduced speed and the reduction while exhausted (VEG-449)', () => {
+      // Base 25 ft, exhaustion 3 → −15 ft.
+      const char = makeCharacter({ speed: 25, exhaustion: 3 });
+      render(<StatsBar character={char} />);
+      expect(within(screen.getByTestId('stat-speed')).getByText('10 ft (−15)')).toBeInTheDocument();
+    });
+
+    it('floors the displayed speed at 0 rather than going negative', () => {
+      const char = makeCharacter({ speed: 25, exhaustion: 6 });
+      render(<StatsBar character={char} />);
+      expect(within(screen.getByTestId('stat-speed')).getByText('0 ft (−30)')).toBeInTheDocument();
+    });
+
+    it('reads the computed block, not the stored speed column (VEG-412)', () => {
+      // Stored says 25; computed says 45 — computed must win, the same contract
+      // the other readouts follow.
+      const base = makeCharacter({ speed: 25 });
+      const char = {
+        ...base,
+        computed: { ...base.computed, speed: { base: 45, penalty: 0, effective: 45 } },
+      };
+      render(<StatsBar character={char} />);
+      expect(within(screen.getByTestId('stat-speed')).getByText('45 ft')).toBeInTheDocument();
+    });
   });
 
   describe('Size', () => {
@@ -178,5 +203,41 @@ describe('computed block is the source of truth (VEG-412)', () => {
     expect(
       within(screen.getByTestId('stat-passive-perception')).getByText('23')
     ).toBeInTheDocument();
+  });
+});
+
+describe('exhaustion penalties reach the stat readouts (VEG-449)', () => {
+  it('reduces initiative and passive perception by 2 per exhaustion level', () => {
+    // Unexhausted baselines: DEX 12 → initiative +1; WIS 14 + prof 3 → PP 15.
+    const char = makeCharacter({
+      abilityScores: mockCharacter.abilityScores,
+      skills: ['Perception', 'Athletics'],
+      exhaustion: 2,
+    });
+    render(<StatsBar character={char} />);
+    expect(within(screen.getByTestId('stat-initiative')).getByText('-3')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('stat-passive-perception')).getByText('11')
+    ).toBeInTheDocument();
+  });
+
+  it('leaves the proficiency bonus alone — it is not a d20 Test', () => {
+    const char = makeCharacter({ exhaustion: 5 });
+    render(<StatsBar character={char} />);
+    expect(within(screen.getByTestId('stat-prof-bonus')).getByText('+3')).toBeInTheDocument();
+  });
+
+  it('rolls initiative with the penalized modifier', async () => {
+    const user = userEvent.setup();
+    mockMessage.mockReset();
+    const char = makeCharacter({ abilityScores: mockCharacter.abilityScores, exhaustion: 2 });
+    render(<StatsBar character={char} canRoll />);
+    await user.click(screen.getByRole('button', { name: 'Roll initiative' }));
+
+    // The d20 face is random, so assert the arithmetic rather than a literal
+    // total: DEX 12 → +1, exhaustion 2 → −4, so the roll must apply −3.
+    const message = mockMessage.mock.calls[0][0] as string;
+    const [, face, total] = message.match(/Initiative: (\d+) . 3 = (-?\d+)/)!;
+    expect(Number(total)).toBe(Number(face) - 3);
   });
 });
