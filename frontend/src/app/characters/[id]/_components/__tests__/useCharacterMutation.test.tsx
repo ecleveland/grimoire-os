@@ -45,6 +45,64 @@ beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
+describe('useCharacterMutation onSuccess callback (VEG-487)', () => {
+  it('runs the per-call onSuccess only after the write resolves', async () => {
+    let resolveWrite: (value: Character) => void = () => {};
+    mockApiFetch.mockReturnValue(
+      new Promise<Character>(resolve => {
+        resolveWrite = resolve;
+      })
+    );
+    const onSuccess = vi.fn();
+    const { result } = renderMutation(makeCharacter());
+
+    act(() => result.current.patch({ heroicInspiration: true }, { onSuccess }));
+
+    // In flight — a summary toast fired here would claim a write that may 409.
+    expect(onSuccess).not.toHaveBeenCalled();
+
+    act(() => resolveWrite(makeCharacter({ version: 8 })));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not run onSuccess when the write fails', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+    const onSuccess = vi.fn();
+    const { result } = renderMutation(makeCharacter());
+
+    act(() => result.current.patch({ heroicInspiration: true }, { onSuccess }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it('still writes when no callback is supplied', async () => {
+    mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
+    const { result } = renderMutation(makeCharacter());
+
+    act(() => result.current.patch({ heroicInspiration: true }));
+
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(1));
+  });
+
+  it('still invalidates the character query alongside a per-call onSuccess', async () => {
+    // The hook's own onSuccess does the refetch; the per-call one is passed to
+    // `mutate`. React Query runs both, but nothing pinned that — and losing the
+    // invalidate would leave `character.version` stale and 409 the next write,
+    // silently, on exactly the new rest paths.
+    mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
+    const client = makeClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const onSuccess = vi.fn();
+    const { result } = renderMutation(makeCharacter(), client);
+
+    act(() => result.current.patch({ heroicInspiration: true }, { onSuccess }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(invalidateSpy).toHaveBeenCalled();
+  });
+});
+
 describe('useCharacterMutation', () => {
   it('PATCHes the character with the fields and expectedVersion', async () => {
     mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
@@ -144,6 +202,15 @@ describe('useCharacterMutation', () => {
       expect(resolved.isSaving).toBe(false);
       // Must not throw — consumers call patch() without guarding.
       expect(() => resolved.patch({ heroicInspiration: true })).not.toThrow();
+    });
+
+    it('never runs onSuccess on the read-only no-op — there is no write to succeed', () => {
+      // Pins the documented contract: a section must not put a continuation the
+      // UI depends on (closing a dialog) in onSuccess, or read-only would hang.
+      const resolved = resolvePlayControls({});
+      const onSuccess = vi.fn();
+      resolved.patch({ heroicInspiration: true }, { onSuccess });
+      expect(onSuccess).not.toHaveBeenCalled();
     });
   });
 

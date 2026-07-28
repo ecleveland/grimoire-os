@@ -1,9 +1,18 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CombatBar from '../CombatBar';
 import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
+
+const mockToastMessage = vi.fn();
+vi.mock('sonner', () => ({
+  toast: { message: (...args: unknown[]) => mockToastMessage(...args) },
+}));
+
+beforeEach(() => {
+  mockToastMessage.mockReset();
+});
 
 const mockCharacter = makeCharacter();
 
@@ -354,12 +363,15 @@ describe('CombatBar', () => {
         spellSlots: [{ level: 1, total: 4, used: 4 }],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
-      expect(onPatch).toHaveBeenCalledWith({
-        hitPoints: { max: 44, current: 44, temporary: 0 },
-        deathSaves: { successes: 0, failures: 0 },
-        hitDice: { dieType: 'd10', total: 8, spent: 2 },
-        spellSlots: [{ level: 1, total: 4, used: 0 }],
-      });
+      expect(onPatch).toHaveBeenCalledWith(
+        {
+          hitPoints: { max: 44, current: 44, temporary: 0 },
+          deathSaves: { successes: 0, failures: 0 },
+          hitDice: { dieType: 'd10', total: 8, spent: 2 },
+          spellSlots: [{ level: 1, total: 4, used: 0 }],
+        },
+        expect.anything()
+      );
     });
 
     it('long rest omits hit dice and slots for a character without them', () => {
@@ -370,10 +382,13 @@ describe('CombatBar', () => {
         spellSlots: [],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
-      expect(onPatch).toHaveBeenCalledWith({
-        hitPoints: { max: 30, current: 30, temporary: 0 },
-        deathSaves: { successes: 0, failures: 0 },
-      });
+      expect(onPatch).toHaveBeenCalledWith(
+        {
+          hitPoints: { max: 30, current: 30, temporary: 0 },
+          deathSaves: { successes: 0, failures: 0 },
+        },
+        expect.anything()
+      );
     });
 
     it('long rests a non-caster whose spellSlots came back null without crashing', () => {
@@ -387,10 +402,13 @@ describe('CombatBar', () => {
         spellSlots: null as unknown as Character['spellSlots'],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
-      expect(onPatch).toHaveBeenCalledWith({
-        hitPoints: { max: 30, current: 30, temporary: 0 },
-        deathSaves: { successes: 0, failures: 0 },
-      });
+      expect(onPatch).toHaveBeenCalledWith(
+        {
+          hitPoints: { max: 30, current: 30, temporary: 0 },
+          deathSaves: { successes: 0, failures: 0 },
+        },
+        expect.anything()
+      );
     });
 
     it('disables Long Rest while a write is in flight', () => {
@@ -402,15 +420,19 @@ describe('CombatBar', () => {
     const ki = { name: 'Ki Points', max: 5, used: 3, recharge: 'short' as const };
     const rage = { name: 'Rage', max: 3, used: 2, recharge: 'long' as const };
 
-    it("short rest recharges only 'short' resources, leaving everything else untouched", () => {
+    it("short rest recharges only 'short' resources, leaving everything else untouched", async () => {
+      // VEG-487: Short Rest now opens a dialog so hit dice can be spent; a rest
+      // that spends none still writes exactly the resource recharge.
       const onPatch = renderOwner({
         hitPoints: { max: 44, current: 10, temporary: 7 },
         resources: [ki, rage],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
-      expect(onPatch).toHaveBeenCalledWith({
-        resources: [{ ...ki, used: 0 }, rage],
-      });
+      await userEvent.click(screen.getByRole('button', { name: /confirm short rest/i }));
+      expect(onPatch).toHaveBeenCalledWith(
+        { resources: [{ ...ki, used: 0 }, rage] },
+        expect.anything()
+      );
     });
 
     it('long rest also resets every resource in the composite patch', () => {
@@ -422,36 +444,122 @@ describe('CombatBar', () => {
         resources: [ki, rage],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
-      expect(onPatch).toHaveBeenCalledWith({
-        hitPoints: { max: 44, current: 44, temporary: 0 },
-        deathSaves: { successes: 0, failures: 0 },
-        resources: [
-          { ...ki, used: 0 },
-          { ...rage, used: 0 },
-        ],
-      });
+      expect(onPatch).toHaveBeenCalledWith(
+        {
+          hitPoints: { max: 44, current: 44, temporary: 0 },
+          deathSaves: { successes: 0, failures: 0 },
+          resources: [
+            { ...ki, used: 0 },
+            { ...rage, used: 0 },
+          ],
+        },
+        expect.anything()
+      );
     });
 
-    it('disables Short Rest when the character has no resources (nothing to recover, no silent no-op)', () => {
-      const onPatch = renderOwner({ resources: null as unknown as Character['resources'] });
+    it('enables Short Rest on hit dice alone, with no resources to recover', () => {
+      // VEG-487: hit dice are now spendable on a short rest, so dice-only
+      // characters get the button the resource-only gate used to deny them.
+      renderOwner({ resources: null as unknown as Character['resources'] });
+      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeEnabled();
+    });
+
+    it('disables Short Rest when neither hit dice nor resources could change', () => {
+      const onPatch = renderOwner({
+        hitDice: { dieType: 'd10', total: 8, spent: 8 },
+        resources: [rage, { ...ki, used: 0 }],
+      });
       expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
       fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
       expect(onPatch).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('short-rest-dialog')).not.toBeInTheDocument();
     });
 
-    it('disables Short Rest when only long-recharge resources exist or short pools are already full', () => {
-      renderOwner({ resources: [rage, { ...ki, used: 0 }] });
-      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
-    });
-
-    it('enables Short Rest when a short-recharge resource has spent uses', () => {
-      renderOwner({ resources: [ki] });
+    it('enables Short Rest on resources alone when every hit die is spent', () => {
+      renderOwner({ hitDice: { dieType: 'd10', total: 8, spent: 8 }, resources: [ki] });
       expect(screen.getByRole('button', { name: 'Short Rest' })).toBeEnabled();
     });
 
     it('disables Short Rest while a write is in flight', () => {
       renderOwner({}, true);
       expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
+    });
+
+    it('opens the short-rest dialog rather than patching immediately', () => {
+      const onPatch = renderOwner({ resources: [ki] });
+      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
+      expect(screen.getByTestId('short-rest-dialog')).toBeInTheDocument();
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('spends hit dice to heal through the dialog', async () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 12, temporary: 0 },
+        hitDice: { dieType: 'd10', total: 8, spent: 3 },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
+      // Average d10 (6) + 2 CON = 8 healing; one more die spent.
+      await userEvent.click(screen.getByRole('button', { name: /spend a hit die/i }));
+      await userEvent.click(screen.getByRole('button', { name: /confirm short rest/i }));
+
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          hitPoints: { max: 44, current: 20, temporary: 0 },
+          hitDice: { dieType: 'd10', total: 8, spent: 4 },
+        }),
+        expect.anything()
+      );
+    });
+
+    it('closes the short-rest dialog on cancel without writing', async () => {
+      const onPatch = renderOwner({ resources: [ki] });
+      fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
+      await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+      expect(screen.queryByTestId('short-rest-dialog')).not.toBeInTheDocument();
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    // ── Exhaustion recovery + summaries (VEG-487) ────────
+
+    it('long rest reduces exhaustion by one level', () => {
+      const onPatch = renderOwner({ exhaustion: 3 });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ exhaustion: 2 }),
+        expect.anything()
+      );
+    });
+
+    it('long rest clears the exhaustion track from level 1', () => {
+      const onPatch = renderOwner({ exhaustion: 1 });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({ exhaustion: null }),
+        expect.anything()
+      );
+    });
+
+    it('long rest omits exhaustion for an unexhausted character', () => {
+      const onPatch = renderOwner({ exhaustion: null });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch.mock.calls[0][0]).not.toHaveProperty('exhaustion');
+    });
+
+    it('summarizes a long rest only once the write succeeds', () => {
+      const onPatch = renderOwner({
+        hitPoints: { max: 44, current: 10, temporary: 0 },
+        exhaustion: 2,
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+
+      // In flight — nothing announced yet.
+      expect(mockToastMessage).not.toHaveBeenCalled();
+
+      const [, options] = onPatch.mock.calls[0];
+      options.onSuccess();
+      expect(mockToastMessage).toHaveBeenCalledWith(expect.stringContaining('+34 HP'));
+      expect(mockToastMessage).toHaveBeenCalledWith(expect.stringContaining('exhaustion'));
     });
   });
 
@@ -488,5 +596,32 @@ describe('null hitPoints / armorClass (VEG-425)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
     expect(onPatch).toHaveBeenCalledTimes(1);
     expect(onPatch.mock.calls[0][0]).not.toHaveProperty('hitPoints');
+  });
+
+  it('offers no hit dice to spend on a null-HP sheet (they would vanish for nothing)', () => {
+    // The `hasHitPoints &&` in CombatBar's diceAvailable is load-bearing: with a
+    // null HP block a spent die buys no healing, so Short Rest must not be
+    // enabled on dice alone.
+    const char = makeCharacter({
+      hitPoints: null,
+      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+    });
+    render(<CombatBar character={char} editable onPatch={vi.fn()} isSaving={false} />);
+    expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
+  });
+
+  it('still allows a resource-only short rest on a null-HP sheet', () => {
+    const char = makeCharacter({
+      hitPoints: null,
+      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      resources: [{ name: 'Ki Points', max: 5, used: 2, recharge: 'short' }],
+    });
+    render(<CombatBar character={char} editable onPatch={vi.fn()} isSaving={false} />);
+
+    const shortRest = screen.getByRole('button', { name: 'Short Rest' });
+    expect(shortRest).toBeEnabled();
+    fireEvent.click(shortRest);
+    // The dialog explains why dice aren't on offer rather than hiding silently.
+    expect(screen.getByRole('status')).toHaveTextContent(/no hit points/i);
   });
 });

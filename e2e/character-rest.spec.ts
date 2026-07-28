@@ -157,8 +157,11 @@ test.describe('character sheet — Long Rest', () => {
       tracker.locator('[data-testid^="resource-1-pip-"][data-filled="true"]')
     ).toHaveCount(3);
 
-    // Short rest: Ki refills, Luck stays spent.
+    // Short rest: Ki refills, Luck stays spent. Since VEG-487 the button opens a
+    // dialog (hit dice are spendable there); this character has no hit dice, so
+    // confirming straight away is a resource-only rest.
     await page.getByRole('button', { name: 'Short Rest' }).click();
+    await page.getByRole('button', { name: 'Confirm Short Rest' }).click();
     await expect(
       tracker.locator('[data-testid^="resource-0-pip-"][data-filled="true"]')
     ).toHaveCount(0);
@@ -180,5 +183,99 @@ test.describe('character sheet — Long Rest', () => {
     await expect(
       tracker.locator('[data-testid^="resource-1-pip-"][data-filled="true"]')
     ).toHaveCount(0);
+  });
+
+  // VEG-487 — spending hit dice to heal on a short rest, and the long rest's
+  // exhaustion step-down.
+
+  test('owner spends hit dice on a short rest to heal', async ({ page }) => {
+    await registerAndLogin(page, 'short-rest-dice', 'Rester Four');
+    const headers = await csrfHeaders(page);
+
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Dara Stonewalker',
+        class: 'Barbarian',
+        level: 4,
+        // CON 14 → +2 modifier, so an average d12 (7) heals 9 per die.
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
+        hitPoints: { max: 40, current: 12, temporary: 0 },
+        hitDice: { dieType: 'd12', total: 4, spent: 1 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Dara Stonewalker' })).toBeVisible();
+
+    const hpBlock = page.getByTestId('hp-block');
+    await expect(hpBlock.getByText('12/40')).toBeVisible();
+    await expect(page.getByTestId('hd-block').getByText('1/4')).toBeVisible();
+
+    await hpBlock.getByRole('button', { name: 'Short Rest' }).click();
+    const dialog = page.getByTestId('short-rest-dialog');
+    await expect(dialog).toBeVisible();
+    // 4 total, 1 spent → 3 available.
+    await expect(dialog.getByTestId('dice-available')).toHaveText('3');
+
+    // Spend two dice at the fixed average: 2 × (7 + 2 CON) = 18 healing.
+    await dialog.getByRole('button', { name: 'Spend a Hit Die' }).click();
+    await dialog.getByRole('button', { name: 'Spend a Hit Die' }).click();
+    await expect(dialog.getByTestId('heal-total')).toHaveText('18');
+    await expect(dialog.getByTestId('hp-preview')).toHaveText('30');
+
+    await dialog.getByRole('button', { name: 'Confirm Short Rest' }).click();
+
+    await expect(dialog).toBeHidden();
+    await expect(hpBlock.getByText('30/40')).toBeVisible();
+    // Two more dice spent: 1 → 3.
+    await expect(page.getByTestId('hd-block').getByText('3/4')).toBeVisible();
+  });
+
+  test('long rest reduces exhaustion by one level', async ({ page }) => {
+    await registerAndLogin(page, 'long-rest-exhaustion', 'Rester Five');
+    const headers = await csrfHeaders(page);
+
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Kelen Ashgrove',
+        class: 'Ranger',
+        level: 3,
+        abilityScores: { strength: 12, dexterity: 16, constitution: 13 },
+        hitPoints: { max: 24, current: 24, temporary: 0 },
+        hitDice: { dieType: 'd10', total: 3, spent: 0 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        exhaustion: 3,
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Kelen Ashgrove' })).toBeVisible();
+    // Pips 1-3 filled. (Asserted via the track's own testids rather than the
+    // "Level 3" label, which would also match the character's level elsewhere.)
+    await expect(page.getByTestId('exhaustion-pip-3')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' }).click();
+
+    // Stepped down 3 → 2: the third pip empties, the second stays filled.
+    await expect(page.getByTestId('exhaustion-pip-3')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('exhaustion-pip-2')).toHaveAttribute('aria-pressed', 'true');
+
+    // Rest down to the last level, then off it. 1 → null is the case that
+    // actually exercises the nullable write: the DTO rejects 0 (@Min(1)), so a
+    // frontend that stepped to 0 instead of null would 400 here and nowhere
+    // else — the unit tests prove each half but not the composition.
+    await page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' }).click();
+    await expect(page.getByTestId('exhaustion-pip-2')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('exhaustion-pip-1')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' }).click();
+    await expect(page.getByTestId('exhaustion-pip-1')).toHaveAttribute('aria-pressed', 'false');
   });
 });
