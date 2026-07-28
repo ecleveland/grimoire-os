@@ -57,10 +57,14 @@ export default function ShortRestDialog({
 
   // `rolls` is dialog-local while `available` tracks the character prop, and a
   // 409 deliberately refetches underneath an open dialog (the designed retry
-  // path). Deriving the usable rolls means a concurrent spend elsewhere drops
-  // the rows the write could never have honoured, instead of rendering a
-  // negative count and silently discarding them on confirm.
+  // path). A concurrent spend elsewhere must drop the rows the write could
+  // never have honoured, instead of rendering a negative count and silently
+  // discarding them on confirm.
   const usableRolls = rolls.slice(0, available);
+  // Truncating the state too — not just the derived view — makes the drop
+  // permanent: otherwise dice returning (another session long-rests this
+  // character) would resurrect rolls the player already watched disappear.
+  if (usableRolls.length < rolls.length) setRolls(usableRolls);
 
   // Spending a die can't heal a sheet with no stored HP block (VEG-425), so the
   // control is withheld rather than offered as a die that vanishes for nothing.

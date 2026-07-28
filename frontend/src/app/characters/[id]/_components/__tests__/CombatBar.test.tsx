@@ -597,4 +597,31 @@ describe('null hitPoints / armorClass (VEG-425)', () => {
     expect(onPatch).toHaveBeenCalledTimes(1);
     expect(onPatch.mock.calls[0][0]).not.toHaveProperty('hitPoints');
   });
+
+  it('offers no hit dice to spend on a null-HP sheet (they would vanish for nothing)', () => {
+    // The `hasHitPoints &&` in CombatBar's diceAvailable is load-bearing: with a
+    // null HP block a spent die buys no healing, so Short Rest must not be
+    // enabled on dice alone.
+    const char = makeCharacter({
+      hitPoints: null,
+      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+    });
+    render(<CombatBar character={char} editable onPatch={vi.fn()} isSaving={false} />);
+    expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
+  });
+
+  it('still allows a resource-only short rest on a null-HP sheet', () => {
+    const char = makeCharacter({
+      hitPoints: null,
+      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      resources: [{ name: 'Ki Points', max: 5, used: 2, recharge: 'short' }],
+    });
+    render(<CombatBar character={char} editable onPatch={vi.fn()} isSaving={false} />);
+
+    const shortRest = screen.getByRole('button', { name: 'Short Rest' });
+    expect(shortRest).toBeEnabled();
+    fireEvent.click(shortRest);
+    // The dialog explains why dice aren't on offer rather than hiding silently.
+    expect(screen.getByRole('status')).toHaveTextContent(/no hit points/i);
+  });
 });

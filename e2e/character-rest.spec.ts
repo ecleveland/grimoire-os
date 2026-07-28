@@ -266,5 +266,16 @@ test.describe('character sheet — Long Rest', () => {
     // Stepped down 3 → 2: the third pip empties, the second stays filled.
     await expect(page.getByTestId('exhaustion-pip-3')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByTestId('exhaustion-pip-2')).toHaveAttribute('aria-pressed', 'true');
+
+    // Rest down to the last level, then off it. 1 → null is the case that
+    // actually exercises the nullable write: the DTO rejects 0 (@Min(1)), so a
+    // frontend that stepped to 0 instead of null would 400 here and nowhere
+    // else — the unit tests prove each half but not the composition.
+    await page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' }).click();
+    await expect(page.getByTestId('exhaustion-pip-2')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.getByTestId('exhaustion-pip-1')).toHaveAttribute('aria-pressed', 'true');
+
+    await page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' }).click();
+    await expect(page.getByTestId('exhaustion-pip-1')).toHaveAttribute('aria-pressed', 'false');
   });
 });

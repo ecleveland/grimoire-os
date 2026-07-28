@@ -84,6 +84,23 @@ describe('useCharacterMutation onSuccess callback (VEG-487)', () => {
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(1));
   });
+
+  it('still invalidates the character query alongside a per-call onSuccess', async () => {
+    // The hook's own onSuccess does the refetch; the per-call one is passed to
+    // `mutate`. React Query runs both, but nothing pinned that — and losing the
+    // invalidate would leave `character.version` stale and 409 the next write,
+    // silently, on exactly the new rest paths.
+    mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
+    const client = makeClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const onSuccess = vi.fn();
+    const { result } = renderMutation(makeCharacter(), client);
+
+    act(() => result.current.patch({ heroicInspiration: true }, { onSuccess }));
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+    expect(invalidateSpy).toHaveBeenCalled();
+  });
 });
 
 describe('useCharacterMutation', () => {
@@ -185,6 +202,15 @@ describe('useCharacterMutation', () => {
       expect(resolved.isSaving).toBe(false);
       // Must not throw — consumers call patch() without guarding.
       expect(() => resolved.patch({ heroicInspiration: true })).not.toThrow();
+    });
+
+    it('never runs onSuccess on the read-only no-op — there is no write to succeed', () => {
+      // Pins the documented contract: a section must not put a continuation the
+      // UI depends on (closing a dialog) in onSuccess, or read-only would hang.
+      const resolved = resolvePlayControls({});
+      const onSuccess = vi.fn();
+      resolved.patch({ heroicInspiration: true }, { onSuccess });
+      expect(onSuccess).not.toHaveBeenCalled();
     });
   });
 

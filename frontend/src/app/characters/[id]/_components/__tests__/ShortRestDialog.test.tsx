@@ -224,16 +224,90 @@ describe('ShortRestDialog (VEG-487)', () => {
     expect(mockToastMessage).toHaveBeenCalledWith(expect.stringContaining('1 hit die'));
   });
 
-  it('keeps the dialog open when the write fails, preserving the rolls', async () => {
+  it('survives a failed write: stays open, re-enables, and retries the same patch', async () => {
     const user = userEvent.setup();
-    const { onClose } = renderDialog();
+    const onPatch = vi.fn();
+    const onClose = vi.fn();
+    const character = makeCharacter({
+      hitPoints: { max: 44, current: 12, temporary: 0 },
+      hitDice: { dieType: 'd10', total: 8, spent: 3 },
+      resources: [],
+    });
+    const props = { character, onPatch, onClose };
+    const { rerender } = render(<ShortRestDialog {...props} isSaving={false} />);
 
     await user.click(screen.getByRole('button', { name: /spend a hit die/i }));
-    await user.click(screen.getByRole('button', { name: /confirm/i }));
+    await user.click(screen.getByRole('button', { name: /confirm short rest/i }));
+    expect(onPatch).toHaveBeenCalledTimes(1);
 
-    // onSuccess never fires on a rejected write.
+    // Write in flight — controls lock.
+    rerender(<ShortRestDialog {...props} isSaving />);
+    expect(screen.getByRole('button', { name: /confirm short rest/i })).toBeDisabled();
+
+    // Write rejects: onSuccess never runs, so the dialog neither closes nor
+    // toasts, and `isSaving` releases. This is the path the 409 handler's
+    // "reloaded the latest version — try again" toast tells the player to take.
+    rerender(<ShortRestDialog {...props} isSaving={false} />);
     expect(onClose).not.toHaveBeenCalled();
+    expect(mockToastMessage).not.toHaveBeenCalled();
+
+    const confirm = screen.getByRole('button', { name: /confirm short rest/i });
+    expect(confirm).toBeEnabled();
+    expect(screen.getByRole('button', { name: /spend a hit die/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^cancel$/i })).toBeEnabled();
+    // The roll survived, so retrying dispatches the identical patch.
     expect(screen.getByTestId('heal-total')).toHaveTextContent('8');
+
+    await user.click(confirm);
+    expect(onPatch).toHaveBeenCalledTimes(2);
+    expect(onPatch.mock.calls[1][0]).toEqual(onPatch.mock.calls[0][0]);
+  });
+
+  it('does not resurrect rolls it already dropped if dice come back', async () => {
+    const user = userEvent.setup();
+    const onPatch = vi.fn();
+    const onClose = vi.fn();
+    const base = {
+      hitPoints: { max: 44, current: 12, temporary: 0 },
+      hitDice: { dieType: 'd10' as const, total: 8, spent: 3 },
+      resources: [],
+    };
+    const { rerender } = render(
+      <ShortRestDialog
+        character={makeCharacter(base)}
+        onPatch={onPatch}
+        onClose={onClose}
+        isSaving={false}
+      />
+    );
+    const spend = screen.getByRole('button', { name: /spend a hit die/i });
+    await user.click(spend);
+    await user.click(spend);
+    await user.click(spend);
+
+    // Another session spends dice → two rolls are dropped...
+    rerender(
+      <ShortRestDialog
+        character={makeCharacter({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 7 } })}
+        onPatch={onPatch}
+        onClose={onClose}
+        isSaving={false}
+      />
+    );
+    expect(screen.getAllByTestId(/^die-row-/)).toHaveLength(1);
+
+    // ...then that session long-rests and the dice return. The dropped rolls
+    // must stay dropped — silently reinstating them would re-queue a spend the
+    // player already saw discarded.
+    rerender(
+      <ShortRestDialog
+        character={makeCharacter({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 0 } })}
+        onPatch={onPatch}
+        onClose={onClose}
+        isSaving={false}
+      />
+    );
+    expect(screen.getAllByTestId(/^die-row-/)).toHaveLength(1);
   });
 
   it('lets a player undo the last die before confirming', async () => {
