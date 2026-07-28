@@ -62,6 +62,12 @@ export function deriveComputed(
     ABILITY_KEYS.map(key => [key, abilityModifier(scores[key])])
   ) as ComputedStats['abilityModifiers'];
 
+  // A bare ability check is a d20 Test and takes the penalty; the modifier
+  // itself does not (VEG-449).
+  const abilityChecks = Object.fromEntries(
+    ABILITY_KEYS.map(key => [key, abilityModifiers[key] + d20Penalty])
+  ) as ComputedStats['abilityChecks'];
+
   const savingThrows = Object.fromEntries(
     ABILITY_KEYS.map(key => {
       const name = ABILITY_KEY_TO_NAME[key];
@@ -104,6 +110,7 @@ export function deriveComputed(
   return {
     proficiencyBonus: prof,
     abilityModifiers,
+    abilityChecks,
     initiative: abilityModifiers.dexterity + d20Penalty,
     savingThrows,
     skills,

@@ -35,11 +35,19 @@ export default function AbilityScoreColumn({ character, canRoll }: AbilityScoreC
     <div className="flex flex-col gap-4">
       {ABILITY_KEYS.map(key => {
         const score = abilityScores[key];
-        const mod = computed.abilityModifiers[key];
+        // The card's headline number is the bonus for a bare ability *check*,
+        // which is what its roll button rolls — so it carries the exhaustion
+        // penalty (VEG-449), exactly like the save and skill rows below it.
+        // `abilityModifiers` stays the raw, unpenalized modifier for HP math
+        // and is absent under version skew (pre-VEG-449 backend), hence the
+        // fallback.
+        const mod = computed.abilityChecks?.[key] ?? computed.abilityModifiers[key];
         const abilityName = ABILITY_KEY_TO_NAME[key];
         const skills = ABILITY_SKILLS_MAP[abilityName] ?? [];
         // Neutral fallbacks guard a key mismatch between the frontend ability/
-        // skill name lists and the backend game-rules keys — fail soft, not crash.
+        // skill name lists and the backend game-rules keys — fail soft, not
+        // crash. They use the check bonus so a mismatch degrades to a
+        // penalized value rather than a silently unpenalized one.
         const save = computed.savingThrows[abilityName] ?? { proficient: false, bonus: mod };
         const isSaveProficient = save.proficient;
         const saveBonus = save.bonus;

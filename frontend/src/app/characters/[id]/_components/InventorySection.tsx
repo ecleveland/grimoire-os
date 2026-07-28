@@ -232,7 +232,13 @@ export default function InventorySection(props: InventorySectionProps) {
   // abilityScores/speed are nullable at the API boundary (VEG-425); fall back to
   // neutral values so a minimal character's inventory renders instead of crashing.
   const strength = (character.abilityScores ?? DEFAULT_ABILITY_SCORES).strength;
-  const speed = character.speed ?? DEFAULT_SPEED;
+  // Start from the computed effective speed, which already has the exhaustion
+  // reduction applied (VEG-449), so this readout and the stat bar can't disagree
+  // about the same character — and the encumbrance line reports the character's
+  // real final speed rather than one that ignores exhaustion. `?? ` chain covers
+  // version skew (a pre-VEG-449 payload has no computed.speed) and the nullable
+  // stored column. Unifying encumbrance into the computed block is VEG-490.
+  const speed = character.computed.speed?.effective ?? character.speed ?? DEFAULT_SPEED;
   const capacity = carryingCapacity(strength, character.size);
   const carried = totalInventoryWeight(inventory);
   const overCapacity = carried > capacity;

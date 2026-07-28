@@ -13,6 +13,7 @@ import {
   loadSpeciesAsRacesFromJson,
 } from './srd-json.loader';
 import { assertUniqueSeedNames } from './seed-guards';
+import { LOOT_GAME_RULE_CATEGORY } from '../loot/loot-game-rules';
 import { srdClasses } from './data/classes';
 import { srdSubclasses } from './data/subclasses';
 import { srdSubraces } from './data/subraces';
@@ -393,8 +394,11 @@ export class SeedService {
     // dev DB and every existing self-host would keep serving the old value. Both
     // carry rule *content* the app derives from — the exhaustion rule now drives
     // the computed-stats penalty — so a silent no-op on edit is a correctness bug,
-    // not just staleness. Neither table has a homebrew tier, so last-write-wins is
-    // safe; both are keyed by their own unique constraint, preserving row ids.
+    // not just staleness. Both are keyed by their own unique constraint, so row
+    // ids survive.
+    //
+    // The one exception is the `npc-generation` game-rule category, which the
+    // admin loot-odds screen owns; see the guard in the loop below.
     //
     // Skills and languages stay insert-only: they're inert name lists nothing
     // derives from, and their rows are user-extendable in place.
@@ -417,9 +421,18 @@ export class SeedService {
       'game-rules.ts': srdGameRules.map(r => `${r.category}/${r.key}`),
     });
     for (const row of srdGameRules) {
+      // The `npc-generation` rows are the loot-odds knobs the admin screen
+      // edits (AdminLootOddsService writes this exact category), so they are
+      // user-owned data, not seed-owned rule content. Seed the defaults on a
+      // fresh database, but leave an existing row alone — an empty `update`
+      // makes the upsert insert-only for these, preserving the pre-VEG-449
+      // `skipDuplicates` behaviour where it actually mattered. Without this,
+      // every `npm run seed` (which dev.sh runs on each dev-server start)
+      // would silently revert a DM's tuned odds.
+      const seedOwned = row.category !== LOOT_GAME_RULE_CATEGORY;
       await tx.gameRule.upsert({
         where: { category_key: { category: row.category, key: row.key } },
-        update: row,
+        update: seedOwned ? row : {},
         create: row,
       });
     }

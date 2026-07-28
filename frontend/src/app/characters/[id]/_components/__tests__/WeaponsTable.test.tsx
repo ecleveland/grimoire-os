@@ -238,3 +238,73 @@ describe('WeaponsTable', () => {
     });
   });
 });
+
+describe('exhaustion penalty on manual rows (VEG-449)', () => {
+  // Derived rows arrive already penalized from the compute layer; manual rows
+  // carry the player's own text. Both render in this one table with identical
+  // Atk buttons, so penalizing only one kind would show the same weapon twice
+  // with bonuses differing by exactly the penalty.
+  it('penalizes a manually-entered attack bonus', () => {
+    const char = makeCharacter({
+      exhaustion: 3,
+      weapons: [{ name: 'Pact Blade', attackBonus: '+7', damage: '1d8+4', damageType: 'Force' }],
+    });
+    render(<WeaponsTable character={char} />);
+    // +7 − 6 = +1.
+    expect(screen.getByText('+1')).toBeInTheDocument();
+    expect(screen.queryByText('+7')).toBeNull();
+  });
+
+  it('leaves manual rows alone when the character is not exhausted', () => {
+    const char = makeCharacter({
+      weapons: [{ name: 'Pact Blade', attackBonus: '+7', damage: '1d8+4', damageType: 'Force' }],
+    });
+    render(<WeaponsTable character={char} />);
+    expect(screen.getByText('+7')).toBeInTheDocument();
+  });
+
+  it('leaves a non-numeric bonus as typed rather than rewriting it', () => {
+    // This column is "Atk Bonus / DC" — a cantrip row may hold "DC 14", which
+    // has no modifier to reduce. Rewriting it would invent a wrong number.
+    const char = makeCharacter({
+      exhaustion: 4,
+      weapons: [{ name: 'Fire Bolt', attackBonus: 'DC 14', damage: '2d10', damageType: 'Fire' }],
+    });
+    render(<WeaponsTable character={char} />);
+    expect(screen.getByText('DC 14')).toBeInTheDocument();
+  });
+
+  it('does not double-penalize derived rows, which arrive penalized', () => {
+    // The compute layer already applied the penalty to computed.weapons; this
+    // component must not apply it a second time.
+    const base = makeCharacter({ exhaustion: 2 });
+    const char = {
+      ...base,
+      weapons: null,
+      computed: {
+        ...base.computed,
+        weapons: [
+          { name: 'Longsword', attackBonus: '+2', damage: '1d8+3', damageType: 'Slashing' },
+        ],
+      },
+    };
+    render(<WeaponsTable character={char} />);
+    expect(screen.getByText('+2')).toBeInTheDocument();
+  });
+
+  it('rolls a manual attack with the penalized bonus', async () => {
+    const user = userEvent.setup();
+    mockMessage.mockReset();
+    const char = makeCharacter({
+      exhaustion: 3,
+      weapons: [{ name: 'Pact Blade', attackBonus: '+7', damage: '1d8+4', damageType: 'Force' }],
+    });
+    render(<WeaponsTable character={char} canRoll />);
+    await user.click(screen.getByRole('button', { name: 'Roll Pact Blade attack' }));
+
+    // d20 face is random; assert the arithmetic (+7 − 6 = +1).
+    const message = mockMessage.mock.calls[0][0] as string;
+    const [, face, total] = message.match(/Pact Blade attack: (\d+) . 1 = (-?\d+)/)!;
+    expect(Number(total)).toBe(Number(face) + 1);
+  });
+});

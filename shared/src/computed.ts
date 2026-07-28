@@ -273,8 +273,17 @@ export interface ComputedStats {
    * Raw ability modifiers. Deliberately *not* reduced by exhaustion (VEG-449):
    * the penalty applies to a d20 Test's roll, not to the modifier itself, and
    * the level-up / short-rest HP math reads these for the CON modifier.
+   *
+   * For the bonus to a bare ability *check*, use {@link ComputedStats.abilityChecks}.
    */
   abilityModifiers: ComputedAbilityModifiers;
+  /**
+   * Bonus for a bare ability check — the ability modifier less any exhaustion
+   * penalty (VEG-449). Separate from {@link ComputedStats.abilityModifiers}
+   * because an ability check *is* a d20 Test and takes the penalty, while the
+   * modifier feeding HP math is not and must not.
+   */
+  abilityChecks: ComputedAbilityModifiers;
   /** Initiative = Dexterity modifier, less any exhaustion penalty. */
   initiative: number;
   /** Keyed by ability full name (e.g. "Strength"); exhaustion-adjusted. */

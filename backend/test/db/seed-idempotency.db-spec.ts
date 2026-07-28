@@ -38,6 +38,7 @@ describe('seed idempotency — real DB (VEG-480/VEG-484)', () => {
   let conditionBullets: string[];
   let gameRuleCount: number;
   let conditionCount: number;
+  let lootRuleId: string;
 
   beforeAll(async () => {
     ctx = await createSeedContext();
@@ -88,6 +89,17 @@ describe('seed idempotency — real DB (VEG-480/VEG-484)', () => {
     await prisma.condition.update({
       where: { id: conditionId },
       data: { bullets: ['MUTATED'] },
+    });
+
+    // Stand in for a DM tuning the odds in /admin/loot-odds: this row is
+    // user-owned, so unlike the two above it must SURVIVE the re-seed.
+    const lootRule = await prisma.gameRule.findFirstOrThrow({
+      where: { category: 'npc-generation', key: 'trinket-chance' },
+    });
+    lootRuleId = lootRule.id;
+    await prisma.gameRule.update({
+      where: { id: lootRuleId },
+      data: { value: { chance: 0.99 } },
     });
 
     await seed.seed();
@@ -146,6 +158,15 @@ describe('seed idempotency — real DB (VEG-480/VEG-484)', () => {
       });
       expect(condition.bullets).toEqual(conditionBullets);
       expect(condition.bullets).not.toEqual(['MUTATED']);
+    });
+
+    // The other side of the same coin: the seed must overwrite rule *content*
+    // it owns without touching the loot-odds knobs the admin screen owns. A
+    // blanket upsert would silently revert a DM's tuning on every re-seed —
+    // and `dev.sh` re-seeds on every dev-server start.
+    it('preserves admin-tuned npc-generation loot-odds rows across a re-seed', async () => {
+      const lootRule = await ctx.prisma.gameRule.findUniqueOrThrow({ where: { id: lootRuleId } });
+      expect(lootRule.value).toEqual({ chance: 0.99 });
     });
 
     it('preserves reference-table row ids and inserts no duplicates', async () => {

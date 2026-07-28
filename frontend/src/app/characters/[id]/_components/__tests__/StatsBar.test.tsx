@@ -83,6 +83,37 @@ describe('StatsBar', () => {
       expect(within(screen.getByTestId('stat-speed')).getByText('0 ft (−30)')).toBeInTheDocument();
     });
 
+    it('falls back to the stored column when computed.speed is absent (version skew)', () => {
+      // A payload from a pre-VEG-449 backend has no `speed` in `computed`.
+      // Degrade like CombatBar's derived AC does — never blank the sheet.
+      const base = makeCharacter({ speed: 25 });
+      const char = {
+        ...base,
+        computed: {
+          ...base.computed,
+          speed: undefined as unknown as (typeof base)['computed']['speed'],
+        },
+      };
+      render(<StatsBar character={char} />);
+      expect(within(screen.getByTestId('stat-speed')).getByText('25 ft')).toBeInTheDocument();
+      // The rest of the bar still renders — the whole point of degrading.
+      expect(screen.getByTestId('stat-prof-bonus')).toBeInTheDocument();
+      expect(screen.getByTestId('stat-passive-perception')).toBeInTheDocument();
+    });
+
+    it('falls back to the default speed when both computed and stored are absent', () => {
+      const base = makeCharacter({ speed: null });
+      const char = {
+        ...base,
+        computed: {
+          ...base.computed,
+          speed: undefined as unknown as (typeof base)['computed']['speed'],
+        },
+      };
+      render(<StatsBar character={char} />);
+      expect(within(screen.getByTestId('stat-speed')).getByText('30 ft')).toBeInTheDocument();
+    });
+
     it('reads the computed block, not the stored speed column (VEG-412)', () => {
       // Stored says 25; computed says 45 — computed must win, the same contract
       // the other readouts follow.

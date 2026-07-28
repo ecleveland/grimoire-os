@@ -245,13 +245,15 @@ export default function StatusTracker(props: StatusTrackerProps) {
           (VEG-449). */}
       {exhaustionEffect && (
         <p data-testid="exhaustion-effect" className="mt-2 text-xs text-red-600 dark:text-red-400">
-          {exhaustionEffect.dead
-            ? 'Death'
-            : // Typographic minus on both halves, matching the dice-roll
-              // formatter — `formatModifier` would render an ASCII hyphen and
-              // leave the two penalties visibly inconsistent on one line.
-              `−${Math.abs(exhaustionEffect.d20Penalty)} to d20 Tests · ` +
-              `−${exhaustionEffect.speedPenalty} ft Speed`}
+          {/* Death is a prefix, not a replacement: the compute layer still
+              applies the full penalty at level 6, so hiding it here would leave
+              every save and skill dropping with no explanation — the exact
+              thing this line exists to prevent. Typographic minus on both
+              halves matches the dice-roll formatter; `formatModifier` would
+              emit an ASCII hyphen and make the two disagree on one line. */}
+          {exhaustionEffect.dead && 'Death · '}
+          {`−${Math.abs(exhaustionEffect.d20Penalty)} to d20 Tests · `}
+          {`−${exhaustionEffect.speedPenalty} ft Speed`}
         </p>
       )}
     </div>

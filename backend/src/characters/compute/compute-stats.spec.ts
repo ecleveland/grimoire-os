@@ -494,9 +494,39 @@ describe('computeCharacterStats', () => {
       expect(stats.weapons[0]).toMatchObject({ attackBonus: '+2', damage: '1d4+3' });
     });
 
-    it('leaves stored manual weapon rows untouched', () => {
-      // The player typed these numbers; like the AC override, a stored manual
-      // value wins over derivation rather than being silently rewritten.
+    it('penalizes surviving equipped rows when a manual row shadows another', () => {
+      // The shadowing case is the one worth constructing: `deriveWeapons` only
+      // ever returns rows built from `inventory`, so asserting on an empty
+      // inventory would still pass with the d20Penalty parameter deleted. Here
+      // the equipped Dagger is suppressed by the same-named manual row, and the
+      // second equipped weapon proves the penalty reaches what survives.
+      const club: InventoryItem = {
+        name: 'Club',
+        quantity: 1,
+        equipped: true,
+        gear: {
+          type: 'weapon',
+          damage: '1d4',
+          damageType: 'Bludgeoning',
+          properties: [],
+          ranged: false,
+        },
+      };
+      const stats = computeCharacterStats(
+        input({
+          exhaustion: 2,
+          inventory: [dagger, club],
+          weapons: [{ name: 'Dagger', attackBonus: '+7', damage: '1d4+4', damageType: 'Piercing' }],
+        })
+      );
+      // Str 16 → +3, prof +3, exhaustion 2 → −4 ⇒ +2.
+      expect(stats.weapons).toEqual([expect.objectContaining({ name: 'Club', attackBonus: '+2' })]);
+    });
+
+    it('never re-emits a stored manual row from the derived list', () => {
+      // Manual rows are the player's own text and the compute layer must not
+      // rewrite them. The sheet applies the penalty at render time instead
+      // (WeaponsTable), so both row kinds agree within the one table.
       const manual = {
         name: 'Pact Blade',
         attackBonus: '+7',
@@ -506,6 +536,21 @@ describe('computeCharacterStats', () => {
       const stats = computeCharacterStats(input({ exhaustion: 5, weapons: [manual] }));
       expect(stats.weapons).toEqual([]);
       expect(manual.attackBonus).toBe('+7');
+    });
+
+    it('penalizes ability checks but not the raw ability modifiers', () => {
+      const stats = computeCharacterStats(input({ exhaustion: 3 }));
+      // Str 16 → +3 modifier, check at +3 − 6 = −3.
+      expect(stats.abilityModifiers.strength).toBe(3);
+      expect(stats.abilityChecks.strength).toBe(-3);
+      // Cha 8 → −1 modifier, check at −7.
+      expect(stats.abilityModifiers.charisma).toBe(-1);
+      expect(stats.abilityChecks.charisma).toBe(-7);
+    });
+
+    it('leaves ability checks equal to the modifiers when unexhausted', () => {
+      const stats = computeCharacterStats(input());
+      expect(stats.abilityChecks).toEqual(stats.abilityModifiers);
     });
 
     it('leaves values that are not d20 Tests unchanged', () => {

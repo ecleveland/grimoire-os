@@ -368,11 +368,17 @@ describe('InventorySection', () => {
   });
 
   describe('inventory editing (owner)', () => {
+    // Rebuild through the factory rather than shallow-spreading over
+    // `baseCharacter`: a spread leaves the prebuilt `computed` block stale, so
+    // overriding a stored field the block derives from (speed, abilityScores)
+    // would silently keep the old derived value. The encumbrance readout reads
+    // `computed.speed` (VEG-449), which made that staleness load-bearing.
     const renderOwner = (over: Partial<Character> = {}, isSaving = false) => {
       const onPatch = vi.fn();
+      const { computed: _stale, ...stored } = { ...baseCharacter, ...over };
       render(
         <InventorySection
-          character={{ ...baseCharacter, ...over }}
+          character={makeCharacter(over.computed ? { ...stored, computed: over.computed } : stored)}
           editable
           onPatch={onPatch}
           isSaving={isSaving}
@@ -891,5 +897,53 @@ describe('null embedded stats (VEG-425)', () => {
     // read abilityScores.strength + speed) actually runs — the null-deref path.
     render(<InventorySection character={char} editable onPatch={vi.fn()} />);
     expect(screen.getByText('Equipment')).toBeInTheDocument();
+  });
+});
+
+describe('exhaustion + encumbrance speed (VEG-449)', () => {
+  // The finding this guards: StatsBar renders computed.speed while this section
+  // used to start from the raw stored column, so one sheet showed two different
+  // walking speeds and the encumbrance line overstated the real one.
+  const encumbered = (over: Partial<Character> = {}) =>
+    makeCharacter({
+      // STR 6 → heavily encumbered above 60 lb; 62 lb carried.
+      abilityScores: {
+        strength: 6,
+        dexterity: 10,
+        constitution: 10,
+        intelligence: 10,
+        wisdom: 10,
+        charisma: 10,
+      },
+      inventory: [{ name: 'Anvil', quantity: 1, weight: 62, equipped: false }],
+      speed: 30,
+      ...over,
+    });
+
+  it('stacks the exhaustion reduction under the encumbrance penalty', () => {
+    // Base 30, exhaustion 2 → 20 effective, then heavily encumbered −20 → 0.
+    render(<InventorySection character={encumbered({ exhaustion: 2 })} />);
+    expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('20 → 0 ft');
+  });
+
+  it('reports the same base speed the stat bar shows', () => {
+    // Exhaustion 1 → 25 effective. Both readouts must agree on 25.
+    const character = encumbered({ exhaustion: 1 });
+    expect(character.computed.speed.effective).toBe(25);
+    render(<InventorySection character={character} />);
+    expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('25 → 5 ft');
+  });
+
+  it('uses the stored column when the computed block predates speed', () => {
+    const base = encumbered();
+    const legacy = {
+      ...base,
+      computed: {
+        ...base.computed,
+        speed: undefined as unknown as (typeof base)['computed']['speed'],
+      },
+    };
+    render(<InventorySection character={legacy} />);
+    expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('30 → 10 ft');
   });
 });

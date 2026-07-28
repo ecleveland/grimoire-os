@@ -541,6 +541,9 @@ describe('CampaignsService', () => {
           // at the DTO layer, never exposed to other members.
           abilityScores: true,
           inventory: true,
+          // Loaded to apply the exhaustion penalty to initiative (VEG-449);
+          // likewise dropped at the DTO layer.
+          exhaustion: true,
         },
       });
       expect(result).toEqual([
@@ -601,6 +604,38 @@ describe('CampaignsService', () => {
       expect(roster.armorClass).toBe(12);
     });
 
+    // VEG-449: the encounter party-add rolls `d20 + initiative` off this
+    // projection, so an exhausted PC must not be placed in the turn order at a
+    // modifier their own sheet says they don't have.
+    it('applies the exhaustion penalty to the initiative modifier', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([{ ...fullCharacter, exhaustion: 3 }]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      // Stored +2, exhaustion 3 → −6.
+      expect(roster.initiative).toBe(-4);
+    });
+
+    it.each([null, 0])('leaves initiative unchanged at exhaustion %p', async exhaustion => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([{ ...fullCharacter, exhaustion }]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      expect(roster.initiative).toBe(2);
+    });
+
+    it('leaves a null initiative null rather than fabricating a penalty', async () => {
+      // A null modifier means "unset"; turning it into -6 would invent a number
+      // the sheet never showed.
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        { ...fullCharacter, initiative: null, exhaustion: 3 },
+      ]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      expect(roster.initiative).toBeNull();
+    });
+
     it('never leaks sheet fields beyond the roster projection', async () => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
       prisma.character.findMany.mockResolvedValue([fullCharacter]);
@@ -611,6 +646,7 @@ describe('CampaignsService', () => {
       expect(roster).not.toHaveProperty('inventory');
       expect(roster).not.toHaveProperty('currency');
       expect(roster).not.toHaveProperty('abilityScores');
+      expect(roster).not.toHaveProperty('exhaustion');
     });
 
     it('propagates ForbiddenException for non-members without querying characters', async () => {
@@ -672,6 +708,7 @@ describe('CampaignsService', () => {
           hitPoints: true,
           abilityScores: true,
           inventory: true,
+          exhaustion: true,
         },
       });
       expect(result).toEqual([

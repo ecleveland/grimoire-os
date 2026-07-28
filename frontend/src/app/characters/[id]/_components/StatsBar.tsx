@@ -1,6 +1,8 @@
 'use client';
 
 import type { Character } from '@/lib/types';
+import type { ComputedSpeed } from '@grimoire-os/shared';
+import { DEFAULT_SPEED } from '@/lib/character-defaults';
 import { formatModifier } from './utils';
 import { useDiceRoll } from './useDiceRoll';
 import RollableStat from './RollableStat';
@@ -9,6 +11,16 @@ interface StatsBarProps {
   character: Character;
   /** When true, Initiative becomes a roll button (owner-only). */
   canRoll?: boolean;
+}
+
+/**
+ * Speed readout: the computed block's effective value, annotating the reduction
+ * so a lowered speed reads as a penalty rather than bad data. Falls back to the
+ * stored column when the computed block predates `speed` (version skew).
+ */
+function speedLabel(speed: ComputedSpeed | undefined, storedSpeed: number | null): string {
+  if (!speed) return `${storedSpeed ?? DEFAULT_SPEED} ft`;
+  return speed.penalty > 0 ? `${speed.effective} ft (−${speed.penalty})` : `${speed.base} ft`;
 }
 
 export default function StatsBar({ character, canRoll }: StatsBarProps) {
@@ -20,7 +32,11 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
   // block rather than the stored column, so an exhaustion reduction shows here
   // (VEG-449) — the block applies the no-stored-speed fallback server-side.
   // Size is stored, not derived; nullable at the API boundary (VEG-425).
-  const { proficiencyBonus, initiative, passivePerception, speed } = character.computed;
+  const { proficiencyBonus, initiative, passivePerception } = character.computed;
+  // `speed` can be absent under version skew (a payload from a pre-VEG-449
+  // backend) — degrade to the legacy stored-speed render instead of crashing
+  // the whole sheet, the same contract CombatBar's derived AC follows.
+  const speed: ComputedSpeed | undefined = character.computed.speed;
 
   const stats: { label: string; value: string; testId: string }[] = [
     { label: 'Prof. Bonus', value: formatModifier(proficiencyBonus), testId: 'stat-prof-bonus' },
@@ -29,7 +45,7 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
       label: 'Speed',
       // Show the reduction rather than only its result, so a lowered speed is
       // self-explaining instead of looking like bad data.
-      value: speed.penalty > 0 ? `${speed.effective} ft (−${speed.penalty})` : `${speed.base} ft`,
+      value: speedLabel(speed, character.speed),
       testId: 'stat-speed',
     },
     { label: 'Size', value: character.size ?? 'Medium', testId: 'stat-size' },

@@ -228,8 +228,12 @@ export function computeCharacterStats(
   const d20Penalty = exhaustion?.d20Penalty ?? 0;
 
   const abilityModifiers = {} as ComputedAbilityModifiers;
+  const abilityChecks = {} as ComputedAbilityModifiers;
   for (const key of ABILITY_KEYS) {
     abilityModifiers[key] = abilityModifier(scoreFor(abilityScores, key));
+    // A bare ability check is a d20 Test, so it takes the penalty — unlike the
+    // modifier itself, which feeds HP math and must stay raw.
+    abilityChecks[key] = abilityModifiers[key] + d20Penalty;
   }
 
   const savingThrowBonuses: Record<string, ComputedSave> = {};
@@ -279,6 +283,7 @@ export function computeCharacterStats(
   return {
     proficiencyBonus: profBonus,
     abilityModifiers,
+    abilityChecks,
     initiative: abilityModifiers.dexterity + d20Penalty,
     savingThrows: savingThrowBonuses,
     skills: skillBonuses,

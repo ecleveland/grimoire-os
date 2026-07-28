@@ -111,10 +111,14 @@ describe('StatusTracker', () => {
       expect(screen.queryByTestId('exhaustion-effect')).not.toBeInTheDocument();
     });
 
-    it('reports death at level 6 instead of a penalty', () => {
+    it('reports death at level 6 alongside the penalty, not instead of it', () => {
+      // The compute layer still applies −12 / −30 ft at level 6, so suppressing
+      // the summary would leave every save and skill dropping unexplained.
       render(<StatusTracker character={makeCharacter({ exhaustion: 6 })} />);
-      expect(screen.getByTestId('exhaustion-effect')).toHaveTextContent('Death');
-      expect(screen.getByTestId('exhaustion-effect')).not.toHaveTextContent('d20');
+      const effect = screen.getByTestId('exhaustion-effect');
+      expect(effect).toHaveTextContent('Death');
+      expect(effect).toHaveTextContent('−12 to d20 Tests');
+      expect(effect).toHaveTextContent('−30 ft Speed');
     });
 
     it('reads the computed block rather than recomputing the rule client-side', () => {

@@ -879,6 +879,38 @@ describe('SeedService', () => {
     });
   });
 
+  // The admin loot-odds screen writes game_rule rows in the `npc-generation`
+  // category (AdminLootOddsService). Those are tuned values a DM owns, so the
+  // blanket upsert above must not reach them — otherwise every `npm run seed`
+  // (which dev.sh runs on each dev-server start) silently reverts them.
+  it('never overwrites admin-editable npc-generation loot-odds rows on re-seed', async () => {
+    await service.seed();
+
+    const lootUpdates = prisma.gameRule.upsert.mock.calls.filter(
+      c => c[0].create.category === 'npc-generation'
+    );
+    // They must still be seeded (a fresh DB needs the defaults) …
+    expect(lootUpdates.length).toBeGreaterThan(0);
+    // … but the update path must be a no-op, leaving a tuned row untouched.
+    for (const call of lootUpdates) {
+      expect(call[0].update).toEqual({});
+    }
+  });
+
+  it('still rewrites non-loot game rules on re-seed', async () => {
+    await service.seed();
+
+    // Guards the fix above from over-reaching: everything outside the
+    // admin-owned category must keep its overwrite-on-reseed behaviour.
+    const others = prisma.gameRule.upsert.mock.calls.filter(
+      c => c[0].create.category !== 'npc-generation'
+    );
+    expect(others.length).toBeGreaterThan(0);
+    for (const call of others) {
+      expect(call[0].update).toEqual(call[0].create);
+    }
+  });
+
   it('upserts conditions by name so edited condition text reaches seeded databases', async () => {
     await service.seed();
 

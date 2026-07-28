@@ -118,19 +118,24 @@ test.describe('character sheet — status tracker', () => {
     await expect(tracker.getByTestId('exhaustion-effect')).toHaveText(
       '−4 to d20 Tests · −10 ft Speed'
     );
-    await expect(speed).toContainText('20 ft');
+    await expect(speed).toContainText('20 ft (−10)');
     await expect(initiative).toContainText('-3');
 
     // Survives a reload — the penalty is recomputed server-side, not local state.
     await page.reload();
     await expect(page.getByRole('heading', { name: 'Bran Coldhearth' })).toBeVisible();
-    await expect(speed).toContainText('20 ft');
+    await expect(speed).toContainText('20 ft (−10)');
     await expect(initiative).toContainText('-3');
 
-    // Level 6 reads as death rather than a penalty line.
+    // Level 6 flags death *and* still reports the penalty it applies.
     await tracker.getByRole('button', { name: 'Set exhaustion level 6' }).click();
-    await expect(tracker.getByTestId('exhaustion-effect')).toHaveText('Death');
-    await expect(speed).toContainText('0 ft');
+    await expect(tracker.getByTestId('exhaustion-effect')).toHaveText(
+      'Death · −12 to d20 Tests · −30 ft Speed'
+    );
+    // Include the reduction: a bare '0 ft' is also a substring of an unreduced
+    // '30 ft', so that assertion could never fail. (The tile wraps its label
+    // too, so an exact-text match isn't available here.)
+    await expect(speed).toContainText('0 ft (−30)');
 
     // Clearing the track restores every value.
     await tracker.getByRole('button', { name: 'Set exhaustion level 6' }).click();

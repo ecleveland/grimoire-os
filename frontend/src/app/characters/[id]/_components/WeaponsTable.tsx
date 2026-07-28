@@ -1,7 +1,8 @@
 'use client';
 
-import type { Character } from '@/lib/types';
+import type { Character, Weapon } from '@/lib/types';
 import { parseModifier, parseDiceExpression } from '@/lib/dice';
+import { formatModifier } from './utils';
 import { useDiceRoll } from './useDiceRoll';
 
 interface WeaponsTableProps {
@@ -10,14 +11,38 @@ interface WeaponsTableProps {
   canRoll?: boolean;
 }
 
+/**
+ * Apply an exhaustion d20 penalty to a manually-entered weapon's attack bonus
+ * (VEG-449). The stored value is free text, so a row whose bonus doesn't parse
+ * as a number (e.g. a spell-save "DC 15" entry — this column is
+ * "Atk Bonus / DC") is left exactly as typed rather than rewritten to a
+ * confidently-wrong number.
+ */
+function penalizeAttack(weapon: Weapon, d20Penalty: number): Weapon {
+  if (d20Penalty === 0) return weapon;
+  const parsed = parseModifier(weapon.attackBonus);
+  if (parsed === null) return weapon;
+  return { ...weapon, attackBonus: formatModifier(parsed + d20Penalty) };
+}
+
 export default function WeaponsTable({ character, canRoll }: WeaponsTableProps) {
   // Derived rows (from equipped gear, VEG-410) render first and get a tag;
   // manual entries keep working exactly as before. Both share the Weapon
   // shape, so the roll buttons don't care which kind a row is. `?? []`:
   // computed.weapons is absent under version skew (pre-VEG-410 backend).
+  //
+  // The exhaustion penalty is already baked into the derived rows by the
+  // compute layer (VEG-449); manual rows carry a free-text bonus the player
+  // typed, so it is applied here instead. Both kinds sit in one table with
+  // identical Atk buttons, so penalizing only one would show two attacks with
+  // the same weapon disagreeing by exactly the penalty.
+  const d20Penalty = character.computed.exhaustion?.d20Penalty ?? 0;
   const rows = [
     ...(character.computed.weapons ?? []).map(weapon => ({ weapon, derived: true })),
-    ...(character.weapons ?? []).map(weapon => ({ weapon, derived: false })),
+    ...(character.weapons ?? []).map(weapon => ({
+      weapon: penalizeAttack(weapon, d20Penalty),
+      derived: false,
+    })),
   ];
   const { rollCheck, rollDamage } = useDiceRoll();
 
