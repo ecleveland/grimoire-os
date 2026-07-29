@@ -1,5 +1,10 @@
-// Runtime enum objects — values match @grimoire-os/shared, defined locally
-// because Turbopack cannot resolve file:-linked packages for value imports.
+// Runtime enum objects — values match @grimoire-os/shared, defined locally for
+// historical reasons (an early Turbopack limitation on value imports from
+// file:-linked packages). That limitation no longer applies: app code value-
+// imports the package widely today, including from client components and the
+// ability/skill tables in `dnd-constants` and `ability-math` (VEG-453). These
+// mirrors are safe to collapse onto the shared exports when someone wants to;
+// nothing forces them.
 export const Role = { PLAYER: 'player', DUNGEON_MASTER: 'dungeon_master', ADMIN: 'admin' } as const;
 export type Role = (typeof Role)[keyof typeof Role];
 export const CampaignStatus = {

@@ -1,34 +1,24 @@
-import type { AbilityScores, Character, ComputedSpellcasting, ComputedStats } from '@/lib/types';
-// Value import from the file-linked shared package: fine here because tests run
-// under Vitest's resolver — app code can't do this (Turbopack limitation, see
-// the types.ts header) and must keep getting computed.xp from the API. The
-// threshold table is the shared master copy, drift-guarded against the seeded
-// rule by a backend test.
-import {
-  computeExhaustionEffect,
-  computeXpBand,
-  deriveArmorClass,
-  deriveWeapons,
-  EXHAUSTION_RULE,
-  resolveSpeed,
-  XP_LEVEL_THRESHOLDS,
-} from '@grimoire-os/shared';
-import {
-  ABILITY_KEYS,
-  ABILITY_KEY_TO_NAME,
-  SKILL_ABILITY_MAP,
-  abilityModifier,
-  proficiencyBonus,
-} from '@/lib/ability-math';
-import { DEFAULT_ABILITY_SCORES } from '@/lib/character-defaults';
+import type { Character, ComputedStats } from '@/lib/types';
+import { DEFAULT_CHARACTER_STATS_RULES, computeCoreCharacterStats } from '@grimoire-os/shared';
 
 /**
- * Derive a `ComputedStats` block from a character's stored inputs, mirroring the
- * backend's `computeCharacterStats` (VEG-412). Keeps factory-built characters
- * self-consistent by default: a spec that overrides `abilityScores`/`level`/
- * `savingThrows`/`skills` gets a matching computed block for free. Specs that
- * verify a component reads `computed` (not stored) should pass an explicit
- * divergent `computed` override instead.
+ * Derive a `ComputedStats` block from a character's stored inputs using the
+ * same shared formula core the backend's `computeCharacterStats` runs on
+ * (VEG-412, VEG-453) — so a fixture's `computed` block is exactly what the real
+ * API would return for those stored fields, and can't drift from it.
+ *
+ * Keeps factory-built characters self-consistent by default: a spec that
+ * overrides `abilityScores`/`level`/`savingThrows`/`skills` gets a matching
+ * computed block for free. Specs that verify a component reads `computed` (not
+ * stored) should pass an explicit divergent `computed` override instead.
+ *
+ * The rules tables are the shared master copies rather than the seeded rows the
+ * backend reads; backend drift guards pin the two together.
+ *
+ * A null `abilityScores` is left as-is rather than swapped for
+ * `DEFAULT_ABILITY_SCORES`: the core treats every missing score as 10, which is
+ * what the API returns for such a row. Substituting the display default here
+ * would re-open a drift seam the moment that default stopped being all-10.
  *
  * `spellSlots` is always null here — deriving it needs class progression data
  * the frontend doesn't have; caster specs override it explicitly.
@@ -50,91 +40,7 @@ export function deriveComputed(
     | 'speed'
   >
 ): ComputedStats {
-  const scores = c.abilityScores ?? DEFAULT_ABILITY_SCORES;
-  const prof = proficiencyBonus(c.level);
-
-  // Exhaustion reduces every d20 Test (VEG-449). Derived from the shared rule
-  // constant, drift-guarded against the seeded rule by a backend test.
-  const exhaustion = computeExhaustionEffect(EXHAUSTION_RULE, c.exhaustion);
-  const d20Penalty = exhaustion?.d20Penalty ?? 0;
-
-  const abilityModifiers = Object.fromEntries(
-    ABILITY_KEYS.map(key => [key, abilityModifier(scores[key])])
-  ) as ComputedStats['abilityModifiers'];
-
-  // A bare ability check is a d20 Test and takes the penalty; the modifier
-  // itself does not (VEG-449).
-  const abilityChecks = Object.fromEntries(
-    ABILITY_KEYS.map(key => [key, abilityModifiers[key] + d20Penalty])
-  ) as ComputedStats['abilityChecks'];
-
-  const savingThrows = Object.fromEntries(
-    ABILITY_KEYS.map(key => {
-      const name = ABILITY_KEY_TO_NAME[key];
-      const proficient = c.savingThrows.includes(name);
-      return [
-        name,
-        { proficient, bonus: abilityModifiers[key] + (proficient ? prof : 0) + d20Penalty },
-      ];
-    })
-  );
-
-  const skills = Object.fromEntries(
-    Object.entries(SKILL_ABILITY_MAP).map(([skill, ability]) => {
-      const key = ability.toLowerCase() as keyof AbilityScores;
-      const proficient = c.skills.includes(skill);
-      return [
-        skill,
-        {
-          ability,
-          proficient,
-          bonus: abilityModifiers[key] + (proficient ? prof : 0) + d20Penalty,
-        },
-      ];
-    })
-  );
-
-  let spellcasting: ComputedSpellcasting | null = null;
-  if (c.spellcastingAbility) {
-    const key = c.spellcastingAbility.toLowerCase() as keyof AbilityScores;
-    const mod = ABILITY_KEYS.includes(key) ? abilityModifiers[key] : 0;
-    spellcasting = {
-      ability: c.spellcastingAbility,
-      modifier: mod,
-      // A save DC is not a d20 Test the caster rolls, so exhaustion spares it.
-      saveDC: 8 + prof + mod,
-      attackBonus: prof + mod + d20Penalty,
-    };
-  }
-
-  return {
-    proficiencyBonus: prof,
-    abilityModifiers,
-    abilityChecks,
-    initiative: abilityModifiers.dexterity + d20Penalty,
-    savingThrows,
-    skills,
-    passivePerception: 10 + skills['Perception'].bonus,
-    spellcasting,
-    spellSlots: null,
-    xp: computeXpBand(XP_LEVEL_THRESHOLDS, c.level, c.experiencePoints),
-    // Same shared derivations the backend compute layer uses (VEG-410), so
-    // fixture AC/weapons stay consistent with stored inventory/armorClass.
-    armorClass: deriveArmorClass(c.inventory ?? [], abilityModifiers.dexterity, c.armorClass),
-    // Grants come from the character's own proficiencies column only: the
-    // frontend has no class catalog, and guided-built characters carry the
-    // class weapon-proficiency strings there anyway (VEG-463).
-    weapons: deriveWeapons(
-      c.inventory ?? [],
-      abilityModifiers,
-      prof,
-      c.proficiencies ?? [],
-      c.weapons ?? [],
-      d20Penalty
-    ),
-    speed: resolveSpeed(c.speed, exhaustion),
-    exhaustion,
-  };
+  return { ...computeCoreCharacterStats(DEFAULT_CHARACTER_STATS_RULES, c), spellSlots: null };
 }
 
 /**

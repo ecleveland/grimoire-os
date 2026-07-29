@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { SKILL_ABILITY_MAP as SHARED_SKILL_ABILITY_MAP } from '@grimoire-os/shared';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILLS, SKILL_NAMES } from '@/lib/dnd-constants';
 import { SKILL_ABILITY_MAP } from '@/app/characters/[id]/_components/utils';
 
@@ -11,6 +12,14 @@ describe('dnd-constants', () => {
       expect(name).toBeTruthy();
       expect(ABILITY_NAMES).toContain(ability);
     }
+  });
+
+  it('projects the shared SKILL_ABILITY_MAP, preserving its order (VEG-453)', () => {
+    // SKILLS is derived from the shared master map rather than re-listing the
+    // 18 rows, so the builder preview can't drift from the seeded mappings the
+    // backend computes against — a backend drift guard pins that master map to
+    // the seeded `skills/ability-mappings` rule.
+    expect(SKILLS.map(s => [s.name, s.ability])).toEqual(Object.entries(SHARED_SKILL_ABILITY_MAP));
   });
 
   it('SKILL_NAMES mirrors SKILLS', () => {

@@ -1,6 +1,13 @@
 import type { AbilityScores } from '@/lib/types';
-import { abilityModifier as sharedAbilityModifier, formatSigned } from '@grimoire-os/shared';
-import { SKILLS } from '@/lib/dnd-constants';
+import {
+  ABILITY_KEYS,
+  ABILITY_NAME_BY_KEY,
+  PROFICIENCY_BONUS_TABLE,
+  SKILL_ABILITY_MAP,
+  abilityModifier as sharedAbilityModifier,
+  formatSigned,
+  proficiencyBonusFrom,
+} from '@grimoire-os/shared';
 
 // Pure ability-score math + ability/skill maps for contexts with NO server
 // character yet — the guided builder and editor previews, where a live
@@ -9,15 +16,13 @@ import { SKILLS } from '@/lib/dnd-constants';
 // `character.computed` block, the authoritative source (VEG-412). No route or
 // API dependency — formerly colocated under characters/[id]/_components/utils.ts,
 // which now re-exports this module.
+//
+// The formulas and the ability/skill tables come from @grimoire-os/shared, the
+// single implementation the backend compute layer also uses (VEG-453). What
+// stays here is presentation: the terse column labels and the inverted
+// ability→skills map the sheet's ability columns render from.
 
-export const ABILITY_KEYS: (keyof AbilityScores)[] = [
-  'strength',
-  'dexterity',
-  'constitution',
-  'intelligence',
-  'wisdom',
-  'charisma',
-];
+export { ABILITY_KEYS, SKILL_ABILITY_MAP };
 
 export const ABILITY_LABELS: Record<keyof AbilityScores, string> = {
   strength: 'STR',
@@ -28,14 +33,8 @@ export const ABILITY_LABELS: Record<keyof AbilityScores, string> = {
   charisma: 'CHA',
 };
 
-export const ABILITY_KEY_TO_NAME: Record<keyof AbilityScores, string> = {
-  strength: 'Strength',
-  dexterity: 'Dexterity',
-  constitution: 'Constitution',
-  intelligence: 'Intelligence',
-  wisdom: 'Wisdom',
-  charisma: 'Charisma',
-};
+/** Alias of the shared key→full-name map, under this module's long-standing name. */
+export const ABILITY_KEY_TO_NAME: Record<keyof AbilityScores, string> = ABILITY_NAME_BY_KEY;
 
 /**
  * Resolve a class's `primaryAbilities` (full ability *names*, e.g. ['Dexterity',
@@ -62,19 +61,16 @@ export function formatModifier(mod: number): string {
   return formatSigned(mod);
 }
 
+/** Delegates to the shared table lookup the backend computes from, so a preview
+ * bonus matches the one the API will derive — including the 1–20 clamp on an
+ * out-of-range level, which the old local `ceil(level/4)+1` lacked (VEG-453). */
 export function proficiencyBonus(level: number): number {
-  return Math.ceil(level / 4) + 1;
+  return proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, level);
 }
 
 export function skillBonus(abilityScore: number, level: number, isProficient: boolean): number {
   return abilityModifier(abilityScore) + (isProficient ? proficiencyBonus(level) : 0);
 }
-
-// Derived from the canonical SKILLS list (single source of truth in
-// @/lib/dnd-constants) so the sheet and the editor can't drift.
-export const SKILL_ABILITY_MAP: Record<string, string> = Object.fromEntries(
-  SKILLS.map(s => [s.name, s.ability])
-);
 
 export const ABILITY_SKILLS_MAP: Record<string, string[]> = Object.entries(
   SKILL_ABILITY_MAP
