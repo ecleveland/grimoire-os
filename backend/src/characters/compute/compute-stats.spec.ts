@@ -5,7 +5,9 @@ import type {
   InventoryItem,
 } from '@grimoire-os/shared';
 import {
+  computeCoreCharacterStats,
   computeXpBand,
+  DEFAULT_CHARACTER_STATS_RULES,
   EXHAUSTION_RULE,
   PROFICIENCY_BONUS_TABLE,
   proficiencyBonusFrom,
@@ -133,6 +135,45 @@ describe('proficiencyBonusFrom', () => {
     expect(proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, 0)).toBe(2);
     expect(proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, 25)).toBe(6);
     expect(proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, NaN)).toBe(2);
+  });
+});
+
+// The shared core degrades rather than crashing on a rules table the seeded
+// data would never produce (a homebrew/partial `game_rules` row). Only reachable
+// by calling the core directly — `computeCharacterStats` always passes the
+// seeded tables, so these paths are invisible from the entry point (VEG-453).
+describe('computeCoreCharacterStats — rules-table degradation', () => {
+  it('falls back to a bare 10 passive perception when the map has no Perception', () => {
+    // Replaces a hard `skillBonuses['Perception'].bonus` deref that would have
+    // thrown; the sheet must render a degenerate value, not a 500.
+    const stats = computeCoreCharacterStats(
+      { ...DEFAULT_CHARACTER_STATS_RULES, skillAbilityMap: {} },
+      input()
+    );
+    expect(stats.passivePerception).toBe(10);
+    expect(stats.skills).toEqual({});
+  });
+
+  it('scores a skill whose governing ability is unrecognized as modifier 0', () => {
+    const stats = computeCoreCharacterStats(
+      { ...DEFAULT_CHARACTER_STATS_RULES, skillAbilityMap: { Athletics: 'Luck' } },
+      input()
+    );
+    // Strength is +3 here, so a 0 proves the unknown ability didn't resolve.
+    expect(stats.skills['Athletics']).toEqual({
+      ability: 'Luck',
+      proficient: false,
+      bonus: 0,
+    });
+  });
+
+  it('still applies proficiency and exhaustion to an unrecognized-ability skill', () => {
+    const stats = computeCoreCharacterStats(
+      { ...DEFAULT_CHARACTER_STATS_RULES, skillAbilityMap: { Athletics: 'Luck' } },
+      { ...input(), skills: ['Athletics'], exhaustion: 1 }
+    );
+    // 0 modifier + 3 proficiency - 2 exhaustion.
+    expect(stats.skills['Athletics'].bonus).toBe(1);
   });
 });
 

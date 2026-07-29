@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { SKILL_ABILITY_MAP as SHARED_SKILL_ABILITY_MAP } from '@grimoire-os/shared';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILLS, SKILL_NAMES } from '@/lib/dnd-constants';
 import { SKILL_ABILITY_MAP } from '@/app/characters/[id]/_components/utils';
 
@@ -14,12 +13,36 @@ describe('dnd-constants', () => {
     }
   });
 
-  it('projects the shared SKILL_ABILITY_MAP, preserving its order (VEG-453)', () => {
+  it('lists the 18 skills grouped by ability, in display order (VEG-453)', () => {
     // SKILLS is derived from the shared master map rather than re-listing the
-    // 18 rows, so the builder preview can't drift from the seeded mappings the
+    // rows, so the builder preview can't drift from the seeded mappings the
     // backend computes against — a backend drift guard pins that master map to
     // the seeded `skills/ability-mappings` rule.
-    expect(SKILLS.map(s => [s.name, s.ability])).toEqual(Object.entries(SHARED_SKILL_ABILITY_MAP));
+    //
+    // Asserted against literals, not against `Object.entries(SHARED_…)`: SKILLS
+    // *is* that expression, so comparing the two is an identity that cannot
+    // fail. These literals are the actual pin on the grouped-by-ability order
+    // the builder renders.
+    expect(SKILLS.map(s => `${s.name}:${s.ability}`)).toEqual([
+      'Athletics:Strength',
+      'Acrobatics:Dexterity',
+      'Sleight of Hand:Dexterity',
+      'Stealth:Dexterity',
+      'Arcana:Intelligence',
+      'History:Intelligence',
+      'Investigation:Intelligence',
+      'Nature:Intelligence',
+      'Religion:Intelligence',
+      'Animal Handling:Wisdom',
+      'Insight:Wisdom',
+      'Medicine:Wisdom',
+      'Perception:Wisdom',
+      'Survival:Wisdom',
+      'Deception:Charisma',
+      'Intimidation:Charisma',
+      'Performance:Charisma',
+      'Persuasion:Charisma',
+    ]);
   });
 
   it('SKILL_NAMES mirrors SKILLS', () => {

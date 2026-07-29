@@ -33,8 +33,10 @@ export const ABILITY_LABELS: Record<keyof AbilityScores, string> = {
   charisma: 'CHA',
 };
 
-/** Alias of the shared key→full-name map, under this module's long-standing name. */
-export const ABILITY_KEY_TO_NAME: Record<keyof AbilityScores, string> = ABILITY_NAME_BY_KEY;
+/** Alias of the shared key→full-name map, under this module's long-standing
+ * name. Deliberately un-annotated: that keeps the shared `AbilityName` union
+ * (and its readonly-ness) instead of widening the values back to `string`. */
+export const ABILITY_KEY_TO_NAME = ABILITY_NAME_BY_KEY;
 
 /**
  * Resolve a class's `primaryAbilities` (full ability *names*, e.g. ['Dexterity',

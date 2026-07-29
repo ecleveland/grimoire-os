@@ -123,7 +123,11 @@ export const PROFICIENCY_BONUS_TABLE: Readonly<Record<string, number>> = {
  *
  * Insertion order is significant — it drives the key order of
  * `ComputedStats.skills`, and the frontend's `SKILLS` constant is this map's
- * projection. Grouped by ability, matching the seeded rule.
+ * projection. Grouped by ability, matching the seeded rule. That order survives
+ * only because no skill name is an integer-like string: JS orders integer-like
+ * keys numerically ahead of insertion order, which is why the same claim would
+ * be false for {@link PROFICIENCY_BONUS_TABLE} and why nothing depends on its
+ * key order. Two tests pin this map's order — a type can't express it.
  */
 export const SKILL_ABILITY_MAP: Readonly<Record<string, AbilityName>> = {
   Athletics: 'Strength',
@@ -146,14 +150,24 @@ export const SKILL_ABILITY_MAP: Readonly<Record<string, AbilityName>> = {
   Persuasion: 'Charisma',
 };
 
-/** The rules tables the stat core reads. */
+/**
+ * The rules tables the stat core reads.
+ *
+ * The two level-keyed tables are `Partial` because that is the truth: they
+ * arrive as untyped seeded JSON, and both lookups throw on a missing row. A
+ * total `Record` would type those guards as unreachable and let a future
+ * consumer index the table without handling the gap.
+ */
 export interface CharacterStatsRules {
   /** Level (as a string key, '1'–'20') → proficiency bonus. */
-  proficiencyBonusTable: Readonly<Record<string, number>>;
-  /** Skill name → governing ability full name. */
+  proficiencyBonusTable: Readonly<Partial<Record<string, number>>>;
+  /** Skill name → governing ability full name. Values stay `string` rather than
+   * {@link AbilityName}: the backend passes seeded JSON, and a corrupt row must
+   * degrade to a 0 modifier (see `computeCoreCharacterStats`) rather than be
+   * cast into a lie. */
   skillAbilityMap: Readonly<Record<string, string>>;
   /** Level (as a string key, '1'–'20') → XP required to reach it. */
-  xpThresholds: Readonly<Record<string, number>>;
+  xpThresholds: Readonly<Partial<Record<string, number>>>;
   /** Per-level exhaustion scaling factors. */
   exhaustion: ExhaustionRule;
 }
@@ -188,7 +202,7 @@ function clampLevel(level: number): number {
  * bonus — the same failure mode {@link computeXpBand} guards against.
  */
 export function proficiencyBonusFrom(
-  table: Readonly<Record<string, number>>,
+  table: Readonly<Partial<Record<string, number>>>,
   level: number
 ): number {
   const lvl = clampLevel(level);
@@ -248,8 +262,12 @@ export interface CharacterStatsInput {
  * Callers with no class catalog (the builder previews, test fixtures) omit it.
  */
 export interface CharacterStatsGrants {
-  /** Class default spellcasting ability; the stored column wins over it. */
-  spellcastingAbility?: string | null;
+  /**
+   * Class *default* spellcasting ability — named for its precedence: the
+   * character's own `spellcastingAbility` column wins whenever it's set (which
+   * is what lets a subclass caster like an Eldritch Knight override the class).
+   */
+  defaultSpellcastingAbility?: string | null;
   /** Class weapon proficiencies, unioned with the character's own list. */
   weaponProficiencies?: string[];
 }
@@ -335,7 +353,7 @@ export function computeCoreCharacterStats(
   // Eldritch Knight), else fall back to the class default. Null → non-caster.
   // An unrecognized name (corrupt column) yields modifier 0; the service logs
   // it so the wrong-but-rendered DC is observable rather than silent.
-  const resolvedAbility = spellcastingAbility ?? grants.spellcastingAbility ?? null;
+  const resolvedAbility = spellcastingAbility ?? grants.defaultSpellcastingAbility ?? null;
   let spellcasting: ComputedSpellcasting | null = null;
   if (resolvedAbility) {
     const key = abilityKeyFromName(resolvedAbility);

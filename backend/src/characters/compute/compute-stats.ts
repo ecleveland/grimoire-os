@@ -20,15 +20,17 @@ import { srdGameRules } from '../../seed/data/game-rules';
 /**
  * Subset of a character's stored fields the compute layer reads. The shared
  * stat core defines the formulas and a deliberately tolerant input shape
- * (VEG-453); this narrows every field back to required, since the service
- * always reads a full Prisma row — so a forgotten field is a compile error
- * here rather than a silently-defaulted derived value.
+ * (VEG-453); the service always reads a full Prisma row, so every field is
+ * required here — a forgotten one is a compile error rather than a silently
+ * defaulted derived value.
+ *
+ * `Required<…>` rather than re-listing the fields: it strips the optional
+ * markers while leaving `| null` intact (so a genuinely nullable column stays
+ * nullable), and — unlike hand-narrowing — a field added to
+ * {@link CharacterStatsInput} later is required here automatically instead of
+ * being silently inherited as optional.
  */
-export interface CharacterComputeInput extends CharacterStatsInput {
-  /** Explicit spellcasting ability (full name); overrides the class default. */
-  spellcastingAbility: string | null;
-  /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
-  armorClass: number | null;
+export interface CharacterComputeInput extends Required<CharacterStatsInput> {
   /** The character's own proficiency strings (weapon/tool, free text); unioned
    * with the class weapon proficiencies to resolve weapon grants (VEG-463). */
   proficiencies: string[];
@@ -36,10 +38,6 @@ export interface CharacterComputeInput extends CharacterStatsInput {
   inventory: InventoryItem[];
   /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
   weapons: Weapon[];
-  /** Exhaustion level 1–6, penalizing d20 Tests and Speed (VEG-449). */
-  exhaustion: number | null;
-  /** Stored walking speed in feet; null falls back to `DEFAULT_SPEED`. */
-  speed: number | null;
 }
 
 // ── Game-rules source (single source of truth, mirrors GET /srd/rules) ──
@@ -152,7 +150,7 @@ export function computeCharacterStats(
 ): ComputedStats {
   return {
     ...computeCoreCharacterStats(SEEDED_RULES, character, {
-      spellcastingAbility: classSpellcasting?.ability,
+      defaultSpellcastingAbility: classSpellcasting?.ability,
       weaponProficiencies: classWeaponProficiencies,
     }),
     // The only derivation the shared core can't do: it needs the class
