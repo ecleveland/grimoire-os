@@ -50,6 +50,22 @@ describe('proficiencyBonus', () => {
   ])('level %i → +%i', (level, expected) => {
     expect(proficiencyBonus(level)).toBe(expected);
   });
+
+  // VEG-453: this delegates to the shared rules-table lookup the API computes
+  // from, which clamps to 1–20. The old local `Math.ceil(level / 4) + 1` agreed
+  // on 1–20 but not outside it, so only these cases can catch a regression back
+  // to it. Reachable: LevelUpDialog computes `character.level + 1` during render
+  // (before the effect that closes it at the cap), so a level-20 sheet renders
+  // one frame at proficiencyBonus(21) — 7 under the old formula, 6 under the API's.
+  it.each([
+    [0, 2],
+    [-3, 2],
+    [21, 6],
+    [25, 6],
+    [NaN, 2],
+  ])('clamps out-of-range level %s to +%s, matching the API', (level, expected) => {
+    expect(proficiencyBonus(level)).toBe(expected);
+  });
 });
 
 describe('skillBonus', () => {

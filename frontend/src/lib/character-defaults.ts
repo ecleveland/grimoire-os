@@ -32,8 +32,7 @@ export const ZERO_HIT_POINTS: HitPoints = { max: 0, current: 0, temporary: 0 };
 /**
  * Default walking speed (ft) when a character has no stored speed. Mirrors
  * `DEFAULT_SPEED` in @grimoire-os/shared, which the compute layer applies to
- * `computed.speed.base` — defined locally as a value because Turbopack can't
- * resolve file:-linked packages for value imports (see the types.ts header).
- * A spec pins the two together.
+ * `computed.speed.base`; a spec pins the two together. The local copy is
+ * historical rather than required — see the types.ts header.
  */
 export const DEFAULT_SPEED = 30;

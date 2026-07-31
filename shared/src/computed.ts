@@ -112,7 +112,7 @@ export const XP_LEVEL_THRESHOLDS: Readonly<Record<string, number>> = {
  * like the other table lookups.
  */
 export function computeXpBand(
-  thresholds: Readonly<Record<string, number>>,
+  thresholds: Readonly<Partial<Record<string, number>>>,
   level: number,
   experiencePoints: number
 ): ComputedXp {

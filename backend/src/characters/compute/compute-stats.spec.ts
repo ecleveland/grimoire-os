@@ -4,13 +4,22 @@ import type {
   ExhaustionRule,
   InventoryItem,
 } from '@grimoire-os/shared';
-import { computeXpBand, EXHAUSTION_RULE, XP_LEVEL_THRESHOLDS } from '@grimoire-os/shared';
+import {
+  computeCoreCharacterStats,
+  computeXpBand,
+  DEFAULT_CHARACTER_STATS_RULES,
+  EXHAUSTION_RULE,
+  PROFICIENCY_BONUS_TABLE,
+  proficiencyBonusFrom,
+  SKILL_ABILITY_MAP,
+  XP_LEVEL_THRESHOLDS,
+} from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
+import { srdSkills } from '../../seed/data/skills';
 import {
   abilityModifier,
   proficiencyBonus,
   computeCharacterStats,
-  computeXp,
   CharacterComputeInput,
 } from './compute-stats';
 
@@ -105,6 +114,88 @@ describe('proficiencyBonus', () => {
   });
 });
 
+describe('proficiency-bonus data', () => {
+  it('the shared PROFICIENCY_BONUS_TABLE matches the seeded rule table (drift guard)', () => {
+    // The compute layer reads the seeded rule while the builder previews and
+    // test fixtures read the shared constant — this pin keeps them one table.
+    const seeded = srdGameRules.find(r => r.category === 'proficiency-bonus' && r.key === 'table');
+    expect(seeded?.value).toEqual(PROFICIENCY_BONUS_TABLE);
+  });
+});
+
+describe('proficiencyBonusFrom', () => {
+  it('throws on a table that does not cover the clamped level', () => {
+    // A sparse table would otherwise surface as a silent NaN bonus downstream,
+    // the same failure mode computeXpBand guards against.
+    expect(() => proficiencyBonusFrom({ '1': 2 }, 5)).toThrow(/proficiency/i);
+    expect(() => proficiencyBonusFrom({}, 1)).toThrow(/proficiency/i);
+  });
+
+  it('clamps out-of-range levels into the table rather than missing a row', () => {
+    expect(proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, 0)).toBe(2);
+    expect(proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, 25)).toBe(6);
+    expect(proficiencyBonusFrom(PROFICIENCY_BONUS_TABLE, NaN)).toBe(2);
+  });
+});
+
+// The shared core degrades rather than crashing on a rules table the seeded
+// data would never produce (a homebrew/partial `game_rules` row). Only reachable
+// by calling the core directly — `computeCharacterStats` always passes the
+// seeded tables, so these paths are invisible from the entry point (VEG-453).
+describe('computeCoreCharacterStats — rules-table degradation', () => {
+  it('falls back to a bare 10 passive perception when the map has no Perception', () => {
+    // Replaces a hard `skillBonuses['Perception'].bonus` deref that would have
+    // thrown; the sheet must render a degenerate value, not a 500.
+    const stats = computeCoreCharacterStats(
+      { ...DEFAULT_CHARACTER_STATS_RULES, skillAbilityMap: {} },
+      input()
+    );
+    expect(stats.passivePerception).toBe(10);
+    expect(stats.skills).toEqual({});
+  });
+
+  it('scores a skill whose governing ability is unrecognized as modifier 0', () => {
+    const stats = computeCoreCharacterStats(
+      { ...DEFAULT_CHARACTER_STATS_RULES, skillAbilityMap: { Athletics: 'Luck' } },
+      input()
+    );
+    // Strength is +3 here, so a 0 proves the unknown ability didn't resolve.
+    expect(stats.skills['Athletics']).toEqual({
+      ability: 'Luck',
+      proficient: false,
+      bonus: 0,
+    });
+  });
+
+  it('still applies proficiency and exhaustion to an unrecognized-ability skill', () => {
+    const stats = computeCoreCharacterStats(
+      { ...DEFAULT_CHARACTER_STATS_RULES, skillAbilityMap: { Athletics: 'Luck' } },
+      { ...input(), skills: ['Athletics'], exhaustion: 1 }
+    );
+    // 0 modifier + 3 proficiency - 2 exhaustion.
+    expect(stats.skills['Athletics'].bonus).toBe(1);
+  });
+});
+
+describe('skill→ability mapping data', () => {
+  it('the shared SKILL_ABILITY_MAP matches the seeded rule, keys and order (drift guard)', () => {
+    const seeded = srdGameRules.find(r => r.category === 'skills' && r.key === 'ability-mappings');
+    expect(seeded?.value).toEqual(SKILL_ABILITY_MAP);
+    // Key order drives the `computed.skills` insertion order the sheet renders,
+    // so pin it too — toEqual alone would let a reordering through.
+    expect(Object.keys(seeded?.value ?? {})).toEqual(Object.keys(SKILL_ABILITY_MAP));
+  });
+
+  it('the seeded srdSkills catalog agrees with the shared map', () => {
+    // A fourth listing of skill→ability (with SRD descriptions). Same drift
+    // risk as the rule table, so it gets pinned to the same master copy.
+    expect(srdSkills).toHaveLength(Object.keys(SKILL_ABILITY_MAP).length);
+    for (const { name, ability } of srdSkills) {
+      expect(SKILL_ABILITY_MAP[name]).toBe(ability);
+    }
+  });
+});
+
 describe('XP threshold data', () => {
   it('the shared XP_LEVEL_THRESHOLDS constant matches the seeded rule table (drift guard)', () => {
     // Frontend test fixtures derive computed.xp from the shared constant while
@@ -123,7 +214,14 @@ describe('computeXpBand', () => {
   });
 });
 
-describe('computeXp', () => {
+// The XP band off the seeded threshold table, read through the real entry point
+// (VEG-453 removed the standalone `computeXp` wrapper once the shared core
+// started deriving the band itself).
+function computeXp(level: number, experiencePoints: number) {
+  return computeCharacterStats(input({ level, experiencePoints })).xp;
+}
+
+describe('xp band from the seeded threshold table', () => {
   it('reports the band for a fresh level-1 character', () => {
     expect(computeXp(1, 0)).toEqual({
       currentLevelAt: 0,

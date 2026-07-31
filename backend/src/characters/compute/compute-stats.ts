@@ -1,14 +1,9 @@
 import type {
-  AbilityScores,
+  CharacterStatsInput,
+  CharacterStatsRules,
   ClassSpellcasting,
-  ComputedAbilityModifiers,
-  ComputedExhaustion,
-  ComputedSave,
-  ComputedSkill,
-  ComputedSpellcasting,
   ComputedSpellSlots,
   ComputedStats,
-  ComputedXp,
   ExhaustionRule,
   InventoryItem,
   SpellcasterType,
@@ -16,32 +11,26 @@ import type {
 } from '@grimoire-os/shared';
 import {
   abilityModifier,
-  computeExhaustionEffect,
-  computeXpBand,
-  deriveArmorClass,
-  deriveWeapons,
-  resolveSpeed,
+  computeCoreCharacterStats,
+  isKnownAbilityName,
+  proficiencyBonusFrom,
 } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 
 /**
- * Subset of a character's stored fields the compute layer reads. Keeping this
- * narrow (rather than taking the full Prisma row) makes the formulas pure and
- * trivially unit-testable, and documents exactly which inputs drive derived
- * values (VEG-346).
+ * Subset of a character's stored fields the compute layer reads. The shared
+ * stat core defines the formulas and a deliberately tolerant input shape
+ * (VEG-453); the service always reads a full Prisma row, so every field is
+ * required here — a forgotten one is a compile error rather than a silently
+ * defaulted derived value.
+ *
+ * `Required<…>` rather than re-listing the fields: it strips the optional
+ * markers while leaving `| null` intact (so a genuinely nullable column stays
+ * nullable), and — unlike hand-narrowing — a field added to
+ * {@link CharacterStatsInput} later is required here automatically instead of
+ * being silently inherited as optional.
  */
-export interface CharacterComputeInput {
-  level: number;
-  experiencePoints: number;
-  abilityScores: AbilityScores | null;
-  /** Ability full names the character is proficient in (e.g. "Strength"). */
-  savingThrows: string[];
-  /** Skill names the character is proficient in (e.g. "Athletics"). */
-  skills: string[];
-  /** Explicit spellcasting ability (full name); overrides the class default. */
-  spellcastingAbility: string | null;
-  /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
-  armorClass: number | null;
+export interface CharacterComputeInput extends Required<CharacterStatsInput> {
   /** The character's own proficiency strings (weapon/tool, free text); unioned
    * with the class weapon proficiencies to resolve weapon grants (VEG-463). */
   proficiencies: string[];
@@ -49,16 +38,15 @@ export interface CharacterComputeInput {
   inventory: InventoryItem[];
   /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
   weapons: Weapon[];
-  /** Exhaustion level 1–6, penalizing d20 Tests and Speed (VEG-449). */
-  exhaustion: number | null;
-  /** Stored walking speed in feet; null falls back to {@link DEFAULT_SPEED}. */
-  speed: number | null;
 }
 
 // ── Game-rules source (single source of truth, mirrors GET /srd/rules) ──
-// The proficiency-bonus table and skill→ability mappings are read straight from
-// the seeded `game_rules` data rather than hardcoded here, so the compute layer
-// can never drift from the rules API.
+// The proficiency-bonus table, skill→ability mappings, XP thresholds and
+// exhaustion scaling are read straight from the seeded `game_rules` data rather
+// than hardcoded, so the compute layer can never drift from the rules API. The
+// shared package keeps master copies of the same tables for consumers with no
+// database access (builder previews, test fixtures); drift-guard tests in this
+// module's spec pin the seeded rows to those copies.
 
 function ruleValue(category: string, key: string): Record<string, unknown> {
   const rule = srdGameRules.find(r => r.category === category && r.key === key);
@@ -68,30 +56,11 @@ function ruleValue(category: string, key: string): Record<string, unknown> {
   return rule.value as Record<string, unknown>;
 }
 
-const PROFICIENCY_BONUS_TABLE = ruleValue('proficiency-bonus', 'table') as Record<string, number>;
-const SKILL_ABILITY_MAP = ruleValue('skills', 'ability-mappings') as Record<string, string>;
-const XP_LEVEL_THRESHOLDS = ruleValue('experience-points', 'level-thresholds') as Record<
-  string,
-  number
->;
-const EXHAUSTION_RULE = ruleValue('exhaustion', 'levels') as unknown as ExhaustionRule;
-
-const ABILITY_KEYS: (keyof AbilityScores)[] = [
-  'strength',
-  'dexterity',
-  'constitution',
-  'intelligence',
-  'wisdom',
-  'charisma',
-];
-
-const ABILITY_NAME_BY_KEY: Record<keyof AbilityScores, string> = {
-  strength: 'Strength',
-  dexterity: 'Dexterity',
-  constitution: 'Constitution',
-  intelligence: 'Intelligence',
-  wisdom: 'Wisdom',
-  charisma: 'Charisma',
+const SEEDED_RULES: CharacterStatsRules = {
+  proficiencyBonusTable: ruleValue('proficiency-bonus', 'table') as Record<string, number>,
+  skillAbilityMap: ruleValue('skills', 'ability-mappings') as Record<string, string>,
+  xpThresholds: ruleValue('experience-points', 'level-thresholds') as Record<string, number>,
+  exhaustion: ruleValue('exhaustion', 'levels') as unknown as ExhaustionRule,
 };
 
 // ── Primitive formulas ─────────────────────────────────────────────────
@@ -102,47 +71,19 @@ function clampLevel(level: number): number {
   return Math.min(20, Math.max(1, Math.floor(level)));
 }
 
-// The canonical 5e modifier formula lives in @grimoire-os/shared next to the
-// gear derivations it feeds; re-exported so existing consumers keep working.
-export { abilityModifier };
+// The canonical 5e formulas live in @grimoire-os/shared next to the gear
+// derivations they feed; re-exported so existing consumers keep working.
+export { abilityModifier, isKnownAbilityName };
 
-/** Proficiency bonus from the rules table (ceil(level/4)+1), clamped 1–20. */
+/** Proficiency bonus from the seeded rules table (ceil(level/4)+1), clamped 1–20. */
 export function proficiencyBonus(level: number): number {
-  return PROFICIENCY_BONUS_TABLE[String(clampLevel(level))];
+  return proficiencyBonusFrom(SEEDED_RULES.proficiencyBonusTable, level);
 }
 
-/** A missing ability score is treated as 10 (modifier 0). */
-function scoreFor(abilityScores: AbilityScores | null, key: keyof AbilityScores): number {
-  return abilityScores?.[key] ?? 10;
-}
-
-function abilityKeyFromName(name: string): keyof AbilityScores | null {
-  const key = name.toLowerCase() as keyof AbilityScores;
-  return ABILITY_KEYS.includes(key) ? key : null;
-}
-
-/**
- * Whether a string names one of the six abilities. The service uses this to
- * flag a corrupt/typo'd `spellcastingAbility` column (free-form text) rather
- * than letting it silently produce a wrong save DC (VEG-346).
- */
-export function isKnownAbilityName(name: string): boolean {
-  return abilityKeyFromName(name) !== null;
-}
-
-// ── Exhaustion ─────────────────────────────────────────────────────────
-
-/** The shared exhaustion math applied to the seeded rule (VEG-449). */
-export function computeExhaustion(level: number | null): ComputedExhaustion | null {
-  return computeExhaustionEffect(EXHAUSTION_RULE, level);
-}
-
-// ── XP progress ────────────────────────────────────────────────────────
-
-/** The shared XP band math applied to the seeded threshold table (VEG-411). */
-export function computeXp(level: number, experiencePoints: number): ComputedXp {
-  return computeXpBand(XP_LEVEL_THRESHOLDS, level, experiencePoints);
-}
+// The former `computeExhaustion` / `computeXp` wrappers are gone (VEG-453): the
+// shared core derives both from the same `SEEDED_RULES` this module passes it,
+// so the wrappers had no callers left. Anything needing one standalone should
+// call `computeExhaustionEffect` / `computeXpBand` with `SEEDED_RULES` directly.
 
 // ── Spell slots ────────────────────────────────────────────────────────
 
@@ -194,113 +135,26 @@ function resolveSpellSlots(
  * Derive a character's authoritative stats from its stored inputs. Pure: the
  * same inputs always yield the same block, so editing an ability score changes
  * every dependent value with no separate write (VEG-346).
+ *
+ * The formulas themselves live in `@grimoire-os/shared` so the builder previews
+ * and test fixtures compute identically (VEG-453); this layer supplies the
+ * seeded rules tables and the one derivation needing the class catalog.
  */
 export function computeCharacterStats(
   character: CharacterComputeInput,
   classSpellcasting?: ClassSpellcasting | null,
   // Class-catalog data resolved by the service, like classSpellcasting; the
-  // union with the character's own list happens here so the grant semantics
-  // stay in the pure compute layer (VEG-463).
+  // union with the character's own list happens in the shared core so the
+  // grant semantics stay with the formulas (VEG-463).
   classWeaponProficiencies: string[] = []
 ): ComputedStats {
-  const {
-    level,
-    experiencePoints,
-    abilityScores,
-    savingThrows,
-    skills,
-    spellcastingAbility,
-    armorClass,
-    proficiencies,
-    inventory,
-    weapons,
-    exhaustion: exhaustionLevel,
-    speed,
-  } = character;
-  const profBonus = proficiencyBonus(level);
-
-  // Exhaustion reduces every d20 Test (SRD 5.2, VEG-449). It is folded into each
-  // derived roll bonus below exactly once — `passivePerception` and the derived
-  // weapon rows inherit it from the values they're built on rather than adding
-  // it again. Ability modifiers, the spell save DC and AC are deliberately
-  // untouched: none of them is a d20 Test the character rolls.
-  const exhaustion = computeExhaustion(exhaustionLevel);
-  const d20Penalty = exhaustion?.d20Penalty ?? 0;
-
-  const abilityModifiers = {} as ComputedAbilityModifiers;
-  const abilityChecks = {} as ComputedAbilityModifiers;
-  for (const key of ABILITY_KEYS) {
-    abilityModifiers[key] = abilityModifier(scoreFor(abilityScores, key));
-    // A bare ability check is a d20 Test, so it takes the penalty — unlike the
-    // modifier itself, which feeds HP math and must stay raw.
-    abilityChecks[key] = abilityModifiers[key] + d20Penalty;
-  }
-
-  const savingThrowBonuses: Record<string, ComputedSave> = {};
-  for (const key of ABILITY_KEYS) {
-    const name = ABILITY_NAME_BY_KEY[key];
-    const proficient = savingThrows.includes(name);
-    savingThrowBonuses[name] = {
-      proficient,
-      bonus: abilityModifiers[key] + (proficient ? profBonus : 0) + d20Penalty,
-    };
-  }
-
-  const skillBonuses: Record<string, ComputedSkill> = {};
-  for (const [skill, ability] of Object.entries(SKILL_ABILITY_MAP)) {
-    const key = abilityKeyFromName(ability);
-    const mod = key ? abilityModifiers[key] : 0;
-    const proficient = skills.includes(skill);
-    skillBonuses[skill] = {
-      ability,
-      proficient,
-      bonus: mod + (proficient ? profBonus : 0) + d20Penalty,
-    };
-  }
-
-  const passivePerception = 10 + skillBonuses['Perception'].bonus;
-
-  // Spellcasting ability: an explicit column wins (covers subclass casters like
-  // Eldritch Knight), else fall back to the class default. Null → non-caster.
-  // An unrecognized name (corrupt column) yields modifier 0; the service logs
-  // it so the wrong-but-rendered DC is observable rather than silent.
-  const resolvedAbility = spellcastingAbility ?? classSpellcasting?.ability ?? null;
-  let spellcasting: ComputedSpellcasting | null = null;
-  if (resolvedAbility) {
-    const key = abilityKeyFromName(resolvedAbility);
-    const mod = key ? abilityModifiers[key] : 0;
-    spellcasting = {
-      ability: resolvedAbility,
-      modifier: mod,
-      // The save DC is a static number the *target* rolls against, not a d20
-      // Test the caster makes, so exhaustion leaves it alone. The spell attack
-      // bonus is a roll, so it takes the penalty.
-      saveDC: 8 + profBonus + mod,
-      attackBonus: profBonus + mod + d20Penalty,
-    };
-  }
-
   return {
-    proficiencyBonus: profBonus,
-    abilityModifiers,
-    abilityChecks,
-    initiative: abilityModifiers.dexterity + d20Penalty,
-    savingThrows: savingThrowBonuses,
-    skills: skillBonuses,
-    passivePerception,
-    spellcasting,
-    spellSlots: resolveSpellSlots(level, classSpellcasting),
-    xp: computeXp(level, experiencePoints),
-    armorClass: deriveArmorClass(inventory, abilityModifiers.dexterity, armorClass),
-    weapons: deriveWeapons(
-      inventory,
-      abilityModifiers,
-      profBonus,
-      [...classWeaponProficiencies, ...proficiencies],
-      weapons,
-      d20Penalty
-    ),
-    speed: resolveSpeed(speed, exhaustion),
-    exhaustion,
+    ...computeCoreCharacterStats(SEEDED_RULES, character, {
+      defaultSpellcastingAbility: classSpellcasting?.ability,
+      weaponProficiencies: classWeaponProficiencies,
+    }),
+    // The only derivation the shared core can't do: it needs the class
+    // catalog's slot progression, which no frontend consumer has.
+    spellSlots: resolveSpellSlots(character.level, classSpellcasting),
   };
 }

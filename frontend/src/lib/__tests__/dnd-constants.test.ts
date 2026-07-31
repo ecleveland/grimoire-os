@@ -13,6 +13,38 @@ describe('dnd-constants', () => {
     }
   });
 
+  it('lists the 18 skills grouped by ability, in display order (VEG-453)', () => {
+    // SKILLS is derived from the shared master map rather than re-listing the
+    // rows, so the builder preview can't drift from the seeded mappings the
+    // backend computes against — a backend drift guard pins that master map to
+    // the seeded `skills/ability-mappings` rule.
+    //
+    // Asserted against literals, not against `Object.entries(SHARED_…)`: SKILLS
+    // *is* that expression, so comparing the two is an identity that cannot
+    // fail. These literals are the actual pin on the grouped-by-ability order
+    // the builder renders.
+    expect(SKILLS.map(s => `${s.name}:${s.ability}`)).toEqual([
+      'Athletics:Strength',
+      'Acrobatics:Dexterity',
+      'Sleight of Hand:Dexterity',
+      'Stealth:Dexterity',
+      'Arcana:Intelligence',
+      'History:Intelligence',
+      'Investigation:Intelligence',
+      'Nature:Intelligence',
+      'Religion:Intelligence',
+      'Animal Handling:Wisdom',
+      'Insight:Wisdom',
+      'Medicine:Wisdom',
+      'Perception:Wisdom',
+      'Survival:Wisdom',
+      'Deception:Charisma',
+      'Intimidation:Charisma',
+      'Performance:Charisma',
+      'Persuasion:Charisma',
+    ]);
+  });
+
   it('SKILL_NAMES mirrors SKILLS', () => {
     expect(SKILL_NAMES).toEqual(SKILLS.map(s => s.name));
   });
