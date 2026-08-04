@@ -8,10 +8,10 @@
 // computes with (VEG-453). Backend drift guards pin the shared master copy to
 // the seeded rule.
 
-import { ABILITY_NAMES, SKILL_ABILITY_MAP } from '@grimoire-os/shared';
+import { ABILITY_NAMES, SKILL_ABILITY_MAP, SKILL_NAMES } from '@grimoire-os/shared';
 import type { AbilityName } from '@grimoire-os/shared';
 
-export { ABILITY_NAMES };
+export { ABILITY_NAMES, SKILL_NAMES };
 export type { AbilityName };
 
 export interface SkillDef {
@@ -23,8 +23,6 @@ export interface SkillDef {
 export const SKILLS: readonly SkillDef[] = Object.entries(SKILL_ABILITY_MAP).map(
   ([name, ability]) => ({ name, ability })
 );
-
-export const SKILL_NAMES: readonly string[] = SKILLS.map(s => s.name);
 
 // Armor-training categories — matches the sheet's EquipmentTraining dots.
 export const ARMOR_TYPES = ['Light', 'Medium', 'Heavy', 'Shields'] as const;

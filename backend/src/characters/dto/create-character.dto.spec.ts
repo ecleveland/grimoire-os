@@ -1,5 +1,6 @@
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
+import { ABILITY_NAMES, SKILL_NAMES } from '@grimoire-os/shared';
 import { CreateCharacterDto } from './create-character.dto';
 import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 
@@ -950,6 +951,87 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       const dto = toDto({ ...baseDto, autoEquipStartingGear: true });
       const errors = await validate(dto, VALIDATOR_STRICTNESS);
       expect(errors.filter(e => e.property === 'autoEquipStartingGear')).toHaveLength(0);
+    });
+  });
+
+  // VEG-493. VEG-492 closed the seeded half of this drift class; these two
+  // fields are the live write boundary it deferred. A typo here doesn't error —
+  // `computed.skills` is keyed off the seeded ability-mappings rule, so an
+  // unknown name produces no row, and the skill the caller *meant* renders
+  // unproficient. Wrong numbers on the sheet, no error, no log.
+  describe('skills (VEG-493)', () => {
+    it('accepts canonical skill names', async () => {
+      const dto = toDto({ ...baseDto, skills: ['Athletics', 'Sleight of Hand'] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+    });
+
+    it('accepts an empty array', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: [] }));
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+    });
+
+    it('rejects a misspelled skill name', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: ['Perceptoin'] }));
+      expect(errors.find(e => e.property === 'skills')).toBeDefined();
+    });
+
+    it('names the offending skill so the 400 is self-diagnosing', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: ['Perceptoin', 'Stealth'] }));
+      expect(errors.find(e => e.property === 'skills')?.constraints?.isIn).toBe(
+        "skills contains unknown skill: 'Perceptoin'"
+      );
+    });
+
+    it('accepts every skill in the shared catalog', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: [...SKILL_NAMES] }));
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+    });
+
+    it('rejects a bare string (not an array)', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: 'Athletics' }));
+      expect(errors.find(e => e.property === 'skills')?.constraints).toHaveProperty('isArray');
+    });
+
+    it('treats null as a clear rather than passing it to Prisma', async () => {
+      // Prisma rejects null for the required String[] column, so without the
+      // transform @IsOptional lets null through to a 500. Mirrors conditions.
+      const dto = toDto({ ...baseDto, skills: null });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+      expect(dto.skills).toEqual([]);
+    });
+  });
+
+  describe('savingThrows (VEG-493)', () => {
+    it('accepts canonical ability names', async () => {
+      const dto = toDto({ ...baseDto, savingThrows: ['Strength', 'Constitution'] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+    });
+
+    it('accepts every ability in the shared catalog', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: [...ABILITY_NAMES] }));
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+    });
+
+    it('rejects a misspelled ability name', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: ['Strngth'] }));
+      expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+    });
+
+    it('rejects an abbreviated ability name (the stored form is the full name)', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: ['STR'] }));
+      expect(errors.find(e => e.property === 'savingThrows')?.constraints?.isIn).toBe(
+        "savingThrows contains unknown saving throw: 'STR'"
+      );
+    });
+
+    it('treats null as a clear rather than passing it to Prisma', async () => {
+      const dto = toDto({ ...baseDto, savingThrows: null });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+      expect(dto.savingThrows).toEqual([]);
     });
   });
 

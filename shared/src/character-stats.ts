@@ -151,6 +151,20 @@ export const SKILL_ABILITY_MAP: Readonly<Record<string, AbilityName>> = {
 };
 
 /**
+ * The 18 SRD skill names, in {@link SKILL_ABILITY_MAP} order.
+ *
+ * Derived rather than re-typed, so the write-boundary guards that reject
+ * unknown skill names (VEG-493) and the seed drift guards (VEG-492) pin against
+ * the same master copy.
+ *
+ * Frozen as well as `readonly`: the backend hands this array to `@IsIn`, which
+ * retains it in validation metadata for the process lifetime, so a mutation
+ * anywhere would silently widen every write boundary at once. `readonly` only
+ * stops that at compile time, and not at all for a JS caller.
+ */
+export const SKILL_NAMES: readonly string[] = Object.freeze(Object.keys(SKILL_ABILITY_MAP));
+
+/**
  * The rules tables the stat core reads.
  *
  * The two level-keyed tables are `Partial` because that is the truth: they

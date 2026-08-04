@@ -16,6 +16,7 @@ import {
 import { Transform, Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ABILITY_NAMES,
   ARMOR_TYPES,
   AttunedItem,
   CharacterFeat,
@@ -24,9 +25,11 @@ import {
   Feature,
   MAX_EXPERIENCE_POINTS,
   RECHARGE_KINDS,
+  SKILL_NAMES,
   SpellEntry,
   WEAPON_CATEGORIES,
 } from '@grimoire-os/shared';
+import { IsEachInCatalog } from '../../common/validators/is-each-in-catalog.decorator';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
 import { IsNonBlankString } from '../../common/validators/non-blank-string.decorator';
@@ -541,16 +544,30 @@ export class CreateCharacterDto {
   @IsString({ each: true })
   languages?: string[];
 
-  @ApiPropertyOptional({ type: [String] })
+  // Proficiency catalogs (VEG-493). Both are the direct write boundary for the
+  // columns `computed` reads: an unknown name produces no computed row and
+  // leaves the skill/save the caller meant sitting at proficient: false, so the
+  // sheet shows wrong numbers with no error anywhere. VEG-492 closed the same
+  // drift class on the seed side; these close it on the API side.
+  // The null → [] transform matches `conditions` below: without it @IsOptional
+  // lets null reach Prisma, which rejects it for the required String[] column
+  // (a 500 instead of a clean clear).
+  @ApiPropertyOptional({
+    enum: ABILITY_NAMES,
+    isArray: true,
+    example: ['Strength', 'Constitution'],
+  })
   @IsOptional()
+  @Transform(({ value }) => (value === null ? [] : (value as unknown)))
   @IsArray()
-  @IsString({ each: true })
+  @IsEachInCatalog(ABILITY_NAMES, 'saving throw')
   savingThrows?: string[];
 
-  @ApiPropertyOptional({ type: [String] })
+  @ApiPropertyOptional({ enum: SKILL_NAMES, isArray: true, example: ['Athletics', 'Intimidation'] })
   @IsOptional()
+  @Transform(({ value }) => (value === null ? [] : (value as unknown)))
   @IsArray()
-  @IsString({ each: true })
+  @IsEachInCatalog(SKILL_NAMES, 'skill')
   skills?: string[];
 
   @ApiPropertyOptional({ example: 'Intelligence' })

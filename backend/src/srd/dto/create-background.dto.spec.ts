@@ -60,10 +60,38 @@ describe('CreateBackgroundDto (through the production ValidationPipe)', () => {
     ['negative languages', { languages: -1 }],
     ['non-integer languages', { languages: 1.5 }],
     ['non-uuid originFeatId', { originFeatId: 'alert' }],
+    // VEG-493: a homebrew background feeds the guided builder's Origin step,
+    // which copies skillProficiencies straight onto Character.skills — so a
+    // typo here propagates into the silent unproficient-skill failure.
+    ['non-canonical skillProficiencies entry', { skillProficiencies: ['Perceptoin'] }],
+    ['a tool name in skillProficiencies', { skillProficiencies: ["Mason's Tools"] }],
   ])('rejects %s', async (_label, over) => {
     await expect(pipe.transform(validBody(over), createMeta)).rejects.toBeInstanceOf(
       BadRequestException
     );
+  });
+
+  // Asserts on the response payload, not the exception's own message — the
+  // payload is what actually reaches the client, and BadRequestException.message
+  // is always the generic 'Bad Request Exception'.
+  it('names the offending skill in the 400 body (VEG-493)', async () => {
+    const err = await pipe
+      .transform(validBody({ skillProficiencies: ['Insight', 'Perceptoin'] }), createMeta)
+      .then(
+        () => null,
+        (e: BadRequestException) => e
+      );
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect((err!.getResponse() as { message: string[] }).message).toContain(
+      "skillProficiencies contains unknown skill: 'Perceptoin'"
+    );
+  });
+
+  it('still accepts free-form tool proficiencies (not a closed catalog)', async () => {
+    await expect(
+      pipe.transform(validBody({ toolProficiencies: ['Gravedigger’s Spade'] }), createMeta)
+    ).resolves.toEqual(expect.objectContaining({ toolProficiencies: ['Gravedigger’s Spade'] }));
   });
 
   it.each([
@@ -107,6 +135,15 @@ describe('UpdateBackgroundDto (through the production ValidationPipe)', () => {
   it('rejects ownership/tier injection', async () => {
     await expect(
       pipe.transform({ name: 'X', createdById: 'evil' }, updateMeta)
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // PartialType makes each field optional but keeps its constraints, so the
+  // catalog guard covers PATCH without a second decorator. Pinned because an
+  // edit is the likelier way a bad skill reaches a stored background.
+  it('inherits the skill catalog guard on update (VEG-493)', async () => {
+    await expect(
+      pipe.transform({ skillProficiencies: ['Perceptoin'] }, updateMeta)
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

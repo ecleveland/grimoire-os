@@ -9,6 +9,8 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { SKILL_NAMES } from '@grimoire-os/shared';
+import { IsEachInCatalog } from '../../common/validators/is-each-in-catalog.decorator';
 
 /**
  * Body for creating a homebrew background (VEG-431). Mirrors the SRD background
@@ -34,11 +36,14 @@ export class CreateBackgroundDto {
   @MaxLength(10_000)
   description?: string;
 
-  @ApiPropertyOptional({ example: ['Insight', 'Religion'] })
+  // Closed catalog (VEG-493): the guided builder's Origin step copies this
+  // array straight onto Character.skills, so an unknown name here propagates
+  // into a skill that silently computes as unproficient. Catalog membership
+  // subsumes the length bound the other proficiency arrays need.
+  @ApiPropertyOptional({ enum: SKILL_NAMES, isArray: true, example: ['Insight', 'Religion'] })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  @MaxLength(100, { each: true })
+  @IsEachInCatalog(SKILL_NAMES, 'skill')
   skillProficiencies?: string[];
 
   @ApiPropertyOptional({ example: ["Mason's Tools"] })
