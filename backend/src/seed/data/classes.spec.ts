@@ -1,3 +1,4 @@
+import { SKILL_ABILITY_MAP } from '@grimoire-os/shared';
 import { srdClasses } from './classes';
 
 const ALL_CLASSES = [
@@ -18,6 +19,11 @@ const FULL_CASTERS = ['Bard', 'Cleric', 'Druid', 'Sorcerer', 'Wizard'];
 const HALF_CASTERS = ['Paladin', 'Ranger'];
 const PACT_CASTER = 'Warlock';
 const NON_CASTERS = ['Barbarian', 'Fighter', 'Monk', 'Rogue'];
+
+// A `Set` rather than `in`/`hasOwnProperty` on the map: `'toString' in obj` is
+// true for every object, so a seeded skill named after an Object.prototype
+// member would slip past that check.
+const CANONICAL_SKILLS = new Set(Object.keys(SKILL_ABILITY_MAP));
 
 const CANTRIP_CASTERS = ['Bard', 'Cleric', 'Druid', 'Sorcerer', 'Warlock', 'Wizard'];
 const NO_CANTRIP_CASTERS = ['Paladin', 'Ranger'];
@@ -474,5 +480,16 @@ describe('SRD class seed data — multiclassing', () => {
       const prereqs = getClass('Barbarian').multiclassing.prerequisites;
       expect(prereqs).toEqual([{ ability: 'Strength', minimum: 13 }]);
     });
+  });
+});
+
+describe('SRD class seed data — skill grants', () => {
+  it.each(ALL_CLASSES)('%s offers only skills the canonical catalog knows', name => {
+    // ClassStep feeds these straight into the skill picker, and the picked names
+    // land on `Character.skills` verbatim. The sheet renders `computed.skills`,
+    // keyed off the catalog — so a typo here is invisible: the intended skill
+    // just renders unproficient, with no error anywhere (VEG-492).
+    const unknown = getClass(name).skillChoices.filter(s => !CANONICAL_SKILLS.has(s));
+    expect(unknown).toEqual([]);
   });
 });

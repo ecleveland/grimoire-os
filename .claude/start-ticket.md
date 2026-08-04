@@ -64,17 +64,38 @@ Classify the PR before running any automated review. Measure against main (`git 
 
 **Risk triggers** (always at least deep tier, regardless of diff size): auth/JWT/cookies, Prisma schema/migrations or seed data, content-access rules (srd/shared/homebrew tiers), rate limiting.
 
-| Tier | When | Review |
-|------|------|--------|
-| **skip** | Docs/markdown-only, CI/config tweaks, dependency-pin bumps, or ≤30 changed lines across ≤3 files with no risk trigger and no behavior change beyond a localized fix | None — CI is the gate |
-| **standard** | Anything between skip and deep: typical bug fixes, small UI tweaks, single-component changes | `code-review medium --comment`, max 1 re-review |
-| **deep** | Full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `code-review xhigh --comment` + `pr-review-toolkit:pr-test-analyzer` and `pr-review-toolkit:type-design-analyzer`, max 3 iterations |
-| **deep + risk trigger** | Any risk trigger above | Same, but `code-review max --comment` |
+| Tier | When | Claude runs | Hand off to the user |
+|------|------|-------------|----------------------|
+| **skip** | Docs/markdown-only, CI/config tweaks, dependency-pin bumps, or ≤30 changed lines across ≤3 files with no risk trigger and no behavior change beyond a localized fix | Nothing — CI is the gate | — |
+| **standard** | Anything between skip and deep: typical bug fixes, small UI tweaks, single-component changes | Self-review of the diff (see below) | `/code-review medium --comment` if the self-review is inconclusive |
+| **deep** | Full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files | `pr-review-toolkit:pr-test-analyzer` + `pr-review-toolkit:type-design-analyzer`, then self-review; max 3 fix iterations | `/code-review xhigh --comment` |
+| **deep + risk trigger** | Any risk trigger above | Same | `/code-review max --comment`, or `/code-review ultra` |
 
-Don't run the full `/pr-review-toolkit:review-pr` at deep tier — its `code-reviewer` and `silent-failure-hunter` passes duplicate angles `code-review` already covers at `xhigh`, and without its independent-verifier step. The two named agents are additive: neither test coverage nor type design is a `code-review` angle.
+### `/code-review` is user-invocable only — plan around it
+
+`/code-review` (the built-in working-diff reviewer with `medium`/`xhigh`/`max`/`ultra` tiers) is flagged `disable-model-invocation`. **Claude cannot launch it — at any tier, with or without `--comment`.** Attempting it fails with `cannot be used with Skill tool due to disable-model-invocation`. This is a property of the built-in command, not of this repo's config; nothing here can enable it.
+
+Note this is *not* the `code-review` plugin in the official marketplace (which reviews a PR by number and *is* model-invocable). That plugin isn't installed, and it's a different tool.
+
+So the review step is a **collaboration**, not something Claude completes alone:
+
+- **Claude runs**, unprompted, what it actually can: the two `pr-review-toolkit` agents named above, plus its own read of the diff. Ask the agents for concrete `file:line` findings and tell them to say plainly when they find nothing — they will otherwise manufacture findings to seem useful. Prefer agents that *verify* claims (mutation-testing a formula, type-checking a proposed alternative) over ones that only read.
+- **Claude then states the tier, the numbers that drove it, and the exact `/code-review` command for you to run**, rather than silently skipping the step or pretending CI covers it.
+- Claude triages whatever you get back from that command the same as any other finding: fix TDD-style where behavior changes, re-verify, push.
+
+Using the Agent tool for the two toolkit passes needs your go-ahead if the session forbids unrequested subagents — Claude should ask once, at the review gate, and offer "skip automated review" as a real option.
+
+Don't run the full `/pr-review-toolkit:review-pr` at deep tier — its `code-reviewer` and `silent-failure-hunter` passes duplicate angles `/code-review` covers at `xhigh`, without its independent-verifier step. The two named agents are additive: neither test coverage nor type design is a `/code-review` angle.
+
+**Self-review is not a substitute, but it isn't nothing.** On VEG-453 it caught a drift seam and two exports the refactor had orphaned. The toolkit agents then caught what it missed: a docstring claiming a compile-time guarantee the type didn't provide, and a test that was an unfalsifiable identity. Treat all three as complementary and none as sufficient.
 
 Test-only and generated files (lockfiles, `tsconfig.tsbuildinfo`, snapshots) don't count toward the line/file thresholds — size the review on production-code impact. When borderline, state the tier and the numbers and let the user bump it up or down before starting.
 
-### Posting inline review comments (`--comment`)
+### Posting review findings to the PR
 
-Post findings with `gh api repos/<owner>/<repo>/pulls/<pr>/comments -f commit_id=… -f path=… -F line=… -f side=RIGHT -f body=…`. The command **must start with `gh api`** to match the project's `Bash(gh api:*)` allow rule — a compound prefix like `SHA=$(git rev-parse HEAD) && gh api …` falls through to the permission classifier and gets denied. Resolve the commit SHA in a separate `git rev-parse HEAD` call first.
+`--comment` is `/code-review`'s own flag, so it posts on its own when *you* run it. Claude posts its findings itself:
+
+- **A round summary** — `gh pr comment <pr> --body "…"`. Record which passes actually ran (and that `/code-review` did not, if it didn't), what was applied, and anything rejected *with the evidence for rejecting it*. A reviewer needs to know a suggestion was considered and found wrong, not just that it's absent.
+- **Findings anchored to a line** — `gh api repos/<owner>/<repo>/pulls/<pr>/comments -f commit_id=… -f path=… -F line=… -f side=RIGHT -f body=…`. The command **must start with `gh api`** to match the project's `Bash(gh api:*)` allow rule — a compound prefix like `SHA=$(git rev-parse HEAD) && gh api …` falls through to the permission classifier and gets denied. Resolve the commit SHA in a separate `git rev-parse HEAD` call first.
+
+Don't take agent findings at face value before posting or acting on them — verify each against the code first. On VEG-453 a review agent cited a species trait's prose description as a structured data listing, and proposed a one-line drift guard that would have failed on a field the seeded row carries and the shared constant doesn't. Both read as authoritative. Verifying is also what tells you whether a finding is latent or already broken, which changes its priority.

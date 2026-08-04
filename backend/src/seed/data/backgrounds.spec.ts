@@ -1,6 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SKILL_ABILITY_MAP } from '@grimoire-os/shared';
 import { srdBackgrounds } from './backgrounds';
+
+// A `Set` rather than `in`/`hasOwnProperty` on the map: `'toString' in obj` is
+// true for every object, so a seeded skill named after an Object.prototype
+// member would slip past that check.
+const CANONICAL_SKILLS = new Set(Object.keys(SKILL_ABILITY_MAP));
 
 describe('SRD backgrounds seed data', () => {
   describe('license attribution', () => {
@@ -13,6 +19,15 @@ describe('SRD backgrounds seed data', () => {
   });
 
   describe.each(srdBackgrounds.map(b => [b.name, b] as const))('%s', (_name, background) => {
+    it('grants only skills the canonical catalog knows (drift guard)', () => {
+      // These names reach `Character.skills` verbatim via the guided builder's
+      // OriginStep, and the sheet renders `computed.skills` — which is keyed off
+      // the catalog. A typo here doesn't error, it silently renders the intended
+      // skill as unproficient (VEG-492).
+      const unknown = background.skillProficiencies.filter(s => !CANONICAL_SKILLS.has(s));
+      expect(unknown).toEqual([]);
+    });
+
     it('has at least 6 personality traits', () => {
       expect(background.personalityTraits.length).toBeGreaterThanOrEqual(6);
     });
