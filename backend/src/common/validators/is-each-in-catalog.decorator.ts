@@ -2,6 +2,15 @@ import { applyDecorators } from '@nestjs/common';
 import { IsIn, ValidationOptions } from 'class-validator';
 
 /**
+ * How many offending entries a rejection message names before summarising the
+ * rest as a count. Enumerating offenders is unbounded by construction — without
+ * a cap, a large bogus array reflects its own contents back at roughly 1:1,
+ * where the `@IsString({ each: true })` message it replaced was fixed-size.
+ * Ten is well past what a human reads and far short of anything worth sending.
+ */
+const MAX_NAMED_OFFENDERS = 10;
+
+/**
  * Every entry of a string array must belong to `catalog`.
  *
  * This wraps `@IsIn(catalog, { each: true })` for one reason: to fix its
@@ -22,18 +31,30 @@ import { IsIn, ValidationOptions } from 'class-validator';
 export function IsEachInCatalog(
   catalog: readonly string[],
   noun: string,
-  options?: ValidationOptions
+  // `each` and `message` are omitted rather than merely overwritten below: the
+  // spread order already made them un-overridable, but silently. Omitting them
+  // turns that into a compile error at the call site. `each: false` contradicts
+  // the name and the @IsArray pairing, and the message is the whole reason this
+  // wrapper exists.
+  options?: Omit<ValidationOptions, 'each' | 'message'>
 ): PropertyDecorator {
   return applyDecorators(
     IsIn(catalog, {
       ...options,
-      // After the spread: neither is a caller's to override.
       each: true,
       message: ({ property, value }) => {
-        const offenders = (Array.isArray(value) ? (value as unknown[]) : [value])
-          .filter(entry => !catalog.includes(entry as string))
-          .map(entry => `'${String(entry)}'`);
-        return `${property} contains unknown ${noun}: ${offenders.join(', ')}`;
+        const offenders = (Array.isArray(value) ? (value as unknown[]) : [value]).filter(
+          entry => !catalog.includes(entry as string)
+        );
+        const named = offenders
+          .slice(0, MAX_NAMED_OFFENDERS)
+          .map(entry => `'${String(entry)}'`)
+          .join(', ');
+        const overflow = offenders.length - MAX_NAMED_OFFENDERS;
+        return (
+          `${property} contains unknown ${noun}: ${named}` +
+          (overflow > 0 ? ` (+${overflow} more)` : '')
+        );
       },
     })
   );

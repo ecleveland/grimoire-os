@@ -83,4 +83,46 @@ describe('IsEachInCatalog', () => {
     const errors = await validate(plainToInstance(Subject, { skills: 'Athletics' }));
     expect(errors.find(e => e.property === 'skills')?.constraints?.isArray).toBeDefined();
   });
+
+  // The case above uses a catalog *member*, so @IsIn passes and the message is
+  // never built — it exercises the @IsArray pairing but not the message's own
+  // non-array branch. This one does: a bare non-member makes @IsIn fail, which
+  // runs the message builder against a string. Without the Array.isArray guard
+  // `value.filter` throws a raw TypeError from inside class-validator, which
+  // surfaces as a 500 instead of this 400.
+  it('builds a message for a bare non-member without throwing', async () => {
+    const errors = await validate(plainToInstance(Subject, { skills: 'Bogus' }));
+    const skills = errors.find(e => e.property === 'skills');
+    expect(skills?.constraints?.isIn).toBe("skills contains unknown skill: 'Bogus'");
+    expect(skills?.constraints?.isArray).toBeDefined();
+  });
+
+  // The message recomputes catalog membership independently of @IsIn's own
+  // check, so the two can drift. If the message's predicate were ever looser
+  // than the constraint's, a value would be rejected and then named nowhere —
+  // the exact silent-ish failure this decorator exists to prevent. A case
+  // variant is the cheapest probe: @IsIn is case-sensitive, so it must be
+  // rejected AND named.
+  it('agrees with @IsIn on case — a case variant is rejected and named', async () => {
+    const message = await messageFor({ skills: ['athletics'] });
+    expect(message).toBe("skills contains unknown skill: 'athletics'");
+  });
+
+  it('never reports an empty offender list when it rejects', async () => {
+    for (const value of ['Bogus', ['athletics'], [42], [' Stealth']]) {
+      const message = await messageFor({ skills: value });
+      expect(message).toBeDefined();
+      expect(message).not.toMatch(/unknown skill: $/);
+    }
+  });
+
+  // Enumerating offenders is unbounded by construction: the old
+  // @IsString({ each: true }) message was fixed-size, so a large bogus array
+  // would newly reflect its own contents back at ~1:1. Cap the enumeration.
+  it('caps the offender list instead of reflecting the whole array', async () => {
+    const message = await messageFor({ skills: Array.from({ length: 500 }, (_, i) => `Bad${i}`) });
+    expect(message!.length).toBeLessThan(400);
+    expect(message).toContain("'Bad0'");
+    expect(message).toMatch(/\(\+\d+ more\)$/);
+  });
 });

@@ -88,6 +88,12 @@ describe('CreateBackgroundDto (through the production ValidationPipe)', () => {
     );
   });
 
+  it('accepts an empty skillProficiencies array', async () => {
+    await expect(
+      pipe.transform(validBody({ skillProficiencies: [] }), createMeta)
+    ).resolves.toEqual(expect.objectContaining({ skillProficiencies: [] }));
+  });
+
   it('still accepts free-form tool proficiencies (not a closed catalog)', async () => {
     await expect(
       pipe.transform(validBody({ toolProficiencies: ['Gravedigger’s Spade'] }), createMeta)

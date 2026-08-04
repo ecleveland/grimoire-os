@@ -2,6 +2,7 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { ABILITY_NAMES, SKILL_NAMES } from '@grimoire-os/shared';
 import { CreateCharacterDto } from './create-character.dto';
+import { UpdateCharacterDto } from './update-character.dto';
 import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 
 describe('CreateCharacterDto — 2024 sheet fields', () => {
@@ -1015,6 +1016,11 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
     });
 
+    it('accepts an empty array', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: [] }));
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+    });
+
     it('rejects a misspelled ability name', async () => {
       const errors = await validate(toDto({ ...baseDto, savingThrows: ['Strngth'] }));
       expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
@@ -1041,5 +1047,67 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       const errors = await validate(dto);
       expect(errors).toHaveLength(0);
     });
+  });
+});
+
+// `@IsIn` stores the catalog array BY REFERENCE in class-validator's global
+// MetadataStorage (stashed on globalThis, so process lifetime) and re-reads it
+// live on every request. A single push anywhere would therefore widen the write
+// boundary for every subsequent request, permanently. `as const` is erased at
+// compile time and guards nothing here — ABILITY_NAMES was mutable at runtime
+// until VEG-493 froze it, and a spec proved a pushed 'Luck' became an accepted
+// saving throw. Runtime assertions, because the risk is a runtime one.
+describe('proficiency catalogs are immutable at runtime (VEG-493)', () => {
+  it.each([
+    ['SKILL_NAMES', SKILL_NAMES],
+    ['ABILITY_NAMES', ABILITY_NAMES],
+  ])('%s is frozen', (_label, catalog) => {
+    expect(Object.isFrozen(catalog)).toBe(true);
+  });
+
+  it.each([
+    ['SKILL_NAMES', SKILL_NAMES],
+    ['ABILITY_NAMES', ABILITY_NAMES],
+  ])('%s rejects a push rather than silently widening the boundary', (_label, catalog) => {
+    expect(() => (catalog as unknown as string[]).push('Luck')).toThrow();
+    expect(catalog).not.toContain('Luck');
+  });
+});
+
+// PATCH is the likelier path for a sheet edit than POST, and UpdateCharacterDto
+// reaches these constraints through two metadata-copy layers —
+// PartialType(OmitType(CreateCharacterDto, …)) — where @Transform inheritance in
+// particular is a @nestjs/swagger implementation detail rather than anything this
+// repo controls. Worth pinning rather than assuming it keeps working across a
+// dependency bump. The background spec already pins the equivalent for
+// UpdateBackgroundDto.
+describe('UpdateCharacterDto — inherited proficiency catalogs (VEG-493)', () => {
+  function toUpdate(plain: Record<string, unknown>): UpdateCharacterDto {
+    return plainToInstance(UpdateCharacterDto, plain);
+  }
+
+  it('accepts a canonical partial body', async () => {
+    const errors = await validate(toUpdate({ skills: ['Perception'] }), VALIDATOR_STRICTNESS);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('inherits the skill catalog guard', async () => {
+    const errors = await validate(toUpdate({ skills: ['Perceptoin'] }));
+    expect(errors.find(e => e.property === 'skills')?.constraints?.isIn).toBe(
+      "skills contains unknown skill: 'Perceptoin'"
+    );
+  });
+
+  it('inherits the saving-throw catalog guard', async () => {
+    const errors = await validate(toUpdate({ savingThrows: ['Strngth'] }));
+    expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+  });
+
+  it('inherits the null → [] transform on both fields', async () => {
+    const dto = toUpdate({ skills: null, savingThrows: null });
+    const errors = await validate(dto, VALIDATOR_STRICTNESS);
+    expect(errors).toHaveLength(0);
+    expect(dto.skills).toEqual([]);
+    expect(dto.savingThrows).toEqual([]);
   });
 });

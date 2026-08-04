@@ -38,15 +38,23 @@ import { abilityModifier, deriveArmorClass, deriveWeapons } from './gear';
 
 // ── Ability identity ───────────────────────────────────────────────────
 
-/** The six abilities by full name, as they're stored on a character row. */
-export const ABILITY_NAMES = [
+/**
+ * The six abilities by full name, as they're stored on a character row.
+ *
+ * Frozen for the same reason as {@link SKILL_NAMES}: the backend hands this to
+ * `@IsIn`, which retains the array by reference in class-validator's global
+ * metadata for the process lifetime. `as const` is erased at compile time and
+ * so guards nothing at runtime — without the freeze, one `push` anywhere would
+ * silently widen the saving-throw write boundary for every subsequent request.
+ */
+export const ABILITY_NAMES = Object.freeze([
   'Strength',
   'Dexterity',
   'Constitution',
   'Intelligence',
   'Wisdom',
   'Charisma',
-] as const;
+] as const);
 
 export type AbilityName = (typeof ABILITY_NAMES)[number];
 
