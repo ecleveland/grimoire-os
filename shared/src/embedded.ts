@@ -69,7 +69,7 @@ export interface AttunedItem {
  * VEG-461) whose flat bonus carries no Dex semantics, so it can never be a
  * breakdown `armorType` either.
  */
-export const ARMOR_TYPES = ['light', 'medium', 'heavy'] as const;
+export const ARMOR_TYPES = Object.freeze(['light', 'medium', 'heavy'] as const);
 export type ArmorType = (typeof ARMOR_TYPES)[number];
 
 /**
@@ -109,7 +109,7 @@ export interface ShieldGear {
 export type ArmorGear = BodyArmorGear | ShieldGear;
 
 /** Weapon proficiency tiers the attack derivation distinguishes (VEG-463). */
-export const WEAPON_CATEGORIES = ['simple', 'martial'] as const;
+export const WEAPON_CATEGORIES = Object.freeze(['simple', 'martial'] as const);
 export type WeaponCategory = (typeof WEAPON_CATEGORIES)[number];
 
 /**
@@ -241,8 +241,15 @@ export interface CombatantLoot {
  * lookup share one vocabulary. Exhaustion is intentionally excluded: it's a
  * 1–6 level track (`Combatant.exhaustion`), not an on/off tag — modelling it as
  * a chip here would let a combatant hold contradictory levels.
+ *
+ * Frozen for the same reason as SKILL_NAMES/ABILITY_NAMES (VEG-493): the
+ * backend hands this array to `@IsIn`, which retains it by reference in
+ * class-validator's process-lifetime metadata and re-reads it on every request,
+ * so one `push` anywhere would permanently widen the write boundary. `as const`
+ * is erased at compile time and guards nothing at runtime. The sibling catalogs
+ * below are frozen on the same grounds.
  */
-export const CONDITIONS = [
+export const CONDITIONS = Object.freeze([
   'Blinded',
   'Charmed',
   'Deafened',
@@ -257,7 +264,7 @@ export const CONDITIONS = [
   'Restrained',
   'Stunned',
   'Unconscious',
-] as const;
+] as const);
 
 export type Condition = (typeof CONDITIONS)[number];
 
@@ -356,7 +363,7 @@ export interface HitDice {
  * When a limited-use class/race resource recharges (VEG-409): a short rest
  * restores `'short'` resources; a long rest restores both kinds.
  */
-export const RECHARGE_KINDS = ['short', 'long'] as const;
+export const RECHARGE_KINDS = Object.freeze(['short', 'long'] as const);
 export type ResourceRecharge = (typeof RECHARGE_KINDS)[number];
 
 /**

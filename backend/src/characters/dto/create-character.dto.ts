@@ -30,6 +30,10 @@ import {
   WEAPON_CATEGORIES,
 } from '@grimoire-os/shared';
 import { IsEachInCatalog } from '../../common/validators/is-each-in-catalog.decorator';
+import {
+  IsCatalogArray,
+  IsOptionalStringArray,
+} from '../../common/validators/optional-array.decorators';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
 import { IsNonBlankString } from '../../common/validators/non-blank-string.decorator';
@@ -532,16 +536,16 @@ export class CreateCharacterDto {
   @IsNumber()
   initiative?: number;
 
+  // @ValidateIf + IsStrictArray, matching skills/savingThrows below: these are
+  // non-null String[] columns too, so an explicit null used to reach Prisma and
+  // 500. Rejecting it here makes the boundary uniform — Prisma never sees a
+  // null for a column that can't hold one.
   @ApiPropertyOptional({ type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
+  @IsOptionalStringArray()
   proficiencies?: string[];
 
   @ApiPropertyOptional({ type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
+  @IsOptionalStringArray()
   languages?: string[];
 
   // Proficiency catalogs (VEG-493). Both are the direct write boundary for the
@@ -549,30 +553,47 @@ export class CreateCharacterDto {
   // leaves the skill/save the caller meant sitting at proficient: false, so the
   // sheet shows wrong numbers with no error anywhere. VEG-492 closed the same
   // drift class on the seed side; these close it on the API side.
-  // The null → [] transform matches `conditions` below: without it @IsOptional
-  // lets null reach Prisma, which rejects it for the required String[] column
-  // (a 500 instead of a clean clear).
+  //
+  // `@ValidateIf` rather than `@IsOptional()`, so an absent key is skipped but
+  // an explicit null is validated (and rejected by the array guard). These hold
+  // durable character data: an earlier revision transformed null → [] to spare
+  // Prisma the 500 it throws for the non-null column, but the service spreads
+  // `changes` straight into `prisma.character.update`, so that turned a loud
+  // failure into a silent 200 that erased every stored proficiency for any
+  // client that serialises an unset optional field as null. Clearing is still
+  // available, explicitly, as []. `conditions` below keeps the null → [] clear:
+  // it is transient status, not durable data.
   @ApiPropertyOptional({
     enum: ABILITY_NAMES,
     isArray: true,
     example: ['Strength', 'Constitution'],
   })
-  @IsOptional()
-  @Transform(({ value }) => (value === null ? [] : (value as unknown)))
-  @IsArray()
-  @IsEachInCatalog(ABILITY_NAMES, 'saving throw')
+  @IsCatalogArray(ABILITY_NAMES, 'saving throw')
   savingThrows?: string[];
 
   @ApiPropertyOptional({ enum: SKILL_NAMES, isArray: true, example: ['Athletics', 'Intimidation'] })
-  @IsOptional()
-  @Transform(({ value }) => (value === null ? [] : (value as unknown)))
-  @IsArray()
-  @IsEachInCatalog(SKILL_NAMES, 'skill')
+  @IsCatalogArray(SKILL_NAMES, 'skill')
   skills?: string[];
 
-  @ApiPropertyOptional({ example: 'Intelligence' })
+  // The ability field that actually feeds a computed number: computeCharacterStats
+  // resolves an unknown name to a null key and falls back to modifier 0, so a
+  // typo renders a wrong-but-plausible spell save DC — the same silent-drift
+  // failure the two catalogs above exist to prevent (VEG-346 shipped
+  // isKnownAbilityName() for exactly this column).
+  @ApiPropertyOptional({ enum: ABILITY_NAMES, example: 'Intelligence' })
   @IsOptional()
   @IsString()
+  // '' means "not a spellcaster" and has to keep passing: ClassStep clears the
+  // field to '' when the chosen class has no spellcasting, and
+  // CharacterEditorForm both initialises it to '' and coerces a stored null to
+  // '' on load — so every non-caster save sends it. @IsOptional() covers null
+  // and undefined but not '', so without this the catalog would 400 every
+  // Fighter.
+  @ValidateIf((_object, value) => value !== '')
+  // Static message: the six legal values are short enough to recite, and
+  // echoing the caller's value back would reintroduce the amplification and
+  // token-interpolation problems IsEachInCatalog exists to avoid.
+  @IsIn(ABILITY_NAMES)
   spellcastingAbility?: string;
 
   @ApiPropertyOptional({ example: 13 })
@@ -686,9 +707,7 @@ export class CreateCharacterDto {
   hitDice?: HitDiceDto;
 
   @ApiPropertyOptional({ type: [String] })
-  @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
+  @IsOptionalStringArray()
   armorTraining?: string[];
 
   @ApiPropertyOptional({ type: [WeaponDto] })
@@ -705,10 +724,14 @@ export class CreateCharacterDto {
   // null → [] so a null clear behaves like the concentration/exhaustion
   // clears; without it @IsOptional lets null through to Prisma, which rejects
   // it for the required String[] column (a 500 instead of a clean clear).
+  // Unlike skills/savingThrows this stays a valid clear: conditions are
+  // transient status, so a null can't destroy anything the player authored.
   @Transform(({ value }) => (value === null ? [] : (value as unknown)))
-  @IsArray()
   @ArrayUnique()
-  @IsIn(CONDITIONS, { each: true })
+  // Was a bare @IsIn, whose message recites all 15 legal values and never names
+  // the typo — the same diagnosis failure the skill/save catalogs were changed
+  // to fix, on the field those two cite as their model.
+  @IsEachInCatalog(CONDITIONS, 'condition')
   conditions?: string[];
 
   @ApiPropertyOptional({ type: ConcentrationDto })
