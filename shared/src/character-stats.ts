@@ -38,15 +38,23 @@ import { abilityModifier, deriveArmorClass, deriveWeapons } from './gear';
 
 // ── Ability identity ───────────────────────────────────────────────────
 
-/** The six abilities by full name, as they're stored on a character row. */
-export const ABILITY_NAMES = [
+/**
+ * The six abilities by full name, as they're stored on a character row.
+ *
+ * Frozen for the same reason as {@link SKILL_NAMES}: the backend hands this to
+ * `@IsIn`, which retains the array by reference in class-validator's global
+ * metadata for the process lifetime. `as const` is erased at compile time and
+ * so guards nothing at runtime — without the freeze, one `push` anywhere would
+ * silently widen the saving-throw write boundary for every subsequent request.
+ */
+export const ABILITY_NAMES = Object.freeze([
   'Strength',
   'Dexterity',
   'Constitution',
   'Intelligence',
   'Wisdom',
   'Charisma',
-] as const;
+] as const);
 
 export type AbilityName = (typeof ABILITY_NAMES)[number];
 
@@ -149,6 +157,20 @@ export const SKILL_ABILITY_MAP: Readonly<Record<string, AbilityName>> = {
   Performance: 'Charisma',
   Persuasion: 'Charisma',
 };
+
+/**
+ * The 18 SRD skill names, in {@link SKILL_ABILITY_MAP} order.
+ *
+ * Derived rather than re-typed, so the write-boundary guards that reject
+ * unknown skill names (VEG-493) and the seed drift guards (VEG-492) pin against
+ * the same master copy.
+ *
+ * Frozen as well as `readonly`: the backend hands this array to `@IsIn`, which
+ * retains it in validation metadata for the process lifetime, so a mutation
+ * anywhere would silently widen every write boundary at once. `readonly` only
+ * stops that at compile time, and not at all for a JS caller.
+ */
+export const SKILL_NAMES: readonly string[] = Object.freeze(Object.keys(SKILL_ABILITY_MAP));
 
 /**
  * The rules tables the stat core reads.

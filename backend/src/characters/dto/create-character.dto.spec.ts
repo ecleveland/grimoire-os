@@ -1,7 +1,17 @@
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
+import {
+  ABILITY_NAMES,
+  ARMOR_TYPES,
+  CONDITIONS,
+  RECHARGE_KINDS,
+  SKILL_NAMES,
+  WEAPON_CATEGORIES,
+} from '@grimoire-os/shared';
 import { CreateCharacterDto } from './create-character.dto';
-import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
+import { UpdateCharacterDto } from './update-character.dto';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS, VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 
 describe('CreateCharacterDto — 2024 sheet fields', () => {
   const baseDto = { name: 'Test Character' };
@@ -953,11 +963,404 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  // VEG-493. VEG-492 closed the seeded half of this drift class; these two
+  // fields are the live write boundary it deferred. A typo here doesn't error —
+  // `computed.skills` is keyed off the seeded ability-mappings rule, so an
+  // unknown name produces no row, and the skill the caller *meant* renders
+  // unproficient. Wrong numbers on the sheet, no error, no log.
+  describe('skills (VEG-493)', () => {
+    it('accepts canonical skill names', async () => {
+      const dto = toDto({ ...baseDto, skills: ['Athletics', 'Sleight of Hand'] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+    });
+
+    it('accepts an empty array', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: [] }));
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+    });
+
+    it('rejects a misspelled skill name', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: ['Perceptoin'] }));
+      expect(errors.find(e => e.property === 'skills')).toBeDefined();
+    });
+
+    it('names the offending skill so the 400 is self-diagnosing', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: ['Perceptoin', 'Stealth'] }));
+      expect(errors.find(e => e.property === 'skills')?.constraints?.isIn).toBe(
+        "skills contains unknown skill: 'Perceptoin'"
+      );
+    });
+
+    it('accepts every skill in the shared catalog', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: [...SKILL_NAMES] }));
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+    });
+
+    it('rejects a bare string (not an array)', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: 'Athletics' }));
+      expect(errors.find(e => e.property === 'skills')?.constraints).toHaveProperty('isArray');
+    });
+
+    // Reversed after the xhigh review of PR #256. The null → [] transform was
+    // added to turn Prisma's 500 into "a clean clear", but the 500 was the only
+    // thing protecting the data: characters.service.update spreads `changes`
+    // straight into prisma.character.update, so a null that a client emits for
+    // an unset optional field silently erases every stored proficiency and
+    // returns 200. Skills are durable character data, unlike `conditions`
+    // (transient status), so the clear must be explicit — `[]`, not null.
+    it('rejects null rather than silently clearing stored skills', async () => {
+      const errors = await validate(toDto({ ...baseDto, skills: null }), VALIDATOR_STRICTNESS);
+      expect(errors.find(e => e.property === 'skills')).toBeDefined();
+    });
+
+    it('accepts an explicit [] as the clear', async () => {
+      const dto = toDto({ ...baseDto, skills: [] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'skills')).toHaveLength(0);
+      expect(dto.skills).toEqual([]);
+    });
+  });
+
+  describe('savingThrows (VEG-493)', () => {
+    it('accepts canonical ability names', async () => {
+      const dto = toDto({ ...baseDto, savingThrows: ['Strength', 'Constitution'] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+    });
+
+    it('accepts every ability in the shared catalog', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: [...ABILITY_NAMES] }));
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+    });
+
+    it('accepts an empty array', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: [] }));
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+    });
+
+    it('rejects a misspelled ability name', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: ['Strngth'] }));
+      expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+    });
+
+    it('rejects an abbreviated ability name (the stored form is the full name)', async () => {
+      const errors = await validate(toDto({ ...baseDto, savingThrows: ['STR'] }));
+      expect(errors.find(e => e.property === 'savingThrows')?.constraints?.isIn).toBe(
+        "savingThrows contains unknown saving throw: 'STR'"
+      );
+    });
+
+    // Same reversal as skills above — see the comment there.
+    it('rejects null rather than silently clearing stored saving throws', async () => {
+      const errors = await validate(
+        toDto({ ...baseDto, savingThrows: null }),
+        VALIDATOR_STRICTNESS
+      );
+      expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+    });
+
+    it('accepts an explicit [] as the clear', async () => {
+      const dto = toDto({ ...baseDto, savingThrows: [] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'savingThrows')).toHaveLength(0);
+      expect(dto.savingThrows).toEqual([]);
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);
       const errors = await validate(dto);
       expect(errors).toHaveLength(0);
     });
+  });
+});
+
+// `@IsIn` stores the catalog array BY REFERENCE in class-validator's global
+// MetadataStorage (stashed on globalThis, so process lifetime) and re-reads it
+// live on every request. A single push anywhere would therefore widen the write
+// boundary for every subsequent request, permanently. `as const` is erased at
+// compile time and guards nothing here — ABILITY_NAMES was mutable at runtime
+// until VEG-493 froze it, and a spec proved a pushed 'Luck' became an accepted
+// saving throw. Runtime assertions, because the risk is a runtime one.
+describe('proficiency catalogs are immutable at runtime (VEG-493)', () => {
+  // Extended after the xhigh review of PR #256: the freeze covered only the two
+  // catalogs that PR touched, but the hazard is a property of *any* catalog
+  // handed to @IsIn, and four siblings sit on this same DTO — CONDITIONS
+  // fourteen lines below the new code. Each is `as const` only, so the exact
+  // runtime-widening this block asserts against is still open for them.
+  const CATALOGS: Array<[string, readonly unknown[]]> = [
+    ['SKILL_NAMES', SKILL_NAMES],
+    ['ABILITY_NAMES', ABILITY_NAMES],
+    ['CONDITIONS', CONDITIONS],
+    ['ARMOR_TYPES', ARMOR_TYPES],
+    ['WEAPON_CATEGORIES', WEAPON_CATEGORIES],
+    ['RECHARGE_KINDS', RECHARGE_KINDS],
+  ];
+
+  it.each(CATALOGS)('%s is frozen', (_label, catalog) => {
+    expect(Object.isFrozen(catalog)).toBe(true);
+  });
+
+  it.each(CATALOGS)(
+    '%s rejects a push rather than silently widening the boundary',
+    (_label, catalog) => {
+      const mutable = catalog as unknown as string[];
+      try {
+        expect(() => mutable.push('Luck')).toThrow();
+        expect(catalog).not.toContain('Luck');
+      } finally {
+        // While this assertion is red the push *succeeds* — which is the whole
+        // point — so undo it. Otherwise the widened catalog leaks into every
+        // spec below through class-validator's by-reference metadata, and the
+        // test that proves the boundary is open would quietly hold it open.
+        const at = mutable.indexOf('Luck');
+        if (at !== -1) mutable.splice(at, 1);
+      }
+    }
+  );
+});
+
+// ── Review findings (xhigh pass on PR #256) ────────────────────────────
+describe('CreateCharacterDto — proficiency write boundary, through the production pipe', () => {
+  const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
+  const createMeta = { type: 'body' as const, metatype: CreateCharacterDto };
+  const updateMeta = { type: 'body' as const, metatype: UpdateCharacterDto };
+
+  // The @IsArray() guard the decorator's docstring and the specs above both
+  // call load-bearing never fires for an object-shaped body: class-transformer
+  // sees design:type = Array, runs `new Array()` and copies the object's
+  // non-index keys, yielding []. @IsArray then passes and the catalog check is
+  // trivially satisfied by an empty array. The unknown skill is accepted with a
+  // 200 and the stored column is wiped — the silent drift VEG-493 exists to
+  // eliminate, except destroying data rather than mis-rendering it.
+  // ({"0":"Athletics"} — integer-like keys — does 400, so the hole is specific
+  // to objects without them.)
+  it.each([
+    ['an object carrying an unknown skill', { skills: { a: 'Perceptoin' } }],
+    ['an empty object', { skills: {} }],
+    ['an object on savingThrows', { savingThrows: { a: 'Strngth' } }],
+  ])('rejects %s rather than coercing it to an empty array', async (_label, over) => {
+    await expect(
+      pipe.transform({ name: 'Test Character', ...over }, createMeta)
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects an object body on PATCH too (the likelier sheet-edit path)', async () => {
+    await expect(
+      pipe.transform({ skills: { a: 'Perceptoin' } }, updateMeta)
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+// `conditions` one screen below guards against exactly this with @ArrayUnique.
+// Duplicates persist to the column and CharacterEditorForm.tsx counts the
+// class-skill pool with a .filter().length, so the helper text renders an
+// impossible "3 of 2 chosen" against a chip list showing one chip.
+describe('CreateCharacterDto — duplicate proficiencies (VEG-493 review)', () => {
+  function toDto(plain: Record<string, unknown>): CreateCharacterDto {
+    return plainToInstance(CreateCharacterDto, plain);
+  }
+
+  it('rejects a duplicated skill', async () => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', skills: ['Athletics', 'Athletics'] }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.find(e => e.property === 'skills')).toBeDefined();
+  });
+
+  it('rejects a duplicated saving throw', async () => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', savingThrows: ['Strength', 'Strength'] }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+  });
+});
+
+// Four lines below `skills` in the same DTO, with ABILITY_NAMES already
+// imported at the top of the file, and it is the ability field that actually
+// feeds a computed number: computeCharacterStats resolves an unknown name to a
+// null key, falls back to modifier 0, and renders a wrong-but-plausible spell
+// save DC. Exactly the failure mode the fields above cite as their reason to
+// exist. isKnownAbilityName() already ships in shared for this purpose.
+describe('CreateCharacterDto — spellcastingAbility (VEG-493 review)', () => {
+  function toDto(plain: Record<string, unknown>): CreateCharacterDto {
+    return plainToInstance(CreateCharacterDto, plain);
+  }
+
+  it('accepts a canonical ability name', async () => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', spellcastingAbility: 'Intelligence' }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.filter(e => e.property === 'spellcastingAbility')).toHaveLength(0);
+  });
+
+  it('rejects a misspelled ability name instead of computing a wrong save DC', async () => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', spellcastingAbility: 'Inteligence' }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.find(e => e.property === 'spellcastingAbility')).toBeDefined();
+  });
+
+  it('rejects an abbreviated ability name', async () => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', spellcastingAbility: 'INT' }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.find(e => e.property === 'spellcastingAbility')).toBeDefined();
+  });
+
+  // '' is the "not a spellcaster" value, and it is not hypothetical: ClassStep
+  // sets `spellcastingAbility: selectedClass.spellcasting?.ability ?? ''` and
+  // clears it to '' when the class changes, CharacterEditorForm initialises it
+  // to '' and coerces a stored null to '' on load, and both send it on every
+  // save. @IsOptional() skips null and undefined but NOT '', so closing this
+  // catalog without allowing '' would 400 every save of every non-caster —
+  // guided creation of a Fighter included. Nothing in the DTO suite would have
+  // caught it; this is the 'green ≠ working' case CLAUDE.md warns about.
+  it.each([
+    ['the editor and guided builder default', ''],
+    ['an explicit null', null],
+  ])('accepts %s as "not a spellcaster"', async (_label, value) => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', spellcastingAbility: value }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.filter(e => e.property === 'spellcastingAbility')).toHaveLength(0);
+  });
+
+  it('accepts the payload a non-caster save actually sends', async () => {
+    const errors = await validate(
+      toDto({
+        name: 'Grunk',
+        class: 'Fighter',
+        spellcastingAbility: '',
+        skills: ['Athletics', 'Intimidation'],
+        savingThrows: ['Strength', 'Constitution'],
+        proficiencies: [],
+        languages: ['Common'],
+        armorTraining: ['Light', 'Medium', 'Shields'],
+      }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors).toHaveLength(0);
+  });
+});
+
+// The sibling required String[] columns still take the 500 the skills/
+// savingThrows transform was written to fix. With null now rejected rather than
+// coerced (see the reversal above), the consistent boundary is a 400 for all of
+// them — Prisma should never see a null for a non-null column.
+describe('CreateCharacterDto — null on the other required array columns', () => {
+  function toDto(plain: Record<string, unknown>): CreateCharacterDto {
+    return plainToInstance(CreateCharacterDto, plain);
+  }
+
+  it.each([['languages'], ['proficiencies'], ['armorTraining']])(
+    'rejects null for %s rather than passing it to Prisma',
+    async field => {
+      const errors = await validate(
+        toDto({ name: 'Test Character', [field]: null }),
+        VALIDATOR_STRICTNESS
+      );
+      expect(errors.find(e => e.property === field)).toBeDefined();
+    }
+  );
+});
+
+// `conditions` is the field the new code cites as its model, yet it still uses
+// the bare @IsIn the new decorator exists to replace — so the repo ships two
+// different rejection formats for the identical field shape. The stock message
+// recites all 15 legal values and never names the typo.
+describe('CreateCharacterDto — conditions message (VEG-493 review)', () => {
+  function toDto(plain: Record<string, unknown>): CreateCharacterDto {
+    return plainToInstance(CreateCharacterDto, plain);
+  }
+
+  it('names the offending condition rather than reciting the catalog', async () => {
+    const errors = await validate(
+      toDto({ name: 'Test Character', conditions: ['Poisened'] }),
+      VALIDATOR_STRICTNESS
+    );
+    const message = Object.values(
+      errors.find(e => e.property === 'conditions')?.constraints ?? {}
+    ).join(' ');
+    expect(message).toContain("'Poisened'");
+    expect(message).not.toContain('Blinded');
+  });
+});
+
+// PATCH is the likelier path for a sheet edit than POST, and UpdateCharacterDto
+// reaches these constraints through two metadata-copy layers —
+// PartialType(OmitType(CreateCharacterDto, …)) — where @Transform inheritance in
+// particular is a @nestjs/swagger implementation detail rather than anything this
+// repo controls. Worth pinning rather than assuming it keeps working across a
+// dependency bump. The background spec already pins the equivalent for
+// UpdateBackgroundDto.
+describe('UpdateCharacterDto — inherited proficiency catalogs (VEG-493)', () => {
+  function toUpdate(plain: Record<string, unknown>): UpdateCharacterDto {
+    return plainToInstance(UpdateCharacterDto, plain);
+  }
+
+  it('accepts a canonical partial body', async () => {
+    const errors = await validate(toUpdate({ skills: ['Perception'] }), VALIDATOR_STRICTNESS);
+    expect(errors).toHaveLength(0);
+  });
+
+  it('inherits the skill catalog guard', async () => {
+    const errors = await validate(toUpdate({ skills: ['Perceptoin'] }));
+    expect(errors.find(e => e.property === 'skills')?.constraints?.isIn).toBe(
+      "skills contains unknown skill: 'Perceptoin'"
+    );
+  });
+
+  it('inherits the saving-throw catalog guard', async () => {
+    const errors = await validate(toUpdate({ savingThrows: ['Strngth'] }));
+    expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+  });
+
+  // Reversed alongside the CreateCharacterDto specs above: PATCH is the likelier
+  // path for the accidental null, so it matters more here than on POST.
+  it('rejects null on both fields rather than clearing them', async () => {
+    const errors = await validate(
+      toUpdate({ skills: null, savingThrows: null }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors.find(e => e.property === 'skills')).toBeDefined();
+    expect(errors.find(e => e.property === 'savingThrows')).toBeDefined();
+  });
+
+  it('still accepts an explicit [] clear on both fields', async () => {
+    const dto = toUpdate({ skills: [], savingThrows: [] });
+    const errors = await validate(dto, VALIDATOR_STRICTNESS);
+    expect(errors).toHaveLength(0);
+    expect(dto.skills).toEqual([]);
+    expect(dto.savingThrows).toEqual([]);
+  });
+
+  // The other three non-null String[] columns get the same treatment, and for
+  // the same reason: PartialType would otherwise re-open null on the PATCH path.
+  it.each([['languages'], ['proficiencies'], ['armorTraining']])(
+    'rejects null for %s on PATCH too',
+    async field => {
+      const errors = await validate(toUpdate({ [field]: null }), VALIDATOR_STRICTNESS);
+      expect(errors.find(e => e.property === field)).toBeDefined();
+    }
+  );
+
+  // The rejection has to read like a validation error, not like an internal
+  // leak: an earlier fix routed null through a sentinel object, and the catalog
+  // message duly printed it — '{"__nullRejected":true}' — in a public 400 body.
+  it('describes a null rejection without leaking implementation details', async () => {
+    const errors = await validate(toUpdate({ skills: null }), VALIDATOR_STRICTNESS);
+    const messages = Object.values(errors.find(e => e.property === 'skills')?.constraints ?? {});
+
+    expect(messages).toContain('skills must be an array');
+    expect(messages.join(' ')).not.toContain('__nullRejected');
   });
 });
