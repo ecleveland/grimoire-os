@@ -95,8 +95,11 @@ export class CharactersService {
   private async toCharacterDto(
     character: Prisma.CharacterGetPayload<object>
   ): Promise<CharacterDto> {
-    // The spellcastingAbility column is free-form text; an unrecognized value
-    // (typo / bad import) would compute a confidently-wrong save DC. Surface it.
+    // An unrecognized value (typo / bad import) would compute a confidently-wrong
+    // save DC. Surface it. Still needed after VEG-493/494 closed the API write
+    // boundary (@IsIn(ABILITY_NAMES) on the create + update DTOs): the column
+    // itself stays free-form `String?`, so a seed, a migration, a restored
+    // backup, or a direct DB write can still land a value the DTO would reject.
     if (character.spellcastingAbility && !isKnownAbilityName(character.spellcastingAbility)) {
       this.logger.warn(
         `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
