@@ -1364,3 +1364,68 @@ describe('UpdateCharacterDto — inherited proficiency catalogs (VEG-493)', () =
     expect(messages.join(' ')).not.toContain('__nullRejected');
   });
 });
+
+// VEG-494. The constraint itself landed with VEG-493 (PR #256) — @ValidateIf +
+// @IsIn(ABILITY_NAMES) on CreateCharacterDto — but only the POST path was
+// pinned. PATCH reaches it through PartialType(OmitType(…)), and this is the one
+// field in the DTO whose guard depends on TWO stacked CONDITIONAL_VALIDATION
+// entries (@IsOptional for null/undefined, @ValidateIf for the '' non-caster
+// sentinel) with PartialType re-applying a third. class-validator ANDs them, so
+// all three agree today — but the block above already argues that swagger's
+// metadata copying is a dependency detail worth pinning rather than assuming,
+// and the two ways it could drift fail in opposite directions: dropping the
+// @ValidateIf 400s every non-caster sheet save, while dropping the @IsIn
+// silently restores the wrong-spell-save-DC bug on the likelier write path.
+describe('UpdateCharacterDto — inherited spellcastingAbility catalog (VEG-494)', () => {
+  const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
+  const updateMeta = { type: 'body' as const, metatype: UpdateCharacterDto };
+
+  function toUpdate(plain: Record<string, unknown>): UpdateCharacterDto {
+    return plainToInstance(UpdateCharacterDto, plain);
+  }
+
+  it('accepts a canonical ability name on PATCH', async () => {
+    const errors = await validate(
+      toUpdate({ spellcastingAbility: 'Intelligence' }),
+      VALIDATOR_STRICTNESS
+    );
+    expect(errors).toHaveLength(0);
+  });
+
+  // Case-sensitivity is part of the contract, not an accident: @IsIn compares
+  // with includes(), so a client lowercasing the value is a drift source too.
+  it.each([
+    ['a misspelled ability name', 'Inteligence'],
+    ['an abbreviated ability name', 'INT'],
+    ['a lowercased ability name', 'intelligence'],
+  ])('inherits the ability catalog guard for %s', async (_label, value) => {
+    const errors = await validate(toUpdate({ spellcastingAbility: value }), VALIDATOR_STRICTNESS);
+    expect(errors.find(e => e.property === 'spellcastingAbility')).toBeDefined();
+  });
+
+  // Both "not a spellcaster" spellings have to survive the metadata copy.
+  // CharacterEditorForm coerces a stored null to '' on load and sends '' on
+  // every save; a bare null arrives from a client that serialises unset
+  // optionals, and the column is nullable, so it stays a legal clear (VEG-316).
+  it.each([
+    ['the editor default', ''],
+    ['an explicit null', null],
+  ])('still accepts %s as "not a spellcaster" on PATCH', async (_label, value) => {
+    const errors = await validate(toUpdate({ spellcastingAbility: value }), VALIDATOR_STRICTNESS);
+    expect(errors).toHaveLength(0);
+  });
+
+  // Through the real pipe rather than the bare validator: this is the payload a
+  // Fighter's sheet edit actually sends, so a regression is a 400 on every save.
+  it('accepts a non-caster PATCH through the production pipe', async () => {
+    await expect(
+      pipe.transform({ class: 'Fighter', spellcastingAbility: '' }, updateMeta)
+    ).resolves.toMatchObject({ spellcastingAbility: '' });
+  });
+
+  it('rejects a typo through the production pipe', async () => {
+    await expect(
+      pipe.transform({ spellcastingAbility: 'Inteligence' }, updateMeta)
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
