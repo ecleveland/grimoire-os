@@ -278,4 +278,52 @@ test.describe('character sheet — Long Rest', () => {
     await page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' }).click();
     await expect(page.getByTestId('exhaustion-pip-1')).toHaveAttribute('aria-pressed', 'false');
   });
+
+  // VEG-488 — a rest with nothing to recover must not write at all. The stored
+  // version is the only place this is observable: the sheet renders identically
+  // either way, but an empty PATCH still bumps the optimistic-lock version and
+  // can 409 a second open session for a click that changed nothing. The unit
+  // tests can prove the patch is empty; that the click issues no request is a
+  // composition property only reachable end-to-end.
+  test('a fully-rested character long-rests without burning a version', async ({ page }) => {
+    await registerAndLogin(page, 'long-rest-noop', 'Rester Three');
+    const headers = await csrfHeaders(page);
+
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Ilna Fairweather',
+        class: 'Fighter',
+        level: 3,
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
+        // Nothing spent anywhere: full HP, no temp, no spent dice, no
+        // exhaustion, no death saves, non-caster.
+        hitPoints: { max: 28, current: 28, temporary: 0 },
+        hitDice: { dieType: 'd10', total: 3, spent: 0 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    const readVersion = async (): Promise<number> => {
+      const read = await page.request.get(`${BACKEND}/api/characters/${characterId}`, { headers });
+      expect(read.ok(), `character read failed: ${read.status()}`).toBeTruthy();
+      return (await read.json()).version as number;
+    };
+    const versionBefore = await readVersion();
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Ilna Fairweather' })).toBeVisible();
+
+    const longRest = page.getByTestId('hp-block').getByRole('button', { name: 'Long Rest' });
+    await longRest.click();
+
+    // The deliberate alternative to greying the button out the way Short Rest
+    // does: it stays live and the summary says why nothing happened.
+    await expect(page.getByText(/already fully rested/i)).toBeVisible();
+    await expect(longRest).toBeEnabled();
+
+    expect(await readVersion()).toBe(versionBefore);
+  });
 });

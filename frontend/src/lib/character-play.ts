@@ -47,6 +47,15 @@ export function setTempHitPoints(hp: HitPoints, amount: number): HitPoints {
 export const CLEARED_DEATH_SAVES = { successes: 0, failures: 0 } as const;
 
 /**
+ * Whether the track has anything to clear. Extracted (VEG-488) so
+ * `applyLongRest`'s omit-when-unchanged guard and the revive rule below can't
+ * drift apart — they ask the same question of the same shape.
+ */
+export function hasDeathSaves(saves: DeathSaves): boolean {
+  return saves.successes > 0 || saves.failures > 0;
+}
+
+/**
  * Death saves only apply while a PC is down: reviving above 0 HP clears them
  * (5e). Mirrors the encounter tracker's `clearDeathSavesIfRevived`
  * (`lib/death-saves.ts`) rule, but for the character sheet's zeroed-object
@@ -55,8 +64,7 @@ export const CLEARED_DEATH_SAVES = { successes: 0, failures: 0 } as const;
  * 0 with saves on the sheet, else `null` (nothing to change).
  */
 export function deathSavesAfterRevive(nextCurrent: number, saves: DeathSaves): DeathSaves | null {
-  const hasSaves = saves.successes > 0 || saves.failures > 0;
-  return nextCurrent > 0 && hasSaves ? { ...CLEARED_DEATH_SAVES } : null;
+  return nextCurrent > 0 && hasDeathSaves(saves) ? { ...CLEARED_DEATH_SAVES } : null;
 }
 
 /**
@@ -133,7 +141,10 @@ export interface LongRestPatch {
   // Omitted for a character with no stored HP block (VEG-425) — a long rest
   // must never fabricate-and-persist a zeroed HitPoints onto a null-HP record.
   hitPoints?: HitPoints;
-  deathSaves: DeathSaves;
+  // Omitted when the track is already clear (VEG-488). Was the one non-optional
+  // field here, which made `applyLongRest` incapable of returning an empty patch
+  // and so made every fully-rested click a wasted write.
+  deathSaves?: DeathSaves;
   hitDice?: HitDice;
   spellSlots?: SpellSlot[];
   resources?: CharacterResource[];
@@ -159,11 +170,16 @@ export function applyLongRest(character: {
   spellSlots?: SpellSlot[] | null;
   resources?: CharacterResource[] | null;
   exhaustion?: number | null;
+  deathSaves?: DeathSaves | null;
 }): LongRestPatch {
-  const { hitPoints, spellSlots, hitDice, resources, exhaustion } = character;
-  const patch: LongRestPatch = {
-    deathSaves: { ...CLEARED_DEATH_SAVES },
-  };
+  const { hitPoints, spellSlots, hitDice, resources, exhaustion, deathSaves } = character;
+  const patch: LongRestPatch = {};
+  // Only when there is a mark to clear (VEG-488), sharing the predicate with
+  // `deathSavesAfterRevive`. A long rest clears the track unconditionally in
+  // 5e, but writing an already-zeroed track back is a state change of nothing.
+  if (deathSaves && hasDeathSaves(deathSaves)) {
+    patch.deathSaves = { ...CLEARED_DEATH_SAVES };
+  }
   if (exhaustion) {
     patch.exhaustion = exhaustionAfterLongRest(exhaustion);
   }
@@ -305,6 +321,11 @@ export function formatLongRestSummary(
       patch.exhaustion === null ? 'exhaustion cleared' : `exhaustion down to ${patch.exhaustion}`
     );
   }
+
+  // Reportable only since VEG-488 made the field presence-signalled: while it
+  // was always written, a downed character's rest cleared a track the player
+  // could see and the toast still said "already fully rested".
+  if (patch.deathSaves) parts.push('death saves cleared');
 
   return joinSummary(parts, 'Long rest taken — already fully rested.');
 }

@@ -104,6 +104,19 @@ export default function CombatBar(props: CombatBarProps) {
   // optimistic-locked composite write (VEG-407, VEG-409, VEG-487).
   const longRest = () => {
     const longRestPatch = applyLongRest(character);
+    // Nothing to recover: skip the write entirely (VEG-488). `patch({})` still
+    // PATCHes with expectedVersion, which burns an optimistic-lock version and
+    // can 409 a concurrent session for a click that changes nothing.
+    //
+    // Deliberately not the disable-the-button route Short Rest takes: a greyed
+    // control states that nothing would happen but never why, whereas the
+    // summary already says "already fully rested" in the player's own terms.
+    // The toast fires directly here rather than through onSuccess because there
+    // is no write to wait on.
+    if (Object.keys(longRestPatch).length === 0) {
+      toast.message(formatLongRestSummary(character, longRestPatch));
+      return;
+    }
     // The summary waits on the write so it can't announce a change a 409 undid.
     patch(longRestPatch, {
       onSuccess: () => toast.message(formatLongRestSummary(character, longRestPatch)),
