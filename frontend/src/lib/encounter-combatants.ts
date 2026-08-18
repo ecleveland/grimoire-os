@@ -1,4 +1,5 @@
 import type { Combatant, PartyCharacter, SrdMonster } from '@/lib/types';
+import type { Rng } from '@/lib/dice';
 import { xpForCr } from '@grimoire-os/shared';
 
 /** Derive the 5e DEX modifier from a monster's raw DEX score: floor((dex - 10) / 2). */
@@ -10,13 +11,13 @@ export function dexModifier(monster: SrdMonster): number {
  * Roll initiative for any flat modifier: d20 + mod (VEG-283). `rng` is
  * injectable so tests can pin the roll; in the app it defaults to Math.random.
  */
-export function rollInitiativeMod(mod: number, rng: () => number = Math.random): number {
+export function rollInitiativeMod(mod: number, rng: Rng = Math.random): number {
   const d20 = Math.floor(rng() * 20) + 1;
   return d20 + mod;
 }
 
 /** Roll initiative for a monster: d20 + DEX modifier. */
-export function rollInitiative(monster: SrdMonster, rng: () => number = Math.random): number {
+export function rollInitiative(monster: SrdMonster, rng: Rng = Math.random): number {
   return rollInitiativeMod(dexModifier(monster), rng);
 }
 

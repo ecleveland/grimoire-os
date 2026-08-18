@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { PartyCharacter } from '@/lib/types';
 import { parseIntField, rollInitiativeMod } from '@/lib/encounter-combatants';
 import type { PartyCombatantEntry } from '@/lib/encounter-combatants';
+import type { Rng } from '@/lib/dice';
 
 interface Props {
   /** Campaign party roster, fetched by the parent. */
@@ -15,7 +16,7 @@ interface Props {
   /** Disables confirm while the parent is persisting. */
   submitting?: boolean;
   /** Injectable randomness for deterministic tests; defaults to Math.random. */
-  rng?: () => number;
+  rng?: Rng;
 }
 
 const DEFAULT_INIT = '10';

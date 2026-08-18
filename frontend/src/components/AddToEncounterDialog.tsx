@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { SrdMonster } from '@/lib/types';
 import { dexModifier, parseIntField, rollInitiative } from '@/lib/encounter-combatants';
+import type { Rng } from '@/lib/dice';
 
 export interface AddToEncounterResult {
   quantity: number;
@@ -17,7 +18,7 @@ interface Props {
   /** Disables confirm while the parent is persisting. */
   submitting?: boolean;
   /** Injectable randomness for deterministic tests; defaults to Math.random. */
-  rng?: () => number;
+  rng?: Rng;
 }
 
 const DEFAULT_INIT = '10';

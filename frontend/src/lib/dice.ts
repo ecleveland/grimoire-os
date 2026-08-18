@@ -5,6 +5,14 @@
  * deterministic. These never mutate character state; rolls are ephemeral.
  */
 
+/**
+ * The injectable random source. Named rather than spelled structurally at each
+ * site (VEG-489) so a prop or parameter reads as *the* seeded-randomness
+ * injection point this convention describes, not an arbitrary callback that
+ * happens to return a number. Shared by `encounter-combatants.ts` and the
+ * encounter dialogs; this module is its home even though the convention
+ * started there.
+ */
 export type Rng = () => number;
 export type RollMode = 'normal' | 'advantage' | 'disadvantage';
 
