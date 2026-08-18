@@ -447,6 +447,24 @@ describe('InventorySection', () => {
       expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('15 → 0 ft');
     });
 
+    // Stacking with exhaustion is covered by the dedicated
+    // `exhaustion + encumbrance speed` block at the bottom of this file, which
+    // predates VEG-490 — no need to restate it here.
+
+    // Version skew: a payload from a pre-VEG-490 backend has no
+    // computed.encumbrance. The sheet must render rather than white-screen —
+    // the same contract StatsBar's speed and CombatBar's derived AC follow.
+    it('degrades without crashing when the computed block predates encumbrance', () => {
+      const base = makeCharacter(baseCharacter);
+      const legacy = {
+        ...base,
+        computed: { ...base.computed, encumbrance: undefined },
+      } as unknown as Character;
+      render(<InventorySection character={legacy} editable onPatch={vi.fn()} isSaving={false} />);
+      expect(screen.getByText('Equipment')).toBeInTheDocument();
+      expect(screen.queryByTestId('encumbrance-status')).toBeNull();
+    });
+
     it('toggles a row equipped flag through patch', async () => {
       const user = userEvent.setup();
       const onPatch = renderOwner();
@@ -926,10 +944,15 @@ describe('exhaustion + encumbrance speed (VEG-449)', () => {
     expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('20 → 0 ft');
   });
 
-  it('reports the same base speed the stat bar shows', () => {
-    // Exhaustion 1 → 25 effective. Both readouts must agree on 25.
+  it('reports the same final speed the stat bar shows', () => {
+    // Base 30, exhaustion 1 → −5, heavily encumbered → −20. Since VEG-490 the
+    // computed block carries both penalties, so `effective` is 5 rather than 25:
+    // the two readouts now read one field instead of agreeing by construction,
+    // which is what stops the stat bar quoting a speed this line contradicts.
     const character = encumbered({ exhaustion: 1 });
-    expect(character.computed.speed.effective).toBe(25);
+    expect(character.computed.speed.exhaustionPenalty).toBe(5);
+    expect(character.computed.speed.encumbrancePenalty).toBe(20);
+    expect(character.computed.speed.effective).toBe(5);
     render(<InventorySection character={character} />);
     expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('25 → 5 ft');
   });

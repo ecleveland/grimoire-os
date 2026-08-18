@@ -6,7 +6,7 @@
 // `spellAttackBonus` columns did. The display sheet consumes this block instead
 // of recomputing locally. Formulas mirror the M10 `game_rules` source.
 
-import type { AbilityScores, ArmorType, Weapon } from './embedded';
+import type { AbilityScores, ArmorType, InventoryItem, Weapon } from './embedded';
 
 /** Per-ability modifiers, keyed exactly like {@link AbilityScores}. */
 export type ComputedAbilityModifiers = Record<keyof AbilityScores, number>;
@@ -169,18 +169,139 @@ export interface ComputedArmorClass {
 export const DEFAULT_SPEED = 30;
 
 /**
- * Walking speed after derived penalties (VEG-449). `base` is the stored column
- * (or {@link DEFAULT_SPEED}), `penalty` is the total reduction in feet, and
- * `effective` is what the sheet displays — floored at 0, since a creature never
- * has negative speed.
+ * Walking speed after derived penalties (VEG-449, VEG-490). `base` is the stored
+ * column (or {@link DEFAULT_SPEED}) and `effective` is what the sheet displays —
+ * floored at 0, since a creature never has negative speed.
  *
- * Exhaustion is the only penalty folded in today; the inventory section applies
- * its encumbrance reduction separately, client-side.
+ * The two reductions are reported separately as well as totalled: a sheet that
+ * only had the total couldn't tell the player *why* their speed dropped, and
+ * before VEG-490 the encumbrance half was applied client-side by the inventory
+ * panel alone, so the headline Speed stat silently omitted it.
+ *
+ * `penalty` is `exhaustionPenalty + encumbrancePenalty`, kept as its own field
+ * so consumers wanting only the total don't have to know the breakdown.
  */
 export interface ComputedSpeed {
   base: number;
+  /** Feet lost to exhaustion (positive magnitude). */
+  exhaustionPenalty: number;
+  /** Feet lost to carrying weight (positive magnitude). */
+  encumbrancePenalty: number;
+  /** Total reduction in feet — the sum of the two above. */
   penalty: number;
   effective: number;
+}
+
+/** 5e variant encumbrance tiers, lightest to heaviest. */
+export type EncumbranceTier = 'unencumbered' | 'encumbered' | 'heavily-encumbered';
+
+/**
+ * Derived carrying state (VEG-490). Moved here from the frontend's
+ * `character-inventory` lib so the tier classification — which is rules data —
+ * has one definition the sheet reads rather than deriving in parallel.
+ */
+export interface ComputedEncumbrance {
+  tier: EncumbranceTier;
+  /** Speed reduction in feet for this tier (0, 10, or 20). */
+  speedPenalty: number;
+  /** Heavily encumbered also imposes disadvantage on checks/attacks/STR-DEX-CON saves. */
+  hasDisadvantage: boolean;
+  /** Maximum carry weight in pounds: Strength × 15, size-scaled. */
+  capacity: number;
+  /** Total weight carried in pounds, rounded to two decimals. */
+  carried: number;
+}
+
+/** The thresholds and multipliers the encumbrance derivation needs. */
+export interface CarryingCapacityRule {
+  /** Capacity = Strength × this, size-scaled (5e: 15). */
+  capacityPerStrength: number;
+  /** Encumbered above Strength × this, size-scaled (5e: 5). */
+  encumberedPerStrength: number;
+  /** Heavily encumbered above Strength × this, size-scaled (5e: 10). */
+  heavilyEncumberedPerStrength: number;
+  /** Feet of speed lost while encumbered (5e: 10). */
+  encumberedSpeedPenalty: number;
+  /** Feet of speed lost while heavily encumbered (5e: 20). */
+  heavilyEncumberedSpeedPenalty: number;
+  /** Creature size → capacity multiplier. Size is free text server-side, so an
+   * unlisted value falls back to ×1 rather than being trusted as a key. */
+  sizeMultipliers: Readonly<Record<string, number>>;
+}
+
+/**
+ * SRD 5.2 carrying-capacity and variant-encumbrance numbers. Master copy for the
+ * frontend test fixtures; the seeded `carrying-capacity/rules` row carries the
+ * same values alongside its display prose, and a backend drift-guard test pins
+ * the two together — the same arrangement as {@link EXHAUSTION_RULE}.
+ */
+export const CARRYING_CAPACITY_RULE: Readonly<CarryingCapacityRule> = {
+  capacityPerStrength: 15,
+  encumberedPerStrength: 5,
+  heavilyEncumberedPerStrength: 10,
+  encumberedSpeedPenalty: 10,
+  heavilyEncumberedSpeedPenalty: 20,
+  sizeMultipliers: {
+    Tiny: 0.5,
+    Small: 1,
+    Medium: 1,
+    Large: 2,
+    Huge: 4,
+    Gargantuan: 8,
+  },
+};
+
+/** Round to two decimals so fractional weights don't show float drift. */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Classify carried weight into 5e's variant encumbrance tiers (VEG-490,
+ * previously `encumbranceStatus` in the frontend lib): encumbered above
+ * Strength × 5, heavily encumbered above Strength × 10 (+ disadvantage), each
+ * threshold scaled by the creature's size multiplier — the same multiplier that
+ * scales capacity.
+ *
+ * Comparisons are strictly greater-than, so a character carrying exactly the
+ * threshold is still in the lighter tier. `size` is free text server-side; an
+ * unknown or absent value falls back to the Medium (×1) multiplier rather than
+ * indexing blind. A character with no ability scores reads as Strength 0 →
+ * capacity 0, which would make every non-empty pack "heavily encumbered", so
+ * callers pass a neutral score instead (see `computeCoreCharacterStats`).
+ */
+export function computeEncumbrance(
+  rule: CarryingCapacityRule,
+  strength: number,
+  size: string | null | undefined,
+  inventory: InventoryItem[]
+): ComputedEncumbrance {
+  const multiplier = (size && rule.sizeMultipliers[size]) || 1;
+  const carried = round2(
+    inventory.reduce((sum, item) => sum + (item.weight ?? 0) * item.quantity, 0)
+  );
+  const heavyAt = strength * rule.heavilyEncumberedPerStrength * multiplier;
+  const encumberedAt = strength * rule.encumberedPerStrength * multiplier;
+
+  const tier: EncumbranceTier =
+    carried > heavyAt
+      ? 'heavily-encumbered'
+      : carried > encumberedAt
+        ? 'encumbered'
+        : 'unencumbered';
+
+  return {
+    tier,
+    speedPenalty:
+      tier === 'heavily-encumbered'
+        ? rule.heavilyEncumberedSpeedPenalty
+        : tier === 'encumbered'
+          ? rule.encumberedSpeedPenalty
+          : 0,
+    hasDisadvantage: tier === 'heavily-encumbered',
+    capacity: strength * rule.capacityPerStrength * multiplier,
+    carried,
+  };
 }
 
 /**
@@ -249,16 +370,29 @@ export function computeExhaustionEffect(
 }
 
 /**
- * Walking speed after the exhaustion reduction; never negative.
- * `speed` is the stored column, falling back to {@link DEFAULT_SPEED}.
+ * Walking speed after the exhaustion and encumbrance reductions (VEG-490); never
+ * negative. `speed` is the stored column, falling back to {@link DEFAULT_SPEED}.
+ *
+ * The two penalties stack additively and the result floors at 0 — a character who
+ * is both severely exhausted and heavily encumbered can lose more than their
+ * whole speed, and 0 is the answer rather than a negative number.
  */
 export function resolveSpeed(
   speed: number | null | undefined,
-  exhaustion: ComputedExhaustion | null
+  exhaustion: ComputedExhaustion | null,
+  encumbrance: ComputedEncumbrance | null
 ): ComputedSpeed {
   const base = speed ?? DEFAULT_SPEED;
-  const penalty = exhaustion?.speedPenalty ?? 0;
-  return { base, penalty, effective: Math.max(0, base - penalty) };
+  const exhaustionPenalty = exhaustion?.speedPenalty ?? 0;
+  const encumbrancePenalty = encumbrance?.speedPenalty ?? 0;
+  const penalty = exhaustionPenalty + encumbrancePenalty;
+  return {
+    base,
+    exhaustionPenalty,
+    encumbrancePenalty,
+    penalty,
+    effective: Math.max(0, base - penalty),
+  };
 }
 
 /**
@@ -302,8 +436,10 @@ export interface ComputedStats {
   armorClass: ComputedArmorClass;
   /** Attack rows derived from equipped weapons (VEG-410); manual `Character.weapons` entries are separate. */
   weapons: Weapon[];
-  /** Walking speed after derived penalties (VEG-449). */
+  /** Walking speed after derived penalties (VEG-449, VEG-490). */
   speed: ComputedSpeed;
   /** Active exhaustion effect, or null when the character isn't exhausted. */
   exhaustion: ComputedExhaustion | null;
+  /** Carrying state: tier, speed penalty, disadvantage, capacity, carried (VEG-490). */
+  encumbrance: ComputedEncumbrance;
 }

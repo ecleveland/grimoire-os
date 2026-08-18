@@ -549,9 +549,20 @@ export const srdGameRules = [
   {
     category: 'carrying-capacity',
     key: 'rules',
+    // The numeric fields are the machine-readable contract the compute layer
+    // reads (VEG-490); `carryCapacity` / `pushDragLift` / `encumbrance` stay as
+    // display prose for the rules API. A drift guard in compute-stats.spec.ts
+    // pins the numerics to CARRYING_CAPACITY_RULE in @grimoire-os/shared,
+    // exactly as the exhaustion/levels row is pinned to EXHAUSTION_RULE — the
+    // prose is excluded from that comparison because nothing derives from it.
     value: {
       carryCapacity: 'Strength score × 15 (in pounds)',
       pushDragLift: 'Strength score × 30 (in pounds)',
+      capacityPerStrength: 15,
+      encumberedPerStrength: 5,
+      heavilyEncumberedPerStrength: 10,
+      encumberedSpeedPenalty: 10,
+      heavilyEncumberedSpeedPenalty: 20,
       sizeMultipliers: {
         Tiny: 0.5,
         Small: 1,

@@ -57,4 +57,48 @@ test.describe('character sheet — encumbrance tiers', () => {
     await expect(status).toContainText('30 → 10 ft');
     await expect(status).toContainText('disadvantage');
   });
+
+  // VEG-490 acceptance criterion. Both reductions are derived server-side now, so
+  // the stat bar and the inventory readout must quote the same final speed. Only
+  // checkable end-to-end: the two live on different tabs, fed by one payload, and
+  // the bug was precisely that they disagreed — the stat bar showed base minus
+  // exhaustion while the inventory line showed the real number.
+  test('quotes one effective speed in the stat bar and the inventory readout', async ({ page }) => {
+    await registerAndLogin(page, 'encumbrance-stack', 'Player Two');
+    const headers = await csrfHeaders(page);
+
+    // STR 10, speed 30 → encumbered above 50 lb. Exhaustion 2 → −10 ft.
+    // Carrying 60 lb → −10 ft. Effective speed 10 ft.
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Weary Warden',
+        class: 'Fighter',
+        level: 3,
+        abilityScores: { strength: 10, dexterity: 12, constitution: 14 },
+        hitPoints: { max: 28, current: 28, temporary: 0 },
+        speed: 30,
+        exhaustion: 2,
+        inventory: [{ name: 'Anvil', quantity: 1, weight: 60, equipped: false }],
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const characterId = (await res.json()).id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByRole('heading', { name: 'Weary Warden' })).toBeVisible();
+
+    // Stat bar: the total reduction on the value, both sources named beneath it.
+    const speedStat = page.getByTestId('stat-speed');
+    await expect(speedStat).toContainText('10 ft (−20)');
+    const breakdown = page.getByTestId('speed-breakdown');
+    await expect(breakdown).toContainText('10 exhaustion');
+    await expect(breakdown).toContainText('10 encumbered');
+
+    // Inventory readout: exhaustion-reduced 20, then 10 after the load — landing
+    // on the same 10 the stat bar shows, which is the whole point.
+    await page.getByRole('tab', { name: 'Spells & Details' }).click();
+    await expect(page.getByTestId('encumbrance-status')).toContainText('20 → 10 ft');
+  });
 });

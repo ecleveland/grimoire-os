@@ -14,16 +14,13 @@ import { resolvePlayControls, type PlayControlProps } from './useCharacterMutati
 import { parseNonNegativeInt } from '@/lib/character-play';
 import {
   addInventoryItem,
-  carryingCapacity,
-  encumbranceStatus,
   removeInventoryItemAt,
   stripCatalogLinkAt,
   toggleEquippedAt,
-  totalInventoryWeight,
   updateInventoryItemAt,
 } from '@/lib/character-inventory';
 import { ATTUNEMENT_MAX, addAttunedItem, removeAttunedItemAt } from '@/lib/character-attunement';
-import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
+import { DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
 import SrdItemSearch from '@/components/SrdItemSearch';
 
 type InventorySectionProps = { character: Character } & PlayControlProps;
@@ -229,25 +226,30 @@ export default function InventorySection(props: InventorySectionProps) {
 
   if (!showInventory && !showCurrency && !showAttunement) return null;
 
-  // abilityScores/speed are nullable at the API boundary (VEG-425); fall back to
-  // neutral values so a minimal character's inventory renders instead of crashing.
-  const strength = (character.abilityScores ?? DEFAULT_ABILITY_SCORES).strength;
-  // Start from the computed effective speed, which already has the exhaustion
-  // reduction applied (VEG-449), so this readout and the stat bar can't disagree
-  // about the same character — and the encumbrance line reports the character's
-  // real final speed rather than one that ignores exhaustion. `?? ` chain covers
-  // version skew (a pre-VEG-449 payload has no computed.speed) and the nullable
-  // stored column. Unifying encumbrance into the computed block is VEG-490.
-  const speed = character.computed.speed?.effective ?? character.speed ?? DEFAULT_SPEED;
-  const capacity = carryingCapacity(strength, character.size);
-  const carried = totalInventoryWeight(inventory);
-  const overCapacity = carried > capacity;
-  // 5e variant encumbrance tiers (VEG-406): surface the current tier and its
-  // movement penalty when carried weight crosses Str×5 / Str×10.
-  const encumbrance = encumbranceStatus(strength, character.size, carried);
-  const reducedSpeed = Math.max(0, speed - encumbrance.speedPenalty);
+  // Carrying state is derived server-side (VEG-490): capacity, carried weight and
+  // the tier all come from the computed block, so this readout and the stat bar
+  // cannot disagree about one character the way they did while encumbrance was
+  // applied here alone. Absent under version skew (a pre-VEG-490 payload) —
+  // degrade to no readout rather than crashing the sheet, the same contract
+  // StatsBar's speed and CombatBar's derived AC follow.
+  const encumbrance = character.computed.encumbrance;
+  const speed = character.computed.speed;
+  const overCapacity = encumbrance ? encumbrance.carried > encumbrance.capacity : false;
+  // The "before → after" pair the readout shows: speed less exhaustion only,
+  // then the final effective value. Display arithmetic on already-derived
+  // numbers, not a second derivation of the rule.
+  //
+  // The skew branch covers a payload carrying `encumbrance` but no `speed` (the
+  // two arrived in different releases): fall back to the stored column and
+  // subtract the server's own tier penalty, which reproduces the pre-VEG-490
+  // render. Still not a re-derivation — the penalty is read, not classified.
+  const storedSpeed = character.speed ?? DEFAULT_SPEED;
+  const speedBeforeLoad = speed ? speed.base - speed.exhaustionPenalty : storedSpeed;
+  const speedAfterLoad = speed
+    ? speed.effective
+    : Math.max(0, storedSpeed - (encumbrance?.speedPenalty ?? 0));
   const encumbranceLabel =
-    encumbrance.tier === 'heavily-encumbered' ? 'Heavily encumbered' : 'Encumbered';
+    encumbrance?.tier === 'heavily-encumbered' ? 'Heavily encumbered' : 'Encumbered';
 
   return (
     <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4">
@@ -422,7 +424,7 @@ export default function InventorySection(props: InventorySectionProps) {
           )}
 
           {/* Carrying-capacity readout */}
-          {hasInventory && (
+          {hasInventory && encumbrance && (
             <p
               data-testid="carrying-capacity"
               className={`mt-2 text-xs ${
@@ -431,12 +433,13 @@ export default function InventorySection(props: InventorySectionProps) {
                   : 'text-gray-500 dark:text-gray-400'
               }`}
             >
-              Carried {carried} / {capacity} lb{overCapacity ? ' — over capacity' : ''}
+              Carried {encumbrance.carried} / {encumbrance.capacity} lb
+              {overCapacity ? ' — over capacity' : ''}
             </p>
           )}
 
-          {/* Encumbrance tier + speed impact (VEG-406) */}
-          {hasInventory && encumbrance.tier !== 'unencumbered' && (
+          {/* Encumbrance tier + speed impact (VEG-406, computed since VEG-490) */}
+          {hasInventory && encumbrance && encumbrance.tier !== 'unencumbered' && (
             <p
               data-testid="encumbrance-status"
               role="status"
@@ -446,7 +449,7 @@ export default function InventorySection(props: InventorySectionProps) {
                   : 'text-amber-600 dark:text-amber-400'
               }`}
             >
-              {encumbranceLabel} — speed {speed} → {reducedSpeed} ft
+              {encumbranceLabel} — speed {speedBeforeLoad} → {speedAfterLoad} ft
               {encumbrance.hasDisadvantage &&
                 ', disadvantage on ability checks, attacks & STR/DEX/CON saves'}
             </p>
