@@ -6,6 +6,7 @@ import {
   togglePip,
   adjustHitDiceSpent,
   deathSavesAfterRevive,
+  hasDeathSaves,
   parseNonNegativeInt,
   CLEARED_DEATH_SAVES,
   hitDiceRegainedOnLongRest,
@@ -125,6 +126,19 @@ describe('CLEARED_DEATH_SAVES', () => {
   });
 });
 
+// Extracted in VEG-488 so applyLongRest's guard and deathSavesAfterRevive share
+// one definition of "has anything to clear" rather than two copies.
+describe('hasDeathSaves', () => {
+  it.each([
+    ['a success alone', { successes: 1, failures: 0 }, true],
+    ['a failure alone', { successes: 0, failures: 1 }, true],
+    ['both tracks marked', { successes: 2, failures: 3 }, true],
+    ['a fully clear track', { successes: 0, failures: 0 }, false],
+  ])('is %s → %s', (_label, saves, expected) => {
+    expect(hasDeathSaves(saves)).toBe(expected);
+  });
+});
+
 describe('deathSavesAfterRevive', () => {
   it('returns a zeroed track when healed above 0 with saves present', () => {
     expect(deathSavesAfterRevive(5, { successes: 1, failures: 2 })).toEqual({
@@ -200,8 +214,24 @@ describe('applyLongRest', () => {
     expect(applyLongRest(base).hitPoints).toEqual({ max: 44, current: 44, temporary: 0 });
   });
 
-  it('clears death saves', () => {
-    expect(applyLongRest(base).deathSaves).toEqual({ successes: 0, failures: 0 });
+  it('clears death saves when any are marked', () => {
+    const patch = applyLongRest({ ...base, deathSaves: { successes: 1, failures: 2 } });
+    expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
+  });
+
+  // VEG-488: the last field that ignored the "omit what wouldn't change"
+  // discipline the other five already follow. Writing an identical track burns
+  // an optimistic-lock version and can 409 a concurrent session for a no-op.
+  it('omits deathSaves when the track is already clear', () => {
+    const patch = applyLongRest({ ...base, deathSaves: { successes: 0, failures: 0 } });
+    expect('deathSaves' in patch).toBe(false);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['null (the API shape for a character with no stored track)', null],
+  ])('omits deathSaves when the stored track is %s', (_label, deathSaves) => {
+    expect('deathSaves' in applyLongRest({ ...base, deathSaves })).toBe(false);
   });
 
   it('regains half the total hit dice (rounded down), capped at the number spent', () => {
@@ -260,11 +290,31 @@ describe('applyLongRest', () => {
     // Regression (VEG-425): Character declared hitPoints non-optional, but the
     // column is `Json?`; `{ ...null }` threw. A minimal character rests without a
     // hitPoints patch — we must not write a fabricated {0,0,0} block to the DB.
-    const patch = applyLongRest({ ...base, hitPoints: null });
+    const patch = applyLongRest({
+      ...base,
+      hitPoints: null,
+      deathSaves: { successes: 1, failures: 0 },
+    });
     expect('hitPoints' in patch).toBe(false);
     // The rest still clears death saves and regains hit dice.
     expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
     expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 1 });
+  });
+
+  // VEG-488 acceptance criterion: the whole point of the per-field guards is
+  // that a rest with nothing to recover writes nothing at all. Asserted with
+  // toEqual({}) rather than field-by-field absence so a future field added
+  // without a guard fails here instead of silently reopening the wasted write.
+  it('returns an empty patch for a character with nothing to recover', () => {
+    const patch = applyLongRest({
+      hitPoints: { max: 44, current: 44, temporary: 0 },
+      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      spellSlots: [{ level: 1, total: 4, used: 0 }],
+      resources: [{ name: 'Rage', max: 3, used: 0, recharge: 'long' }],
+      exhaustion: null,
+      deathSaves: { successes: 0, failures: 0 },
+    });
+    expect(patch).toEqual({});
   });
 
   // ── Resource recovery (VEG-409) ─────────────────────────
@@ -576,6 +626,34 @@ describe('rest summaries (VEG-487)', () => {
       const summary = formatLongRestSummary(character, applyLongRest(character));
       expect(summary).toMatch(/temp/i);
       expect(summary).not.toMatch(/already fully rested/i);
+    });
+
+    // VEG-488: once deathSaves is presence-signalled like spellSlots/resources,
+    // the summary can finally report it. Before, the field was always present so
+    // there was nothing to report on — which meant a downed character's rest
+    // cleared a visible track and the toast never mentioned it.
+    it('reports death saves being cleared', () => {
+      const character = {
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        spellSlots: [],
+        deathSaves: { successes: 1, failures: 2 },
+      };
+      const summary = formatLongRestSummary(character, applyLongRest(character));
+      expect(summary).toMatch(/death saves? cleared/i);
+      expect(summary).not.toMatch(/already fully rested/i);
+    });
+
+    it('does not claim death saves were cleared when the track was already empty', () => {
+      const character = {
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        spellSlots: [],
+        deathSaves: { successes: 0, failures: 0 },
+      };
+      const summary = formatLongRestSummary(character, applyLongRest(character));
+      expect(summary).not.toMatch(/death save/i);
+      expect(summary).toMatch(/already fully rested/i);
     });
 
     it('does not claim a recharge when every resource is already full', () => {

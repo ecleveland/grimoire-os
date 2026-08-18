@@ -382,11 +382,9 @@ describe('CombatBar', () => {
         spellSlots: [],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      // deathSaves absent: the track was already clear (VEG-488).
       expect(onPatch).toHaveBeenCalledWith(
-        {
-          hitPoints: { max: 30, current: 30, temporary: 0 },
-          deathSaves: { successes: 0, failures: 0 },
-        },
+        { hitPoints: { max: 30, current: 30, temporary: 0 } },
         expect.anything()
       );
     });
@@ -403,10 +401,7 @@ describe('CombatBar', () => {
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
       expect(onPatch).toHaveBeenCalledWith(
-        {
-          hitPoints: { max: 30, current: 30, temporary: 0 },
-          deathSaves: { successes: 0, failures: 0 },
-        },
+        { hitPoints: { max: 30, current: 30, temporary: 0 } },
         expect.anything()
       );
     });
@@ -447,12 +442,69 @@ describe('CombatBar', () => {
       expect(onPatch).toHaveBeenCalledWith(
         {
           hitPoints: { max: 44, current: 44, temporary: 0 },
-          deathSaves: { successes: 0, failures: 0 },
           resources: [
             { ...ki, used: 0 },
             { ...rage, used: 0 },
           ],
         },
+        expect.anything()
+      );
+    });
+
+    // ── Long rest with nothing to recover (VEG-488) ──────
+    // The empty patch is only half the fix: `patch({})` still PATCHes with
+    // expectedVersion, so the wasted write survives unless the click itself
+    // short-circuits. Decided deliberately (see CombatBar): the button stays
+    // enabled and the toast explains, rather than greying out unexplained the
+    // way Short Rest does.
+    const fullyRested: Partial<Character> = {
+      hitPoints: { max: 44, current: 44, temporary: 0 },
+      deathSaves: { successes: 0, failures: 0 },
+      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      spellSlots: [{ level: 1, total: 4, used: 0 }],
+      resources: [rage].map(r => ({ ...r, used: 0 })),
+      exhaustion: null,
+    };
+
+    it('writes nothing when a long rest would change nothing', () => {
+      const onPatch = renderOwner(fullyRested);
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).not.toHaveBeenCalled();
+    });
+
+    it('still explains itself when it skips the write', () => {
+      renderOwner(fullyRested);
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(mockToastMessage).toHaveBeenCalledWith(expect.stringMatching(/already fully rested/i));
+    });
+
+    it('keeps Long Rest enabled when there is nothing to recover', () => {
+      renderOwner(fullyRested);
+      expect(screen.getByRole('button', { name: 'Long Rest' })).toBeEnabled();
+    });
+
+    it('still writes when a single field would change', () => {
+      // One spent hit die is enough — guards against a short-circuit that keys
+      // off something coarser than "the patch is empty".
+      const onPatch = renderOwner({
+        ...fullyRested,
+        hitDice: { dieType: 'd10', total: 8, spent: 1 },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith(
+        { hitDice: { dieType: 'd10', total: 8, spent: 0 } },
+        expect.anything()
+      );
+    });
+
+    it('still writes when only death saves would change', () => {
+      const onPatch = renderOwner({
+        ...fullyRested,
+        deathSaves: { successes: 1, failures: 2 },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
+      expect(onPatch).toHaveBeenCalledWith(
+        { deathSaves: { successes: 0, failures: 0 } },
         expect.anything()
       );
     });
