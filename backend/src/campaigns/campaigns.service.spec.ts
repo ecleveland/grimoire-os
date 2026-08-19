@@ -712,6 +712,10 @@ describe('CampaignsService', () => {
       class: 'Fighter',
       level: 3,
       armorClass: 16,
+      // Dex 16 → +3, so the resolved initiative (+3 base plus the +1 stored
+      // bonus) differs from the stored column. Without a Dex here the two
+      // coincide at 1 and the projection assertion below cannot fail.
+      abilityScores: { dexterity: 16 },
       initiative: 1,
       hitPoints: { max: 28, current: 28, temporary: 0 },
       backstory: 'a closely guarded secret',
@@ -754,7 +758,7 @@ describe('CampaignsService', () => {
           class: 'Fighter',
           level: 3,
           armorClass: 16,
-          initiative: 1,
+          initiative: 4,
           hitPoints: { max: 28, current: 28, temporary: 0 },
         },
       ]);
@@ -768,6 +772,18 @@ describe('CampaignsService', () => {
 
       expect(row).not.toHaveProperty('backstory');
       expect(row).not.toHaveProperty('inventory');
+    });
+
+    it('resolves a null initiative to the Dex-derived modifier (VEG-452)', async () => {
+      // The attach picker is the second producer of PartyCharacterDto.initiative;
+      // findCharactersForMember had this covered and this path did not.
+      campaignAuth.assertCampaignOwner.mockResolvedValue(ownerAndMemberCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        { ...attachable, initiative: null, abilityScores: { dexterity: 18 } },
+      ]);
+
+      const [row] = await service.findAttachableCharacters(CAMPAIGN_ID, USER_ID);
+      expect(row.initiative).toBe(4);
     });
 
     it('resolves a null armorClass to the equipment-derived AC (VEG-410)', async () => {

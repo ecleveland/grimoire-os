@@ -211,18 +211,22 @@ export interface ComputedSpeed {
  * level-ups instead of going stale the moment the score changes.
  *
  * `exhaustionPenalty` is the d20-Test reduction, carried as its own field so a
- * sheet can name it rather than showing an unexplained drop. It is already
- * negative (see {@link ComputedExhaustion.d20Penalty}), so `effective` is the
- * plain sum of all three.
+ * sheet can name it rather than showing an unexplained drop. It is a POSITIVE
+ * magnitude, matching every other `*Penalty` field on these types
+ * ({@link ComputedSpeed.exhaustionPenalty}, {@link ComputedEncumbrance.speedPenalty}),
+ * even though its source {@link ComputedExhaustion.d20Penalty} is negative. One
+ * sign convention across all of them beats a field that means the opposite of
+ * its identically-named sibling 40 lines up, which is the kind of thing a
+ * reader gets wrong by analogy and no type can catch.
  */
 export interface ComputedInitiative {
   /** Dexterity modifier — the derived half. */
   base: number;
   /** Stored `Character.initiative` column, added on top. 0 when unset. */
   bonus: number;
-  /** d20-Test reduction from exhaustion, as a negative number (e.g. -6). */
+  /** d20-Test reduction from exhaustion, as a positive magnitude (e.g. 6). */
   exhaustionPenalty: number;
-  /** `base + bonus + exhaustionPenalty`. Not floored — a negative initiative
+  /** `base + bonus - exhaustionPenalty`. Not floored — a negative initiative
    * modifier is a real outcome, unlike a negative speed. */
   effective: number;
 }
@@ -238,12 +242,16 @@ export function resolveInitiative(
   exhaustion: ComputedExhaustion | null
 ): ComputedInitiative {
   const bonus = stored ?? 0;
-  const exhaustionPenalty = exhaustion?.d20Penalty ?? 0;
+  // d20Penalty arrives negative; this type reports magnitudes, so negate once
+  // here rather than letting the sign convention leak to every consumer.
+  // Branch rather than negating a coalesced 0: `-(0)` is `-0`, which is a
+  // distinct value to Object.is and to every deep-equality assertion.
+  const exhaustionPenalty = exhaustion ? -exhaustion.d20Penalty : 0;
   return {
     base: dexModifier,
     bonus,
     exhaustionPenalty,
-    effective: dexModifier + bonus + exhaustionPenalty,
+    effective: dexModifier + bonus - exhaustionPenalty,
   };
 }
 

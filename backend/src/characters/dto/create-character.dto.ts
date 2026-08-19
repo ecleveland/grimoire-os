@@ -531,7 +531,13 @@ export class CreateCharacterDto {
   @IsNumber()
   speed?: number;
 
-  @ApiPropertyOptional({ example: 2 })
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Flat initiative BONUS added on top of the Dexterity modifier (VEG-452) — not a total. ' +
+      'Omit or send 0 when the character has no feat/feature bonus; the Dexterity modifier is ' +
+      'always applied on top by the server.',
+  })
   @IsOptional()
   @IsNumber()
   initiative?: number;

@@ -48,10 +48,14 @@ function speedBreakdown(speed: ComputedSpeed | undefined): string[] {
 }
 
 /**
- * Initiative from the computed block (VEG-452). Version skew has two shapes
- * here, unlike speed's one: a pre-VEG-452 backend sends a bare number where the
- * block now sits, and an older one may omit the field entirely. Both degrade to
- * a plain modifier rather than rendering "+undefined".
+ * Initiative from the computed block (VEG-452). A pre-VEG-452 backend sends a
+ * bare number where the block now sits, so that shape degrades to itself.
+ *
+ * The `undefined` arm is NOT version skew: `initiative` has been on
+ * `ComputedStats` since its first commit, so a backend old enough to omit it
+ * omits the whole `computed` object and the property access throws first. It is
+ * kept only as a malformed-payload guard, so a bad block renders a 0 instead of
+ * "+undefined".
  */
 function initiativeValue(initiative: ComputedInitiative | number | undefined): number {
   if (typeof initiative === 'number') return initiative;
@@ -73,7 +77,10 @@ function initiativeBreakdown(initiative: ComputedInitiative | number | undefined
   if (bonus === 0 && exhaustionPenalty === 0) return [];
   const parts = [`${formatModifier(base)} dex`];
   if (bonus !== 0) parts.push(`${formatModifier(bonus)} bonus`);
-  if (exhaustionPenalty !== 0) parts.push(`${formatModifier(exhaustionPenalty)} exhaustion`);
+  // Magnitude with an explicit minus, matching speedBreakdown above rather than
+  // formatModifier — the two tiles sit side by side and must not disagree on
+  // how a reduction looks.
+  if (exhaustionPenalty > 0) parts.push(`−${exhaustionPenalty} exhaustion`);
   return parts;
 }
 
@@ -88,8 +95,8 @@ export default function StatsBar({ character, canRoll }: StatsBarProps) {
   // (VEG-449) — the block applies the no-stored-speed fallback server-side.
   // Size is stored, not derived; nullable at the API boundary (VEG-425).
   const { proficiencyBonus, passivePerception } = character.computed;
-  // Like `speed` below, this can be absent or a bare number under version skew
-  // (a payload from a pre-VEG-452 backend), so it is read defensively.
+  // Like `speed` below, this can be a bare number under version skew (a payload
+  // from a pre-VEG-452 backend), so it is read defensively.
   const initiative: ComputedInitiative | number | undefined = character.computed.initiative;
   const initiativeTotal = initiativeValue(initiative);
   // `speed` can be absent under version skew (a payload from a pre-VEG-449

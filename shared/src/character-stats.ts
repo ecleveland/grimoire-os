@@ -276,8 +276,14 @@ export interface CharacterStatsInput {
   /**
    * Stored initiative column — a flat *bonus* added on top of the Dexterity
    * modifier (VEG-452), not an override. See {@link ComputedInitiative}.
+   *
+   * Required (though nullable) on purpose: `Character.initiative` is a
+   * required-nullable key, so a whole Character still assigns cleanly, while a
+   * caller that narrows via Pick — `deriveComputed` in the frontend test utils
+   * is the one that exists — fails to compile instead of silently dropping the
+   * bonus from every fixture it builds.
    */
-  initiative?: number | null;
+  initiative: number | null;
   /** The character's own proficiency strings (weapon/tool, free text). */
   proficiencies?: string[] | null;
   /** Inventory rows; equipped items with gear metadata drive AC/weapons (VEG-410). */

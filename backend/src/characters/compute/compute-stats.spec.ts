@@ -351,10 +351,11 @@ describe('computeCharacterStats', () => {
 
     it('stacks the bonus with the exhaustion d20 penalty', () => {
       // Level 3 exhaustion is −6 to every d20 Test. Dex +1, bonus +5 → 0.
+      // Reported as a positive magnitude, like every other *Penalty field.
       expect(computeCharacterStats(input({ initiative: 5, exhaustion: 3 })).initiative).toEqual({
         base: 1,
         bonus: 5,
-        exhaustionPenalty: -6,
+        exhaustionPenalty: 6,
         effective: 0,
       });
     });

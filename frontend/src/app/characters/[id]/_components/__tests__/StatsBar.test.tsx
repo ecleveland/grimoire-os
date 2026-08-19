@@ -90,6 +90,9 @@ describe('StatsBar', () => {
         const breakdown = screen.getByTestId('initiative-breakdown');
         expect(breakdown).toHaveTextContent('+1 dex');
         expect(breakdown).toHaveTextContent('+5 bonus');
+        // Without this a healthy character renders "+0 exhaustion" and the
+        // suite stays green.
+        expect(breakdown).not.toHaveTextContent(/exhaustion/i);
       });
 
       it('names a negative bonus rather than hiding it', () => {
@@ -104,7 +107,7 @@ describe('StatsBar', () => {
         expect(within(screen.getByTestId('stat-initiative')).getByText('+0')).toBeInTheDocument();
         const breakdown = screen.getByTestId('initiative-breakdown');
         expect(breakdown).toHaveTextContent('+5 bonus');
-        expect(breakdown).toHaveTextContent('-6 exhaustion');
+        expect(breakdown).toHaveTextContent('−6 exhaustion');
       });
 
       it('names exhaustion alone when there is no bonus to report', () => {
@@ -115,8 +118,16 @@ describe('StatsBar', () => {
         expect(within(screen.getByTestId('stat-initiative')).getByText('-5')).toBeInTheDocument();
         const breakdown = screen.getByTestId('initiative-breakdown');
         expect(breakdown).toHaveTextContent('+1 dex');
-        expect(breakdown).toHaveTextContent('-6 exhaustion');
+        expect(breakdown).toHaveTextContent('−6 exhaustion');
         expect(breakdown).not.toHaveTextContent(/bonus/i);
+      });
+
+      it('derives from Dexterity alone when the column is null', () => {
+        // The majority state: nothing writes the column unless a player edits
+        // it. This is the shape that used to reach the tracker as +0.
+        render(<StatsBar character={withInitiative({ initiative: null })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+1')).toBeInTheDocument();
+        expect(screen.queryByTestId('initiative-breakdown')).toBeNull();
       });
 
       it('treats a stored 0 as no bonus, showing the bare Dex modifier', () => {
@@ -394,7 +405,7 @@ describe('computed block is the source of truth (VEG-412)', () => {
     computed: {
       ...mockCharacter.computed,
       proficiencyBonus: 7,
-      initiative: 9,
+      initiative: { base: 9, bonus: 0, exhaustionPenalty: 0, effective: 9 },
       passivePerception: 23,
     },
   };

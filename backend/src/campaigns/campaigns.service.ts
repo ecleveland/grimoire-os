@@ -69,8 +69,8 @@ const partyCharacterSelect = {
   // whitelist drops both, so members still never see each other's inventory.
   abilityScores: true,
   inventory: true,
-  // Loaded only to apply the exhaustion penalty to the initiative modifier
-  // (VEG-449); dropped by the DTO whitelist like the two above.
+  // Loaded only to resolve the effective initiative modifier (VEG-452);
+  // dropped by the DTO whitelist like the two above.
   exhaustion: true,
 } satisfies Prisma.CharacterSelect;
 
@@ -108,7 +108,7 @@ function withEffectiveArmorClass<
  */
 function withEffectiveInitiative<
   T extends { initiative: number | null; abilityScores: unknown; exhaustion: number | null },
->(character: T): T {
+>(character: T): T & { initiative: number } {
   const dexterity = (character.abilityScores as AbilityScores | null)?.dexterity ?? 10;
   const { effective } = resolveInitiative(
     character.initiative,
