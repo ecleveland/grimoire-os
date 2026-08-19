@@ -107,6 +107,18 @@ describe('StatsBar', () => {
         expect(breakdown).toHaveTextContent('-6 exhaustion');
       });
 
+      it('names exhaustion alone when there is no bonus to report', () => {
+        // Dex +1, exhaustion 3 → −6, so −5. Without the dex line the reader
+        // would see "-6 exhaustion" under a "-5" value and have to do the
+        // subtraction themselves.
+        render(<StatsBar character={withInitiative({ exhaustion: 3 })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('-5')).toBeInTheDocument();
+        const breakdown = screen.getByTestId('initiative-breakdown');
+        expect(breakdown).toHaveTextContent('+1 dex');
+        expect(breakdown).toHaveTextContent('-6 exhaustion');
+        expect(breakdown).not.toHaveTextContent(/bonus/i);
+      });
+
       it('treats a stored 0 as no bonus, showing the bare Dex modifier', () => {
         render(<StatsBar character={withInitiative({ initiative: 0 })} />);
         expect(within(screen.getByTestId('stat-initiative')).getByText('+1')).toBeInTheDocument();
