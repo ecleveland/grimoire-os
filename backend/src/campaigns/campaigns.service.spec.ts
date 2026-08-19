@@ -541,7 +541,7 @@ describe('CampaignsService', () => {
           // at the DTO layer, never exposed to other members.
           abilityScores: true,
           inventory: true,
-          // Loaded to apply the exhaustion penalty to initiative (VEG-449);
+          // Loaded to resolve the effective initiative modifier (VEG-452);
           // likewise dropped at the DTO layer.
           exhaustion: true,
         },
@@ -555,7 +555,7 @@ describe('CampaignsService', () => {
           class: 'Wizard',
           level: 5,
           armorClass: 12,
-          initiative: 2,
+          initiative: 4,
           hitPoints: { max: 22, current: 17, temporary: 0 },
         },
       ]);
@@ -604,36 +604,70 @@ describe('CampaignsService', () => {
       expect(roster.armorClass).toBe(12);
     });
 
-    // VEG-449: the encounter party-add rolls `d20 + initiative` off this
-    // projection, so an exhausted PC must not be placed in the turn order at a
-    // modifier their own sheet says they don't have.
-    it('applies the exhaustion penalty to the initiative modifier', async () => {
+    // VEG-452: the encounter party-add rolls `d20 + initiative` off this
+    // projection, so it must quote the same effective modifier the owner's
+    // sheet does — Dexterity + the stored bonus column, less exhaustion.
+    it('resolves initiative as the Dex modifier plus the stored bonus', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([fullCharacter]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      // Dex 14 → +2, stored bonus +2.
+      expect(roster.initiative).toBe(4);
+    });
+
+    // The regression this ticket exists for. Before VEG-452 the roster bailed
+    // on a null stored column and shipped null, which AddPartyDialog coerced to
+    // `?? 0` — so a Dex 18 PC whose sheet reads +4 was rolled at d20+0. Null is
+    // the majority state, since nothing writes the column unless a player edits it.
+    it('derives from Dexterity when no bonus is stored, rather than shipping null', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        { ...fullCharacter, initiative: null, abilityScores: { dexterity: 18 } },
+      ]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      expect(roster.initiative).toBe(4);
+    });
+
+    it('applies the exhaustion penalty on top of both', async () => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
       prisma.character.findMany.mockResolvedValue([{ ...fullCharacter, exhaustion: 3 }]);
 
       const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
-      // Stored +2, exhaustion 3 → −6.
-      expect(roster.initiative).toBe(-4);
+      // Dex +2, stored bonus +2, exhaustion 3 → −6.
+      expect(roster.initiative).toBe(-2);
     });
 
-    it.each([null, 0])('leaves initiative unchanged at exhaustion %p', async exhaustion => {
+    it.each([null, 0])('applies no exhaustion penalty at level %p', async exhaustion => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
       prisma.character.findMany.mockResolvedValue([{ ...fullCharacter, exhaustion }]);
 
       const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
-      expect(roster.initiative).toBe(2);
+      expect(roster.initiative).toBe(4);
     });
 
-    it('leaves a null initiative null rather than fabricating a penalty', async () => {
-      // A null modifier means "unset"; turning it into -6 would invent a number
-      // the sheet never showed.
+    it('treats a stored 0 as no bonus, not as an override of Dexterity', async () => {
+      // 0 is the editor form's default for the field, so reading it as "my
+      // initiative is exactly +0" would mask the Dex modifier of every
+      // character ever saved through that form.
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
       prisma.character.findMany.mockResolvedValue([
-        { ...fullCharacter, initiative: null, exhaustion: 3 },
+        { ...fullCharacter, initiative: 0, abilityScores: { dexterity: 18 } },
       ]);
 
       const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
-      expect(roster.initiative).toBeNull();
+      expect(roster.initiative).toBe(4);
+    });
+
+    it('falls back to a 0 Dex modifier when the sheet has no ability scores', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([
+        { ...fullCharacter, initiative: null, abilityScores: null },
+      ]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+      expect(roster.initiative).toBe(0);
     });
 
     it('never leaks sheet fields beyond the roster projection', async () => {

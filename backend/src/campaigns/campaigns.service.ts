@@ -13,6 +13,7 @@ import {
   deriveArmorClass,
   EXHAUSTION_RULE,
   inventoryFromJson,
+  resolveInitiative,
 } from '@grimoire-os/shared';
 import * as crypto from 'crypto';
 import { NoteVisibility } from '../prisma/enums';
@@ -93,22 +94,28 @@ function withEffectiveArmorClass<
 }
 
 /**
- * Apply the exhaustion penalty to the initiative modifier the roster exposes
- * (VEG-449). The encounter party-add rolls `d20 + initiative`, so without this
- * an exhausted PC is placed in the turn order at a modifier their own sheet
- * says they don't have.
+ * Resolve the initiative modifier the roster exposes (VEG-452), the same way
+ * `withEffectiveArmorClass` above resolves AC: the encounter party-add rolls
+ * `d20 + initiative` off this projection, so it must quote exactly what the
+ * owner's sheet shows rather than a second, quietly different number.
  *
- * Deliberately narrow: it adjusts whatever initiative the projection already
- * ships rather than re-deriving from Dex. Reconciling the stored column with
- * the computed block is VEG-452's job, and doing it here would silently change
- * the roster's numbers for every unexhausted character too.
+ * The stored column is an additive bonus over the Dexterity modifier, not an
+ * override — see `ComputedInitiative` in the shared package for why. VEG-449
+ * could only apply the exhaustion penalty here and left the reconciliation to
+ * this ticket; its narrow version bailed on a null stored column, which is the
+ * majority state, so an unmodified PC was rolled at d20+0 while their sheet
+ * read the full Dex modifier.
  */
 function withEffectiveInitiative<
-  T extends { initiative: number | null; exhaustion: number | null },
+  T extends { initiative: number | null; abilityScores: unknown; exhaustion: number | null },
 >(character: T): T {
-  const effect = computeExhaustionEffect(EXHAUSTION_RULE, character.exhaustion);
-  if (!effect || character.initiative === null) return character;
-  return { ...character, initiative: character.initiative + effect.d20Penalty };
+  const dexterity = (character.abilityScores as AbilityScores | null)?.dexterity ?? 10;
+  const { effective } = resolveInitiative(
+    character.initiative,
+    abilityModifier(dexterity),
+    computeExhaustionEffect(EXHAUSTION_RULE, character.exhaustion)
+  );
+  return { ...character, initiative: effective };
 }
 
 function serialize(campaign: any): CampaignDto {

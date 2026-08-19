@@ -192,6 +192,61 @@ export interface ComputedSpeed {
   effective: number;
 }
 
+/**
+ * Stored-vs-computed initiative reconciliation (VEG-452).
+ *
+ * Ownership rule: `base` is the Dexterity modifier and is owned by the compute
+ * layer; `bonus` is the stored `Character.initiative` column, owned by the
+ * player. The two ADD. The column is not an override — a stored 0 and an absent
+ * column both mean "no bonus", so `effective` never drops below what Dexterity
+ * alone would give.
+ *
+ * Additive rather than override-wins (which is how {@link ComputedArmorClass}
+ * treats its stored column) for two reasons. The editor form has always
+ * defaulted this field to 0, so override semantics would pin every
+ * form-created character to +0 and silently mask their Dexterity. And the real
+ * 5e sources of a flat initiative bonus — Alert, Jack of All Trades, a
+ * Harengon's Hare-Trigger — genuinely stack on top of Dexterity rather than
+ * replacing it, so an additive bonus keeps tracking Dexterity through
+ * level-ups instead of going stale the moment the score changes.
+ *
+ * `exhaustionPenalty` is the d20-Test reduction, carried as its own field so a
+ * sheet can name it rather than showing an unexplained drop. It is already
+ * negative (see {@link ComputedExhaustion.d20Penalty}), so `effective` is the
+ * plain sum of all three.
+ */
+export interface ComputedInitiative {
+  /** Dexterity modifier — the derived half. */
+  base: number;
+  /** Stored `Character.initiative` column, added on top. 0 when unset. */
+  bonus: number;
+  /** d20-Test reduction from exhaustion, as a negative number (e.g. -6). */
+  exhaustionPenalty: number;
+  /** `base + bonus + exhaustionPenalty`. Not floored — a negative initiative
+   * modifier is a real outcome, unlike a negative speed. */
+  effective: number;
+}
+
+/**
+ * Resolve initiative from its three sources (VEG-452). See
+ * {@link ComputedInitiative} for why the stored column adds rather than
+ * overrides.
+ */
+export function resolveInitiative(
+  stored: number | null | undefined,
+  dexModifier: number,
+  exhaustion: ComputedExhaustion | null
+): ComputedInitiative {
+  const bonus = stored ?? 0;
+  const exhaustionPenalty = exhaustion?.d20Penalty ?? 0;
+  return {
+    base: dexModifier,
+    bonus,
+    exhaustionPenalty,
+    effective: dexModifier + bonus + exhaustionPenalty,
+  };
+}
+
 /** 5e variant encumbrance tiers, lightest to heaviest. */
 export type EncumbranceTier = 'unencumbered' | 'encumbered' | 'heavily-encumbered';
 
@@ -421,8 +476,8 @@ export interface ComputedStats {
    * modifier feeding HP math is not and must not.
    */
   abilityChecks: ComputedAbilityModifiers;
-  /** Initiative = Dexterity modifier, less any exhaustion penalty. */
-  initiative: number;
+  /** Dexterity modifier plus the stored bonus column, less exhaustion (VEG-452). */
+  initiative: ComputedInitiative;
   /** Keyed by ability full name (e.g. "Strength"); exhaustion-adjusted. */
   savingThrows: Record<string, ComputedSave>;
   /** Keyed by skill name (e.g. "Athletics"); exhaustion-adjusted. */

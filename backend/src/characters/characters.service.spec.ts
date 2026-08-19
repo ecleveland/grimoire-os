@@ -63,7 +63,13 @@ describe('CharactersService', () => {
       expect(result).toBeInstanceOf(CharacterDto);
       // create funnels through toCharacterDto, so the computed block is present.
       expect(result.computed.proficiencyBonus).toBe(3);
-      expect(result.computed.initiative).toBe(1);
+      // Dex 12 → +1 base, plus the fixture's stored +1 bonus (VEG-452).
+      expect(result.computed.initiative).toEqual({
+        base: 1,
+        bonus: 1,
+        exhaustionPenalty: 0,
+        effective: 2,
+      });
     });
 
     it('round-trips conditions/concentration/exhaustion through the response DTO (VEG-408)', async () => {
@@ -328,7 +334,13 @@ describe('CharactersService', () => {
       // mockCharacter is a level-5 Fighter (non-caster): STR 16, DEX 12, CON 14,
       // WIS 13; proficient in Strength/Constitution saves and Athletics.
       expect(result.computed.proficiencyBonus).toBe(3);
-      expect(result.computed.initiative).toBe(1);
+      // Dex 12 → +1 base, plus the fixture's stored +1 bonus (VEG-452).
+      expect(result.computed.initiative).toEqual({
+        base: 1,
+        bonus: 1,
+        exhaustionPenalty: 0,
+        effective: 2,
+      });
       expect(result.computed.abilityModifiers.strength).toBe(3);
       expect(result.computed.savingThrows['Strength']).toEqual({ bonus: 6, proficient: true });
       expect(result.computed.skills['Athletics']).toEqual({

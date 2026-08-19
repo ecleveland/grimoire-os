@@ -34,6 +34,7 @@ import {
   computeEncumbrance,
   computeExhaustionEffect,
   computeXpBand,
+  resolveInitiative,
   resolveSpeed,
 } from './computed';
 import type { AbilityScores, InventoryItem, Weapon } from './embedded';
@@ -272,6 +273,11 @@ export interface CharacterStatsInput {
   spellcastingAbility?: string | null;
   /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
   armorClass?: number | null;
+  /**
+   * Stored initiative column — a flat *bonus* added on top of the Dexterity
+   * modifier (VEG-452), not an override. See {@link ComputedInitiative}.
+   */
+  initiative?: number | null;
   /** The character's own proficiency strings (weapon/tool, free text). */
   proficiencies?: string[] | null;
   /** Inventory rows; equipped items with gear metadata drive AC/weapons (VEG-410). */
@@ -325,6 +331,7 @@ export function computeCoreCharacterStats(
     skills,
     spellcastingAbility,
     armorClass,
+    initiative,
     proficiencies,
     inventory,
     weapons,
@@ -418,7 +425,7 @@ export function computeCoreCharacterStats(
     proficiencyBonus: profBonus,
     abilityModifiers,
     abilityChecks,
-    initiative: abilityModifiers.dexterity + d20Penalty,
+    initiative: resolveInitiative(initiative, abilityModifiers.dexterity, exhaustion),
     savingThrows: savingThrowBonuses,
     skills: skillBonuses,
     passivePerception,

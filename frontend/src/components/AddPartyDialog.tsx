@@ -24,7 +24,9 @@ const DEFAULT_INIT = '10';
 /**
  * Picks campaign PCs to add as combatants (VEG-283). Every PC starts selected
  * unless a combatant with the same name is already in the encounter; each row
- * carries its own initiative with a d20 + sheet-modifier auto-roll. Emits the
+ * carries its own initiative with a d20 + sheet-modifier auto-roll — the
+ * modifier is `PartyCharacter.initiative`, which the roster resolves to the
+ * effective value the owner's sheet shows (VEG-452). Emits the
  * resolved entries upward; snapshotting, auto-numbering, and persistence
  * happen in the parent.
  */

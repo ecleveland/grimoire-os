@@ -33,6 +33,9 @@ export function deriveComputed(
     | 'skills'
     | 'spellcastingAbility'
     | 'armorClass'
+    // Stored initiative bonus (VEG-452), so a spec overriding it gets a
+    // matching computed block for free.
+    | 'initiative'
     | 'proficiencies'
     | 'inventory'
     | 'weapons'
@@ -84,7 +87,10 @@ export function makeCharacter(over: Partial<Character> = {}): Character {
     deathSaves: { successes: 2, failures: 1 },
     armorClass: 18,
     speed: 25,
-    initiative: 1,
+    // No flat initiative bonus by default (VEG-452): the column is additive on
+    // top of the Dex modifier, so a non-zero default would silently inflate
+    // every spec's initiative. Bonus specs override it.
+    initiative: 0,
     // Mirrors the backend fixture Fighter: the class weapon strings live on
     // the character row (as the guided builder writes them), so derived
     // weapon rows stay proficient like the real API's class-grant union

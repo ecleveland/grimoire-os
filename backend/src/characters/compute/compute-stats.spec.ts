@@ -43,6 +43,7 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     skills: [],
     spellcastingAbility: null,
     armorClass: null,
+    initiative: null,
     proficiencies: [],
     inventory: [],
     weapons: [],
@@ -301,11 +302,68 @@ describe('computeCharacterStats', () => {
     });
   });
 
-  it('sets initiative to the Dexterity modifier', () => {
-    expect(computeCharacterStats(input()).initiative).toBe(1);
+  it('bases initiative on the Dexterity modifier', () => {
+    expect(computeCharacterStats(input()).initiative).toEqual({
+      base: 1,
+      bonus: 0,
+      exhaustionPenalty: 0,
+      effective: 1,
+    });
     expect(
       computeCharacterStats(input({ abilityScores: { ...BASE_SCORES, dexterity: 18 } })).initiative
-    ).toBe(4);
+    ).toEqual({ base: 4, bonus: 0, exhaustionPenalty: 0, effective: 4 });
+  });
+
+  // ── Stored initiative column as an additive bonus (VEG-452) ──────────────
+  // The column carries Alert / Jack-of-All-Trades / Harengon style flat bonuses
+  // the compute layer can't derive. Additive, not an override: the editor form
+  // has always defaulted the field to 0, so override semantics would pin every
+  // form-created character to +0 and mask their Dexterity entirely.
+  describe('stored initiative bonus (VEG-452)', () => {
+    it('adds the stored bonus on top of the Dexterity modifier', () => {
+      expect(computeCharacterStats(input({ initiative: 5 })).initiative).toEqual({
+        base: 1,
+        bonus: 5,
+        exhaustionPenalty: 0,
+        effective: 6,
+      });
+    });
+
+    it.each([
+      ['null', null],
+      ['zero', 0],
+    ])('treats a %s bonus as no bonus, not as an override', (_label, stored) => {
+      // The three live rows storing 0 came from the form default, not from a
+      // deliberate "my initiative is exactly +0" — they must keep their Dex.
+      expect(
+        computeCharacterStats(input({ initiative: stored, abilityScores: BASE_SCORES })).initiative
+      ).toEqual({ base: 1, bonus: 0, exhaustionPenalty: 0, effective: 1 });
+    });
+
+    it('keeps a negative stored bonus', () => {
+      expect(computeCharacterStats(input({ initiative: -2 })).initiative).toEqual({
+        base: 1,
+        bonus: -2,
+        exhaustionPenalty: 0,
+        effective: -1,
+      });
+    });
+
+    it('stacks the bonus with the exhaustion d20 penalty', () => {
+      // Level 3 exhaustion is −6 to every d20 Test. Dex +1, bonus +5 → 0.
+      expect(computeCharacterStats(input({ initiative: 5, exhaustion: 3 })).initiative).toEqual({
+        base: 1,
+        bonus: 5,
+        exhaustionPenalty: -6,
+        effective: 0,
+      });
+    });
+
+    it('applies the bonus with no stored ability scores', () => {
+      expect(
+        computeCharacterStats(input({ abilityScores: null, initiative: 3 })).initiative
+      ).toEqual({ base: 0, bonus: 3, exhaustionPenalty: 0, effective: 3 });
+    });
   });
 
   it('reports proficiency bonus for the level', () => {
@@ -410,7 +468,7 @@ describe('computeCharacterStats', () => {
       wisdom: 0,
       charisma: 0,
     });
-    expect(stats.initiative).toBe(0);
+    expect(stats.initiative.effective).toBe(0);
     expect(stats.passivePerception).toBe(10);
   });
 
@@ -555,7 +613,7 @@ describe('computeCharacterStats', () => {
       // Dex 12 → +1, level 5 → prof +3.
       expect(stats.savingThrows['Dexterity'].bonus).toBe(4);
       expect(stats.skills['Perception'].bonus).toBe(4); // Wis 13 → +1, +3 prof
-      expect(stats.initiative).toBe(1);
+      expect(stats.initiative.effective).toBe(1);
       expect(stats.passivePerception).toBe(14);
       expect(stats.speed).toEqual({
         base: 30,
@@ -585,7 +643,7 @@ describe('computeCharacterStats', () => {
       expect(stats.savingThrows['Strength'].bonus).toBe(3 + d20Penalty); // unproficient
       expect(stats.skills['Perception'].bonus).toBe(4 + d20Penalty);
       expect(stats.skills['Athletics'].bonus).toBe(3 + d20Penalty); // unproficient, Str +3
-      expect(stats.initiative).toBe(1 + d20Penalty);
+      expect(stats.initiative.effective).toBe(1 + d20Penalty);
       expect(stats.passivePerception).toBe(14 + d20Penalty);
       expect(stats.spellcasting?.attackBonus).toBe(2 + d20Penalty); // Cha 8 → −1, +3 prof
       expect(stats.speed).toEqual({

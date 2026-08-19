@@ -184,6 +184,12 @@ export interface PartyCharacter {
    * roster cards match the owner's sheet. Null only on legacy payloads.
    */
   armorClass: number | null;
+  /**
+   * Effective initiative modifier (VEG-452): the Dexterity modifier plus the
+   * stored bonus column, less any exhaustion penalty, resolved server-side so
+   * the encounter party-add rolls the same number the owner's sheet shows.
+   * Null only on legacy payloads.
+   */
   initiative: number | null;
   hitPoints: HitPoints | null;
 }
