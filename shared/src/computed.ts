@@ -380,11 +380,14 @@ export function computeExhaustionEffect(
 export function resolveSpeed(
   speed: number | null | undefined,
   exhaustion: ComputedExhaustion | null,
-  encumbrance: ComputedEncumbrance | null
+  // Not nullable, unlike `exhaustion`: "no exhaustion" is a real state, but every
+  // character has a carrying state — an unencumbered one is tier 'unencumbered'
+  // with a 0 penalty, not an absent block. A null here would mean nothing.
+  encumbrance: ComputedEncumbrance
 ): ComputedSpeed {
   const base = speed ?? DEFAULT_SPEED;
   const exhaustionPenalty = exhaustion?.speedPenalty ?? 0;
-  const encumbrancePenalty = encumbrance?.speedPenalty ?? 0;
+  const encumbrancePenalty = encumbrance.speedPenalty;
   const penalty = exhaustionPenalty + encumbrancePenalty;
   return {
     base,

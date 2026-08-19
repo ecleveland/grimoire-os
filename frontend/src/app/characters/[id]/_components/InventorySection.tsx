@@ -9,6 +9,7 @@ import type {
   InventoryItem,
   SrdItem,
 } from '@/lib/types';
+import type { ComputedEncumbrance, ComputedSpeed } from '@grimoire-os/shared';
 import { gearMetaFromItem, isGearCategory } from '@grimoire-os/shared';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
@@ -232,8 +233,13 @@ export default function InventorySection(props: InventorySectionProps) {
   // applied here alone. Absent under version skew (a pre-VEG-490 payload) —
   // degrade to no readout rather than crashing the sheet, the same contract
   // StatsBar's speed and CombatBar's derived AC follow.
-  const encumbrance = character.computed.encumbrance;
-  const speed = character.computed.speed;
+  // Annotated `| undefined` deliberately, though `ComputedStats` declares both
+  // non-optional: an older payload omits them, and without this the guards below
+  // read as dead code on a non-nullable field — the exact thing a cleanup pass
+  // (or a no-unnecessary-condition lint) would delete, reopening the crash.
+  // StatsBar does the same for `speed`.
+  const encumbrance: ComputedEncumbrance | undefined = character.computed.encumbrance;
+  const speed: ComputedSpeed | undefined = character.computed.speed;
   const overCapacity = encumbrance ? encumbrance.carried > encumbrance.capacity : false;
   // The "before → after" pair the readout shows: speed less exhaustion only,
   // then the final effective value. Display arithmetic on already-derived

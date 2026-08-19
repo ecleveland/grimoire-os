@@ -763,15 +763,16 @@ describe('SRD game rules seed data', () => {
     // until a DM noticed the tooltip disagreeing with their speed.
     it('states the same thresholds in its prose as in its numeric fields', () => {
       const rule = getCarryingCapacity();
-      expect(rule.carryCapacity).toContain(`× ${rule.capacityPerStrength}`);
-      expect(rule.encumbrance.encumbered).toContain(`× ${rule.encumberedPerStrength}`);
-      expect(rule.encumbrance.encumbered).toContain(`${rule.encumberedSpeedPenalty} ft`);
-      expect(rule.encumbrance.heavilyEncumbered).toContain(
-        `× ${rule.heavilyEncumberedPerStrength}`
-      );
-      expect(rule.encumbrance.heavilyEncumbered).toContain(
-        `${rule.heavilyEncumberedSpeedPenalty} ft`
-      );
+      // Anchored, not `toContain`: a bare substring passes on a prefix, so
+      // `capacityPerStrength: 1` would "match" the prose "× 15" and a penalty of
+      // 0 would match "10 ft". \\b forces the digits to be a whole number.
+      const times = (n: number) => new RegExp(`× ${n}\\b`);
+      const feet = (n: number) => new RegExp(`\\b${n} ft\\b`);
+      expect(rule.carryCapacity).toMatch(times(rule.capacityPerStrength));
+      expect(rule.encumbrance.encumbered).toMatch(times(rule.encumberedPerStrength));
+      expect(rule.encumbrance.encumbered).toMatch(feet(rule.encumberedSpeedPenalty));
+      expect(rule.encumbrance.heavilyEncumbered).toMatch(times(rule.heavilyEncumberedPerStrength));
+      expect(rule.encumbrance.heavilyEncumbered).toMatch(feet(rule.heavilyEncumberedSpeedPenalty));
     });
 
     it('covers all six SRD size categories', () => {

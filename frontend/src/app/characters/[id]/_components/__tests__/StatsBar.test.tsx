@@ -143,6 +143,26 @@ describe('StatsBar', () => {
         expect(breakdown).toHaveTextContent('20 encumbered');
       });
 
+      // The branch speedBreakdown's own comment documents, and which nothing
+      // reached: a pre-VEG-490 block has `penalty` but neither component field.
+      // The skew test below exits at the `!speed` guard instead, so without this
+      // the code could render "−undefined exhaustion" with a green suite.
+      it('shows the total but no breakdown for a block predating the component fields', () => {
+        const base = withStrength(16);
+        const legacy = {
+          ...base,
+          computed: {
+            ...base.computed,
+            speed: { base: 30, penalty: 10, effective: 20 },
+          },
+        } as unknown as Character;
+        render(<StatsBar character={legacy} />);
+        expect(
+          within(screen.getByTestId('stat-speed')).getByText('20 ft (−10)')
+        ).toBeInTheDocument();
+        expect(screen.queryByTestId('speed-breakdown')).toBeNull();
+      });
+
       it('omits the breakdown under version skew rather than crashing', () => {
         const base = withStrength(16, { exhaustion: 3 });
         const legacy = {

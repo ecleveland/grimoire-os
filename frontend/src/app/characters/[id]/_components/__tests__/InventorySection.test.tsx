@@ -455,7 +455,20 @@ describe('InventorySection', () => {
     // computed.encumbrance. The sheet must render rather than white-screen —
     // the same contract StatsBar's speed and CombatBar's derived AC follow.
     it('degrades without crashing when the computed block predates encumbrance', () => {
-      const base = makeCharacter(baseCharacter);
+      // Built from a character that IS encumbered (STR 6 against the fixture's
+      // 62 lb), so dropping the block has something to suppress. With the
+      // default STR 16 the tier would be 'unencumbered' anyway and the assertion
+      // below would hold no matter how the component behaved.
+      // `computed` is stripped before rebuilding: spreading a built character
+      // back through the factory would carry its prebuilt block through
+      // `over.computed ?? deriveComputed(...)`, leaving the STR-16 derivation in
+      // place — the staleness renderOwner's comment warns about.
+      const { computed: _stale, ...stored } = baseCharacter;
+      const base = makeCharacter({
+        ...stored,
+        abilityScores: { ...baseCharacter.abilityScores, strength: 6 },
+      });
+      expect(base.computed.encumbrance.tier).toBe('heavily-encumbered');
       const legacy = {
         ...base,
         computed: { ...base.computed, encumbrance: undefined },
@@ -463,6 +476,9 @@ describe('InventorySection', () => {
       render(<InventorySection character={legacy} editable onPatch={vi.fn()} isSaving={false} />);
       expect(screen.getByText('Equipment')).toBeInTheDocument();
       expect(screen.queryByTestId('encumbrance-status')).toBeNull();
+      // The capacity line reads the same block, so it must stay absent too
+      // rather than rendering "Carried undefined / undefined lb".
+      expect(screen.queryByTestId('carrying-capacity')).toBeNull();
     });
 
     it('toggles a row equipped flag through patch', async () => {

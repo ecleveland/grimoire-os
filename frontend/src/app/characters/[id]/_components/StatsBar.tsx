@@ -24,13 +24,14 @@ function speedLabel(speed: ComputedSpeed | undefined, storedSpeed: number | null
 }
 
 /**
- * Which reductions produced the total (VEG-490), or null when nothing is
- * reducing speed. Kept off the value line deliberately: that renders at text-xl
- * in a narrow grid tile, so naming the sources inline would wrap badly. This is
- * the same split CombatBar uses for its derived-AC breakdown.
+ * Which reductions produced the total (VEG-490); empty when nothing is reducing
+ * speed. Kept off the value line deliberately: that renders at text-xl in a
+ * narrow grid tile, so naming the sources inline would wrap badly. This is the
+ * same split CombatBar uses for its derived-AC breakdown.
  *
- * Both sources are named even when only one applies — "−15" alone doesn't tell
- * a player whether to drop cargo or take a long rest.
+ * Each contributing source is named — "−15" alone doesn't tell a player whether
+ * to drop cargo or take a long rest. A source contributing 0 is omitted rather
+ * than listed as "−0".
  */
 function speedBreakdown(speed: ComputedSpeed | undefined): string[] {
   if (!speed || speed.penalty <= 0) return [];

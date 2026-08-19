@@ -759,6 +759,19 @@ describe('encumbrance (VEG-490)', () => {
     expect(stats.speed).toMatchObject({ encumbrancePenalty: 10, penalty: 10, effective: 20 });
   });
 
+  // The upper edge of the encumbered tier. Migrated from the frontend lib's
+  // `encumbranceStatus(10, 'Medium', 100).tier === 'encumbered'` — the one
+  // assertion the VEG-490 move dropped. Without it, flipping `carried > heavyAt`
+  // to `>=` in computeEncumbrance passes the whole suite while silently moving a
+  // character carrying exactly Strength × 10 to −20 ft plus disadvantage.
+  it.each([
+    ['at Medium scale', null, 160],
+    ['at Large scale, where the threshold doubles', 'Large', 320],
+  ])('stays encumbered carrying exactly Strength × 10 %s', (_label, size, carried) => {
+    const stats = computeCharacterStats(input({ size, inventory: lbs(carried) }));
+    expect(stats.encumbrance).toMatchObject({ tier: 'encumbered', speedPenalty: 10 });
+  });
+
   it('is heavily encumbered above Strength × 10: −20 ft plus disadvantage', () => {
     const stats = computeCharacterStats(input({ inventory: lbs(161) }));
     expect(stats.encumbrance).toMatchObject({
