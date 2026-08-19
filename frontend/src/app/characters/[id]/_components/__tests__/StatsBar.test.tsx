@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import StatsBar from '../StatsBar';
+import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
 
 const mockMessage = vi.fn();
@@ -81,6 +82,100 @@ describe('StatsBar', () => {
       const char = makeCharacter({ speed: 25, exhaustion: 6 });
       render(<StatsBar character={char} />);
       expect(within(screen.getByTestId('stat-speed')).getByText('0 ft (−30)')).toBeInTheDocument();
+    });
+
+    // VEG-490. The big number stays compact (it renders at text-xl in a narrow
+    // tile); the sources go beneath it, one per line, the way CombatBar's derived
+    // AC already explains itself via `ac-breakdown`. One-per-line was chosen from
+    // a real screenshot: joined into a sentence they wrapped mid-phrase in the
+    // 3-column mobile grid, splitting "−10" from "encumbered".
+    describe('penalty breakdown (VEG-490)', () => {
+      // The shared fixture carries nothing by default, so weight is explicit
+      // here. At 62 lb: STR 16 is unencumbered (encumbered above 80), STR 10
+      // crosses the ×5 threshold (−10) and STR 6 the ×10 one (−20).
+      const withStrength = (strength: number, over: Partial<Character> = {}) =>
+        makeCharacter({
+          abilityScores: {
+            strength,
+            dexterity: 12,
+            constitution: 14,
+            intelligence: 10,
+            wisdom: 14,
+            charisma: 8,
+          },
+          size: 'Small',
+          speed: 25,
+          inventory: [{ name: 'Anvil', quantity: 1, weight: 62, equipped: false }],
+          ...over,
+        });
+
+      it('shows no breakdown when nothing is reducing speed', () => {
+        render(<StatsBar character={withStrength(16)} />);
+        expect(screen.queryByTestId('speed-breakdown')).toBeNull();
+      });
+
+      it('names exhaustion as the source when it is the only reduction', () => {
+        render(<StatsBar character={withStrength(16, { exhaustion: 3 })} />);
+        expect(screen.getByTestId('speed-breakdown')).toHaveTextContent('15 exhaustion');
+        // /encumber/, not /encumbrance/ — the label is "encumbered", so the
+        // narrower pattern would pass no matter what this rendered.
+        expect(screen.getByTestId('speed-breakdown')).not.toHaveTextContent(/encumber/i);
+      });
+
+      it('reduces speed for encumbrance alone, which it previously ignored', () => {
+        // The actual bug this ticket fixes: StatsBar rendered a flat 25 ft for an
+        // encumbered character, while the inventory panel showed 15.
+        render(<StatsBar character={withStrength(10)} />);
+        expect(
+          within(screen.getByTestId('stat-speed')).getByText('15 ft (−10)')
+        ).toBeInTheDocument();
+        expect(screen.getByTestId('speed-breakdown')).toHaveTextContent('10 encumbered');
+      });
+
+      it('names both sources when both apply, so the total is explainable', () => {
+        // STR 6 → heavily encumbered (−20); exhaustion 2 → −10; base 25 → 0.
+        render(<StatsBar character={withStrength(6, { exhaustion: 2 })} />);
+        expect(
+          within(screen.getByTestId('stat-speed')).getByText('0 ft (−30)')
+        ).toBeInTheDocument();
+        const breakdown = screen.getByTestId('speed-breakdown');
+        expect(breakdown).toHaveTextContent('10 exhaustion');
+        expect(breakdown).toHaveTextContent('20 encumbered');
+      });
+
+      // The branch speedBreakdown's own comment documents, and which nothing
+      // reached: a pre-VEG-490 block has `penalty` but neither component field.
+      // The skew test below exits at the `!speed` guard instead, so without this
+      // the code could render "−undefined exhaustion" with a green suite.
+      it('shows the total but no breakdown for a block predating the component fields', () => {
+        const base = withStrength(16);
+        const legacy = {
+          ...base,
+          computed: {
+            ...base.computed,
+            speed: { base: 30, penalty: 10, effective: 20 },
+          },
+        } as unknown as Character;
+        render(<StatsBar character={legacy} />);
+        expect(
+          within(screen.getByTestId('stat-speed')).getByText('20 ft (−10)')
+        ).toBeInTheDocument();
+        expect(screen.queryByTestId('speed-breakdown')).toBeNull();
+      });
+
+      it('omits the breakdown under version skew rather than crashing', () => {
+        const base = withStrength(16, { exhaustion: 3 });
+        const legacy = {
+          ...base,
+          computed: {
+            ...base.computed,
+            speed: undefined as unknown as (typeof base)['computed']['speed'],
+          },
+        };
+        render(<StatsBar character={legacy} />);
+        expect(within(screen.getByTestId('stat-speed')).getByText('25 ft')).toBeInTheDocument();
+        expect(screen.queryByTestId('speed-breakdown')).toBeNull();
+      });
     });
 
     it('falls back to the stored column when computed.speed is absent (version skew)', () => {

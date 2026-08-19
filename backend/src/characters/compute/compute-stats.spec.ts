@@ -1,10 +1,12 @@
 import type {
   AbilityScores,
+  CarryingCapacityRule,
   ClassSpellcasting,
   ExhaustionRule,
   InventoryItem,
 } from '@grimoire-os/shared';
 import {
+  CARRYING_CAPACITY_RULE,
   computeCoreCharacterStats,
   computeXpBand,
   DEFAULT_CHARACTER_STATS_RULES,
@@ -46,6 +48,7 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     weapons: [],
     exhaustion: null,
     speed: null,
+    size: null,
     ...over,
   };
 }
@@ -554,7 +557,13 @@ describe('computeCharacterStats', () => {
       expect(stats.skills['Perception'].bonus).toBe(4); // Wis 13 → +1, +3 prof
       expect(stats.initiative).toBe(1);
       expect(stats.passivePerception).toBe(14);
-      expect(stats.speed).toEqual({ base: 30, penalty: 0, effective: 30 });
+      expect(stats.speed).toEqual({
+        base: 30,
+        exhaustionPenalty: 0,
+        encumbrancePenalty: 0,
+        penalty: 0,
+        effective: 30,
+      });
     });
 
     it.each([
@@ -581,6 +590,8 @@ describe('computeCharacterStats', () => {
       expect(stats.spellcasting?.attackBonus).toBe(2 + d20Penalty); // Cha 8 → −1, +3 prof
       expect(stats.speed).toEqual({
         base: 30,
+        exhaustionPenalty: speedPenalty,
+        encumbrancePenalty: 0,
         penalty: speedPenalty,
         effective: 30 - speedPenalty,
       });
@@ -695,17 +706,189 @@ describe('computeCharacterStats', () => {
     it('floors effective speed at zero rather than going negative', () => {
       // Base 20 ft, level 6 → −30 ft.
       const stats = computeCharacterStats(input({ exhaustion: 6, speed: 20 }));
-      expect(stats.speed).toEqual({ base: 20, penalty: 30, effective: 0 });
+      expect(stats.speed).toEqual({
+        base: 20,
+        exhaustionPenalty: 30,
+        encumbrancePenalty: 0,
+        penalty: 30,
+        effective: 0,
+      });
     });
 
     it('reports the stored speed column as the base, defaulting when absent', () => {
       expect(computeCharacterStats(input({ speed: 40 })).speed).toEqual({
         base: 40,
+        exhaustionPenalty: 0,
+        encumbrancePenalty: 0,
         penalty: 0,
         effective: 40,
       });
       expect(computeCharacterStats(input({ speed: null })).speed.base).toBe(30);
     });
+  });
+});
+
+// VEG-490. Encumbrance was derived client-side in
+// frontend/src/lib/character-inventory.ts and applied on top of computed.speed
+// by InventorySection alone, so StatsBar's headline Speed stat silently omitted
+// it. These cases move here with the derivation; the frontend specs they came
+// from pinned every edge case below and none of that coverage is dropped.
+describe('encumbrance (VEG-490)', () => {
+  // Str 16 → capacity 240 lb, encumbered above 80, heavily encumbered above 160.
+  const lbs = (weight: number) => [{ name: 'Load', quantity: 1, weight, equipped: false }];
+
+  it('is unencumbered at or below Strength × 5, with no speed penalty', () => {
+    const stats = computeCharacterStats(input({ inventory: lbs(80) }));
+    expect(stats.encumbrance).toEqual({
+      tier: 'unencumbered',
+      speedPenalty: 0,
+      hasDisadvantage: false,
+      capacity: 240,
+      carried: 80,
+    });
+    expect(stats.speed.encumbrancePenalty).toBe(0);
+  });
+
+  it('is encumbered above Strength × 5: −10 ft, no disadvantage', () => {
+    const stats = computeCharacterStats(input({ inventory: lbs(81) }));
+    expect(stats.encumbrance).toMatchObject({
+      tier: 'encumbered',
+      speedPenalty: 10,
+      hasDisadvantage: false,
+    });
+    expect(stats.speed).toMatchObject({ encumbrancePenalty: 10, penalty: 10, effective: 20 });
+  });
+
+  // The upper edge of the encumbered tier. Migrated from the frontend lib's
+  // `encumbranceStatus(10, 'Medium', 100).tier === 'encumbered'` — the one
+  // assertion the VEG-490 move dropped. Without it, flipping `carried > heavyAt`
+  // to `>=` in computeEncumbrance passes the whole suite while silently moving a
+  // character carrying exactly Strength × 10 to −20 ft plus disadvantage.
+  it.each([
+    ['at Medium scale', null, 160],
+    ['at Large scale, where the threshold doubles', 'Large', 320],
+  ])('stays encumbered carrying exactly Strength × 10 %s', (_label, size, carried) => {
+    const stats = computeCharacterStats(input({ size, inventory: lbs(carried) }));
+    expect(stats.encumbrance).toMatchObject({ tier: 'encumbered', speedPenalty: 10 });
+  });
+
+  it('is heavily encumbered above Strength × 10: −20 ft plus disadvantage', () => {
+    const stats = computeCharacterStats(input({ inventory: lbs(161) }));
+    expect(stats.encumbrance).toMatchObject({
+      tier: 'heavily-encumbered',
+      speedPenalty: 20,
+      hasDisadvantage: true,
+    });
+    expect(stats.speed).toMatchObject({ encumbrancePenalty: 20, effective: 10 });
+  });
+
+  it('carries nothing, and is unencumbered, with an empty inventory', () => {
+    const stats = computeCharacterStats(input({ inventory: [] }));
+    expect(stats.encumbrance).toMatchObject({ tier: 'unencumbered', carried: 0, capacity: 240 });
+  });
+
+  it.each([
+    ['Tiny', 0.5, 120],
+    ['Small', 1, 240],
+    ['Large', 2, 480],
+    ['Huge', 4, 960],
+    ['Gargantuan', 8, 1920],
+  ])('scales capacity for a %s creature (×%p)', (size, _multiplier, capacity) => {
+    expect(computeCharacterStats(input({ size })).encumbrance.capacity).toBe(capacity);
+  });
+
+  // The thresholds and the capacity scale by the same size multiplier.
+  it('scales thresholds and capacity by creature size', () => {
+    const large = computeCharacterStats(input({ inventory: lbs(160), size: 'Large' }));
+    expect(large.encumbrance).toMatchObject({ tier: 'unencumbered', capacity: 480 });
+    expect(
+      computeCharacterStats(input({ inventory: lbs(161), size: 'Large' })).encumbrance.tier
+    ).toBe('encumbered');
+  });
+
+  it.each([
+    ['an unknown size', 'Weird'],
+    ['an absent size', null],
+  ])('falls back to the Medium multiplier for %s', (_label, size) => {
+    const stats = computeCharacterStats(input({ inventory: lbs(81), size }));
+    expect(stats.encumbrance).toMatchObject({ tier: 'encumbered', capacity: 240 });
+  });
+
+  it('sums weight × quantity, counting a missing weight as zero', () => {
+    const stats = computeCharacterStats(
+      input({
+        inventory: [
+          { name: 'Rations', quantity: 5, weight: 2, equipped: false },
+          { name: 'Torch', quantity: 3, equipped: false },
+        ],
+      })
+    );
+    expect(stats.encumbrance.carried).toBe(10);
+  });
+
+  it('rounds carried weight to two decimals rather than showing float drift', () => {
+    const stats = computeCharacterStats(
+      input({ inventory: [{ name: 'Dart', quantity: 3, weight: 0.1, equipped: false }] })
+    );
+    expect(stats.encumbrance.carried).toBe(0.3);
+  });
+
+  // A minimal character (null abilityScores) must read as unencumbered rather
+  // than spuriously over a capacity of 0 — the VEG-425 degrade-don't-crash rule,
+  // and what InventorySection's DEFAULT_ABILITY_SCORES fallback did client-side.
+  it('treats a character with no ability scores as unencumbered', () => {
+    const stats = computeCharacterStats(input({ abilityScores: null, inventory: lbs(40) }));
+    expect(stats.encumbrance).toMatchObject({ tier: 'unencumbered', speedPenalty: 0 });
+    expect(stats.speed.encumbrancePenalty).toBe(0);
+  });
+
+  describe('stacked with exhaustion — the whole point of the ticket', () => {
+    it('applies both reductions and keeps them separable in the breakdown', () => {
+      // Base 30, exhaustion 2 → −10, heavily encumbered → −20.
+      const stats = computeCharacterStats(input({ exhaustion: 2, inventory: lbs(161) }));
+      expect(stats.speed).toEqual({
+        base: 30,
+        exhaustionPenalty: 10,
+        encumbrancePenalty: 20,
+        penalty: 30,
+        effective: 0,
+      });
+    });
+
+    it('floors at zero with both stacked, never reporting a negative speed', () => {
+      // Base 30, exhaustion 5 → −25, heavily encumbered → −20; total −45.
+      const stats = computeCharacterStats(input({ exhaustion: 5, inventory: lbs(200) }));
+      expect(stats.speed.penalty).toBe(45);
+      expect(stats.speed.effective).toBe(0);
+    });
+
+    it('reports one effective speed, so the stat bar and inventory readout agree', () => {
+      const stats = computeCharacterStats(input({ exhaustion: 1, inventory: lbs(90), speed: 40 }));
+      // 40 − 5 (exhaustion 1) − 10 (encumbered) = 25.
+      expect(stats.speed.effective).toBe(25);
+      expect(stats.speed.base - stats.speed.penalty).toBe(stats.speed.effective);
+    });
+  });
+});
+
+describe('carrying-capacity rule data', () => {
+  it('the shared CARRYING_CAPACITY_RULE constant matches the seeded rule (drift guard)', () => {
+    // Same arrangement as the exhaustion guard below: the compute layer reads the
+    // seeded row while frontend fixtures read the shared constant, so this pins
+    // them to one rule. The prose keys are display text the derivation never
+    // reads, so they are not part of the contract.
+    const seeded = srdGameRules.find(r => r.category === 'carrying-capacity' && r.key === 'rules');
+    const {
+      carryCapacity: _carryCapacity,
+      pushDragLift: _pushDragLift,
+      encumbrance: _encumbrance,
+      ...numeric
+    } = seeded!.value as unknown as CarryingCapacityRule & {
+      carryCapacity: string;
+      pushDragLift: string;
+      encumbrance: Record<string, string>;
+    };
+    expect(numeric).toEqual(CARRYING_CAPACITY_RULE);
   });
 });
 

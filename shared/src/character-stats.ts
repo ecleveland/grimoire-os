@@ -18,6 +18,7 @@
 // and `EXHAUSTION_RULE` already use in ./computed.
 
 import type {
+  CarryingCapacityRule,
   ComputedAbilityModifiers,
   ComputedExhaustion,
   ComputedSave,
@@ -27,8 +28,10 @@ import type {
   ExhaustionRule,
 } from './computed';
 import {
+  CARRYING_CAPACITY_RULE,
   EXHAUSTION_RULE,
   XP_LEVEL_THRESHOLDS,
+  computeEncumbrance,
   computeExhaustionEffect,
   computeXpBand,
   resolveSpeed,
@@ -192,6 +195,8 @@ export interface CharacterStatsRules {
   xpThresholds: Readonly<Partial<Record<string, number>>>;
   /** Per-level exhaustion scaling factors. */
   exhaustion: ExhaustionRule;
+  /** Carry thresholds, speed penalties and size multipliers (VEG-490). */
+  carryingCapacity: CarryingCapacityRule;
 }
 
 /**
@@ -204,6 +209,7 @@ export const DEFAULT_CHARACTER_STATS_RULES: CharacterStatsRules = {
   skillAbilityMap: SKILL_ABILITY_MAP,
   xpThresholds: XP_LEVEL_THRESHOLDS,
   exhaustion: EXHAUSTION_RULE,
+  carryingCapacity: CARRYING_CAPACITY_RULE,
 };
 
 // ── Primitive formulas ─────────────────────────────────────────────────
@@ -276,6 +282,9 @@ export interface CharacterStatsInput {
   exhaustion?: number | null;
   /** Stored walking speed in feet; null falls back to `DEFAULT_SPEED`. */
   speed?: number | null;
+  /** Creature size, scaling the carry thresholds (VEG-490). Free text
+   * server-side, so an unrecognized value falls back to the ×1 multiplier. */
+  size?: string | null;
 }
 
 /**
@@ -321,6 +330,7 @@ export function computeCoreCharacterStats(
     weapons,
     exhaustion: exhaustionLevel,
     speed,
+    size,
   } = input;
   const profBonus = proficiencyBonusFrom(rules.proficiencyBonusTable, level);
 
@@ -393,6 +403,17 @@ export function computeCoreCharacterStats(
 
   const items = inventory ?? [];
 
+  // Carrying state (VEG-490). Reads the raw Strength *score*, not its modifier —
+  // 5e capacity is Strength × 15. `scoreFor` supplies the neutral 10 for a
+  // character with no stored ability scores, so a minimal sheet reads as
+  // unencumbered instead of over a capacity of 0.
+  const encumbrance = computeEncumbrance(
+    rules.carryingCapacity,
+    scoreFor(abilityScores, 'strength'),
+    size,
+    items
+  );
+
   return {
     proficiencyBonus: profBonus,
     abilityModifiers,
@@ -413,7 +434,8 @@ export function computeCoreCharacterStats(
       weapons ?? [],
       d20Penalty
     ),
-    speed: resolveSpeed(speed, exhaustion),
+    speed: resolveSpeed(speed, exhaustion, encumbrance),
     exhaustion,
+    encumbrance,
   };
 }

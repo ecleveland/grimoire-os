@@ -38,6 +38,9 @@ export function deriveComputed(
     | 'weapons'
     | 'exhaustion'
     | 'speed'
+    // Scales the carry thresholds the encumbrance block derives (VEG-490), so a
+    // spec overriding `size` gets a matching tier for free.
+    | 'size'
   >
 ): ComputedStats {
   return { ...computeCoreCharacterStats(DEFAULT_CHARACTER_STATS_RULES, c), spellSlots: null };

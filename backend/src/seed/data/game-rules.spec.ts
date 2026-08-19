@@ -710,6 +710,11 @@ describe('SRD game rules seed data', () => {
     type CarryingCapacity = {
       carryCapacity: string;
       pushDragLift: string;
+      capacityPerStrength: number;
+      encumberedPerStrength: number;
+      heavilyEncumberedPerStrength: number;
+      encumberedSpeedPenalty: number;
+      heavilyEncumberedSpeedPenalty: number;
       sizeMultipliers: Record<string, number>;
       encumbrance: { encumbered: string; heavilyEncumbered: string };
     };
@@ -727,6 +732,14 @@ describe('SRD game rules seed data', () => {
       expect(rule.value).toEqual({
         carryCapacity: 'Strength score × 15 (in pounds)',
         pushDragLift: 'Strength score × 30 (in pounds)',
+        // Machine-readable mirrors of the prose above (VEG-490) — what the
+        // compute layer actually derives from. compute-stats.spec.ts pins these
+        // to CARRYING_CAPACITY_RULE in shared; this asserts the row's full shape.
+        capacityPerStrength: 15,
+        encumberedPerStrength: 5,
+        heavilyEncumberedPerStrength: 10,
+        encumberedSpeedPenalty: 10,
+        heavilyEncumberedSpeedPenalty: 20,
         sizeMultipliers: {
           Tiny: 0.5,
           Small: 1,
@@ -741,6 +754,25 @@ describe('SRD game rules seed data', () => {
             'Strength score × 10 — speed reduced by 20 ft, disadvantage on ability checks, attack rolls, and STR/DEX/CON saving throws',
         },
       });
+    });
+
+    // The row now states each threshold twice — once as prose for the rules API,
+    // once as a number for the compute layer (VEG-490). Nothing stops an editor
+    // updating one and not the other, and the prose is what a human reads while
+    // the number is what the sheet obeys, so a silent split would be invisible
+    // until a DM noticed the tooltip disagreeing with their speed.
+    it('states the same thresholds in its prose as in its numeric fields', () => {
+      const rule = getCarryingCapacity();
+      // Anchored, not `toContain`: a bare substring passes on a prefix, so
+      // `capacityPerStrength: 1` would "match" the prose "× 15" and a penalty of
+      // 0 would match "10 ft". \\b forces the digits to be a whole number.
+      const times = (n: number) => new RegExp(`× ${n}\\b`);
+      const feet = (n: number) => new RegExp(`\\b${n} ft\\b`);
+      expect(rule.carryCapacity).toMatch(times(rule.capacityPerStrength));
+      expect(rule.encumbrance.encumbered).toMatch(times(rule.encumberedPerStrength));
+      expect(rule.encumbrance.encumbered).toMatch(feet(rule.encumberedSpeedPenalty));
+      expect(rule.encumbrance.heavilyEncumbered).toMatch(times(rule.heavilyEncumberedPerStrength));
+      expect(rule.encumbrance.heavilyEncumbered).toMatch(feet(rule.heavilyEncumberedSpeedPenalty));
     });
 
     it('covers all six SRD size categories', () => {

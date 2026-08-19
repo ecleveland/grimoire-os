@@ -120,6 +120,9 @@ export class CharactersService {
         weapons: Array.isArray(character.weapons) ? (character.weapons as unknown as Weapon[]) : [],
         exhaustion: character.exhaustion,
         speed: character.speed,
+        // Scales the carry thresholds (VEG-490); free text, so an unrecognized
+        // value falls back to the ×1 multiplier rather than being trusted.
+        size: character.size,
       },
       classData.spellcasting,
       classData.weaponProficiencies

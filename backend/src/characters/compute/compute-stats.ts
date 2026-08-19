@@ -1,4 +1,5 @@
 import type {
+  CarryingCapacityRule,
   CharacterStatsInput,
   CharacterStatsRules,
   ClassSpellcasting,
@@ -61,6 +62,7 @@ const SEEDED_RULES: CharacterStatsRules = {
   skillAbilityMap: ruleValue('skills', 'ability-mappings') as Record<string, string>,
   xpThresholds: ruleValue('experience-points', 'level-thresholds') as Record<string, number>,
   exhaustion: ruleValue('exhaustion', 'levels') as unknown as ExhaustionRule,
+  carryingCapacity: ruleValue('carrying-capacity', 'rules') as unknown as CarryingCapacityRule,
 };
 
 // ── Primitive formulas ─────────────────────────────────────────────────
