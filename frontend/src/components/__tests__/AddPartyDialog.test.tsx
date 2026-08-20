@@ -122,13 +122,38 @@ describe('AddPartyDialog', () => {
     ).toBe('1');
   });
 
-  it('treats a null sheet initiative modifier as +0 for rolls', async () => {
+  // Was "treats a null sheet initiative modifier as +0" until VEG-452. The
+  // roster now always resolves a number, so null is unrepresentable and that
+  // test pinned a shape no backend can send. A 0 modifier is the real case it
+  // was reaching for — an unmodified character — and it still has to roll flat.
+  it('shows the resolved initiative modifier as visible text, not only in the tooltip', () => {
+    // A DM on a tablet has no hover; the tooltip is unreachable there and to
+    // screen readers, so the reconciled number has to be on the row itself.
+    renderDialog({ characters: [makeCharacter({ initiative: 4 })] });
+    expect(screen.getByTestId('party-initiative-char-1')).toHaveTextContent('Init +4');
+  });
+
+  it('signs a negative resolved modifier in the visible readout', () => {
+    renderDialog({ characters: [makeCharacter({ initiative: -2 })] });
+    expect(screen.getByTestId('party-initiative-char-1')).toHaveTextContent('Init -2');
+  });
+
+  it('rolls a flat d20 for a character whose resolved modifier is 0', async () => {
     const user = userEvent.setup();
-    renderDialog({ characters: [makeCharacter({ initiative: null })], rng: () => 0.999 });
+    renderDialog({ characters: [makeCharacter({ initiative: 0 })], rng: () => 0.999 });
     await user.click(screen.getByRole('button', { name: /roll initiative for thia/i }));
     expect(
       (screen.getByRole('spinbutton', { name: /initiative for thia/i }) as HTMLInputElement).value
     ).toBe('20');
+  });
+
+  it('rolls with a negative resolved modifier rather than flooring it away', async () => {
+    const user = userEvent.setup();
+    renderDialog({ characters: [makeCharacter({ initiative: -3 })], rng: () => 0.999 });
+    await user.click(screen.getByRole('button', { name: /roll initiative for thia/i }));
+    expect(
+      (screen.getByRole('spinbutton', { name: /initiative for thia/i }) as HTMLInputElement).value
+    ).toBe('17');
   });
 
   it('calls onCancel from the cancel button', async () => {

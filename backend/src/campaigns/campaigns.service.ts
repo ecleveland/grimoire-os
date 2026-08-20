@@ -11,7 +11,6 @@ import {
   abilityModifier,
   computeExhaustionEffect,
   deriveArmorClass,
-  EXHAUSTION_RULE,
   inventoryFromJson,
   resolveInitiative,
 } from '@grimoire-os/shared';
@@ -31,6 +30,10 @@ import {
 } from './dto/campaign-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { stripCombatantsForCharacters } from './combatant-cleanup';
+// The same seeded game-rules table the character sheet's compute layer derives
+// from (VEG-452) — not the shared package's master copy, so the roster and the
+// sheet cannot disagree about exhaustion even if the two tables ever drift.
+import { SEEDED_RULES } from '../characters/compute/compute-stats';
 
 const campaignInclude = {
   players: true,
@@ -75,47 +78,50 @@ const partyCharacterSelect = {
 } satisfies Prisma.CharacterSelect;
 
 /**
- * Resolve the AC the roster exposes (VEG-410): the stored column is a manual
- * override that is usually null now that AC derives from equipped gear, so
- * every PartyCharacter consumer (encounter party-add, the roster cards) gets
- * the same effective value the owner's sheet shows instead of a null.
- */
-function withEffectiveArmorClass<
-  T extends { armorClass: number | null; abilityScores: unknown; inventory: unknown },
->(character: T): T {
-  if (character.armorClass !== null) return character;
-  const dexterity = (character.abilityScores as AbilityScores | null)?.dexterity ?? 10;
-  const { derived } = deriveArmorClass(
-    inventoryFromJson(character.inventory),
-    abilityModifier(dexterity),
-    null
-  );
-  return { ...character, armorClass: derived };
-}
-
-/**
- * Resolve the initiative modifier the roster exposes (VEG-452), the same way
- * `withEffectiveArmorClass` above resolves AC: the encounter party-add rolls
- * `d20 + initiative` off this projection, so it must quote exactly what the
- * owner's sheet shows rather than a second, quietly different number.
+ * Resolve every derived stat the roster exposes, in one pass (VEG-410, VEG-452).
  *
- * The stored column is an additive bonus over the Dexterity modifier, not an
- * override — see `ComputedInitiative` in the shared package for why. VEG-449
- * could only apply the exhaustion penalty here and left the reconciliation to
- * this ticket; its narrow version bailed on a null stored column, which is the
- * majority state, so an unmodified PC was rolled at d20+0 while their sheet
- * read the full Dex modifier.
+ * AC and initiative both need the Dexterity modifier, so they are derived
+ * together: two helpers meant parsing `abilityScores`, applying the `?? 10`
+ * fallback and calling `abilityModifier` twice per row, plus two object spreads.
+ * Keeping them in one function also means a third derived field cannot be added
+ * to one call site and forgotten at the other.
+ *
+ * AC: the stored column is a manual override, usually null now that AC derives
+ * from equipped gear, so consumers get the effective value the owner's sheet
+ * shows instead of a null.
+ *
+ * Initiative: the stored column is an additive bonus over the Dexterity
+ * modifier, not an override — see `ComputedInitiative` in the shared package for
+ * why. The encounter party-add rolls `d20 + initiative` off this projection, so
+ * it must quote exactly what the sheet shows. VEG-449 could only apply the
+ * exhaustion penalty here and left the reconciliation to VEG-452; its narrow
+ * version bailed on a null stored column, which is the majority state, so an
+ * unmodified PC was rolled at d20+0 while their sheet read the full Dex modifier.
  */
-function withEffectiveInitiative<
-  T extends { initiative: number | null; abilityScores: unknown; exhaustion: number | null },
+function withEffectiveDerivedStats<
+  T extends {
+    armorClass: number | null;
+    initiative: number | null;
+    abilityScores: unknown;
+    inventory: unknown;
+    exhaustion: number | null;
+  },
 >(character: T): T & { initiative: number } {
   const dexterity = (character.abilityScores as AbilityScores | null)?.dexterity ?? 10;
-  const { effective } = resolveInitiative(
+  const dexModifier = abilityModifier(dexterity);
+
+  const armorClass =
+    character.armorClass !== null
+      ? character.armorClass
+      : deriveArmorClass(inventoryFromJson(character.inventory), dexModifier, null).derived;
+
+  const { effective: initiative } = resolveInitiative(
     character.initiative,
-    abilityModifier(dexterity),
-    computeExhaustionEffect(EXHAUSTION_RULE, character.exhaustion)
+    dexModifier,
+    computeExhaustionEffect(SEEDED_RULES.exhaustion, character.exhaustion)
   );
-  return { ...character, initiative: effective };
+
+  return { ...character, armorClass, initiative };
 }
 
 function serialize(campaign: any): CampaignDto {
@@ -266,7 +272,7 @@ export class CampaignsService {
     });
     return toDtoArray(
       PartyCharacterDto,
-      characters.map(c => withEffectiveInitiative(withEffectiveArmorClass(c)))
+      characters.map(c => withEffectiveDerivedStats(c))
     );
   }
 
@@ -290,7 +296,7 @@ export class CampaignsService {
     });
     return toDtoArray(
       PartyCharacterDto,
-      characters.map(c => withEffectiveInitiative(withEffectiveArmorClass(c)))
+      characters.map(c => withEffectiveDerivedStats(c))
     );
   }
 

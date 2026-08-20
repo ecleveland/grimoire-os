@@ -98,7 +98,10 @@ describe('StatsBar', () => {
       it('names a negative bonus rather than hiding it', () => {
         render(<StatsBar character={withInitiative({ initiative: -2 })} />);
         expect(within(screen.getByTestId('stat-initiative')).getByText('-1')).toBeInTheDocument();
-        expect(screen.getByTestId('initiative-breakdown')).toHaveTextContent('-2 bonus');
+        // Typographic minus, not an ASCII hyphen: every sign on this line uses
+        // one glyph so a negative bonus cannot sit above "−6 exhaustion" and
+        // disagree with it (the rule StatusTracker states for its own line).
+        expect(screen.getByTestId('initiative-breakdown')).toHaveTextContent('−2 bonus');
       });
 
       it('names exhaustion alongside the bonus when both apply', () => {

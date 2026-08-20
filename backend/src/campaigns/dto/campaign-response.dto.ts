@@ -37,7 +37,8 @@ export class PartyCharacterDto {
   @Expose() class!: string | null;
   @Expose() level!: number;
   @Expose() armorClass!: number | null;
-  @Expose() initiative!: number | null;
+  // Always resolved by withEffectiveDerivedStats (VEG-452); never null.
+  @Expose() initiative!: number;
   @Expose() hitPoints!: HitPoints | null;
 }
 

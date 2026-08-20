@@ -60,8 +60,11 @@ test.describe('character sheet — initiative (VEG-452)', () => {
     await page.getByRole('button', { name: /add party/i }).click();
     await expect(page.getByTestId('add-party')).toBeVisible();
 
-    // The roll button's tooltip names the modifier the roster resolved. Before
-    // this ticket it read "d20 +0" for this character.
+    // Assert the VISIBLE readout, not the Roll button's tooltip: a title
+    // attribute is unreachable on touch and to screen readers, so testing it
+    // alone would leave the user-facing half of this fix uncovered. Before this
+    // ticket the roster resolved this character to +0.
+    await expect(page.getByTestId('add-party')).toContainText('Init +4');
     await expect(
       page.getByRole('button', { name: 'Roll initiative for Quick Quinn' })
     ).toHaveAttribute('title', 'd20 +4');
@@ -109,6 +112,7 @@ test.describe('character sheet — initiative (VEG-452)', () => {
     await page.goto(`/campaigns/${campaignId}/encounters/${encounterId}`);
     await page.getByRole('button', { name: /add party/i }).click();
     await expect(page.getByTestId('add-party')).toBeVisible();
+    await expect(page.getByTestId('add-party')).toContainText('Init +7');
     await expect(
       page.getByRole('button', { name: 'Roll initiative for Alert Alia' })
     ).toHaveAttribute('title', 'd20 +7');

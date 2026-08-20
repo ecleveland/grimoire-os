@@ -76,6 +76,11 @@ export interface Character {
   deathSaves: DeathSaves | null;
   armorClass: number | null;
   speed: number | null;
+  /**
+   * Flat initiative BONUS added on top of the Dexterity modifier (VEG-452), not
+   * a total. Null and 0 both mean "no bonus"; see {@link ComputedInitiative}
+   * for why it adds rather than overrides.
+   */
   initiative: number | null;
   proficiencies: string[];
   languages: string[];
@@ -129,9 +134,14 @@ export interface Character {
    * Authoritative derived stats, attached by the backend to every character
    * response (VEG-346) and consumed by the sheet as the single source of truth
    * (VEG-412). Required, not optional: `toCharacterDto` always sets it, and an
-   * honest type lets the sheet read it without fabricated fallbacks. Where a
-   * stored column overlaps (initiative, spell-slot maxima), the computed value
-   * wins for display; stored fields keep only the mutable play state (`used`).
+   * honest type lets the sheet read it without fabricated fallbacks.
+   *
+   * Where a stored column overlaps, the reconciliation rule is per-field and
+   * documented on the computed type itself, because the rules genuinely differ:
+   * `armorClass` treats the stored column as an override that wins when set
+   * (VEG-410), `initiative` folds it in as an additive bonus over the Dexterity
+   * modifier (VEG-452), and spell-slot maxima are owned by the class
+   * progression while stored rows keep the mutable play state (`used`).
    */
   computed: ComputedStats;
   createdAt: string;
@@ -188,9 +198,14 @@ export interface PartyCharacter {
    * Effective initiative modifier (VEG-452): the Dexterity modifier plus the
    * stored bonus column, less any exhaustion penalty, resolved server-side so
    * the encounter party-add rolls the same number the owner's sheet shows.
-   * Null only on legacy payloads.
+   *
+   * Non-nullable, unlike {@link PartyCharacter.armorClass} above: the roster
+   * resolver returns `T & { initiative: number }` and both call sites apply it
+   * unconditionally, so there is no path that yields a null. Typing it nullable
+   * would keep dead `?? 0` branches alive downstream and let specs pin a shape
+   * no backend can send.
    */
-  initiative: number | null;
+  initiative: number;
   hitPoints: HitPoints | null;
 }
 

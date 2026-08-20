@@ -68,18 +68,27 @@ function initiativeValue(initiative: ComputedInitiative | number | undefined): n
  * redundant "+1 dex" line under a "+1" value.
  *
  * Same split as {@link speedBreakdown} for the same reason: the value renders at
- * text-xl in a narrow tile, so naming sources inline would wrap. A legacy numeric
- * initiative has no parts to name and yields nothing.
+ * text-xl in a narrow tile, so naming sources inline would wrap.
+ *
+ * Signs use one glyph across the whole line. `formatModifier` emits an ASCII
+ * hyphen, so mixing it with the typographic minus the reductions use would put
+ * "-2 bonus" directly above "−6 exhaustion" — the disagreement StatusTracker's
+ * own comment calls out and avoids the same way.
  */
+function signedPart(value: number): string {
+  return value < 0 ? `−${Math.abs(value)}` : `+${value}`;
+}
+
 function initiativeBreakdown(initiative: ComputedInitiative | number | undefined): string[] {
   if (typeof initiative !== 'object' || initiative === null) return [];
   const { base, bonus, exhaustionPenalty } = initiative;
+  // A malformed block reaches here with undefined members, which would compare
+  // unequal to 0 and render "+undefined dex". Same degrade-don't-crash contract
+  // initiativeValue's `?? 0` follows.
+  if (![base, bonus, exhaustionPenalty].every(v => typeof v === 'number')) return [];
   if (bonus === 0 && exhaustionPenalty === 0) return [];
-  const parts = [`${formatModifier(base)} dex`];
-  if (bonus !== 0) parts.push(`${formatModifier(bonus)} bonus`);
-  // Magnitude with an explicit minus, matching speedBreakdown above rather than
-  // formatModifier — the two tiles sit side by side and must not disagree on
-  // how a reduction looks.
+  const parts = [`${signedPart(base)} dex`];
+  if (bonus !== 0) parts.push(`${signedPart(bonus)} bonus`);
   if (exhaustionPenalty > 0) parts.push(`−${exhaustionPenalty} exhaustion`);
   return parts;
 }

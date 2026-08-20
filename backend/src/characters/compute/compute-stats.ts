@@ -57,7 +57,13 @@ function ruleValue(category: string, key: string): Record<string, unknown> {
   return rule.value as Record<string, unknown>;
 }
 
-const SEEDED_RULES: CharacterStatsRules = {
+/**
+ * The seeded rules the compute layer derives from. Exported so other modules
+ * resolving the same derived values (the campaign roster's effective initiative,
+ * VEG-452) read this table rather than the shared package's master copy — two
+ * tables pinned together by a drift test is one source fewer than one table.
+ */
+export const SEEDED_RULES: CharacterStatsRules = {
   proficiencyBonusTable: ruleValue('proficiency-bonus', 'table') as Record<string, number>,
   skillAbilityMap: ruleValue('skills', 'ability-mappings') as Record<string, string>,
   xpThresholds: ruleValue('experience-points', 'level-thresholds') as Record<string, number>,

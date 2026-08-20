@@ -77,6 +77,15 @@ export interface ComputedXp {
 export const MAX_EXPERIENCE_POINTS = 2_147_483_647;
 
 /**
+ * Symmetric bound on the stored initiative bonus (VEG-452), enforced at the DTO
+ * write boundary. Deliberately far above any real 5e bonus (Alert is +5) rather
+ * than rules-accurate: the job is keeping the value inside Postgres int4 so a
+ * bad write 400s at the boundary instead of 500ing in the driver, not policing
+ * homebrew. Negative bonuses are legitimate, hence the symmetry.
+ */
+export const MAX_INITIATIVE_BONUS = 999;
+
+/**
  * SRD XP required to reach each level, keyed '1'–'20'. Master copy for the
  * frontend test fixtures; the seeded `experience-points/level-thresholds` rule
  * carries the same data and a backend drift-guard test pins the two together.

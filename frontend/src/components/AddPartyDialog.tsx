@@ -5,6 +5,7 @@ import type { PartyCharacter } from '@/lib/types';
 import { parseIntField, rollInitiativeMod } from '@/lib/encounter-combatants';
 import type { PartyCombatantEntry } from '@/lib/encounter-combatants';
 import type { Rng } from '@/lib/dice';
+import { formatSigned } from '@grimoire-os/shared';
 
 interface Props {
   /** Campaign party roster, fetched by the parent. */
@@ -58,7 +59,7 @@ export default function AddPartyDialog({
   function rollRow(character: PartyCharacter) {
     setInits(prev => ({
       ...prev,
-      [character.id]: String(rollInitiativeMod(character.initiative ?? 0, rng)),
+      [character.id]: String(rollInitiativeMod(character.initiative, rng)),
     }));
   }
 
@@ -66,7 +67,7 @@ export default function AddPartyDialog({
     setInits(prev => {
       const next = { ...prev };
       for (const c of characters) {
-        next[c.id] = String(rollInitiativeMod(c.initiative ?? 0, rng));
+        next[c.id] = String(rollInitiativeMod(c.initiative, rng));
       }
       return next;
     });
@@ -140,6 +141,13 @@ export default function AddPartyDialog({
                   <span>
                     AC {c.armorClass ?? '— (uses 10)'} · HP{' '}
                     {c.hitPoints ? `${c.hitPoints.current}/${c.hitPoints.max}` : '— (uses 10/10)'}
+                    {' · '}
+                    {/* Shown, not only in the Roll button's tooltip: a DM on a
+                        tablet has no hover, and this is the number the sheet and
+                        the tracker were reconciled onto (VEG-452). */}
+                    <span data-testid={`party-initiative-${c.id}`}>
+                      Init {formatSigned(c.initiative)}
+                    </span>
                   </span>
                   {existing.has(c.name.trim()) && (
                     <span className="ml-1 text-amber-600 dark:text-amber-400">
@@ -160,7 +168,7 @@ export default function AddPartyDialog({
                 aria-label={`Roll initiative for ${c.name}`}
                 onClick={() => rollRow(c)}
                 className={rollButtonClass}
-                title={`d20 ${c.initiative != null && c.initiative >= 0 ? '+' : ''}${c.initiative ?? 0}`}
+                title={`d20 ${formatSigned(c.initiative)}`}
               >
                 Roll
               </button>
