@@ -77,6 +77,15 @@ export interface ComputedXp {
 export const MAX_EXPERIENCE_POINTS = 2_147_483_647;
 
 /**
+ * Symmetric bound on the stored initiative bonus (VEG-452), enforced at the DTO
+ * write boundary. Deliberately far above any real 5e bonus (Alert is +5) rather
+ * than rules-accurate: the job is keeping the value inside Postgres int4 so a
+ * bad write 400s at the boundary instead of 500ing in the driver, not policing
+ * homebrew. Negative bonuses are legitimate, hence the symmetry.
+ */
+export const MAX_INITIATIVE_BONUS = 999;
+
+/**
  * SRD XP required to reach each level, keyed '1'–'20'. Master copy for the
  * frontend test fixtures; the seeded `experience-points/level-thresholds` rule
  * carries the same data and a backend drift-guard test pins the two together.
@@ -190,6 +199,69 @@ export interface ComputedSpeed {
   /** Total reduction in feet — the sum of the two above. */
   penalty: number;
   effective: number;
+}
+
+/**
+ * Stored-vs-computed initiative reconciliation (VEG-452).
+ *
+ * Ownership rule: `base` is the Dexterity modifier and is owned by the compute
+ * layer; `bonus` is the stored `Character.initiative` column, owned by the
+ * player. The two ADD. The column is not an override — a stored 0 and an absent
+ * column both mean "no bonus", so `effective` never drops below what Dexterity
+ * alone would give.
+ *
+ * Additive rather than override-wins (which is how {@link ComputedArmorClass}
+ * treats its stored column) for two reasons. The editor form has always
+ * defaulted this field to 0, so override semantics would pin every
+ * form-created character to +0 and silently mask their Dexterity. And the real
+ * 5e sources of a flat initiative bonus — Alert, Jack of All Trades, a
+ * Harengon's Hare-Trigger — genuinely stack on top of Dexterity rather than
+ * replacing it, so an additive bonus keeps tracking Dexterity through
+ * level-ups instead of going stale the moment the score changes.
+ *
+ * `exhaustionPenalty` is the d20-Test reduction, carried as its own field so a
+ * sheet can name it rather than showing an unexplained drop. It is a POSITIVE
+ * magnitude, matching every other `*Penalty` field on these types
+ * ({@link ComputedSpeed.exhaustionPenalty}, {@link ComputedEncumbrance.speedPenalty}),
+ * even though its source {@link ComputedExhaustion.d20Penalty} is negative. One
+ * sign convention across all of them beats a field that means the opposite of
+ * its identically-named sibling 40 lines up, which is the kind of thing a
+ * reader gets wrong by analogy and no type can catch.
+ */
+export interface ComputedInitiative {
+  /** Dexterity modifier — the derived half. */
+  base: number;
+  /** Stored `Character.initiative` column, added on top. 0 when unset. */
+  bonus: number;
+  /** d20-Test reduction from exhaustion, as a positive magnitude (e.g. 6). */
+  exhaustionPenalty: number;
+  /** `base + bonus - exhaustionPenalty`. Not floored — a negative initiative
+   * modifier is a real outcome, unlike a negative speed. */
+  effective: number;
+}
+
+/**
+ * Resolve initiative from its three sources (VEG-452). See
+ * {@link ComputedInitiative} for why the stored column adds rather than
+ * overrides.
+ */
+export function resolveInitiative(
+  stored: number | null | undefined,
+  dexModifier: number,
+  exhaustion: ComputedExhaustion | null
+): ComputedInitiative {
+  const bonus = stored ?? 0;
+  // d20Penalty arrives negative; this type reports magnitudes, so negate once
+  // here rather than letting the sign convention leak to every consumer.
+  // Branch rather than negating a coalesced 0: `-(0)` is `-0`, which is a
+  // distinct value to Object.is and to every deep-equality assertion.
+  const exhaustionPenalty = exhaustion ? -exhaustion.d20Penalty : 0;
+  return {
+    base: dexModifier,
+    bonus,
+    exhaustionPenalty,
+    effective: dexModifier + bonus - exhaustionPenalty,
+  };
 }
 
 /** 5e variant encumbrance tiers, lightest to heaviest. */
@@ -421,8 +493,8 @@ export interface ComputedStats {
    * modifier feeding HP math is not and must not.
    */
   abilityChecks: ComputedAbilityModifiers;
-  /** Initiative = Dexterity modifier, less any exhaustion penalty. */
-  initiative: number;
+  /** Dexterity modifier plus the stored bonus column, less exhaustion (VEG-452). */
+  initiative: ComputedInitiative;
   /** Keyed by ability full name (e.g. "Strength"); exhaustion-adjusted. */
   savingThrows: Record<string, ComputedSave>;
   /** Keyed by skill name (e.g. "Athletics"); exhaustion-adjusted. */

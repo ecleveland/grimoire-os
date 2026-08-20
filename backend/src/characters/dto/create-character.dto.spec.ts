@@ -93,6 +93,36 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('initiative', () => {
+    // VEG-452 turned this column into a player-facing BONUS, so it is now far
+    // more likely to be hand-edited than when the sheet ignored it. Same
+    // boundary rationale as experiencePoints: @IsNumber alone let a fractional
+    // or out-of-int4 value through to Prisma and 500 in the driver.
+    it('accepts a plausible flat bonus', async () => {
+      const dto = toDto({ ...baseDto, initiative: 5 });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'initiative')).toHaveLength(0);
+    });
+
+    it('accepts a negative bonus, which is a legitimate value', async () => {
+      const dto = toDto({ ...baseDto, initiative: -3 });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'initiative')).toHaveLength(0);
+    });
+
+    it('rejects a non-integer', async () => {
+      const dto = toDto({ ...baseDto, initiative: 2.5 });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'initiative')).toBeDefined();
+    });
+
+    it.each([5_000_000_000, -5_000_000_000])('rejects %p, beyond the column range', async value => {
+      const dto = toDto({ ...baseDto, initiative: value });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'initiative')).toBeDefined();
+    });
+  });
+
   describe('heroicInspiration', () => {
     it('accepts a boolean', async () => {
       const dto = toDto({ ...baseDto, heroicInspiration: true });

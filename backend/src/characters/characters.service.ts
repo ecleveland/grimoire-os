@@ -115,6 +115,7 @@ export class CharactersService {
         skills: character.skills,
         spellcastingAbility: character.spellcastingAbility,
         armorClass: character.armorClass,
+        initiative: character.initiative,
         proficiencies: character.proficiencies,
         inventory: inventoryFromJson(character.inventory),
         weapons: Array.isArray(character.weapons) ? (character.weapons as unknown as Weapon[]) : [],

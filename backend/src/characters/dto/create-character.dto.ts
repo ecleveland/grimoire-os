@@ -24,6 +24,7 @@ import {
   DIE_TYPES,
   Feature,
   MAX_EXPERIENCE_POINTS,
+  MAX_INITIATIVE_BONUS,
   RECHARGE_KINDS,
   SKILL_NAMES,
   SpellEntry,
@@ -531,9 +532,21 @@ export class CreateCharacterDto {
   @IsNumber()
   speed?: number;
 
-  @ApiPropertyOptional({ example: 2 })
+  // Same boundary rationale as experiencePoints and level: a fractional or
+  // out-of-int4 value overflows in Prisma and 500s instead of 400ing here. The
+  // bound is generous rather than 5e-accurate — homebrew bonuses are small, but
+  // the column only has to stay inside Int.
+  @ApiPropertyOptional({
+    example: 2,
+    description:
+      'Flat initiative BONUS added on top of the Dexterity modifier (VEG-452) — not a total. ' +
+      'Omit or send 0 when the character has no feat/feature bonus; the Dexterity modifier is ' +
+      'always applied on top by the server.',
+  })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(-MAX_INITIATIVE_BONUS)
+  @Max(MAX_INITIATIVE_BONUS)
   initiative?: number;
 
   // @ValidateIf + IsStrictArray, matching skills/savingThrows below: these are

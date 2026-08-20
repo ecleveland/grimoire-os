@@ -439,6 +439,16 @@ describe('CharacterEditorForm rendering', () => {
     renderForm();
     expect(screen.getByText(/select an srd class to list its subclasses/i)).toBeInTheDocument();
   });
+
+  // VEG-452 made the stored column an additive bonus over the Dex modifier. This
+  // label and its helper text are the only place the UI says so, so a revert to
+  // the old bare "Initiative" label would otherwise ship green — and would leave
+  // players entering a total into a field that now adds.
+  it('labels initiative as a bonus and says what it adds to', () => {
+    renderForm();
+    expect(screen.getByLabelText('Initiative Bonus')).toBeInTheDocument();
+    expect(screen.getByText(/added to your dexterity modifier/i)).toBeInTheDocument();
+  });
 });
 
 describe('CharacterEditorForm autofill', () => {

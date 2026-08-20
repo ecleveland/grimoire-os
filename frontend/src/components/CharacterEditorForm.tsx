@@ -848,8 +848,9 @@ export default function CharacterEditorForm({
             onChange={e => set('armorClass', e.target.value === '' ? '' : Number(e.target.value))}
           />
           <FormField
-            label="Initiative"
+            label="Initiative Bonus"
             type="number"
+            helperText="Added to your Dexterity modifier (Alert, Jack of All Trades…)"
             value={values.initiative}
             onChange={e => set('initiative', Number(e.target.value))}
           />

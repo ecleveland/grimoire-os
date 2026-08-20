@@ -62,6 +62,108 @@ describe('StatsBar', () => {
         'text-center'
       );
     });
+
+    describe('bonus breakdown (VEG-452)', () => {
+      const withInitiative = (over: Partial<Character> = {}) =>
+        makeCharacter({
+          abilityScores: {
+            strength: 16,
+            dexterity: 12,
+            constitution: 14,
+            intelligence: 10,
+            wisdom: 14,
+            charisma: 8,
+          },
+          size: 'Small',
+          ...over,
+        });
+
+      it('shows no breakdown when Dexterity is the only contribution', () => {
+        render(<StatsBar character={withInitiative()} />);
+        expect(screen.queryByTestId('initiative-breakdown')).toBeNull();
+      });
+
+      it('adds the stored bonus to the Dex modifier and names both', () => {
+        // Dex 12 → +1, stored bonus +5 → +6.
+        render(<StatsBar character={withInitiative({ initiative: 5 })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+6')).toBeInTheDocument();
+        const breakdown = screen.getByTestId('initiative-breakdown');
+        expect(breakdown).toHaveTextContent('+1 dex');
+        expect(breakdown).toHaveTextContent('+5 bonus');
+        // Without this a healthy character renders "+0 exhaustion" and the
+        // suite stays green.
+        expect(breakdown).not.toHaveTextContent(/exhaustion/i);
+      });
+
+      it('names a negative bonus rather than hiding it', () => {
+        render(<StatsBar character={withInitiative({ initiative: -2 })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('-1')).toBeInTheDocument();
+        // Typographic minus, not an ASCII hyphen: every sign on this line uses
+        // one glyph so a negative bonus cannot sit above "−6 exhaustion" and
+        // disagree with it (the rule StatusTracker states for its own line).
+        expect(screen.getByTestId('initiative-breakdown')).toHaveTextContent('−2 bonus');
+      });
+
+      it('names exhaustion alongside the bonus when both apply', () => {
+        // Dex +1, bonus +5, exhaustion 3 → −6, so +0.
+        render(<StatsBar character={withInitiative({ initiative: 5, exhaustion: 3 })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+0')).toBeInTheDocument();
+        const breakdown = screen.getByTestId('initiative-breakdown');
+        expect(breakdown).toHaveTextContent('+5 bonus');
+        expect(breakdown).toHaveTextContent('−6 exhaustion');
+      });
+
+      it('names exhaustion alone when there is no bonus to report', () => {
+        // Dex +1, exhaustion 3 → −6, so −5. Without the dex line the reader
+        // would see "-6 exhaustion" under a "-5" value and have to do the
+        // subtraction themselves.
+        render(<StatsBar character={withInitiative({ exhaustion: 3 })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('-5')).toBeInTheDocument();
+        const breakdown = screen.getByTestId('initiative-breakdown');
+        expect(breakdown).toHaveTextContent('+1 dex');
+        expect(breakdown).toHaveTextContent('−6 exhaustion');
+        expect(breakdown).not.toHaveTextContent(/bonus/i);
+      });
+
+      it('derives from Dexterity alone when the column is null', () => {
+        // The majority state: nothing writes the column unless a player edits
+        // it. This is the shape that used to reach the tracker as +0.
+        render(<StatsBar character={withInitiative({ initiative: null })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+1')).toBeInTheDocument();
+        expect(screen.queryByTestId('initiative-breakdown')).toBeNull();
+      });
+
+      it('treats a stored 0 as no bonus, showing the bare Dex modifier', () => {
+        render(<StatsBar character={withInitiative({ initiative: 0 })} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+1')).toBeInTheDocument();
+        expect(screen.queryByTestId('initiative-breakdown')).toBeNull();
+      });
+
+      // Version skew: a payload from a pre-VEG-452 backend carries a bare number
+      // where the block now sits. Degrade to that number instead of rendering
+      // "+undefined" or crashing the whole sheet, the same contract `speed` follows.
+      it('renders a legacy numeric initiative rather than crashing', () => {
+        const base = withInitiative();
+        const legacy = {
+          ...base,
+          computed: { ...base.computed, initiative: 3 },
+        } as unknown as Character;
+        render(<StatsBar character={legacy} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+3')).toBeInTheDocument();
+        expect(screen.queryByTestId('initiative-breakdown')).toBeNull();
+      });
+
+      it('falls back to +0 when the computed initiative is absent entirely', () => {
+        const base = withInitiative();
+        const legacy = {
+          ...base,
+          computed: { ...base.computed, initiative: undefined },
+        } as unknown as Character;
+        render(<StatsBar character={legacy} />);
+        expect(within(screen.getByTestId('stat-initiative')).getByText('+0')).toBeInTheDocument();
+        expect(screen.queryByTestId('initiative-breakdown')).toBeNull();
+      });
+    });
   });
 
   describe('Speed', () => {
@@ -306,7 +408,7 @@ describe('computed block is the source of truth (VEG-412)', () => {
     computed: {
       ...mockCharacter.computed,
       proficiencyBonus: 7,
-      initiative: 9,
+      initiative: { base: 9, bonus: 0, exhaustionPenalty: 0, effective: 9 },
       passivePerception: 23,
     },
   };

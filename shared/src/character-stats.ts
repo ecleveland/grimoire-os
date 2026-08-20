@@ -34,6 +34,7 @@ import {
   computeEncumbrance,
   computeExhaustionEffect,
   computeXpBand,
+  resolveInitiative,
   resolveSpeed,
 } from './computed';
 import type { AbilityScores, InventoryItem, Weapon } from './embedded';
@@ -260,6 +261,21 @@ function scoreFor(abilityScores: AbilityScores | null | undefined, key: keyof Ab
  * backend compute layer, which reads a full Prisma row — narrow it back to
  * required on their own input type.
  */
+/**
+ * The stored character fields the derivations read.
+ *
+ * Every key backed by a required-nullable column on `Character` is required
+ * here too, though still nullable (VEG-452). A whole Character therefore
+ * assigns cleanly, while a caller that narrows via `Pick` — `deriveComputed` in
+ * the frontend test utils is the one that exists — fails to compile instead of
+ * silently dropping the field and deriving from a fixture that no longer
+ * matches what the API would return. `Required<>` guards the backend's own
+ * input type; this guards everyone else.
+ *
+ * `spellcastingAbility`, `weapons` and `size` stay optional because they are
+ * optional keys on `Character`, so requiring them here would break that
+ * assignability.
+ */
 export interface CharacterStatsInput {
   level: number;
   experiencePoints: number;
@@ -271,17 +287,22 @@ export interface CharacterStatsInput {
   /** Explicit spellcasting ability (full name); overrides the class default. */
   spellcastingAbility?: string | null;
   /** Stored AC column — the manual override the derived AC yields to (VEG-410). */
-  armorClass?: number | null;
+  armorClass: number | null;
+  /**
+   * Stored initiative column — a flat *bonus* added on top of the Dexterity
+   * modifier (VEG-452), not an override. See {@link ComputedInitiative}.
+   */
+  initiative: number | null;
   /** The character's own proficiency strings (weapon/tool, free text). */
-  proficiencies?: string[] | null;
+  proficiencies: string[] | null;
   /** Inventory rows; equipped items with gear metadata drive AC/weapons (VEG-410). */
-  inventory?: InventoryItem[] | null;
+  inventory: InventoryItem[] | null;
   /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
   weapons?: Weapon[] | null;
   /** Exhaustion level 1–6, penalizing d20 Tests and Speed (VEG-449). */
-  exhaustion?: number | null;
+  exhaustion: number | null;
   /** Stored walking speed in feet; null falls back to `DEFAULT_SPEED`. */
-  speed?: number | null;
+  speed: number | null;
   /** Creature size, scaling the carry thresholds (VEG-490). Free text
    * server-side, so an unrecognized value falls back to the ×1 multiplier. */
   size?: string | null;
@@ -325,6 +346,7 @@ export function computeCoreCharacterStats(
     skills,
     spellcastingAbility,
     armorClass,
+    initiative,
     proficiencies,
     inventory,
     weapons,
@@ -418,7 +440,7 @@ export function computeCoreCharacterStats(
     proficiencyBonus: profBonus,
     abilityModifiers,
     abilityChecks,
-    initiative: abilityModifiers.dexterity + d20Penalty,
+    initiative: resolveInitiative(initiative, abilityModifiers.dexterity, exhaustion),
     savingThrows: savingThrowBonuses,
     skills: skillBonuses,
     passivePerception,
