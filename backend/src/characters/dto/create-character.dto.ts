@@ -26,6 +26,7 @@ import {
   MAX_EXPERIENCE_POINTS,
   MAX_INITIATIVE_BONUS,
   RECHARGE_KINDS,
+  SIZES,
   SKILL_NAMES,
   SpellEntry,
   WEAPON_CATEGORIES,
@@ -215,14 +216,26 @@ class GearMetaDto {
   weaponCategory?: string;
 }
 
+// Large enough for any real stack (arrows, rations), small enough that
+// weight × quantity can't approach number-precision limits. Same cap the pack
+// bundle contents use.
+const MAX_ITEM_QUANTITY = 10_000;
+
 class InventoryItemDto {
   @ApiProperty({ example: 'Longsword' })
   @IsString()
   name!: string;
 
-  @ApiPropertyOptional({ example: 1 })
+  // Bounded like every other quantity in the API (VEG-497): an unvalidated
+  // fractional or negative count fed `weight * quantity` and could NaN the
+  // carried sum. Still optional — rows written before this ticket can lack it,
+  // and a PATCH round-tripping one must not 400; computeEncumbrance counts such
+  // a row as one of the item.
+  @ApiPropertyOptional({ example: 1, minimum: 1, maximum: MAX_ITEM_QUANTITY })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_ITEM_QUANTITY)
   quantity?: number;
 
   @ApiPropertyOptional()
@@ -703,9 +716,14 @@ export class CreateCharacterDto {
   @IsString()
   avatarUrl?: string;
 
-  @ApiPropertyOptional({ example: 'Medium' })
+  // Whitelisted against the shared catalog (VEG-497). Free text here reached
+  // computeEncumbrance as an object key, where `constructor` resolved to
+  // Object.prototype's and NaN'd every carrying threshold — which reads as
+  // `unencumbered`, so the rule switched off invisibly. UpdateCharacterDto
+  // inherits this through PartialType, so PATCH is covered too.
+  @ApiPropertyOptional({ enum: SIZES, example: 'Medium' })
   @IsOptional()
-  @IsString()
+  @IsIn(SIZES)
   size?: string;
 
   @ApiPropertyOptional({ example: false })

@@ -336,11 +336,12 @@ function round2(n: number): number {
  * scales capacity.
  *
  * Comparisons are strictly greater-than, so a character carrying exactly the
- * threshold is still in the lighter tier. `size` is free text server-side; an
- * unknown or absent value falls back to the Medium (×1) multiplier rather than
- * indexing blind. A character with no ability scores reads as Strength 0 →
- * capacity 0, which would make every non-empty pack "heavily encumbered", so
- * callers pass a neutral score instead (see `computeCoreCharacterStats`).
+ * threshold is still in the lighter tier. An unknown or absent `size` falls back
+ * to the Medium (×1) multiplier, and a row with no `quantity` counts as one of
+ * the item — see the inline notes for why both matter. A character with no
+ * ability scores reads as Strength 0 → capacity 0, which would make every
+ * non-empty pack "heavily encumbered", so callers pass a neutral score instead
+ * (see `computeCoreCharacterStats`).
  */
 export function computeEncumbrance(
   rule: CarryingCapacityRule,
@@ -348,9 +349,30 @@ export function computeEncumbrance(
   size: string | null | undefined,
   inventory: InventoryItem[]
 ): ComputedEncumbrance {
-  const multiplier = (size && rule.sizeMultipliers[size]) || 1;
+  // `size` is an untrusted key (VEG-497). Rows written before the DTO gained
+  // `@IsIn(SIZES)` hold free text, and a plain-object index resolves
+  // `constructor` or `toString` to an Object.prototype member, which NaN's every
+  // threshold below. `hasOwnProperty` keeps the lookup to configured sizes.
+  //
+  // `?? 1`, not `|| 1`: a configured 0 multiplier is a real value and must not be
+  // promoted to 1. Nothing is 0 today (Tiny is 0.5), so only the coalesce keeps
+  // that true if one is ever added.
+  const configured =
+    size != null && Object.prototype.hasOwnProperty.call(rule.sizeMultipliers, size)
+      ? rule.sizeMultipliers[size]
+      : undefined;
+  const multiplier = configured ?? 1;
   const carried = round2(
-    inventory.reduce((sum, item) => sum + (item.weight ?? 0) * item.quantity, 0)
+    inventory.reduce((sum, item) => {
+      // A row may omit either field: `weight` is optional on InventoryItem, and
+      // `quantity` went unvalidated until VEG-497, so stored JSON can lack it. A
+      // missing quantity means *one* of the item — coalescing to 0 would drop the
+      // row's weight as silently as the NaN did. The finite check is the
+      // backstop for values no boundary revalidates, since one bad row otherwise
+      // poisons the sum and switches the whole rule off.
+      const contribution = (item.weight ?? 0) * (item.quantity ?? 1);
+      return Number.isFinite(contribution) ? sum + contribution : sum;
+    }, 0)
   );
   const heavyAt = strength * rule.heavilyEncumberedPerStrength * multiplier;
   const encumberedAt = strength * rule.encumberedPerStrength * multiplier;

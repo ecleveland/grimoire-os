@@ -250,7 +250,17 @@ export default function InventorySection(props: InventorySectionProps) {
   // subtract the server's own tier penalty, which reproduces the pre-VEG-490
   // render. Still not a re-derivation — the penalty is read, not classified.
   const storedSpeed = character.speed ?? DEFAULT_SPEED;
-  const speedBeforeLoad = speed ? speed.base - speed.exhaustionPenalty : storedSpeed;
+  // A pre-VEG-490 block has `penalty` but neither component field — the same
+  // legacy shape StatsBar's speedBreakdown treats as a first-class case. Reading
+  // `exhaustionPenalty` off one yields undefined and renders "speed NaN → 20 ft"
+  // (VEG-497). That block's `penalty` was exhaustion alone, since encumbrance
+  // wasn't folded into speed yet, so it IS the before-load reduction.
+  const exhaustionOnly =
+    typeof speed?.exhaustionPenalty === 'number' ? speed.exhaustionPenalty : (speed?.penalty ?? 0);
+  // Floored like `speedAfterLoad` below: exhaustion deeper than the walking
+  // speed (a Dwarf's 25 ft against level 6's −30) otherwise renders "-5 → 0 ft"
+  // (VEG-497). Pre-VEG-490 this half read the already-floored `effective`.
+  const speedBeforeLoad = speed ? Math.max(0, speed.base - exhaustionOnly) : storedSpeed;
   const speedAfterLoad = speed
     ? speed.effective
     : Math.max(0, storedSpeed - (encumbrance?.speedPenalty ?? 0));

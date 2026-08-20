@@ -8,11 +8,13 @@ import type {
 import {
   CARRYING_CAPACITY_RULE,
   computeCoreCharacterStats,
+  computeEncumbrance,
   computeXpBand,
   DEFAULT_CHARACTER_STATS_RULES,
   EXHAUSTION_RULE,
   PROFICIENCY_BONUS_TABLE,
   proficiencyBonusFrom,
+  SIZES,
   SKILL_ABILITY_MAP,
   XP_LEVEL_THRESHOLDS,
 } from '@grimoire-os/shared';
@@ -873,6 +875,63 @@ describe('encumbrance (VEG-490)', () => {
     expect(stats.encumbrance).toMatchObject({ tier: 'encumbered', capacity: 240 });
   });
 
+  // VEG-497. `size` is free text on rows written before the DTO gained
+  // @IsIn(SIZES), so the multiplier lookup takes an untrusted key. Indexing a
+  // plain object resolved `constructor` to `Object` and NaN'd every threshold —
+  // and because `carried > NaN` is false, the tier pinned to `unencumbered` and
+  // the whole rule switched off with nothing raised. Asserting the full block,
+  // not just the tier: the failure's signature is a plausible-looking
+  // `unencumbered`, so a toMatchObject on the tier alone would still pass while
+  // `capacity` serialised as null.
+  it.each([['constructor'], ['toString'], ['hasOwnProperty'], ['__proto__']])(
+    'reads the prototype key %p as an unknown size rather than NaN-ing the block',
+    size => {
+      const stats = computeCharacterStats(input({ inventory: lbs(200), size }));
+      expect(stats.encumbrance).toEqual({
+        tier: 'heavily-encumbered',
+        speedPenalty: 20,
+        hasDisadvantage: true,
+        capacity: 240,
+        carried: 200,
+      });
+    }
+  );
+
+  // VEG-497. `quantity` was @IsOptional() with no @IsInt, so a row may legitimately
+  // omit it and `weight * undefined` NaN'd the sum — the same silent switch-off.
+  // A row without a quantity means one of the item, not zero of it: coalescing to
+  // 0 would drop its weight just as invisibly.
+  //
+  // Cast because InventoryItem types `quantity` as required — which is exactly
+  // why this needs a test: the shape is unreachable from typed code and only
+  // exists as stored JSON, so the type system never had a chance to catch it.
+  it('counts a row with no quantity as one of the item, not NaN', () => {
+    const stats = computeCharacterStats(
+      input({
+        inventory: [{ name: 'Anvil', weight: 200, equipped: false }] as unknown as InventoryItem[],
+      })
+    );
+    expect(stats.encumbrance).toMatchObject({
+      tier: 'heavily-encumbered',
+      speedPenalty: 20,
+      carried: 200,
+    });
+    expect(stats.speed.encumbrancePenalty).toBe(20);
+  });
+
+  // The `|| 1` this replaced could not tell a configured 0 from an absent key.
+  // Tiny is 0.5 today and nothing is 0 yet, so only a direct rule check pins it.
+  it('honours a zero size multiplier instead of promoting it to 1', () => {
+    const zeroed = {
+      ...CARRYING_CAPACITY_RULE,
+      sizeMultipliers: { ...CARRYING_CAPACITY_RULE.sizeMultipliers, Motelike: 0 },
+    };
+    expect(computeEncumbrance(zeroed, 16, 'Motelike', lbs(1))).toMatchObject({
+      capacity: 0,
+      tier: 'heavily-encumbered',
+    });
+  });
+
   it('sums weight × quantity, counting a missing weight as zero', () => {
     const stats = computeCharacterStats(
       input({
@@ -948,6 +1007,14 @@ describe('carrying-capacity rule data', () => {
       encumbrance: Record<string, string>;
     };
     expect(numeric).toEqual(CARRYING_CAPACITY_RULE);
+  });
+
+  // VEG-497. The DTO whitelists `size` against SIZES while the derivation scales
+  // by the sizeMultipliers keys. Two lists, one meaning: a size accepted at the
+  // write boundary but absent from the table would silently fall back to ×1, and
+  // one added to the table but not SIZES would be rejected on the way in.
+  it('SIZES covers exactly the sizes the multiplier table scales (drift guard)', () => {
+    expect([...SIZES].sort()).toEqual(Object.keys(CARRYING_CAPACITY_RULE.sizeMultipliers).sort());
   });
 });
 
