@@ -23,8 +23,12 @@ import {
   CONDITIONS,
   DIE_TYPES,
   Feature,
+  MAX_ARMOR_CLASS,
   MAX_EXPERIENCE_POINTS,
   MAX_INITIATIVE_BONUS,
+  MAX_SPEED,
+  MAX_SPELL_ATTACK_BONUS,
+  MAX_SPELL_SAVE_DC,
   RECHARGE_KINDS,
   SIZES,
   SKILL_NAMES,
@@ -535,14 +539,23 @@ export class CreateCharacterDto {
   @Type(() => DeathSavesDto)
   deathSaves?: DeathSavesDto;
 
+  // Same boundary rationale as experiencePoints and level (VEG-496): both are
+  // Int columns, and @IsNumber alone let a fractional or out-of-int4 value
+  // through to Prisma and 500 in the driver. Floored at 0 — neither a negative
+  // AC nor a negative speed means anything, and the computed speed block
+  // already floors what it derives.
   @ApiPropertyOptional({ example: 16 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_ARMOR_CLASS)
   armorClass?: number;
 
   @ApiPropertyOptional({ example: 30 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_SPEED)
   speed?: number;
 
   // Same boundary rationale as experiencePoints and level: a fractional or
@@ -622,14 +635,21 @@ export class CreateCharacterDto {
   @IsIn(ABILITY_NAMES)
   spellcastingAbility?: string;
 
+  // Int columns, bounded for the same reason as armorClass and speed (VEG-496).
+  // A save DC floors at 0; the attack bonus is symmetric like initiative,
+  // because a negative one is a legitimate result of a low ability modifier.
   @ApiPropertyOptional({ example: 13 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_SPELL_SAVE_DC)
   spellSaveDC?: number;
 
   @ApiPropertyOptional({ example: 5 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(-MAX_SPELL_ATTACK_BONUS)
+  @Max(MAX_SPELL_ATTACK_BONUS)
   spellAttackBonus?: number;
 
   @ApiPropertyOptional({ type: [SpellEntryDto] })

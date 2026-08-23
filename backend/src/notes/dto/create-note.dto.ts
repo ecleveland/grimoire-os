@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum, IsNumber, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsInt, IsArray, Min, Max } from 'class-validator';
+import { MAX_INT4 } from '@grimoire-os/shared';
 import { NoteVisibility } from '../../prisma/enums';
 
 export class CreateNoteDto {
@@ -21,9 +22,13 @@ export class CreateNoteDto {
   @IsEnum(NoteVisibility)
   visibility?: NoteVisibility;
 
+  // Same Int-column boundary as campaign.currentSession (VEG-496). Floored at
+  // 0 rather than 1: session zero is a real thing people write notes about.
   @ApiPropertyOptional({ example: 1 })
   @IsOptional()
-  @IsNumber()
+  @IsInt()
+  @Min(0)
+  @Max(MAX_INT4)
   sessionNumber?: number;
 
   @ApiPropertyOptional({ type: [String] })
