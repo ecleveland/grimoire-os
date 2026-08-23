@@ -43,10 +43,12 @@ export function asDieType(value: string | undefined): DieType | null {
 export const RECHARGE_KINDS = ['short', 'long'] as const;
 export type ResourceRecharge = (typeof RECHARGE_KINDS)[number];
 
-// Creature sizes, smallest to largest. Stored as a free-text string server-side
-// (the DTO doesn't constrain it), but the editor offers the canonical set.
-export const SIZES = ['Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan'] as const;
-export type Size = (typeof SIZES)[number];
+// Creature sizes, smallest to largest. Re-exported, not redeclared: VEG-497
+// promoted the list to @grimoire-os/shared so the editor's picker, the DTO's
+// @IsIn whitelist and the carrying-capacity multipliers all read one tuple.
+// The DTO does constrain `size` now, though stored rows predating that don't.
+export { SIZES } from '@grimoire-os/shared';
+export type { Size } from '@grimoire-os/shared';
 
 export type {
   // Embedded types

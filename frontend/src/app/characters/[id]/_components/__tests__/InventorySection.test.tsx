@@ -985,4 +985,57 @@ describe('exhaustion + encumbrance speed (VEG-449)', () => {
     render(<InventorySection character={legacy} />);
     expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('30 → 10 ft');
   });
+
+  // VEG-497. The before-load half lost the Math.max(0, …) floor its after-load
+  // sibling on the next line kept, so exhaustion deeper than the walking speed
+  // rendered a negative. Pre-VEG-490 this line read the already-floored
+  // `effective` and showed "0 → 0 ft".
+  it('floors the before-load speed at 0 rather than rendering a negative', () => {
+    // A Dwarf's 25 ft against exhaustion 6 → −30 ft.
+    render(<InventorySection character={encumbered({ speed: 25, exhaustion: 6 })} />);
+    const status = screen.getByTestId('encumbrance-status');
+    // Anchored on the 'speed ' prefix: bare '0 → 0 ft' substring-matches inside
+    // '20 → 0 ft' and would pass against an unfloored render.
+    expect(status).toHaveTextContent('speed 0 → 0 ft');
+    expect(status.textContent).not.toMatch(/-\d/);
+  });
+
+  // VEG-497. A payload carrying `encumbrance` alongside a pre-VEG-490 speed
+  // block — {base, penalty, effective}, no component split — read
+  // `exhaustionPenalty` off it and rendered "speed NaN → 20 ft".
+  // StatsBar.speedBreakdown already treats this exact shape as a first-class
+  // case, so both halves of the sheet must agree on what a legacy block is.
+  it('renders real numbers for a legacy speed block with no component split', () => {
+    const base = encumbered({ exhaustion: 2 });
+    const legacy = {
+      ...base,
+      computed: {
+        ...base.computed,
+        // Pre-VEG-490 `penalty` was exhaustion alone; encumbrance wasn't folded in.
+        speed: { base: 30, penalty: 10, effective: 20 },
+      },
+    } as unknown as Character;
+    render(<InventorySection character={legacy} />);
+    const status = screen.getByTestId('encumbrance-status');
+    expect(status.textContent).not.toMatch(/NaN/);
+    expect(status).toHaveTextContent('speed 20 → 20 ft');
+  });
+
+  // The property defect 3 violated. Asserting the relationship rather than one
+  // pair of literals catches a regression at any speed/exhaustion combination,
+  // which a fixed-value case cannot.
+  it.each([
+    [30, 0],
+    [25, 6],
+    [30, 2],
+    [20, 5],
+  ])('renders before = max(0, base − exhaustion) at speed %i, exhaustion %i', (speed, level) => {
+    const character = encumbered({ speed, exhaustion: level || undefined });
+    const { base, exhaustionPenalty } = character.computed.speed;
+    render(<InventorySection character={character} />);
+    const before = Math.max(0, base - exhaustionPenalty);
+    expect(screen.getByTestId('encumbrance-status')).toHaveTextContent(
+      `speed ${before} → ${character.computed.speed.effective} ft`
+    );
+  });
 });

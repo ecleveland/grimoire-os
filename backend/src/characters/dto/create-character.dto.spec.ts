@@ -6,6 +6,7 @@ import {
   ARMOR_TYPES,
   CONDITIONS,
   RECHARGE_KINDS,
+  SIZES,
   SKILL_NAMES,
   WEAPON_CATEGORIES,
 } from '@grimoire-os/shared';
@@ -21,9 +22,14 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
   }
 
   describe('size', () => {
-    it('accepts a valid size string', async () => {
-      const dto = toDto({ ...baseDto, size: 'Medium' });
+    it.each(SIZES.map(size => [size]))('accepts the canonical size %s', async size => {
+      const dto = toDto({ ...baseDto, size });
       const errors = await validate(dto);
+      expect(errors.filter(e => e.property === 'size')).toHaveLength(0);
+    });
+
+    it('accepts an absent size (the column is optional)', async () => {
+      const errors = await validate(toDto({ ...baseDto }));
       expect(errors.filter(e => e.property === 'size')).toHaveLength(0);
     });
 
@@ -31,6 +37,30 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       const dto = toDto({ ...baseDto, size: 123 });
       const errors = await validate(dto);
       expect(errors.find(e => e.property === 'size')).toBeDefined();
+    });
+
+    // VEG-497. `size` was @IsString() with no catalog, so free text reached
+    // computeEncumbrance and was used as an object key — `constructor` resolved
+    // to Object.prototype's, NaN'd the thresholds, and silently pinned every
+    // character to `unencumbered`. Rejecting here is what keeps that from
+    // becoming stored data; the compute layer's own guard covers rows already
+    // written. 'medium' is in the list to pin case-sensitivity: the multiplier
+    // table is keyed 'Medium', so a lowercase accept would fall back to ×1.
+    it.each([['constructor'], ['toString'], ['__proto__'], ['Weird'], ['medium'], ['']])(
+      'rejects the off-catalog size %p with the isIn constraint',
+      async size => {
+        const dto = toDto({ ...baseDto, size });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === 'size')?.constraints).toHaveProperty('isIn');
+      }
+    );
+
+    // PATCH is how a sheet edit is saved, and UpdateCharacterDto inherits `size`
+    // through PartialType — this pins that the whitelist survives that copy.
+    it('rejects an off-catalog size on the update DTO too', async () => {
+      const dto = plainToInstance(UpdateCharacterDto, { size: 'constructor' });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'size')?.constraints).toHaveProperty('isIn');
     });
   });
 
@@ -362,6 +392,47 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
         .find(e => e.property === 'inventory')
         ?.children?.[0]?.children?.find(c => c.property === 'name');
       expect(name?.constraints).toHaveProperty('isString');
+    });
+
+    // VEG-497. `quantity` was @IsOptional() @IsNumber(), so a fractional or
+    // negative count was accepted and `weight * quantity` could NaN the carried
+    // sum, switching the encumbrance rule off with nothing raised. Bounds match
+    // the convention every other quantity DTO uses (set-bundle-contents,
+    // purchase, create-encounter): integer, at least 1.
+    describe('quantity (VEG-497)', () => {
+      const quantityErrorOf = async (quantity: unknown) => {
+        const dto = toDto({
+          ...baseDto,
+          inventory: [{ name: 'Anvil', quantity, equipped: false }],
+        });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        return errors
+          .find(e => e.property === 'inventory')
+          ?.children?.[0]?.children?.find(c => c.property === 'quantity');
+      };
+
+      it.each([
+        ['zero', 'min', 0],
+        ['a negative count', 'min', -1],
+        ['a fractional count', 'isInt', 1.5],
+        ['a numeric string', 'isInt', '2'],
+        ['an absurd count that would overflow the weight sum', 'max', 10_001],
+      ])('rejects %s with the %s constraint', async (_label, constraint, quantity) => {
+        expect(await quantityErrorOf(quantity)).toHaveProperty(`constraints.${constraint}`);
+      });
+
+      it('accepts a valid integer quantity', async () => {
+        expect(await quantityErrorOf(5)).toBeUndefined();
+      });
+
+      // Stays optional deliberately: rows written before this ticket can lack
+      // `quantity`, and a PATCH that round-trips one must not 400. The compute
+      // layer counts such a row as one of the item.
+      it('accepts an item with no quantity at all', async () => {
+        const dto = toDto({ ...baseDto, inventory: [{ name: 'Anvil', equipped: false }] });
+        const errors = await validate(dto, VALIDATOR_STRICTNESS);
+        expect(errors.filter(e => e.property === 'inventory')).toHaveLength(0);
+      });
     });
 
     // Gear snapshots (VEG-410): the catalog picker PATCHes inventory items
@@ -704,7 +775,9 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       const quantity = errors
         .find(e => e.property === 'inventory')
         ?.children?.[0]?.children?.find(c => c.property === 'quantity');
-      expect(quantity?.constraints).toHaveProperty('isNumber');
+      // `isInt` since VEG-497 tightened @IsNumber to @IsInt — same rejection,
+      // stricter constraint.
+      expect(quantity?.constraints).toHaveProperty('isInt');
     });
   });
 

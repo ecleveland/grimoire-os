@@ -73,6 +73,27 @@ export const ARMOR_TYPES = Object.freeze(['light', 'medium', 'heavy'] as const);
 export type ArmorType = (typeof ARMOR_TYPES)[number];
 
 /**
+ * Creature sizes, smallest to largest (VEG-497). Promoted here from the
+ * frontend's `lib/types` so one list serves all three consumers: the editor's
+ * size picker, `CreateCharacterDto`'s `@IsIn` whitelist, and the capacity
+ * multipliers in {@link CARRYING_CAPACITY_RULE}, whose keys a drift guard pins
+ * to this tuple.
+ *
+ * Not to be confused with a *species'* size, which the SRD writes as prose and
+ * can read "Medium or Small" — `OriginStep` refuses to propagate such a value
+ * into a character's `size` for exactly that reason.
+ */
+export const SIZES = Object.freeze([
+  'Tiny',
+  'Small',
+  'Medium',
+  'Large',
+  'Huge',
+  'Gargantuan',
+] as const);
+export type Size = (typeof SIZES)[number];
+
+/**
  * Body-armor stats snapshotted onto an inventory item at catalog-add time
  * (VEG-410). `baseArmorClass` is the flat armor base; the Dex rule (full /
  * capped at 2 / none) follows from `armorType`, so no cap is stored.
