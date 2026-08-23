@@ -19,6 +19,14 @@ import { UpdateNoteDto } from '../notes/dto/update-note.dto';
  * Add a pair whenever a DTO starts writing Int columns on a new model. Nested
  * DTOs for Json columns (CombatantDto inside `Encounter.combatants`) stay out:
  * int4 never applies to them.
+ *
+ * Known limit, so nobody reads this as more than it is: the registry is the
+ * coverage. A brand-new DTO writing a model nobody listed here is invisible to
+ * this test. It closes the "someone added an Int field to a DTO we already
+ * guard" hole, which is how all three prior instances happened, not the "someone
+ * wrote a whole new write path" one. Enumerating every Int column in the schema
+ * instead would flag the SRD and seed-only tables that have no DTO at all, and
+ * a guard that cries wolf gets deleted.
  */
 const GUARDED: ReadonlyArray<readonly [new () => object, string]> = [
   [CreateCharacterDto, 'Character'],
@@ -55,7 +63,7 @@ describe('Int-backed DTO fields are bounded at the write boundary', () => {
   // A guard that silently checks nothing is worse than no guard: if the Prisma
   // client is stale or ungenerated the DMMF lookup returns nothing, every
   // intersection below comes out empty, and the real assertion passes vacuously.
-  it.each(GUARDED.map(([, model]) => model))(
+  it.each([...new Set(GUARDED.map(([, model]) => model))])(
     'resolves %s in the generated Prisma schema',
     model => {
       expect(intColumnsOf(model).length).toBeGreaterThan(0);
