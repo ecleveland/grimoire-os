@@ -71,10 +71,18 @@ export interface ComputedXp {
 }
 
 /**
+ * Postgres int4 ceiling. Every stored `Int` column tops out here, so a counter
+ * with no meaningful rules limit of its own (session numbers, encounter rounds)
+ * takes this as its DTO `@Max` — the bound exists to keep the value inside the
+ * column, nothing more. Fields that deserve a tighter, named bound get one below.
+ */
+export const MAX_INT4 = 2_147_483_647;
+
+/**
  * Postgres int4 ceiling for stored `experiencePoints`: the write boundary (DTO
  * `@Max`) and the sheet's Award XP control both enforce this one constant.
  */
-export const MAX_EXPERIENCE_POINTS = 2_147_483_647;
+export const MAX_EXPERIENCE_POINTS = MAX_INT4;
 
 /**
  * Symmetric bound on the stored initiative bonus (VEG-452), enforced at the DTO
@@ -84,6 +92,22 @@ export const MAX_EXPERIENCE_POINTS = 2_147_483_647;
  * homebrew. Negative bonuses are legitimate, hence the symmetry.
  */
 export const MAX_INITIATIVE_BONUS = 999;
+
+/**
+ * Bounds on the remaining stored character-sheet Int columns (VEG-496), all
+ * enforced at the DTO write boundary for the same reason as
+ * {@link MAX_INITIATIVE_BONUS}: Prisma 500s on a non-integer or out-of-int4
+ * value that `@IsNumber()` alone waves through.
+ *
+ * Generous rather than rules-accurate. A 5e AC tops out in the twenties and a
+ * save DC in the low twenties, but homebrew and stacked buffs are the player's
+ * business — these only have to keep the write inside the column.
+ */
+export const MAX_ARMOR_CLASS = 999;
+export const MAX_SPEED = 999;
+export const MAX_SPELL_SAVE_DC = 999;
+/** Symmetric like {@link MAX_INITIATIVE_BONUS}: a negative attack bonus is legitimate. */
+export const MAX_SPELL_ATTACK_BONUS = 999;
 
 /**
  * SRD XP required to reach each level, keyed '1'–'20'. Master copy for the

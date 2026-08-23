@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
+import { MAX_INT4 } from '@grimoire-os/shared';
 import { UpdateNoteDto } from './update-note.dto';
 
 // Mirror the global ValidationPipe (bootstrap-config.ts): plainToInstance with
@@ -34,5 +35,22 @@ describe('UpdateNoteDto', () => {
 
   it('rejects a non-numeric sessionNumber', () => {
     expect(validate({ sessionNumber: 'not-a-number' }).length).toBeGreaterThan(0);
+  });
+
+  // VEG-496: the field carried a bare @IsNumber(), so a fractional or
+  // out-of-int4 value cleared validation and 500ed in the Prisma driver. The
+  // null-clear cases above are the reason @IsOptional() stays — it skips null
+  // as well as undefined, so the bound never rejects a deliberate clear.
+  it('accepts session zero and the upper bound exactly', () => {
+    expect(validate({ sessionNumber: 0 })).toHaveLength(0);
+    expect(validate({ sessionNumber: MAX_INT4 })).toHaveLength(0);
+  });
+
+  it.each([-1, MAX_INT4 + 1])('rejects %p, outside the column range', value => {
+    expect(validate({ sessionNumber: value }).length).toBeGreaterThan(0);
+  });
+
+  it('rejects a non-integer sessionNumber', () => {
+    expect(validate({ sessionNumber: 1.5 }).length).toBeGreaterThan(0);
   });
 });

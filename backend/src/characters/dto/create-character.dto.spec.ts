@@ -5,6 +5,10 @@ import {
   ABILITY_NAMES,
   ARMOR_TYPES,
   CONDITIONS,
+  MAX_ARMOR_CLASS,
+  MAX_SPEED,
+  MAX_SPELL_ATTACK_BONUS,
+  MAX_SPELL_SAVE_DC,
   RECHARGE_KINDS,
   SIZES,
   SKILL_NAMES,
@@ -150,6 +154,57 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       const dto = toDto({ ...baseDto, initiative: value });
       const errors = await validate(dto);
       expect(errors.find(e => e.property === 'initiative')).toBeDefined();
+    });
+  });
+
+  // VEG-496 closed the last four Int columns still on a bare @IsNumber(). Same
+  // failure as initiative above: the value cleared validation, reached Prisma,
+  // and 500ed in the driver instead of 400ing at the boundary.
+  describe.each([
+    ['armorClass', MAX_ARMOR_CLASS, 0],
+    ['speed', MAX_SPEED, 0],
+    ['spellSaveDC', MAX_SPELL_SAVE_DC, 0],
+    ['spellAttackBonus', MAX_SPELL_ATTACK_BONUS, -MAX_SPELL_ATTACK_BONUS],
+  ])('%s', (property, max, min) => {
+    it('accepts a plausible value', async () => {
+      const dto = toDto({ ...baseDto, [property]: 16 });
+      const errors = await validate(dto);
+      expect(errors.filter(e => e.property === property)).toHaveLength(0);
+    });
+
+    it.each([['upper', max] as const, ['lower', min] as const])(
+      'accepts the %s bound exactly',
+      async (_label, value) => {
+        const dto = toDto({ ...baseDto, [property]: value });
+        const errors = await validate(dto);
+        expect(errors.filter(e => e.property === property)).toHaveLength(0);
+      }
+    );
+
+    it.each([['above', max + 1] as const, ['below', min - 1] as const])(
+      'rejects one %s the bound',
+      async (_label, value) => {
+        const dto = toDto({ ...baseDto, [property]: value });
+        const errors = await validate(dto);
+        expect(errors.find(e => e.property === property)).toBeDefined();
+      }
+    );
+
+    it('rejects a non-integer', async () => {
+      const dto = toDto({ ...baseDto, [property]: 15.5 });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === property)).toBeDefined();
+    });
+
+    it('rejects a value past the int4 range', async () => {
+      const dto = toDto({ ...baseDto, [property]: 5_000_000_000 });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === property)).toBeDefined();
+    });
+
+    it('accepts an absent value (the column is optional)', async () => {
+      const errors = await validate(toDto({ ...baseDto }));
+      expect(errors.filter(e => e.property === property)).toHaveLength(0);
     });
   });
 
@@ -1530,5 +1585,29 @@ describe('UpdateCharacterDto — inherited spellcastingAbility catalog (VEG-494)
     await expect(
       pipe.transform({ spellcastingAbility: 'Inteligence' }, updateMeta)
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  // VEG-496, through the real pipe rather than the bare validator: these are the
+  // payloads that used to clear validation and 500 in the Prisma driver. The
+  // bare-validator cases above pin the decorators; these pin the status code the
+  // caller actually gets, which is the whole point of the ticket.
+  it.each([
+    ['a fractional armorClass', { armorClass: 15.5 }],
+    ['a fractional speed', { speed: 30.5 }],
+    ['an out-of-int4 speed', { speed: 5_000_000_000 }],
+    ['an out-of-int4 spellSaveDC', { spellSaveDC: 5_000_000_000 }],
+    ['an out-of-int4 spellAttackBonus', { spellAttackBonus: -5_000_000_000 }],
+  ])('400s on %s instead of reaching Prisma', async (_label, over) => {
+    await expect(pipe.transform({ ...over }, updateMeta)).rejects.toBeInstanceOf(
+      BadRequestException
+    );
+  });
+
+  // The clear path stays open: the columns are nullable and CombatBar's
+  // "Use derived AC" button sends exactly this.
+  it('still accepts an explicit null armorClass clear through the pipe', async () => {
+    await expect(pipe.transform({ armorClass: null }, updateMeta)).resolves.toMatchObject({
+      armorClass: null,
+    });
   });
 });
