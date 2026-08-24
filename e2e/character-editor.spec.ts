@@ -51,3 +51,55 @@ test.describe('character editor — identity / abilities / combat', () => {
     await expect(page.getByTestId('hd-block')).toContainText('d10');
   });
 });
+
+// VEG-500. VEG-496 bounded these columns at the DTO write boundary; the editor
+// kept accepting values the server would refuse, so the user met the limit as a
+// 400 toast. jsdom only approximates a real number input's value sanitization,
+// so the keystroke path below (a typed minus sign) needs a real browser to mean
+// anything.
+test.describe('character editor — bounded numeric inputs', () => {
+  test('pins an over-max speed and accepts a typed negative initiative bonus', async ({ page }) => {
+    await registerAndLogin(page, 'char-bounds');
+
+    // The sheet carries a "Roll initiative" button, so a loose /initiative/i
+    // matches a non-input as soon as this leaves the editor. Name the field.
+    const speedField = () => page.getByLabel('Speed', { exact: true });
+    const initiativeField = () => page.getByLabel('Initiative Bonus', { exact: true });
+    // The editor is a client component reached by a link, so wait for it to
+    // mount before reading a field rather than racing the navigation.
+    const openEditor = async (submitLabel: RegExp) => {
+      await page.getByRole('link', { name: /edit/i }).first().click();
+      await expect(page.getByRole('button', { name: submitLabel })).toBeVisible();
+    };
+
+    await page.goto('/characters/new');
+    await page.getByLabel(/^name/i).fill('Bounded Bardolph');
+
+    // Past the ceiling: the control pins it rather than letting the write 400.
+    await speedField().fill('5000');
+    await expect(speedField()).toHaveValue('999');
+
+    // A lone "-" is not a valid number, so the browser reports '' for it
+    // mid-keystroke. Typing character by character is the case that used to eat
+    // the minus sign and leave "3".
+    await initiativeField().clear();
+    await initiativeField().pressSequentially('-3');
+    await expect(initiativeField()).toHaveValue('-3');
+
+    await page.getByRole('button', { name: /create character/i }).click();
+    await expect(page.getByRole('heading', { name: 'Bounded Bardolph' })).toBeVisible();
+
+    // Both survive the round trip rather than being clamped only on screen.
+    await openEditor(/save changes/i);
+    await expect(speedField()).toHaveValue('999');
+    await expect(initiativeField()).toHaveValue('-3');
+
+    // Blanking the bonus saves 0, not null — it is a flat bonus, and no bonus
+    // is zero.
+    await initiativeField().clear();
+    await page.getByRole('button', { name: /save changes/i }).click();
+    await expect(page.getByRole('heading', { name: 'Bounded Bardolph' })).toBeVisible();
+    await openEditor(/save changes/i);
+    await expect(initiativeField()).toHaveValue('0');
+  });
+});

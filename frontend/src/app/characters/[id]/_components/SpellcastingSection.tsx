@@ -4,7 +4,8 @@ import { useState } from 'react';
 import type { Character, SpellEntry, SrdClass, SrdSpell } from '@/lib/types';
 import { formatModifier } from './utils';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
-import { parseNonNegativeInt, togglePip } from '@/lib/character-play';
+import { togglePip } from '@/lib/character-play';
+import { clampIntToRange } from '@/lib/form-helpers';
 import { resolveSpellSlotView, writeSlotUsed } from '@/lib/spell-slot-view';
 import {
   addSpellEntry,
@@ -98,7 +99,7 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   const addFreeSpell = () => {
     const name = addName.trim();
     if (!name) return;
-    const level = Math.min(MAX_SPELL_LEVEL, parseNonNegativeInt(addLevel));
+    const level = clampIntToRange(addLevel, 0, MAX_SPELL_LEVEL);
     const entry: SpellEntry = { level, name, prepared: level > 0 };
     patch({ spells: addSpellEntry(storedSpells, entry) });
     setAddName('');

@@ -22,6 +22,8 @@ import type {
   Weapon,
 } from '@/lib/types';
 import { asDieType, DIE_TYPES, SIZES } from '@/lib/types';
+import { MAX_ARMOR_CLASS, MAX_INITIATIVE_BONUS, MAX_SPEED } from '@grimoire-os/shared';
+import { clampIntToRange } from '@/lib/form-helpers';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
 import { recommendedAbilityKeys } from '@/lib/ability-math';
 import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
@@ -66,7 +68,14 @@ export interface CharacterFormValues {
   abilityScores: AbilityScores;
   /** Blank = no manual override — AC derives from equipped gear (VEG-410). */
   armorClass: number | '';
-  initiative: number;
+  /**
+   * Blank is a transient editing state, not a distinct value: it submits as 0
+   * (VEG-500). The field has to be able to hold `''` because a lone `-` is not
+   * a valid number, so the browser reports `''` for it mid-keystroke — coercing
+   * that to 0 made React rewrite the node and eat the minus sign, leaving the
+   * symmetric bound VEG-452 put on this column unreachable from the UI.
+   */
+  initiative: number | '';
   speed: number;
   hitPoints: HitPoints;
   hitDice: HitDice;
@@ -284,7 +293,9 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     size: v.size,
     abilityScores: v.abilityScores,
     armorClass: v.armorClass === '' ? null : v.armorClass,
-    initiative: v.initiative,
+    // Unlike armorClass, blank here is not "derive it" — the column is a flat
+    // bonus and no bonus is 0 (VEG-500).
+    initiative: v.initiative === '' ? 0 : v.initiative,
     speed: v.speed,
     hitPoints: v.hitPoints,
     hitDice: v.hitDice,
@@ -839,27 +850,50 @@ export default function CharacterEditorForm({
       <div className={cardClass}>
         <h2 className={sectionHeading}>Combat</h2>
         <div className="grid grid-cols-3 gap-4">
+          {/*
+            The three bounds below are clamped in onChange, not left to the
+            `max` attribute (VEG-500). `max` constrains the stepper and native
+            validation but does not stop typing, so on its own it would turn the
+            server's 400 into a silent client-side invalid state. Clamping only
+            bites past the bound, so ordinary typing is untouched.
+          */}
           <FormField
             label="Armor Class"
             type="number"
             min={0}
+            max={MAX_ARMOR_CLASS}
             placeholder="derived"
             value={values.armorClass}
-            onChange={e => set('armorClass', e.target.value === '' ? '' : Number(e.target.value))}
+            onChange={e =>
+              set(
+                'armorClass',
+                e.target.value === '' ? '' : clampIntToRange(e.target.value, 0, MAX_ARMOR_CLASS)
+              )
+            }
           />
           <FormField
             label="Initiative Bonus"
             type="number"
+            min={-MAX_INITIATIVE_BONUS}
+            max={MAX_INITIATIVE_BONUS}
             helperText="Added to your Dexterity modifier (Alert, Jack of All Trades…)"
             value={values.initiative}
-            onChange={e => set('initiative', Number(e.target.value))}
+            onChange={e =>
+              set(
+                'initiative',
+                e.target.value === ''
+                  ? ''
+                  : clampIntToRange(e.target.value, -MAX_INITIATIVE_BONUS, MAX_INITIATIVE_BONUS)
+              )
+            }
           />
           <FormField
             label="Speed"
             type="number"
             min={0}
+            max={MAX_SPEED}
             value={values.speed}
-            onChange={e => set('speed', Number(e.target.value))}
+            onChange={e => set('speed', clampIntToRange(e.target.value, 0, MAX_SPEED))}
           />
         </div>
         <div className="grid grid-cols-3 gap-4">
