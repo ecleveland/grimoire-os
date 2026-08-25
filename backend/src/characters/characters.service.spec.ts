@@ -9,6 +9,7 @@ import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import {
   USER_ID,
   USER_ID_2,
@@ -17,6 +18,12 @@ import {
   createCharacterDto,
 } from '../test/fixtures';
 import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
+
+// VEG-505: loadClassData resolves the class against the character owner's
+// visible content (srd + shared + their own homebrew), not by bare name.
+const visibleToOwner = {
+  OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }],
+};
 
 describe('CharactersService', () => {
   let service: CharactersService;
@@ -37,6 +44,7 @@ describe('CharactersService', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: CampaignAuthService, useValue: campaignAuth },
         { provide: InventoryResolverService, useValue: inventoryResolver },
+        ContentAccessService,
       ],
     }).compile();
 
@@ -44,7 +52,7 @@ describe('CharactersService', () => {
 
     // Default: the character's class exists in the catalog as a non-caster
     // (mockCharacter is a Fighter). Specific tests override for spellcasters.
-    prisma.srdClass.findUnique.mockResolvedValue({ spellcasting: null });
+    prisma.srdClass.findFirst.mockResolvedValue({ spellcasting: null });
   });
 
   describe('create', () => {
@@ -370,7 +378,7 @@ describe('CharactersService', () => {
         spellcastingAbility: 'Intelligence',
         abilityScores: { ...mockCharacter.abilityScores, intelligence: 16 },
       });
-      prisma.srdClass.findUnique.mockResolvedValue({
+      prisma.srdClass.findFirst.mockResolvedValue({
         spellcasting: {
           ability: 'Intelligence',
           spellSlotProgression: {
@@ -382,8 +390,8 @@ describe('CharactersService', () => {
 
       const result = await service.findOne(CHARACTER_ID);
 
-      expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
-        where: { name: 'Wizard' },
+      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+        where: { name: 'Wizard', ...visibleToOwner },
         select: { spellcasting: true, weaponProficiencies: true },
       });
       // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
@@ -412,7 +420,7 @@ describe('CharactersService', () => {
         abilityScores: { ...mockCharacter.abilityScores, charisma: 16 },
       });
       // Class not present in the catalog.
-      prisma.srdClass.findUnique.mockResolvedValue(null);
+      prisma.srdClass.findFirst.mockResolvedValue(null);
 
       const result = await service.findOne(CHARACTER_ID);
 
@@ -454,7 +462,7 @@ describe('CharactersService', () => {
         proficiencies: [],
         inventory: [tieredLongsword],
       });
-      prisma.srdClass.findUnique.mockResolvedValue({
+      prisma.srdClass.findFirst.mockResolvedValue({
         spellcasting: null,
         weaponProficiencies: ['Simple weapons', 'Martial weapons'],
       });
@@ -463,10 +471,35 @@ describe('CharactersService', () => {
 
       // STR 16 → +3, prof +3 granted by the class list.
       expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
-      expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
-        where: { name: 'Fighter' },
+      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+        where: { name: 'Fighter', ...visibleToOwner },
         select: { spellcasting: true, weaponProficiencies: true },
       });
+    });
+
+    // VEG-505 tiered SrdClass, so a class name is no longer globally unique: two
+    // users may each own a homebrew "Fighter" alongside the SRD one. Resolving
+    // by bare name would let another user's homebrew drive this character's
+    // spell slots and weapon proficiencies.
+    it("resolves the class against the character owner's visible content only (VEG-505)", async () => {
+      prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, class: 'Fighter' });
+      prisma.srdClass.findFirst.mockResolvedValue({
+        spellcasting: null,
+        weaponProficiencies: [],
+      });
+
+      await service.findOne(CHARACTER_ID);
+
+      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+        where: {
+          name: 'Fighter',
+          OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: mockCharacter.userId }],
+        },
+        select: { spellcasting: true, weaponProficiencies: true },
+      });
+      // Scoped to the owner, never to some other user.
+      const call = prisma.srdClass.findFirst.mock.calls[0][0];
+      expect(JSON.stringify(call)).not.toContain(USER_ID_2);
     });
 
     it('derives a non-proficient row when neither class nor character covers the weapon (VEG-463)', async () => {
@@ -477,7 +510,7 @@ describe('CharactersService', () => {
         inventory: [tieredLongsword],
       });
       // Class not present in the catalog → no class grants.
-      prisma.srdClass.findUnique.mockResolvedValue(null);
+      prisma.srdClass.findFirst.mockResolvedValue(null);
 
       const result = await service.findOne(CHARACTER_ID);
 
@@ -494,7 +527,7 @@ describe('CharactersService', () => {
         proficiencies: ['Longswords'],
         inventory: [tieredLongsword],
       });
-      prisma.srdClass.findUnique.mockResolvedValue(null);
+      prisma.srdClass.findFirst.mockResolvedValue(null);
 
       const result = await service.findOne(CHARACTER_ID);
 

@@ -429,16 +429,24 @@ export class SrdService {
 
   // ── Classes ─────────────────────────────────────────
 
-  async findAllClasses() {
+  // Tiered since VEG-505: the response now varies per caller, which is why the
+  // class routes moved off SrdController's blanket URL-keyed cache and onto
+  // ClassesController's AnonymousCacheInterceptor. Nothing can create a
+  // homebrew class until VEG-506, so today every caller sees the same rows.
+  async findAllClasses(userId?: string) {
     return this.prisma.srdClass.findMany({
+      where: { ...this.contentAccess.visibleTo(userId) },
       orderBy: { name: 'asc' },
       include: { features: { orderBy: CLASS_FEATURE_ORDER } },
     });
   }
 
-  async findClass(id: string) {
-    return this.prisma.srdClass.findUnique({
-      where: { id },
+  // findFirst, not findUnique: the visibility fragment is not part of any
+  // unique key, and a row the caller cannot see must read as absent (404)
+  // rather than existing-but-forbidden, which would confirm it exists.
+  async findClass(id: string, userId?: string) {
+    return this.prisma.srdClass.findFirst({
+      where: { id, ...this.contentAccess.visibleTo(userId) },
       include: {
         subclasses: {
           include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
@@ -469,8 +477,18 @@ export class SrdService {
 
   // ── Subclasses ──────────────────────────────────────
 
-  async searchSubclasses(classId?: string) {
-    const where: Record<string, unknown> = {};
+  // A subclass is only as visible as its parent class (VEG-505). Scoping the
+  // subclass row alone would expose a homebrew subclass hanging off a class the
+  // caller cannot see — and once VEG-509 lets a user attach a subclass to any
+  // class visible to *them*, the parent check is what stops that subclass
+  // leaking back to everyone who can see the parent.
+  private visibleSubclassWhere(userId?: string): Record<string, unknown> {
+    const visible = this.contentAccess.visibleTo(userId);
+    return { ...visible, srdClass: { is: { ...visible } } };
+  }
+
+  async searchSubclasses(classId?: string, userId?: string) {
+    const where: Record<string, unknown> = this.visibleSubclassWhere(userId);
     if (classId) where.classId = classId;
     return this.prisma.subclass.findMany({
       where,
@@ -479,9 +497,9 @@ export class SrdService {
     });
   }
 
-  async findSubclass(id: string) {
-    return this.prisma.subclass.findUnique({
-      where: { id },
+  async findSubclass(id: string, userId?: string) {
+    return this.prisma.subclass.findFirst({
+      where: { id, ...this.visibleSubclassWhere(userId) },
       include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
     });
   }

@@ -55,32 +55,9 @@ describe('SrdController', () => {
   // Monster routes moved to MonstersController (VEG-293) — see monsters.controller.spec.ts.
   // Feat routes moved to FeatsController (VEG-295) — see feats.controller.spec.ts.
   // Item routes moved to ItemsController (VEG-296) — see items.controller.spec.ts.
-
-  // ── Classes ─────────────────────────────────────────
-
-  describe('findAllClasses', () => {
-    it('delegates to service', async () => {
-      const classes = [{ id: '1', name: 'Fighter' }];
-      service.findAllClasses.mockResolvedValue(classes);
-
-      const result = await controller.findAllClasses();
-
-      expect(service.findAllClasses).toHaveBeenCalled();
-      expect(result).toEqual(classes);
-    });
-  });
-
-  describe('findClass', () => {
-    it('delegates to service with id', async () => {
-      const cls = { id: '1', name: 'Fighter', subclasses: [] };
-      service.findClass.mockResolvedValue(cls);
-
-      const result = await controller.findClass('1');
-
-      expect(service.findClass).toHaveBeenCalledWith('1');
-      expect(result).toEqual(cls);
-    });
-  });
+  // Class/subclass routes moved to ClassesController (VEG-505) — see
+  // classes.controller.spec.ts, which also asserts they are no longer declared
+  // here (they must stay off this controller's URL-keyed cache).
 
   // ── Races ───────────────────────────────────────────
 
@@ -105,31 +82,6 @@ describe('SrdController', () => {
 
       expect(service.findRace).toHaveBeenCalledWith('1');
       expect(result).toEqual(race);
-    });
-  });
-
-  // ── Subclasses ──────────────────────────────────────
-
-  describe('searchSubclasses', () => {
-    it('delegates to service with classId', async () => {
-      service.searchSubclasses.mockResolvedValue([]);
-
-      const result = await controller.searchSubclasses('class-1');
-
-      expect(service.searchSubclasses).toHaveBeenCalledWith('class-1');
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('findSubclass', () => {
-    it('delegates to service with id', async () => {
-      const subclass = { id: '1', name: 'Champion' };
-      service.findSubclass.mockResolvedValue(subclass);
-
-      const result = await controller.findSubclass('1');
-
-      expect(service.findSubclass).toHaveBeenCalledWith('1');
-      expect(result).toEqual(subclass);
     });
   });
 

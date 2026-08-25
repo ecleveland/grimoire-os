@@ -65,9 +65,20 @@ describe('SeedService', () => {
       model.update.mockResolvedValue({});
     }
     prisma.srdClass.createMany.mockResolvedValue({ count: 0 });
-    prisma.srdClass.upsert.mockImplementation((args: any) =>
-      Promise.resolve({ id: `id-${args.where.name}`, name: args.where.name })
-    );
+    // VEG-505: classes now ride seedSrdByName's srd-partitioned
+    // findFirst -> update/create, the same path backgrounds use.
+    const seededClassNames = new Set<string>();
+    prisma.srdClass.findFirst.mockImplementation((args: any) => {
+      const name = args?.where?.name as string | undefined;
+      return Promise.resolve(
+        name && seededClassNames.has(name) ? { id: `id-${name}`, name } : null
+      );
+    });
+    prisma.srdClass.create.mockImplementation((args: any) => {
+      seededClassNames.add(args.data.name);
+      return Promise.resolve({ id: `id-${args.data.name}`, name: args.data.name });
+    });
+    prisma.srdClass.update.mockResolvedValue({});
     prisma.race.createMany.mockResolvedValue({ count: 0 });
     prisma.race.upsert.mockImplementation((args: any) =>
       Promise.resolve({ id: `id-${args.where.name}`, name: args.where.name })
@@ -119,14 +130,12 @@ describe('SeedService', () => {
     });
 
     // Subclass/subrace FK resolution
-    prisma.srdClass.findUnique.mockResolvedValue({
-      id: 'class-1',
-      name: 'Fighter',
-    });
     prisma.race.findUnique.mockResolvedValue({ id: 'race-1', name: 'Dwarf' });
-    prisma.subclass.upsert.mockImplementation((args: any) =>
-      Promise.resolve({ id: `sub-${args.where.name}`, name: args.where.name })
+    prisma.subclass.findFirst.mockResolvedValue(null);
+    prisma.subclass.create.mockImplementation((args: any) =>
+      Promise.resolve({ id: `sub-${args.data.name}`, name: args.data.name })
     );
+    prisma.subclass.update.mockResolvedValue({});
     prisma.subrace.upsert.mockResolvedValue({});
 
     // Dev admin user lookup returns null (user doesn't exist yet)
@@ -303,7 +312,9 @@ describe('SeedService', () => {
     // Classes and races are upserted by name (VEG-480), and conditions/game
     // rules by their unique key (VEG-449), not createMany'd — see the dedicated
     // re-seed block below.
-    expect(prisma.srdClass.upsert).toHaveBeenCalled();
+    // Classes moved off upsert onto the srd-partitioned write path (VEG-505);
+    // races are untiered and still upsert by name.
+    expect(prisma.srdClass.create).toHaveBeenCalled();
     expect(prisma.race.upsert).toHaveBeenCalled();
     expect(prisma.condition.upsert).toHaveBeenCalled();
     expect(prisma.gameRule.upsert).toHaveBeenCalled();
@@ -348,20 +359,23 @@ describe('SeedService', () => {
   // row id (child ClassFeature/RaceTrait/Subclass FKs resolve back to it by
   // name, so a delete-and-recreate would orphan them).
   describe('class/race parent re-seed (VEG-480)', () => {
-    it('upserts each class by name rather than insert-only createMany', async () => {
+    // VEG-505 moved this onto seedSrdByName, so the mechanism is now
+    // findFirst -> update/create rather than upsert. The property VEG-480
+    // cared about is unchanged and still asserted: a re-seed must propagate
+    // edits instead of silently skipping existing rows.
+    it('writes each class through a path that updates existing rows, not insert-only createMany', async () => {
+      prisma.srdClass.findFirst.mockResolvedValue({ id: 'existing-class' });
+
       await service.seed();
 
-      // createMany can only insert; on an existing DB it skips, so edits never
-      // land. The upsert is what makes a re-seed actually update.
       expect(prisma.srdClass.createMany).not.toHaveBeenCalled();
-      expect(prisma.srdClass.upsert).toHaveBeenCalled();
+      expect(prisma.srdClass.update).toHaveBeenCalled();
 
-      const call = prisma.srdClass.upsert.mock.calls[0][0];
-      expect(call.where).toEqual({ name: expect.any(String) });
-      // The update branch must carry the row's fields — an empty update would
-      // reproduce the insert-only no-op the ticket fixes.
-      expect(call.update.hitDie).toBeDefined();
-      expect(call.create.hitDie).toBeDefined();
+      const call = prisma.srdClass.update.mock.calls[0][0];
+      expect(call.where).toEqual({ id: 'existing-class' });
+      // The update must carry the row's fields — an empty update would
+      // reproduce the insert-only no-op VEG-480 fixed.
+      expect(call.data.hitDie).toBeDefined();
     });
 
     it('upserts each race by name rather than insert-only createMany', async () => {
@@ -387,11 +401,11 @@ describe('SeedService', () => {
 
       await service.seed();
 
+      // seedSrdByName keys the payload by the kind it was given (VEG-505),
+      // where seedClasses previously passed a filename.
       expect(guard).toHaveBeenCalledWith(
         'class',
-        expect.objectContaining({
-          'classes.ts': expect.arrayContaining(['Fighter']),
-        })
+        expect.objectContaining({ class: expect.arrayContaining(['Fighter']) })
       );
       expect(guard).toHaveBeenCalledWith('race', expect.any(Object));
     });
@@ -403,8 +417,74 @@ describe('SeedService', () => {
       await service.seed();
 
       const firstItemCreate = prisma.item.create.mock.invocationCallOrder[0];
-      const firstClassUpsert = prisma.srdClass.upsert.mock.invocationCallOrder[0];
-      expect(firstItemCreate).toBeLessThan(firstClassUpsert);
+      const firstClassWrite = prisma.srdClass.create.mock.invocationCallOrder[0];
+      expect(firstItemCreate).toBeLessThan(firstClassWrite);
+    });
+  });
+
+  // ── Class/subclass writes stay inside the srd partition (VEG-505) ──────
+  //
+  // VEG-505 tiered SrdClass and Subclass, so `name` is no longer globally
+  // unique and upsert-by-name no longer even compiles. Every seed write and FK
+  // resolution must filter on contentSource='srd' so a re-seed can never read
+  // or clobber a user's homebrew class that reuses an SRD name.
+  describe('class/subclass srd partitioning (VEG-505)', () => {
+    it('resolves the class to update by name AND srd partition, never by name alone', async () => {
+      await service.seed();
+
+      expect(prisma.srdClass.upsert).not.toHaveBeenCalled();
+      expect(prisma.srdClass.createMany).not.toHaveBeenCalled();
+      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+        where: { name: expect.any(String), contentSource: 'srd' },
+        select: { id: true },
+      });
+      for (const [args] of prisma.srdClass.findFirst.mock.calls) {
+        expect(args.where.contentSource).toBe('srd');
+      }
+    });
+
+    it('writes classes tagged srd so the partial unique index applies', async () => {
+      await service.seed();
+
+      const [call] = prisma.srdClass.create.mock.calls[0];
+      expect(call.data.contentSource).toBe('srd');
+      // The update branch must still carry substantive fields, or a re-seed is
+      // the insert-only no-op VEG-480 fixed.
+      expect(call.data.hitDie).toBeDefined();
+    });
+
+    it('resolves a subclass parent class within the srd partition', async () => {
+      await service.seed();
+
+      expect(prisma.srdClass.findUnique).not.toHaveBeenCalled();
+      const parentLookups = prisma.srdClass.findFirst.mock.calls.filter(
+        ([args]) => args.where.name === 'Fighter'
+      );
+      expect(parentLookups.length).toBeGreaterThan(0);
+      for (const [args] of parentLookups) {
+        expect(args.where.contentSource).toBe('srd');
+      }
+    });
+
+    it('resolves subclass rows by name AND srd partition, never by name alone', async () => {
+      await service.seed();
+
+      expect(prisma.subclass.upsert).not.toHaveBeenCalled();
+      for (const [args] of prisma.subclass.findFirst.mock.calls) {
+        expect(args.where.contentSource).toBe('srd');
+      }
+      const [created] = prisma.subclass.create.mock.calls[0];
+      expect(created.data.contentSource).toBe('srd');
+    });
+
+    it('scopes class-feature FK resolution to srd classes', async () => {
+      await service.seed();
+
+      const classFkLookups = prisma.srdClass.findMany.mock.calls;
+      expect(classFkLookups.length).toBeGreaterThan(0);
+      for (const [args] of classFkLookups) {
+        expect(args.where.contentSource).toBe('srd');
+      }
     });
   });
 
@@ -538,11 +618,13 @@ describe('SeedService', () => {
     expect(raceRows[0].name).toBe('Test Species');
   });
 
-  it('resolves FK references for subclasses via upsert', async () => {
+  it('resolves FK references for subclasses from the seeded parent class', async () => {
     await service.seed();
 
-    expect(prisma.srdClass.findUnique).toHaveBeenCalled();
-    expect(prisma.subclass.upsert).toHaveBeenCalled();
+    expect(prisma.srdClass.findFirst).toHaveBeenCalled();
+    expect(prisma.subclass.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ classId: expect.any(String) }) })
+    );
   });
 
   it('resolves FK references for subraces via upsert', async () => {

@@ -14,7 +14,7 @@ test.describe('character editor — weapons & features', () => {
     // Pick an SRD class so the feature can be categorized under Class Features.
     const classInput = page.getByLabel(/^class/i);
     await classInput.click();
-    const firstClass = page.getByRole('option').first();
+    const firstClass = page.getByRole('listbox').getByRole('option').first();
     const className = ((await firstClass.textContent()) ?? '').trim();
     await firstClass.click();
 

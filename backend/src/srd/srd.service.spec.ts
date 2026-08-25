@@ -633,6 +633,7 @@ describe('SrdService', () => {
       const result = await service.findAllClasses();
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
+        where: { contentSource: { in: ['srd', 'shared'] } },
         orderBy: { name: 'asc' },
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
@@ -640,9 +641,89 @@ describe('SrdService', () => {
     });
   });
 
+  // ── Class/subclass tiering (VEG-505) ──────────────────────────────────
+  //
+  // Nothing can create a homebrew class until VEG-506, so these assert the
+  // where-fragment rather than data: with zero homebrew rows the scoped query
+  // is behaviourally identical to the unscoped one, and the fragment is the
+  // only thing that will still be true when VEG-506 lands.
+  describe('class/subclass visibility scoping (VEG-505)', () => {
+    const GLOBAL = { contentSource: { in: ['srd', 'shared'] } };
+
+    it('findAllClasses shows an anonymous caller the global catalog only', async () => {
+      prisma.srdClass.findMany.mockResolvedValue([]);
+
+      await service.findAllClasses();
+
+      expect(prisma.srdClass.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: GLOBAL })
+      );
+    });
+
+    it('findAllClasses adds the caller’s own homebrew, and nobody else’s', async () => {
+      prisma.srdClass.findMany.mockResolvedValue([]);
+
+      await service.findAllClasses('user-1');
+
+      const [args] = prisma.srdClass.findMany.mock.calls[0];
+      expect(args.where).toEqual({ OR: [GLOBAL, { createdById: 'user-1' }] });
+      expect(JSON.stringify(args.where)).not.toContain('user-2');
+    });
+
+    it('findClass scopes by id AND visibility, so a stranger’s homebrew 404s', async () => {
+      prisma.srdClass.findFirst.mockResolvedValue(null);
+
+      await service.findClass('cls-1', 'user-1');
+
+      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'cls-1', OR: [GLOBAL, { createdById: 'user-1' }] },
+        })
+      );
+    });
+
+    it('searchSubclasses requires the subclass AND its parent class to be visible', async () => {
+      prisma.subclass.findMany.mockResolvedValue([]);
+
+      await service.searchSubclasses(undefined, 'user-1');
+
+      const [args] = prisma.subclass.findMany.mock.calls[0];
+      expect(args.where).toEqual({
+        OR: [GLOBAL, { createdById: 'user-1' }],
+        srdClass: { is: { OR: [GLOBAL, { createdById: 'user-1' }] } },
+      });
+    });
+
+    it('searchSubclasses keeps the classId filter alongside the scoping', async () => {
+      prisma.subclass.findMany.mockResolvedValue([]);
+
+      await service.searchSubclasses('class-1', 'user-1');
+
+      const [args] = prisma.subclass.findMany.mock.calls[0];
+      expect(args.where.classId).toBe('class-1');
+      expect(args.where.srdClass).toBeDefined();
+    });
+
+    it('findSubclass scopes by id, visibility, and parent visibility', async () => {
+      prisma.subclass.findFirst.mockResolvedValue(null);
+
+      await service.findSubclass('sub-1', 'user-1');
+
+      expect(prisma.subclass.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'sub-1',
+            OR: [GLOBAL, { createdById: 'user-1' }],
+            srdClass: { is: { OR: [GLOBAL, { createdById: 'user-1' }] } },
+          },
+        })
+      );
+    });
+  });
+
   describe('findClass', () => {
     it('includes subclasses and features (with subclass features) ordered', async () => {
-      prisma.srdClass.findUnique.mockResolvedValue({
+      prisma.srdClass.findFirst.mockResolvedValue({
         id: '1',
         name: 'Fighter',
         subclasses: [],
@@ -651,8 +732,8 @@ describe('SrdService', () => {
 
       await service.findClass('1');
 
-      expect(prisma.srdClass.findUnique).toHaveBeenCalledWith({
-        where: { id: '1' },
+      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+        where: { id: '1', ...{ contentSource: { in: ['srd', 'shared'] } } },
         include: {
           subclasses: {
             include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
@@ -710,7 +791,10 @@ describe('SrdService', () => {
       await service.searchSubclasses();
 
       expect(prisma.subclass.findMany).toHaveBeenCalledWith({
-        where: {},
+        where: {
+          ...{ contentSource: { in: ['srd', 'shared'] } },
+          srdClass: { is: { contentSource: { in: ['srd', 'shared'] } } },
+        },
         orderBy: { name: 'asc' },
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
@@ -722,7 +806,11 @@ describe('SrdService', () => {
       await service.searchSubclasses('class-1');
 
       expect(prisma.subclass.findMany).toHaveBeenCalledWith({
-        where: { classId: 'class-1' },
+        where: {
+          ...{ contentSource: { in: ['srd', 'shared'] } },
+          srdClass: { is: { contentSource: { in: ['srd', 'shared'] } } },
+          classId: 'class-1',
+        },
         orderBy: { name: 'asc' },
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
@@ -1129,12 +1217,16 @@ describe('SrdService', () => {
   describe('findSubclass', () => {
     it('returns subclass by id with features included', async () => {
       const subclass = { id: '1', name: 'Champion', features: [] };
-      prisma.subclass.findUnique.mockResolvedValue(subclass);
+      prisma.subclass.findFirst.mockResolvedValue(subclass);
 
       const result = await service.findSubclass('1');
 
-      expect(prisma.subclass.findUnique).toHaveBeenCalledWith({
-        where: { id: '1' },
+      expect(prisma.subclass.findFirst).toHaveBeenCalledWith({
+        where: {
+          id: '1',
+          ...{ contentSource: { in: ['srd', 'shared'] } },
+          srdClass: { is: { contentSource: { in: ['srd', 'shared'] } } },
+        },
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
       expect(result).toEqual(subclass);

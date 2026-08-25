@@ -18,10 +18,14 @@ test.describe('character editor — SRD pickers + autofill', () => {
 
     await page.getByLabel(/^name/i).fill('Picker Hero');
 
-    // Class — open the combobox and pick the first SRD option.
+    // Class — open the combobox and pick the first SRD option. The query is
+    // scoped to the combobox's role="listbox": a page-wide getByRole('option')
+    // also matches the native <select> options (Size, Alignment) that are always
+    // in the DOM, so it binds to one of those while the list is still loading
+    // and then times out clicking an element inside a closed select (VEG-505).
     const classInput = page.getByLabel(/^class/i);
     await classInput.click();
-    const firstClass = page.getByRole('option').first();
+    const firstClass = page.getByRole('listbox').getByRole('option').first();
     const className = ((await firstClass.textContent()) ?? '').trim();
     await firstClass.click();
     await expect(classInput).toHaveValue(className);
@@ -29,7 +33,7 @@ test.describe('character editor — SRD pickers + autofill', () => {
     // Race — same, in its own combobox.
     const raceInput = page.getByLabel(/^race/i);
     await raceInput.click();
-    const firstRace = page.getByRole('option').first();
+    const firstRace = page.getByRole('listbox').getByRole('option').first();
     const raceName = ((await firstRace.textContent()) ?? '').trim();
     await firstRace.click();
     await expect(raceInput).toHaveValue(raceName);

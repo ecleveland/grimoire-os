@@ -445,22 +445,15 @@ export class SeedService {
     // Strip embedded feature arrays before writing; those live in their own
     // table, seeded by seedClassFeatures().
     //
-    // Upsert by name, not createMany({ skipDuplicates }) (VEG-480): the latter
-    // is insert-only, so edits to class data silently no-op on any database
-    // that already has the rows. `SrdClass.name` is globally unique and carries
-    // no contentSource, so a plain upsert-by-name is safe (no homebrew tier to
-    // clobber). Upsert also preserves the row id, which child ClassFeature and
-    // Subclass FKs resolve back to by name — a delete-and-recreate would orphan
-    // them.
+    // Rides seedSrdByName since VEG-505 tiered SrdClass: upsert-by-name is gone
+    // because `name` is no longer globally unique, and a bare by-name write
+    // could now clobber a user's homebrew class that reuses an SRD name. The
+    // shared path scopes its lookup to contentSource='srd', still propagates
+    // edits on re-seed (the insert-only no-op VEG-480 fixed), still preserves
+    // the row id that child ClassFeature and Subclass FKs resolve back to, and
+    // runs the duplicate-name guard every other by-name table uses.
     const classRows = srdClasses.map(({ features: _features, ...rest }) => rest);
-    // Upsert-by-name is last-write-wins, so a duplicate name would silently
-    // clobber rather than the createMany first-wins skip. Guard it like every
-    // other by-name-upserted table (seedSrdByName does the same at the item/
-    // spell/etc. layer).
-    assertUniqueSeedNames('class', { 'classes.ts': classRows.map(r => r.name) });
-    for (const row of classRows) {
-      await tx.srdClass.upsert({ where: { name: row.name }, update: row, create: row });
-    }
+    await this.seedSrdByName(srdDelegate(tx.srdClass), classRows, 'class');
     this.logger.log(`  Classes: ${classRows.length} entries`);
   }
 
@@ -481,9 +474,13 @@ export class SeedService {
   }
 
   private async seedClassFeatures(tx: Prisma.TransactionClient): Promise<void> {
+    // Scoped to the srd partition (VEG-505): an unscoped name lookup could
+    // resolve a homebrew class of the same name and hang SRD feature rows off
+    // a user's class.
     const classIdByName = await this.resolveIdsByName(
       nameLookupDelegate(tx.srdClass),
-      srdClasses.map(c => c.name)
+      srdClasses.map(c => c.name),
+      'srd'
     );
     const classFeatureRows: Prisma.ClassFeatureCreateManyInput[] = [];
     for (const cls of srdClasses) {
@@ -557,30 +554,38 @@ export class SeedService {
     this.logger.log(`  Background Features: ${backgroundFeatureRows.length} entries`);
   }
 
+  // Both lookups below are scoped to the srd partition (VEG-505). `name` is no
+  // longer globally unique on either table, so an unscoped parent lookup could
+  // resolve a user's homebrew class, and an unscoped subclass lookup could
+  // overwrite a homebrew subclass that reuses an SRD name. Written inline
+  // rather than through seedSrdByName because the subclass id is needed to
+  // attach its feature rows, which that helper does not return.
   private async seedSubclasses(tx: Prisma.TransactionClient): Promise<void> {
     let subclassFeatureCount = 0;
     for (const sc of srdSubclasses) {
-      const parent = await tx.srdClass.findUnique({ where: { name: sc.className } });
+      const parent = await tx.srdClass.findFirst({
+        where: { name: sc.className, contentSource: 'srd' },
+        select: { id: true },
+      });
       if (!parent) {
         this.logger.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
         continue;
       }
-      const subclass = await tx.subclass.upsert({
-        where: { name: sc.name },
-        create: {
-          name: sc.name,
-          classId: parent.id,
-          description: sc.description,
-          spellList: sc.spellList,
-          spellcasting: sc.spellcasting,
-        },
-        update: {
-          classId: parent.id,
-          description: sc.description,
-          spellList: sc.spellList,
-          spellcasting: sc.spellcasting,
-        },
+      const data = {
+        name: sc.name,
+        classId: parent.id,
+        description: sc.description,
+        spellList: sc.spellList,
+        spellcasting: sc.spellcasting,
+        contentSource: 'srd' as const,
+      };
+      const existing = await tx.subclass.findFirst({
+        where: { name: sc.name, contentSource: 'srd' },
+        select: { id: true },
       });
+      const subclass = existing
+        ? await tx.subclass.update({ where: { id: existing.id }, data })
+        : await tx.subclass.create({ data });
       const features: Prisma.SubclassFeatureCreateManyInput[] = (sc.features ?? []).map(f => ({
         subclassId: subclass.id,
         name: f.name,

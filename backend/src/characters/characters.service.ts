@@ -19,6 +19,7 @@ import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { computeCharacterStats, isKnownAbilityName } from './compute/compute-stats';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { autoEquipStartingArmor } from './inventory/auto-equip';
+import { ContentAccessService } from '../srd/content-access.service';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -40,7 +41,8 @@ export class CharactersService {
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService,
-    private inventoryResolver: InventoryResolverService
+    private inventoryResolver: InventoryResolverService,
+    private contentAccess: ContentAccessService
   ) {}
 
   // Lightweight ownership/existence guard for write paths (VEG-346). Selects
@@ -62,17 +64,25 @@ export class CharactersService {
 
   // Spell-slot maxima need the class's progression table (VEG-346) and weapon
   // proficiency grants need its weapon list (VEG-463) — one lookup serves
-  // both. Looked up by name (srd_classes.name is unique); homebrew/unknown
+  // both. Still resolved by name because `Character.class` is a free-text
+  // column, not an FK (VEG-477 tracks making it id-keyed).
+  //
+  // Scoped to `ownerId`'s visible content since VEG-505 tiered SrdClass: the
+  // name is no longer globally unique, so two users may each own a homebrew
+  // "Fighter" alongside the SRD one. An unscoped findFirst here would let
+  // whichever row Postgres returned first — possibly a stranger's homebrew —
+  // drive this character's spell slots and weapon proficiencies. Unknown
   // classes resolve to nothing, in which case slots are omitted and weapon
   // grants fall back to the character's own proficiencies column.
   private async loadClassData(
     className: string | null,
-    characterId: string
+    characterId: string,
+    ownerId: string
   ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
     const none = { spellcasting: null, weaponProficiencies: [] };
     if (!className) return none;
-    const cls = await this.prisma.srdClass.findUnique({
-      where: { name: className },
+    const cls = await this.prisma.srdClass.findFirst({
+      where: { name: className, ...this.contentAccess.visibleTo(ownerId) },
       select: { spellcasting: true, weaponProficiencies: true },
     });
     if (!cls) {
@@ -105,7 +115,7 @@ export class CharactersService {
         `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
       );
     }
-    const classData = await this.loadClassData(character.class, character.id);
+    const classData = await this.loadClassData(character.class, character.id, character.userId);
     const computed = computeCharacterStats(
       {
         level: character.level,

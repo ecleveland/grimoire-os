@@ -4,6 +4,7 @@ import { MonstersController } from './monsters.controller';
 import { SpellsController } from './spells.controller';
 import { FeatsController } from './feats.controller';
 import { BackgroundsController } from './backgrounds.controller';
+import { ClassesController } from './classes.controller';
 import { ItemsController } from './items.controller';
 import { SearchController } from './search.controller';
 import { SrdService } from './srd.service';
@@ -22,6 +23,7 @@ import { HomebrewItemsService } from './homebrew-items.service';
     SpellsController,
     FeatsController,
     BackgroundsController,
+    ClassesController,
     ItemsController,
     SearchController,
   ],

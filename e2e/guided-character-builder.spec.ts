@@ -45,13 +45,13 @@ test.describe('guided character builder — class selection', () => {
     await background.click();
     // First background alphabetically is Acolyte, whose origin feat is Magic
     // Initiate (Cleric) — the grant card surfaces it (VEG-430).
-    await page.getByRole('option').first().click();
+    await page.getByRole('listbox').getByRole('option').first().click();
     const backgroundGrants = page.getByRole('group', { name: /background grants/i });
     await expect(backgroundGrants).toBeVisible();
     await expect(backgroundGrants).toContainText('Magic Initiate (Cleric)');
     const species = page.getByRole('combobox', { name: /species/i });
     await species.click();
-    await page.getByRole('option').first().click();
+    await page.getByRole('listbox').getByRole('option').first().click();
     await expect(page.getByRole('group', { name: /species grants/i })).toBeVisible();
 
     // Abilities step — use point-buy and spend a couple points; the live preview
