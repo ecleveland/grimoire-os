@@ -9,6 +9,7 @@ import type {
 } from '@/lib/types';
 import { applyDamage, applyHeal } from './combatant-hp';
 import { recoverResources } from './character-resources';
+import { clampIntToRange } from './form-helpers';
 
 /**
  * Pure state transitions for the in-sheet play controls (VEG-349). The sheet
@@ -72,9 +73,12 @@ export function deathSavesAfterRevive(nextCurrent: number, saves: DeathSaves): D
  * by the HP-amount and coin inputs so the "reject negatives, floor to int"
  * decision lives in one place. (Distinct from `parseIntField`, which truncates
  * but allows negatives, used by the encounter dialogs.)
+ *
+ * The floor-only case of `clampIntToRange` (VEG-500). Callers that also have a
+ * ceiling should use that directly rather than wrapping this in a `Math.min`.
  */
 export function parseNonNegativeInt(value: string): number {
-  return Math.max(0, Math.floor(Number(value) || 0));
+  return clampIntToRange(value, 0, Number.MAX_SAFE_INTEGER);
 }
 
 /**

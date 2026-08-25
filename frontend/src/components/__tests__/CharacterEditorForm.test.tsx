@@ -15,6 +15,7 @@ import CharacterEditorForm, {
   type CharacterFormValues,
 } from '../CharacterEditorForm';
 import type { Character, SrdBackground, SrdClass, SrdRace, SrdSubclass } from '@/lib/types';
+import { MAX_ARMOR_CLASS, MAX_INITIATIVE_BONUS, MAX_SPEED } from '@grimoire-os/shared';
 
 const mockToastSuccess = vi.fn();
 const mockToastError = vi.fn();
@@ -907,5 +908,111 @@ describe('recommended primary abilities (VEG-447)', () => {
       expect(screen.queryByTestId('recommended-summary')).not.toBeInTheDocument()
     );
     expect(screen.queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+});
+
+// VEG-500. VEG-496 bounded these three columns at the DTO write boundary, so a
+// value the editor accepts but the server refuses now surfaces as a 400 toast
+// instead of the control declining it. The bounds are clamped in onChange rather
+// than left to the `max` attribute, which constrains the stepper but does not
+// stop typing.
+describe('CharacterEditorForm — bounded numeric inputs (VEG-500)', () => {
+  const combatField = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+  // Name is `required`, so an empty form never reaches onSubmit — every
+  // submit-path case below starts from a filled-in character.
+  const renderFilled = () => renderForm({ initialValues: characterToFormValues(makeCharacter()) });
+
+  it('publishes each bound as min/max, sourced from the shared constants', () => {
+    renderForm();
+    const ac = combatField('Armor Class');
+    expect(ac.min).toBe('0');
+    expect(ac.max).toBe(String(MAX_ARMOR_CLASS));
+
+    const speed = combatField('Speed');
+    expect(speed.min).toBe('0');
+    expect(speed.max).toBe(String(MAX_SPEED));
+
+    // Symmetric: VEG-452 made this column an additive bonus, and a negative
+    // bonus is legitimate.
+    const initiative = combatField('Initiative Bonus');
+    expect(initiative.min).toBe(String(-MAX_INITIATIVE_BONUS));
+    expect(initiative.max).toBe(String(MAX_INITIATIVE_BONUS));
+  });
+
+  it('pins an over-max speed to the bound instead of submitting the typed value', async () => {
+    const { onSubmit } = renderFilled();
+    const user = userEvent.setup();
+    fireEvent.change(combatField('Speed'), { target: { value: '5000' } });
+    expect(combatField('Speed').value).toBe(String(MAX_SPEED));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).speed).toBe(MAX_SPEED);
+  });
+
+  it('pins over-max keystrokes as they land, not just an atomic paste', async () => {
+    renderForm();
+    const user = userEvent.setup();
+    const speed = combatField('Speed');
+    await user.clear(speed);
+    await user.type(speed, '5000');
+    expect(speed.value).toBe(String(MAX_SPEED));
+  });
+
+  it('floors a fractional speed — the column is an int4', async () => {
+    const { onSubmit } = renderFilled();
+    const user = userEvent.setup();
+    fireEvent.change(combatField('Speed'), { target: { value: '30.9' } });
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).speed).toBe(30);
+  });
+
+  it('clamps armor class without disturbing the blank = derived sentinel', async () => {
+    const { onSubmit } = renderFilled();
+    const user = userEvent.setup();
+    const ac = combatField('Armor Class');
+    fireEvent.change(ac, { target: { value: '5000' } });
+    expect(ac.value).toBe(String(MAX_ARMOR_CLASS));
+    // Blanking must still mean "derive from equipped gear" (VEG-410), not 0.
+    fireEvent.change(ac, { target: { value: '' } });
+    expect(ac.value).toBe('');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).armorClass).toBe('');
+  });
+
+  it('clamps the initiative bonus at both ends of the symmetric bound', async () => {
+    const { onSubmit } = renderFilled();
+    const user = userEvent.setup();
+    fireEvent.change(combatField('Initiative Bonus'), { target: { value: '-5000' } });
+    expect(combatField('Initiative Bonus').value).toBe(String(-MAX_INITIATIVE_BONUS));
+    fireEvent.change(combatField('Initiative Bonus'), { target: { value: '5000' } });
+    expect(combatField('Initiative Bonus').value).toBe(String(MAX_INITIATIVE_BONUS));
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).initiative).toBe(
+      MAX_INITIATIVE_BONUS
+    );
+  });
+
+  // The regression case. A lone "-" is not a valid number, so the browser reports
+  // '' for it; coercing that to 0 made React rewrite the node to "0" and eat the
+  // minus, so typing "-3" produced 3. Holding '' in state (as armorClass already
+  // does) leaves the node alone and the browser keeps its "-" buffer.
+  it('accepts a negative initiative bonus typed a keystroke at a time', async () => {
+    const { onSubmit } = renderFilled();
+    const user = userEvent.setup();
+    const initiative = combatField('Initiative Bonus');
+    await user.clear(initiative);
+    await user.type(initiative, '-3');
+    expect(initiative.value).toBe('-3');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    expect((onSubmit.mock.calls[0][0] as CharacterFormValues).initiative).toBe(-3);
+  });
+
+  it('submits a blank initiative bonus as 0, not null', async () => {
+    const { onSubmit } = renderFilled();
+    const user = userEvent.setup();
+    await user.clear(combatField('Initiative Bonus'));
+    expect(combatField('Initiative Bonus').value).toBe('');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+    const values = onSubmit.mock.calls[0][0] as CharacterFormValues;
+    expect(characterFormPayload(values).initiative).toBe(0);
   });
 });

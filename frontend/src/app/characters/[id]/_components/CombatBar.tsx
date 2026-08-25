@@ -19,6 +19,8 @@ import {
   formatLongRestSummary,
   CLEARED_DEATH_SAVES,
 } from '@/lib/character-play';
+import { clampIntToRange } from '@/lib/form-helpers';
+import { MAX_ARMOR_CLASS } from '@grimoire-os/shared';
 
 type CombatBarProps = { character: Character } & PlayControlProps;
 
@@ -61,7 +63,10 @@ export default function CombatBar(props: CombatBarProps) {
   const [acOverride, setAcOverride] = useState('');
 
   const applyAcOverride = () => {
-    const value = parseNonNegativeInt(acOverride);
+    // Parsed on apply rather than per keystroke, so clamping here can't fight
+    // the typing. VEG-496 bounds this column at the DTO, so an unclamped 5000
+    // would 400 (VEG-500).
+    const value = clampIntToRange(acOverride, 0, MAX_ARMOR_CLASS);
     if (value <= 0) return;
     patch({ armorClass: value });
     setAcOverride('');
@@ -194,6 +199,7 @@ export default function CombatBar(props: CombatBarProps) {
               <input
                 type="number"
                 min={1}
+                max={MAX_ARMOR_CLASS}
                 aria-label="AC override"
                 value={acOverride}
                 disabled={isSaving}

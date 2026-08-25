@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import CombatBar from '../CombatBar';
 import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
+import { MAX_ARMOR_CLASS } from '@grimoire-os/shared';
 
 const mockToastMessage = vi.fn();
 vi.mock('sonner', () => ({
@@ -77,6 +78,20 @@ describe('CombatBar', () => {
       fireEvent.change(screen.getByLabelText('AC override'), { target: { value: '17' } });
       await userEvent.click(screen.getByRole('button', { name: 'Override' }));
       expect(onPatch).toHaveBeenCalledWith({ armorClass: 17 });
+    });
+
+    // VEG-500. `parseNonNegativeInt` already kept this input off a negative or
+    // fractional AC, but nothing capped it, so 5000 got as far as the DTO bound
+    // VEG-496 added and came back a 400.
+    it('pins an over-max override to MAX_ARMOR_CLASS instead of letting it 400', async () => {
+      const onPatch = vi.fn();
+      const char = makeCharacter({ armorClass: null, inventory: [chainShirt] });
+      render(<CombatBar character={char} editable onPatch={onPatch} isSaving={false} />);
+      const input = screen.getByLabelText('AC override') as HTMLInputElement;
+      expect(input.max).toBe(String(MAX_ARMOR_CLASS));
+      fireEvent.change(input, { target: { value: '5000' } });
+      await userEvent.click(screen.getByRole('button', { name: 'Override' }));
+      expect(onPatch).toHaveBeenCalledWith({ armorClass: MAX_ARMOR_CLASS });
     });
 
     it('ignores an Override click with a blank or non-positive value', async () => {
