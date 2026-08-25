@@ -667,7 +667,6 @@ describe('SrdService', () => {
 
       const [args] = prisma.srdClass.findMany.mock.calls[0];
       expect(args.where).toEqual({ OR: [GLOBAL, { createdById: 'user-1' }] });
-      expect(JSON.stringify(args.where)).not.toContain('user-2');
     });
 
     it('findClass scopes by id AND visibility, so a stranger’s homebrew 404s', async () => {
@@ -680,6 +679,21 @@ describe('SrdService', () => {
           where: { id: 'cls-1', OR: [GLOBAL, { createdById: 'user-1' }] },
         })
       );
+    });
+
+    // The nested include is a separate read path from the row itself. Scoping
+    // the class but not its subclasses would hand every user's homebrew
+    // subclass of an SRD class to everyone the moment VEG-509 allows one, which
+    // is that ticket's *common* case, not an edge.
+    it('findClass scopes the subclasses it includes, not just the class row', async () => {
+      prisma.srdClass.findFirst.mockResolvedValue(null);
+
+      await service.findClass('cls-1', 'user-1');
+
+      const [args] = prisma.srdClass.findFirst.mock.calls[0];
+      expect(args.include.subclasses.where).toEqual({
+        OR: [GLOBAL, { createdById: 'user-1' }],
+      });
     });
 
     it('searchSubclasses requires the subclass AND its parent class to be visible', async () => {
@@ -736,6 +750,7 @@ describe('SrdService', () => {
         where: { id: '1', ...{ contentSource: { in: ['srd', 'shared'] } } },
         include: {
           subclasses: {
+            where: { contentSource: { in: ['srd', 'shared'] } },
             include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
           },
           features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] },

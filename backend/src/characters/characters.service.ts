@@ -83,6 +83,14 @@ export class CharactersService {
     if (!className) return none;
     const cls = await this.prisma.srdClass.findFirst({
       where: { name: className, ...this.contentAccess.visibleTo(ownerId) },
+      // Scoping narrows the ambiguity but does not remove it: once VEG-506 lets
+      // this owner create a homebrew "Fighter", it and the SRD row both match.
+      // Without an order Postgres may return either, so the same character's
+      // spell slots and weapon proficiencies could flip between reads. Homebrew
+      // rows carry a creator and srd/shared rows do not, so owners-first with
+      // nulls last means the caller's own class wins; `id` breaks any remaining
+      // tie so the result is stable rather than merely deterministic-looking.
+      orderBy: [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
       select: { spellcasting: true, weaponProficiencies: true },
     });
     if (!cls) {

@@ -15,8 +15,17 @@ import {
   truncateAll,
   type SeedContext,
 } from './db-harness';
+import type { ContentSource } from '@grimoire-os/shared';
 
 const HOMEBREW_LABEL = 'Homebrew';
+
+// The same fragment ContentAccessService.visibleTo builds. Declared with a
+// mutable ContentSource[] because Prisma's `in` will not take a readonly array.
+const GLOBAL_SOURCES: ContentSource[] = ['srd', 'shared'];
+const visibleTo = (userId?: string) =>
+  userId
+    ? { OR: [{ contentSource: { in: GLOBAL_SOURCES } }, { createdById: userId }] }
+    : { contentSource: { in: GLOBAL_SOURCES } };
 
 describe('class content-source tiering — real DB (VEG-505)', () => {
   let ctx: SeedContext;
@@ -251,6 +260,183 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
         where: { id: srdSubclassId, contentSource: 'srd' },
       });
       expect(nonSrdSeeded).toBe(1);
+    });
+  });
+
+  // The srd partial index on subclasses had no coverage: the migration comment
+  // says "the seed relies on that guarantee", but seedSubclasses resolves by
+  // findFirst and never touches the index, so a mis-authored predicate would be
+  // invisible.
+  describe('the srd subclass index', () => {
+    it('keeps SRD subclass names globally unique', async () => {
+      const existing = await ctx.prisma.subclass.findUniqueOrThrow({
+        where: { id: srdSubclassId },
+      });
+
+      await expect(
+        ctx.prisma.subclass.create({
+          data: { name: existing.name, classId: srdClassId, contentSource: 'srd' },
+        })
+      ).rejects.toThrow(/Unique constraint failed on the fields: \(`name`\)/);
+    });
+  });
+
+  // The parent check in `visibleSubclassWhere` is a Prisma relation filter; no
+  // unit-level shape assertion can prove it actually excludes anything. This is
+  // the one fixture where it changes the answer today: a subclass the caller
+  // could otherwise see, hanging off a parent they cannot.
+  describe('subclass visibility follows its parent class', () => {
+    let hiddenParentId: string;
+    let sharedSubclassId: string;
+
+    beforeAll(async () => {
+      const { prisma } = ctx;
+      const parent = await prisma.srdClass.create({
+        data: {
+          name: `Hidden Parent ${Date.now()}`,
+          hitDie: 'd8',
+          contentSource: 'homebrew',
+          createdById: otherUserId,
+          source: HOMEBREW_LABEL,
+        },
+      });
+      hiddenParentId = parent.id;
+      // `shared` is globally visible on its own, so only the parent check can
+      // exclude it.
+      const sub = await prisma.subclass.create({
+        data: { name: `Shared Sub ${Date.now()}`, classId: parent.id, contentSource: 'shared' },
+      });
+      sharedSubclassId = sub.id;
+    });
+
+    it('is visible when only the subclass row is scoped', async () => {
+      const rows = await ctx.prisma.subclass.findMany({
+        where: { id: sharedSubclassId, ...visibleTo(userId) },
+      });
+      expect(rows).toHaveLength(1);
+    });
+
+    it('is hidden once the parent class must be visible too', async () => {
+      const rows = await ctx.prisma.subclass.findMany({
+        where: {
+          id: sharedSubclassId,
+          ...visibleTo(userId),
+          srdClass: { is: visibleTo(userId) },
+        },
+      });
+      expect(rows).toHaveLength(0);
+    });
+
+    it('is visible to the parent’s owner', async () => {
+      const rows = await ctx.prisma.subclass.findMany({
+        where: {
+          id: sharedSubclassId,
+          ...visibleTo(otherUserId),
+          srdClass: { is: visibleTo(otherUserId) },
+        },
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0].classId).toBe(hiddenParentId);
+    });
+  });
+
+  // loadClassData resolves a free-text class name against the owner's visible
+  // set. Scoping narrows the tie but does not break it: the owner's homebrew
+  // "Fighter" and the SRD "Fighter" both match, and an unordered findFirst lets
+  // Postgres return either, so spell slots would flip between reads.
+  describe('the loadClassData tie-break', () => {
+    it('returns the owner’s homebrew class ahead of the identically-named SRD row', async () => {
+      const where = {
+        name: srdClassName,
+        OR: [{ contentSource: { in: GLOBAL_SOURCES } }, { createdById: userId }],
+      };
+      const both = await ctx.prisma.srdClass.findMany({ where, select: { id: true } });
+      expect(both.length).toBeGreaterThan(1);
+
+      const picked = await ctx.prisma.srdClass.findFirst({
+        where,
+        orderBy: [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+        select: { id: true, contentSource: true, createdById: true },
+      });
+      expect(picked?.contentSource).toBe('homebrew');
+      expect(picked?.createdById).toBe(userId);
+    });
+
+    it('falls back to the SRD row when the owner has no homebrew of that name', async () => {
+      const picked = await ctx.prisma.srdClass.findFirst({
+        where: {
+          name: srdClassName,
+          OR: [{ contentSource: { in: GLOBAL_SOURCES } }, { createdById: 'user-with-no-homebrew' }],
+        },
+        orderBy: [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+        select: { contentSource: true },
+      });
+      expect(picked?.contentSource).toBe('srd');
+    });
+  });
+
+  // The CHECK was added for the delete path, not the insert path: the migration
+  // justifies it as "a SET NULL firing on homebrew would violate these CHECKs
+  // and abort the delete". users.service.spec.ts is fully mocked, so it can
+  // prove the deleteMany ordering but not that the constraints back it.
+  describe('deleting a user who owns homebrew classes', () => {
+    async function makeOwnerWithHomebrew(tag: string) {
+      const { prisma } = ctx;
+      const user = await prisma.user.create({
+        data: { username: `veg505-${tag}-${Date.now()}`, passwordHash: 'x', displayName: tag },
+      });
+      const cls = await prisma.srdClass.create({
+        data: {
+          name: `${tag} Class ${Date.now()}`,
+          hitDie: 'd8',
+          contentSource: 'homebrew',
+          createdById: user.id,
+          source: HOMEBREW_LABEL,
+        },
+      });
+      await prisma.subclass.create({
+        data: {
+          name: `${tag} Sub ${Date.now()}`,
+          classId: cls.id,
+          contentSource: 'homebrew',
+          createdById: user.id,
+        },
+      });
+      return { userId: user.id, classId: cls.id };
+    }
+
+    it('aborts the delete rather than nulling the creator of a homebrew row', async () => {
+      const { userId: id } = await makeOwnerWithHomebrew('abort');
+
+      await expect(ctx.prisma.user.delete({ where: { id } })).rejects.toThrow(
+        /srd_classes_homebrew_has_creator_check/
+      );
+      // Still there: the transaction rolled back rather than half-deleting.
+      await expect(ctx.prisma.user.findUniqueOrThrow({ where: { id } })).resolves.toBeDefined();
+    });
+
+    it('refuses to remove a class while its subclasses still reference it', async () => {
+      const { classId } = await makeOwnerWithHomebrew('restrict');
+
+      // Subclass.classId is ON DELETE RESTRICT, which is what makes the
+      // subclass-before-class ordering in UsersService.remove load-bearing.
+      await expect(ctx.prisma.srdClass.delete({ where: { id: classId } })).rejects.toThrow(
+        /Foreign key constraint violated/
+      );
+    });
+
+    it('succeeds when subclasses are cleared before classes, as the service does', async () => {
+      const { userId: id } = await makeOwnerWithHomebrew('ordered');
+      const homebrewByUser = { where: { createdById: id, contentSource: 'homebrew' as const } };
+
+      await ctx.prisma.$transaction(async tx => {
+        await tx.subclass.deleteMany(homebrewByUser);
+        await tx.srdClass.deleteMany(homebrewByUser);
+        await tx.user.delete({ where: { id } });
+      });
+
+      expect(await ctx.prisma.user.findUnique({ where: { id } })).toBeNull();
+      expect(await ctx.prisma.srdClass.count({ where: { createdById: id } })).toBe(0);
     });
   });
 });

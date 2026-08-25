@@ -448,7 +448,13 @@ export class SrdService {
     return this.prisma.srdClass.findFirst({
       where: { id, ...this.contentAccess.visibleTo(userId) },
       include: {
+        // The nested include is its own read path. Scoping only the class row
+        // would return every user's homebrew subclass of an SRD class to
+        // everyone — the parent check `visibleSubclassWhere` adds elsewhere is
+        // redundant here, since the parent is the row being fetched and is
+        // already scoped by the `where` above.
         subclasses: {
+          where: { ...this.contentAccess.visibleTo(userId) },
           include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
         },
         features: { orderBy: CLASS_FEATURE_ORDER },
@@ -482,13 +488,18 @@ export class SrdService {
   // caller cannot see — and once VEG-509 lets a user attach a subclass to any
   // class visible to *them*, the parent check is what stops that subclass
   // leaking back to everyone who can see the parent.
-  private visibleSubclassWhere(userId?: string): Record<string, unknown> {
+  private visibleSubclassWhere(userId?: string): Prisma.SubclassWhereInput {
     const visible = this.contentAccess.visibleTo(userId);
-    return { ...visible, srdClass: { is: { ...visible } } };
+    return { ...visible, srdClass: { is: visible } };
   }
 
   async searchSubclasses(classId?: string, userId?: string) {
-    const where: Record<string, unknown> = this.visibleSubclassWhere(userId);
+    // Typed, not Record<string, unknown>: this fragment IS the subclass
+    // visibility boundary, and a misspelled `srdClass` relation key would
+    // silently delete the parent check. Note the annotation cannot catch a
+    // later `where.OR = [...]` clobbering the visibility fragment — a free-text
+    // filter added here must nest under `AND`, as every sibling search does.
+    const where: Prisma.SubclassWhereInput = this.visibleSubclassWhere(userId);
     if (classId) where.classId = classId;
     return this.prisma.subclass.findMany({
       where,

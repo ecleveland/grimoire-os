@@ -4,6 +4,7 @@ import { ClassesController } from './classes.controller';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
+import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type {
   JwtUser,
   OptionallyAuthenticatedRequest,
@@ -82,6 +83,25 @@ describe('class routes are off the shared URL-keyed cache (VEG-505)', () => {
     );
     expect(names).toContain(AnonymousCacheInterceptor.name);
     expect(names).not.toContain('CacheInterceptor');
+  });
+
+  // Removing OptionalJwtAuthGuard leaves req.user permanently undefined, so
+  // every caller silently downgrades to the global catalog and never sees their
+  // own homebrew. Nothing else here would catch that: the handler specs build
+  // their own request objects and bypass routing entirely.
+  it('guards every route with OptionalJwtAuthGuard, or req.user is always undefined', () => {
+    const proto = ClassesController.prototype as unknown as Record<string, unknown>;
+    const handlers = ['findAllClasses', 'findClass', 'searchSubclasses', 'findSubclass'];
+
+    for (const handler of handlers) {
+      const guards = Reflect.getMetadata('__guards__', proto[handler] as object) ?? [];
+      const names = guards.map((g: unknown) =>
+        typeof g === 'function'
+          ? g.name
+          : (g as { constructor: { name: string } })?.constructor?.name
+      );
+      expect(names).toContain(OptionalJwtAuthGuard.name);
+    }
   });
 
   it('SrdController no longer declares any class or subclass route', () => {

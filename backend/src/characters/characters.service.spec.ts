@@ -24,6 +24,9 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 const visibleToOwner = {
   OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }],
 };
+// Owners first, nulls last: the caller's own homebrew class wins a name tie
+// with the SRD row, and `id` keeps the result stable (VEG-505).
+const ownerFirstOrder = [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }];
 
 describe('CharactersService', () => {
   let service: CharactersService;
@@ -392,6 +395,7 @@ describe('CharactersService', () => {
 
       expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
         where: { name: 'Wizard', ...visibleToOwner },
+        orderBy: ownerFirstOrder,
         select: { spellcasting: true, weaponProficiencies: true },
       });
       // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
@@ -473,6 +477,7 @@ describe('CharactersService', () => {
       expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
       expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
         where: { name: 'Fighter', ...visibleToOwner },
+        orderBy: ownerFirstOrder,
         select: { spellcasting: true, weaponProficiencies: true },
       });
     });
@@ -495,11 +500,32 @@ describe('CharactersService', () => {
           name: 'Fighter',
           OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: mockCharacter.userId }],
         },
+        orderBy: ownerFirstOrder,
         select: { spellcasting: true, weaponProficiencies: true },
       });
-      // Scoped to the owner, never to some other user.
-      const call = prisma.srdClass.findFirst.mock.calls[0][0];
-      expect(JSON.stringify(call)).not.toContain(USER_ID_2);
+    });
+
+    // Scoping alone leaves a tie: once VEG-506 lets this owner create a
+    // homebrew "Fighter", both it and the SRD row match, and an unordered
+    // findFirst lets Postgres pick either — so spell slots and weapon
+    // proficiencies would flip between reads of the same character. The owner's
+    // own class wins, deterministically.
+    it('prefers the owner’s homebrew class over an identically-named SRD row (VEG-505)', async () => {
+      prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, class: 'Fighter' });
+      prisma.srdClass.findFirst.mockResolvedValue({
+        spellcasting: null,
+        weaponProficiencies: [],
+      });
+
+      await service.findOne(CHARACTER_ID);
+
+      const [args] = prisma.srdClass.findFirst.mock.calls[0];
+      // Homebrew rows carry a creator; srd and shared rows have none, so
+      // ordering owners first and nulls last puts the caller's own class ahead.
+      expect(args.orderBy).toEqual([
+        { createdById: { sort: 'desc', nulls: 'last' } },
+        { id: 'asc' },
+      ]);
     });
 
     it('derives a non-proficient row when neither class nor character covers the weapon (VEG-463)', async () => {
