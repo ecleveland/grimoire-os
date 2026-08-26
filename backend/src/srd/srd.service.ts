@@ -442,8 +442,10 @@ export class SrdService {
   }
 
   // findFirst, not findUnique: the visibility fragment is not part of any
-  // unique key, and a row the caller cannot see must read as absent (404)
-  // rather than existing-but-forbidden, which would confirm it exists.
+  // unique key. The confidentiality property is that a row the caller cannot
+  // see is indistinguishable from one that does not exist — both return null,
+  // so nothing confirms the row is there. (Null serialises as 200 with an empty
+  // body, not 404; findBackground has the same shape.)
   async findClass(id: string, userId?: string) {
     return this.prisma.srdClass.findFirst({
       where: { id, ...this.contentAccess.visibleTo(userId) },

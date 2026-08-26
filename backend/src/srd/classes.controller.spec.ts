@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CacheModule } from '@nestjs/cache-manager';
-import { ClassesController } from './classes.controller';
+import { ClassesController, SubclassesController } from './classes.controller';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
@@ -20,6 +20,7 @@ const anonReq = {} as OptionallyAuthenticatedRequest;
 
 describe('ClassesController', () => {
   let controller: ClassesController;
+  let subclasses: SubclassesController;
   let srdService: {
     findAllClasses: jest.Mock;
     findClass: jest.Mock;
@@ -36,19 +37,20 @@ describe('ClassesController', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [ClassesController],
+      controllers: [ClassesController, SubclassesController],
       imports: [CacheModule.register()],
       providers: [{ provide: SrdService, useValue: srdService }],
     }).compile();
 
     controller = module.get(ClassesController);
+    subclasses = module.get(SubclassesController);
   });
 
   it("passes the caller's userId to every read so their homebrew is included", async () => {
     await controller.findAllClasses(authedReq());
     await controller.findClass('cls-1', authedReq());
-    await controller.searchSubclasses(authedReq(), 'cls-1');
-    await controller.findSubclass('sub-1', authedReq());
+    await subclasses.searchSubclasses(authedReq(), 'cls-1');
+    await subclasses.findSubclass('sub-1', authedReq());
 
     expect(srdService.findAllClasses).toHaveBeenCalledWith('u1');
     expect(srdService.findClass).toHaveBeenCalledWith('cls-1', 'u1');
@@ -58,14 +60,14 @@ describe('ClassesController', () => {
 
   it('passes undefined userId for anonymous callers', async () => {
     await controller.findAllClasses(anonReq);
-    await controller.searchSubclasses(anonReq);
+    await subclasses.searchSubclasses(anonReq);
 
     expect(srdService.findAllClasses).toHaveBeenCalledWith(undefined);
     expect(srdService.searchSubclasses).toHaveBeenCalledWith(undefined, undefined);
   });
 
   it('keeps the classId filter optional and separate from the caller', async () => {
-    await controller.searchSubclasses(authedReq());
+    await subclasses.searchSubclasses(authedReq());
 
     expect(srdService.searchSubclasses).toHaveBeenCalledWith(undefined, 'u1');
   });
@@ -90,17 +92,22 @@ describe('class routes are off the shared URL-keyed cache (VEG-505)', () => {
   // own homebrew. Nothing else here would catch that: the handler specs build
   // their own request objects and bypass routing entirely.
   it('guards every route with OptionalJwtAuthGuard, or req.user is always undefined', () => {
-    const proto = ClassesController.prototype as unknown as Record<string, unknown>;
-    const handlers = ['findAllClasses', 'findClass', 'searchSubclasses', 'findSubclass'];
+    const cases: [object, string[]][] = [
+      [ClassesController.prototype, ['findAllClasses', 'findClass']],
+      [SubclassesController.prototype, ['searchSubclasses', 'findSubclass']],
+    ];
 
-    for (const handler of handlers) {
-      const guards = Reflect.getMetadata('__guards__', proto[handler] as object) ?? [];
-      const names = guards.map((g: unknown) =>
-        typeof g === 'function'
-          ? g.name
-          : (g as { constructor: { name: string } })?.constructor?.name
-      );
-      expect(names).toContain(OptionalJwtAuthGuard.name);
+    for (const [proto, handlers] of cases) {
+      for (const handler of handlers) {
+        const fn = (proto as unknown as Record<string, unknown>)[handler] as object;
+        const guards = Reflect.getMetadata('__guards__', fn) ?? [];
+        const names = guards.map((g: unknown) =>
+          typeof g === 'function'
+            ? g.name
+            : (g as { constructor: { name: string } })?.constructor?.name
+        );
+        expect(names).toContain(OptionalJwtAuthGuard.name);
+      }
     }
   });
 

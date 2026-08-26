@@ -460,6 +460,9 @@ model SrdClass {
 
   // Name uniqueness is enforced by partial unique indexes (per-source) added by
   // hand in the add_class_content_source migration; Prisma cannot model them.
+  // The plain name index is not redundant with those: they are partial, so the
+  // class lookup's OR-over-tiers predicate cannot use any of them.
+  @@index([name])
   @@index([contentSource])
   @@index([createdById])
   @@map("srd_classes")
@@ -509,6 +512,8 @@ model Subclass {
   // scoped by its parent (the way ClassFeature is keyed [classId, name]), so
   // one author writing "Path of Ash" under both Barbarian and Fighter is
   // legitimate and must not collide.
+  @@index([name])
+  @@index([classId])
   @@index([contentSource])
   @@index([createdById])
   @@map("subclasses")

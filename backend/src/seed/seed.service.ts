@@ -560,31 +560,53 @@ export class SeedService {
   // overwrite a homebrew subclass that reuses an SRD name. Written inline
   // rather than through seedSrdByName because the subclass id is needed to
   // attach its feature rows, which that helper does not return.
+  // Both lookups are scoped to the srd partition (VEG-505). `name` is no longer
+  // globally unique on either table, so an unscoped parent lookup could resolve
+  // a user's homebrew class, and an unscoped subclass lookup could overwrite a
+  // homebrew subclass that reuses an SRD name.
+  //
+  // Resolved in two upfront queries rather than per row: this runs inside the
+  // single interactive seed transaction that already carries a raised
+  // SEED_TX_TIMEOUT_MS, and a query per subclass for the parent plus another
+  // for the row itself made that 2N round trips. seedClassFeatures resolves its
+  // whole FK map the same way.
   private async seedSubclasses(tx: Prisma.TransactionClient): Promise<void> {
+    // The only by-name seed write path that lacked the duplicate guard: two
+    // entries sharing a name would silently merge into one row, the second
+    // overwriting the first's columns while both sets of features attach to it.
+    // Every other by-name table asserts this, and classes gained it when they
+    // moved onto seedSrdByName.
+    assertUniqueSeedNames('subclass', { subclass: srdSubclasses.map(sc => sc.name) });
+
+    const classIdByName = await this.resolveIdsByName(
+      nameLookupDelegate(tx.srdClass),
+      [...new Set(srdSubclasses.map(sc => sc.className))],
+      'srd'
+    );
+    const subclassIdByName = await this.resolveIdsByName(
+      nameLookupDelegate(tx.subclass),
+      srdSubclasses.map(sc => sc.name),
+      'srd'
+    );
+
     let subclassFeatureCount = 0;
     for (const sc of srdSubclasses) {
-      const parent = await tx.srdClass.findFirst({
-        where: { name: sc.className, contentSource: 'srd' },
-        select: { id: true },
-      });
-      if (!parent) {
+      const classId = classIdByName.get(sc.className);
+      if (!classId) {
         this.logger.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
         continue;
       }
       const data = {
         name: sc.name,
-        classId: parent.id,
+        classId,
         description: sc.description,
         spellList: sc.spellList,
         spellcasting: sc.spellcasting,
         contentSource: 'srd' as const,
       };
-      const existing = await tx.subclass.findFirst({
-        where: { name: sc.name, contentSource: 'srd' },
-        select: { id: true },
-      });
-      const subclass = existing
-        ? await tx.subclass.update({ where: { id: existing.id }, data })
+      const existingId = subclassIdByName.get(sc.name);
+      const subclass = existingId
+        ? await tx.subclass.update({ where: { id: existingId }, data })
         : await tx.subclass.create({ data });
       const features: Prisma.SubclassFeatureCreateManyInput[] = (sc.features ?? []).map(f => ({
         subclassId: subclass.id,

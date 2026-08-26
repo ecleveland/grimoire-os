@@ -15,17 +15,15 @@ import {
   truncateAll,
   type SeedContext,
 } from './db-harness';
-import type { ContentSource } from '@grimoire-os/shared';
+import { ContentAccessService } from '../../src/srd/content-access.service';
 
 const HOMEBREW_LABEL = 'Homebrew';
 
-// The same fragment ContentAccessService.visibleTo builds. Declared with a
-// mutable ContentSource[] because Prisma's `in` will not take a readonly array.
-const GLOBAL_SOURCES: ContentSource[] = ['srd', 'shared'];
-const visibleTo = (userId?: string) =>
-  userId
-    ? { OR: [{ contentSource: { in: GLOBAL_SOURCES } }, { createdById: userId }] }
-    : { contentSource: { in: GLOBAL_SOURCES } };
+// The real service, not a copy of it. It has no constructor dependencies, so a
+// spec can hold one directly — and then a change to visibleTo shows up here
+// instead of silently agreeing with a hand-written duplicate.
+const contentAccess = new ContentAccessService();
+const visibleTo = (userId?: string) => contentAccess.visibleTo(userId);
 
 describe('class content-source tiering — real DB (VEG-505)', () => {
   let ctx: SeedContext;

@@ -21,33 +21,48 @@ import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payl
  * the split is in place first so VEG-506 cannot ship the leak.
  */
 @ApiTags('SRD')
-@Controller('srd')
+@Controller('srd/classes')
 @UseInterceptors(AnonymousCacheInterceptor)
 export class ClassesController {
   constructor(private readonly srdService: SrdService) {}
 
-  @Get('classes')
+  @Get()
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'List classes (global catalog + the caller’s homebrew)' })
   findAllClasses(@Req() req: OptionallyAuthenticatedRequest) {
     return this.srdService.findAllClasses(req.user?.userId);
   }
 
-  @Get('classes/:id')
+  @Get(':id')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Get class by ID (includes subclasses)' })
   findClass(@Param('id') id: string, @Req() req: OptionallyAuthenticatedRequest) {
     return this.srdService.findClass(id, req.user?.userId);
   }
+}
 
-  @Get('subclasses')
+/**
+ * Split from {@link ClassesController} rather than sharing an `srd` prefix
+ * (VEG-505). Two controllers on the same prefix with opposite cache
+ * interceptors is a live footgun: a `@Get('classes/…')` later added to
+ * SrdController would compile, route, and land silently on the blanket
+ * URL-keyed cache. Entity-specific prefixes make that impossible, and match
+ * every sibling tiered controller.
+ */
+@ApiTags('SRD')
+@Controller('srd/subclasses')
+@UseInterceptors(AnonymousCacheInterceptor)
+export class SubclassesController {
+  constructor(private readonly srdService: SrdService) {}
+
+  @Get()
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'List subclasses (global catalog + the caller’s homebrew)' })
   searchSubclasses(@Req() req: OptionallyAuthenticatedRequest, @Query('classId') classId?: string) {
     return this.srdService.searchSubclasses(classId, req.user?.userId);
   }
 
-  @Get('subclasses/:id')
+  @Get(':id')
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({ summary: 'Get subclass by ID' })
   findSubclass(@Param('id') id: string, @Req() req: OptionallyAuthenticatedRequest) {

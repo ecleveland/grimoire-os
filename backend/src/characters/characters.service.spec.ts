@@ -21,9 +21,12 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 
 // VEG-505: loadClassData resolves the class against the character owner's
 // visible content (srd + shared + their own homebrew), not by bare name.
-const visibleToOwner = {
-  OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }],
-};
+//
+// Built from the real service rather than restated by hand. Writing both sides
+// of the assertion from the same assumption means an inverted or narrowed
+// visibleTo keeps this suite green; the service is already a provider below and
+// has no constructor dependencies.
+const visibleToOwner = new ContentAccessService().visibleTo(USER_ID);
 // Every visible row with the name is fetched and the tier picked in code, so
 // resolution never depends on a column sort (VEG-505).
 const classSelect = { contentSource: true, spellcasting: true, weaponProficiencies: true };

@@ -5,6 +5,7 @@ import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { srdBackgrounds } from './data/backgrounds';
+import { srdSubclasses } from './data/subclasses';
 import * as seedGuards from './seed-guards';
 
 // Mock the JSON loader module
@@ -123,6 +124,10 @@ describe('SeedService', () => {
       const names = (args?.where?.name?.in ?? []) as string[];
       return Promise.resolve(buildFkRows(names));
     });
+    // VEG-505: seedSubclasses resolves its parent classes and its own existing
+    // rows up front instead of one query per subclass. Empty = nothing seeded
+    // yet, so the create branch runs; the srdClass mock above supplies parents.
+    prisma.subclass.findMany.mockResolvedValue([]);
     // Feat FK resolution for background origin feats (VEG-429): id = `feat-<name>`.
     prisma.feat.findMany.mockImplementation((args: any) => {
       const names = (args?.where?.name?.in ?? []) as string[];
@@ -453,16 +458,22 @@ describe('SeedService', () => {
       expect(call.data.hitDie).toBeDefined();
     });
 
-    it('resolves a subclass parent class within the srd partition', async () => {
+    // Scoping is NOT this test's job and deliberately is not asserted here.
+    // seedClassFeatures issues an srd-scoped srdClass.findMany over the same
+    // name set, so no predicate can tell the two calls apart — an earlier
+    // version tried and passed with the parent lookup unscoped. The exhaustive
+    // loop in "scopes class-feature FK resolution to srd classes" is the guard
+    // that actually fails in that case; verified by mutation.
+    //
+    // What is left, and is falsifiable: the old per-row mechanism is gone and
+    // every subclass write got a resolved parent id.
+    it('resolves subclass parents through the shared FK map, not a per-row lookup', async () => {
       await service.seed();
 
       expect(prisma.srdClass.findUnique).not.toHaveBeenCalled();
-      const parentLookups = prisma.srdClass.findFirst.mock.calls.filter(
-        ([args]) => args.where.name === 'Fighter'
-      );
-      expect(parentLookups.length).toBeGreaterThan(0);
-      for (const [args] of parentLookups) {
-        expect(args.where.contentSource).toBe('srd');
+      expect(prisma.subclass.create.mock.calls.length).toBeGreaterThan(0);
+      for (const [args] of prisma.subclass.create.mock.calls) {
+        expect(args.data.classId).toEqual(expect.any(String));
       }
     });
 

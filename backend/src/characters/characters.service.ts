@@ -96,6 +96,14 @@ export class CharactersService {
     // shared row per name, and the `where` admits only this owner's homebrew,
     // of which there is at most one. So the fetch is bounded at three rows and
     // the preference below picks the same one every time.
+    //
+    // Consequence worth knowing: because `Character.class` is free text with no
+    // id recorded, creating a homebrew class named "Fighter" retroactively
+    // repoints every one of this owner's existing Fighters at it, and deleting
+    // it flips them back. Preferring the SRD row instead would be equally
+    // surprising in the other direction — a homebrew class the owner made and
+    // selected would be ignored. VEG-477 removes the guesswork by keying the
+    // column to an id; until then this is a documented heuristic, not a rule.
     const candidates = await this.prisma.srdClass.findMany({
       where: { name: className, ...this.contentAccess.visibleTo(ownerId) },
       select: { contentSource: true, spellcasting: true, weaponProficiencies: true },
