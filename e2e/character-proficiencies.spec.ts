@@ -50,7 +50,7 @@ test.describe('character editor — editable proficiencies', () => {
     await page.getByLabel(/^name/i).fill('Pool Hero');
     const classInput = page.getByLabel(/^class/i);
     await classInput.click();
-    await page.getByRole('option').first().click();
+    await page.getByRole('listbox').getByRole('option').first().click();
 
     // The advisory counter appears (non-blocking choose-N).
     await expect(page.getByText(/from your class \(choose \d+\):/i)).toBeVisible();

@@ -30,23 +30,11 @@ export class SrdController {
 
   // Spell routes live in SpellsController (VEG-294), monster routes in
   // MonstersController (VEG-293), feat routes in FeatsController (VEG-295),
-  // and item routes in ItemsController (VEG-296): their responses vary per
-  // user (caller's homebrew included), so they must stay off this
-  // controller's URL-keyed CacheInterceptor.
-
-  // ── Classes ─────────────────────────────────────────
-
-  @Get('classes')
-  @ApiOperation({ summary: 'List all SRD classes' })
-  findAllClasses() {
-    return this.srdService.findAllClasses();
-  }
-
-  @Get('classes/:id')
-  @ApiOperation({ summary: 'Get class by ID (includes subclasses)' })
-  findClass(@Param('id') id: string) {
-    return this.srdService.findClass(id);
-  }
+  // item routes in ItemsController (VEG-296), background routes in
+  // BackgroundsController (VEG-431), and class/subclass routes in
+  // ClassesController (VEG-505): their responses vary per user (caller's
+  // homebrew included), so they must stay off this controller's URL-keyed
+  // CacheInterceptor.
 
   // ── Races ───────────────────────────────────────────
 
@@ -60,20 +48,6 @@ export class SrdController {
   @ApiOperation({ summary: 'Get race by ID (includes subraces)' })
   findRace(@Param('id') id: string) {
     return this.srdService.findRace(id);
-  }
-
-  // ── Subclasses ──────────────────────────────────────
-
-  @Get('subclasses')
-  @ApiOperation({ summary: 'List SRD subclasses' })
-  searchSubclasses(@Query('classId') classId?: string) {
-    return this.srdService.searchSubclasses(classId);
-  }
-
-  @Get('subclasses/:id')
-  @ApiOperation({ summary: 'Get subclass by ID' })
-  findSubclass(@Param('id') id: string) {
-    return this.srdService.findSubclass(id);
   }
 
   // ── Subraces ────────────────────────────────────────

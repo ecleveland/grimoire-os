@@ -171,6 +171,11 @@ export class UsersService {
         await tx.item.deleteMany(homebrewByUser);
         await tx.feat.deleteMany(homebrewByUser);
         await tx.background.deleteMany(homebrewByUser);
+        // Subclasses before classes (VEG-505): Subclass.classId has no cascade,
+        // so removing a homebrew class while its subclasses still reference it
+        // raises an FK violation and aborts the whole user delete.
+        await tx.subclass.deleteMany(homebrewByUser);
+        await tx.srdClass.deleteMany(homebrewByUser);
         await tx.user.delete({ where: { id } });
       });
     } catch (error: unknown) {

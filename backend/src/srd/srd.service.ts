@@ -429,18 +429,34 @@ export class SrdService {
 
   // ── Classes ─────────────────────────────────────────
 
-  async findAllClasses() {
+  // Tiered since VEG-505: the response now varies per caller, which is why the
+  // class routes moved off SrdController's blanket URL-keyed cache and onto
+  // ClassesController's AnonymousCacheInterceptor. Nothing can create a
+  // homebrew class until VEG-506, so today every caller sees the same rows.
+  async findAllClasses(userId?: string) {
     return this.prisma.srdClass.findMany({
+      where: { ...this.contentAccess.visibleTo(userId) },
       orderBy: { name: 'asc' },
       include: { features: { orderBy: CLASS_FEATURE_ORDER } },
     });
   }
 
-  async findClass(id: string) {
-    return this.prisma.srdClass.findUnique({
-      where: { id },
+  // findFirst, not findUnique: the visibility fragment is not part of any
+  // unique key. The confidentiality property is that a row the caller cannot
+  // see is indistinguishable from one that does not exist — both return null,
+  // so nothing confirms the row is there. (Null serialises as 200 with an empty
+  // body, not 404; findBackground has the same shape.)
+  async findClass(id: string, userId?: string) {
+    return this.prisma.srdClass.findFirst({
+      where: { id, ...this.contentAccess.visibleTo(userId) },
       include: {
+        // The nested include is its own read path. Scoping only the class row
+        // would return every user's homebrew subclass of an SRD class to
+        // everyone — the parent check `visibleSubclassWhere` adds elsewhere is
+        // redundant here, since the parent is the row being fetched and is
+        // already scoped by the `where` above.
         subclasses: {
+          where: { ...this.contentAccess.visibleTo(userId) },
           include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
         },
         features: { orderBy: CLASS_FEATURE_ORDER },
@@ -469,8 +485,23 @@ export class SrdService {
 
   // ── Subclasses ──────────────────────────────────────
 
-  async searchSubclasses(classId?: string) {
-    const where: Record<string, unknown> = {};
+  // A subclass is only as visible as its parent class (VEG-505). Scoping the
+  // subclass row alone would expose a homebrew subclass hanging off a class the
+  // caller cannot see — and once VEG-509 lets a user attach a subclass to any
+  // class visible to *them*, the parent check is what stops that subclass
+  // leaking back to everyone who can see the parent.
+  private visibleSubclassWhere(userId?: string): Prisma.SubclassWhereInput {
+    const visible = this.contentAccess.visibleTo(userId);
+    return { ...visible, srdClass: { is: visible } };
+  }
+
+  async searchSubclasses(classId?: string, userId?: string) {
+    // Typed, not Record<string, unknown>: this fragment IS the subclass
+    // visibility boundary, and a misspelled `srdClass` relation key would
+    // silently delete the parent check. Note the annotation cannot catch a
+    // later `where.OR = [...]` clobbering the visibility fragment — a free-text
+    // filter added here must nest under `AND`, as every sibling search does.
+    const where: Prisma.SubclassWhereInput = this.visibleSubclassWhere(userId);
     if (classId) where.classId = classId;
     return this.prisma.subclass.findMany({
       where,
@@ -479,9 +510,9 @@ export class SrdService {
     });
   }
 
-  async findSubclass(id: string) {
-    return this.prisma.subclass.findUnique({
-      where: { id },
+  async findSubclass(id: string, userId?: string) {
+    return this.prisma.subclass.findFirst({
+      where: { id, ...this.visibleSubclassWhere(userId) },
       include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
     });
   }

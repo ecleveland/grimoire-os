@@ -377,6 +377,8 @@ describe('UsersService', () => {
       prisma.item.deleteMany.mockResolvedValue({ count: 2 });
       prisma.feat.deleteMany.mockResolvedValue({ count: 0 });
       prisma.background.deleteMany.mockResolvedValue({ count: 1 });
+      prisma.subclass.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.srdClass.deleteMany.mockResolvedValue({ count: 0 });
       prisma.user.delete.mockResolvedValue(mockUser);
 
       await service.remove(USER_ID);
@@ -388,12 +390,38 @@ describe('UsersService', () => {
         prisma.item,
         prisma.feat,
         prisma.background,
+        prisma.subclass,
+        prisma.srdClass,
       ]) {
         expect(model.deleteMany).toHaveBeenCalledWith({
           where: { createdById: USER_ID, contentSource: 'homebrew' },
         });
       }
       expect(prisma.user.delete).toHaveBeenCalledWith({ where: { id: USER_ID } });
+    });
+
+    // VEG-505: Subclass.classId has no cascade, so deleting a homebrew class
+    // before its subclasses would raise an FK violation and abort the whole
+    // user delete. Order is load-bearing, not cosmetic.
+    it('deletes homebrew subclasses before their parent classes', async () => {
+      for (const model of [
+        prisma.spell,
+        prisma.monster,
+        prisma.item,
+        prisma.feat,
+        prisma.background,
+        prisma.subclass,
+        prisma.srdClass,
+      ]) {
+        model.deleteMany.mockResolvedValue({ count: 0 });
+      }
+      prisma.user.delete.mockResolvedValue(mockUser);
+
+      await service.remove(USER_ID);
+
+      expect(prisma.subclass.deleteMany.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.srdClass.deleteMany.mock.invocationCallOrder[0]
+      );
     });
   });
 });

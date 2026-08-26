@@ -38,7 +38,7 @@ test.describe('character editor — personality & details', () => {
     // Pick an SRD background so its suggestions appear.
     const bgInput = page.getByLabel(/^background/i);
     await bgInput.click();
-    await page.getByRole('option').first().click();
+    await page.getByRole('listbox').getByRole('option').first().click();
 
     // The first suggestion row is for Personality Traits; click its first chip
     // and confirm it lands in that textarea.

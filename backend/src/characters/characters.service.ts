@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { AbilityScores, ClassSpellcasting, Weapon } from '@grimoire-os/shared';
+import type { AbilityScores, ClassSpellcasting, ContentSource, Weapon } from '@grimoire-os/shared';
 import { inventoryFromJson } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -19,6 +19,7 @@ import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { computeCharacterStats, isKnownAbilityName } from './compute/compute-stats';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { autoEquipStartingArmor } from './inventory/auto-equip';
+import { ContentAccessService } from '../srd/content-access.service';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -40,7 +41,8 @@ export class CharactersService {
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService,
-    private inventoryResolver: InventoryResolverService
+    private inventoryResolver: InventoryResolverService,
+    private contentAccess: ContentAccessService
   ) {}
 
   // Lightweight ownership/existence guard for write paths (VEG-346). Selects
@@ -62,19 +64,52 @@ export class CharactersService {
 
   // Spell-slot maxima need the class's progression table (VEG-346) and weapon
   // proficiency grants need its weapon list (VEG-463) — one lookup serves
-  // both. Looked up by name (srd_classes.name is unique); homebrew/unknown
+  // both. Still resolved by name because `Character.class` is a free-text
+  // column, not an FK (VEG-477 tracks making it id-keyed).
+  //
+  // Scoped to `ownerId`'s visible content since VEG-505 tiered SrdClass: the
+  // name is no longer globally unique, so two users may each own a homebrew
+  // "Fighter" alongside the SRD one. An unscoped findFirst here would let
+  // whichever row Postgres returned first — possibly a stranger's homebrew —
+  // drive this character's spell slots and weapon proficiencies. Unknown
   // classes resolve to nothing, in which case slots are omitted and weapon
   // grants fall back to the character's own proficiencies column.
   private async loadClassData(
     className: string | null,
-    characterId: string
+    characterId: string,
+    ownerId: string
   ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
     const none = { spellcasting: null, weaponProficiencies: [] };
     if (!className) return none;
-    const cls = await this.prisma.srdClass.findUnique({
-      where: { name: className },
-      select: { spellcasting: true, weaponProficiencies: true },
+    // Scoping narrows the ambiguity but does not remove it: once VEG-506 lets
+    // this owner create a homebrew "Fighter", it and the SRD row both match, and
+    // an unordered read lets Postgres return either — so the same character's
+    // spell slots and weapon proficiencies could flip between reads.
+    //
+    // Resolved by tier, in code. An earlier attempt sorted by `createdById` on
+    // the theory that only homebrew rows carry a creator; shared rows carry one
+    // too (AdminItemsService.create writes `contentSource: 'shared'` alongside
+    // `createdById`, and this table's SET NULL FK exists precisely so a shared
+    // row survives its author), so that sort collapsed into comparing two uuids.
+    //
+    // The partial unique indexes make this total: at most one srd row and one
+    // shared row per name, and the `where` admits only this owner's homebrew,
+    // of which there is at most one. So the fetch is bounded at three rows and
+    // the preference below picks the same one every time.
+    //
+    // Consequence worth knowing: because `Character.class` is free text with no
+    // id recorded, creating a homebrew class named "Fighter" retroactively
+    // repoints every one of this owner's existing Fighters at it, and deleting
+    // it flips them back. Preferring the SRD row instead would be equally
+    // surprising in the other direction — a homebrew class the owner made and
+    // selected would be ignored. VEG-477 removes the guesswork by keying the
+    // column to an id; until then this is a documented heuristic, not a rule.
+    const candidates = await this.prisma.srdClass.findMany({
+      where: { name: className, ...this.contentAccess.visibleTo(ownerId) },
+      select: { contentSource: true, spellcasting: true, weaponProficiencies: true },
     });
+    const ofTier = (tier: ContentSource) => candidates.find(c => c.contentSource === tier);
+    const cls = ofTier('homebrew') ?? ofTier('shared') ?? ofTier('srd');
     if (!cls) {
       // A non-null class with no matching row (typo or homebrew not in the
       // catalog) silently drops spell slots — log so it's diagnosable rather
@@ -105,7 +140,7 @@ export class CharactersService {
         `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
       );
     }
-    const classData = await this.loadClassData(character.class, character.id);
+    const classData = await this.loadClassData(character.class, character.id, character.userId);
     const computed = computeCharacterStats(
       {
         level: character.level,

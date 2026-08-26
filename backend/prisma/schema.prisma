@@ -77,6 +77,8 @@ model User {
   homebrewItems             Item[]
   homebrewFeats             Feat[]
   homebrewBackgrounds       Background[]
+  homebrewClasses           SrdClass[]
+  homebrewSubclasses        Subclass[]
 
   @@map("users")
 }
@@ -418,9 +420,16 @@ model ItemBundleEntry {
   @@map("item_bundle_entries")
 }
 
+/// The `Srd` prefix is historical, not a claim that every row is seed content
+/// (VEG-505). It predates the content-source model and carries no tiering
+/// meaning: `Race`, `Subclass` and `Subrace` are equally seed-only today and
+/// are unprefixed, while every model that IS tiered (`Background`, `Feat`,
+/// `Item`, `Monster`, `Spell`) is unprefixed too. Renaming was considered and
+/// declined: it buys no behavior and costs a table rename plus index and FK
+/// constraint renames on `class_features` and `subclasses`.
 model SrdClass {
   id                  String   @id @default(uuid())
-  name                String   @unique
+  name                String
   hitDie              String
   primaryAbilities    String[]
   savingThrows        String[]
@@ -436,9 +445,26 @@ model SrdClass {
   subclassLevel       Int?
   source              String   @default("SRD 5.2.1")
 
+  contentSource ContentSource @default(srd)
+  createdById   String?
+  campaignId    String?
+
+  // SetNull (not Cascade), matching Background: admin-published `shared` rows
+  // are global catalog content and must survive their author's deletion.
+  // Homebrew rows are deleted explicitly by UsersService.remove and backstopped
+  // by a hand-authored DB CHECK (VEG-317).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
   subclasses Subclass[]
   features   ClassFeature[]
 
+  // Name uniqueness is enforced by partial unique indexes (per-source) added by
+  // hand in the add_class_content_source migration; Prisma cannot model them.
+  // The plain name index is not redundant with those: they are partial, so the
+  // class lookup's OR-over-tiers predicate cannot use any of them.
+  @@index([name])
+  @@index([contentSource])
+  @@index([createdById])
   @@map("srd_classes")
 }
 
@@ -463,16 +489,33 @@ model Race {
 
 model Subclass {
   id           String  @id @default(uuid())
-  name         String  @unique
+  name         String
   classId      String
   description  String?
   spellList    Json?
   spellcasting Json?
   source       String  @default("SRD 5.2.1")
 
+  contentSource ContentSource @default(srd)
+  createdById   String?
+  campaignId    String?
+
+  // Same SetNull + CHECK contract as SrdClass above (VEG-505).
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
   srdClass SrdClass          @relation(fields: [classId], references: [id])
   features SubclassFeature[]
 
+  // Name uniqueness is enforced by partial unique indexes (per-source) added by
+  // hand in the add_class_content_source migration; Prisma cannot model them.
+  // The homebrew index keys on `classId` too, unlike SrdClass: a subclass is
+  // scoped by its parent (the way ClassFeature is keyed [classId, name]), so
+  // one author writing "Path of Ash" under both Barbarian and Fighter is
+  // legitimate and must not collide.
+  @@index([name])
+  @@index([classId])
+  @@index([contentSource])
+  @@index([createdById])
   @@map("subclasses")
 }
 
