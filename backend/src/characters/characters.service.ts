@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { AbilityScores, ClassSpellcasting, Weapon } from '@grimoire-os/shared';
+import type { AbilityScores, ClassSpellcasting, ContentSource, Weapon } from '@grimoire-os/shared';
 import { inventoryFromJson } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -81,18 +81,27 @@ export class CharactersService {
   ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
     const none = { spellcasting: null, weaponProficiencies: [] };
     if (!className) return none;
-    const cls = await this.prisma.srdClass.findFirst({
+    // Scoping narrows the ambiguity but does not remove it: once VEG-506 lets
+    // this owner create a homebrew "Fighter", it and the SRD row both match, and
+    // an unordered read lets Postgres return either — so the same character's
+    // spell slots and weapon proficiencies could flip between reads.
+    //
+    // Resolved by tier, in code. An earlier attempt sorted by `createdById` on
+    // the theory that only homebrew rows carry a creator; shared rows carry one
+    // too (AdminItemsService.create writes `contentSource: 'shared'` alongside
+    // `createdById`, and this table's SET NULL FK exists precisely so a shared
+    // row survives its author), so that sort collapsed into comparing two uuids.
+    //
+    // The partial unique indexes make this total: at most one srd row and one
+    // shared row per name, and the `where` admits only this owner's homebrew,
+    // of which there is at most one. So the fetch is bounded at three rows and
+    // the preference below picks the same one every time.
+    const candidates = await this.prisma.srdClass.findMany({
       where: { name: className, ...this.contentAccess.visibleTo(ownerId) },
-      // Scoping narrows the ambiguity but does not remove it: once VEG-506 lets
-      // this owner create a homebrew "Fighter", it and the SRD row both match.
-      // Without an order Postgres may return either, so the same character's
-      // spell slots and weapon proficiencies could flip between reads. Homebrew
-      // rows carry a creator and srd/shared rows do not, so owners-first with
-      // nulls last means the caller's own class wins; `id` breaks any remaining
-      // tie so the result is stable rather than merely deterministic-looking.
-      orderBy: [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
-      select: { spellcasting: true, weaponProficiencies: true },
+      select: { contentSource: true, spellcasting: true, weaponProficiencies: true },
     });
+    const ofTier = (tier: ContentSource) => candidates.find(c => c.contentSource === tier);
+    const cls = ofTier('homebrew') ?? ofTier('shared') ?? ofTier('srd');
     if (!cls) {
       // A non-null class with no matching row (typo or homebrew not in the
       // catalog) silently drops spell slots — log so it's diagnosable rather

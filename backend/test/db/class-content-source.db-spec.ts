@@ -344,34 +344,62 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
   // set. Scoping narrows the tie but does not break it: the owner's homebrew
   // "Fighter" and the SRD "Fighter" both match, and an unordered findFirst lets
   // Postgres return either, so spell slots would flip between reads.
-  describe('the loadClassData tie-break', () => {
-    it('returns the owner’s homebrew class ahead of the identically-named SRD row', async () => {
-      const where = {
-        name: srdClassName,
-        OR: [{ contentSource: { in: GLOBAL_SOURCES } }, { createdById: userId }],
-      };
-      const both = await ctx.prisma.srdClass.findMany({ where, select: { id: true } });
-      expect(both.length).toBeGreaterThan(1);
+  // loadClassData picks a tier in code rather than by a column sort. What the
+  // database has to guarantee for that to be total is the shape of the
+  // candidate set: at most one row per tier, with all three able to coexist
+  // under one name. The picking itself is unit-tested.
+  describe('the loadClassData candidate set', () => {
+    let sharedClassId: string;
 
-      const picked = await ctx.prisma.srdClass.findFirst({
-        where,
-        orderBy: [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
-        select: { id: true, contentSource: true, createdById: true },
+    beforeAll(async () => {
+      // A shared class with the SAME name and a creator. This row is why the
+      // first attempt at the tie-break failed: it sorted on `createdById`
+      // assuming only homebrew rows had one.
+      const shared = await ctx.prisma.srdClass.create({
+        data: {
+          name: srdClassName,
+          hitDie: 'd4',
+          contentSource: 'shared',
+          createdById: otherUserId,
+          source: 'Shared',
+        },
       });
-      expect(picked?.contentSource).toBe('homebrew');
-      expect(picked?.createdById).toBe(userId);
+      sharedClassId = shared.id;
     });
 
-    it('falls back to the SRD row when the owner has no homebrew of that name', async () => {
-      const picked = await ctx.prisma.srdClass.findFirst({
-        where: {
-          name: srdClassName,
-          OR: [{ contentSource: { in: GLOBAL_SOURCES } }, { createdById: 'user-with-no-homebrew' }],
-        },
-        orderBy: [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+    it('a shared class carries a creator, exactly like a homebrew one', async () => {
+      const shared = await ctx.prisma.srdClass.findUniqueOrThrow({ where: { id: sharedClassId } });
+      expect(shared.createdById).toBe(otherUserId);
+      // The premise of the discarded sort — "only homebrew rows have a creator"
+      // — is false, and this is the row that proves it.
+      const homebrew = await ctx.prisma.srdClass.findFirstOrThrow({
+        where: { name: srdClassName, contentSource: 'homebrew', createdById: userId },
+      });
+      expect(homebrew.createdById).not.toBeNull();
+    });
+
+    it('offers the owner exactly one row per tier under a single name', async () => {
+      const candidates = await ctx.prisma.srdClass.findMany({
+        where: { name: srdClassName, ...visibleTo(userId) },
+        select: { contentSource: true, createdById: true },
+      });
+
+      // srd + shared + this owner's homebrew. Another user's homebrew of the
+      // same name exists in the fixture and must not appear here.
+      const tiers = candidates.map(c => c.contentSource).sort();
+      expect(tiers).toEqual(['homebrew', 'shared', 'srd']);
+      for (const c of candidates) {
+        if (c.contentSource === 'homebrew') expect(c.createdById).toBe(userId);
+      }
+    });
+
+    it('offers only the global tiers to an owner with no homebrew of that name', async () => {
+      const candidates = await ctx.prisma.srdClass.findMany({
+        where: { name: srdClassName, ...visibleTo('user-with-no-homebrew') },
         select: { contentSource: true },
       });
-      expect(picked?.contentSource).toBe('srd');
+
+      expect(candidates.map(c => c.contentSource).sort()).toEqual(['shared', 'srd']);
     });
   });
 

@@ -24,9 +24,9 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 const visibleToOwner = {
   OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }],
 };
-// Owners first, nulls last: the caller's own homebrew class wins a name tie
-// with the SRD row, and `id` keeps the result stable (VEG-505).
-const ownerFirstOrder = [{ createdById: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }];
+// Every visible row with the name is fetched and the tier picked in code, so
+// resolution never depends on a column sort (VEG-505).
+const classSelect = { contentSource: true, spellcasting: true, weaponProficiencies: true };
 
 describe('CharactersService', () => {
   let service: CharactersService;
@@ -55,7 +55,7 @@ describe('CharactersService', () => {
 
     // Default: the character's class exists in the catalog as a non-caster
     // (mockCharacter is a Fighter). Specific tests override for spellcasters.
-    prisma.srdClass.findFirst.mockResolvedValue({ spellcasting: null });
+    prisma.srdClass.findMany.mockResolvedValue([{ contentSource: 'srd', spellcasting: null }]);
   });
 
   describe('create', () => {
@@ -381,22 +381,24 @@ describe('CharactersService', () => {
         spellcastingAbility: 'Intelligence',
         abilityScores: { ...mockCharacter.abilityScores, intelligence: 16 },
       });
-      prisma.srdClass.findFirst.mockResolvedValue({
-        spellcasting: {
-          ability: 'Intelligence',
-          spellSlotProgression: {
-            5: { 1: 4, 2: 3, 3: 2 },
-            20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1 },
+      prisma.srdClass.findMany.mockResolvedValue([
+        {
+          contentSource: 'srd',
+          spellcasting: {
+            ability: 'Intelligence',
+            spellSlotProgression: {
+              5: { 1: 4, 2: 3, 3: 2 },
+              20: { 1: 4, 2: 3, 3: 3, 4: 3, 5: 3, 6: 2, 7: 2, 8: 1, 9: 1 },
+            },
           },
         },
-      });
+      ]);
 
       const result = await service.findOne(CHARACTER_ID);
 
-      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+      expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: { name: 'Wizard', ...visibleToOwner },
-        orderBy: ownerFirstOrder,
-        select: { spellcasting: true, weaponProficiencies: true },
+        select: classSelect,
       });
       // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
       expect(result.computed.spellcasting).toEqual({
@@ -424,7 +426,7 @@ describe('CharactersService', () => {
         abilityScores: { ...mockCharacter.abilityScores, charisma: 16 },
       });
       // Class not present in the catalog.
-      prisma.srdClass.findFirst.mockResolvedValue(null);
+      prisma.srdClass.findMany.mockResolvedValue([]);
 
       const result = await service.findOne(CHARACTER_ID);
 
@@ -466,19 +468,21 @@ describe('CharactersService', () => {
         proficiencies: [],
         inventory: [tieredLongsword],
       });
-      prisma.srdClass.findFirst.mockResolvedValue({
-        spellcasting: null,
-        weaponProficiencies: ['Simple weapons', 'Martial weapons'],
-      });
+      prisma.srdClass.findMany.mockResolvedValue([
+        {
+          contentSource: 'srd',
+          spellcasting: null,
+          weaponProficiencies: ['Simple weapons', 'Martial weapons'],
+        },
+      ]);
 
       const result = await service.findOne(CHARACTER_ID);
 
       // STR 16 → +3, prof +3 granted by the class list.
       expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
-      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+      expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: { name: 'Fighter', ...visibleToOwner },
-        orderBy: ownerFirstOrder,
-        select: { spellcasting: true, weaponProficiencies: true },
+        select: classSelect,
       });
     });
 
@@ -488,44 +492,95 @@ describe('CharactersService', () => {
     // spell slots and weapon proficiencies.
     it("resolves the class against the character owner's visible content only (VEG-505)", async () => {
       prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, class: 'Fighter' });
-      prisma.srdClass.findFirst.mockResolvedValue({
-        spellcasting: null,
-        weaponProficiencies: [],
-      });
+      prisma.srdClass.findMany.mockResolvedValue([
+        {
+          contentSource: 'srd',
+          spellcasting: null,
+          weaponProficiencies: [],
+        },
+      ]);
 
       await service.findOne(CHARACTER_ID);
 
-      expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+      expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: {
           name: 'Fighter',
           OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: mockCharacter.userId }],
         },
-        orderBy: ownerFirstOrder,
-        select: { spellcasting: true, weaponProficiencies: true },
+        select: classSelect,
       });
     });
 
-    // Scoping alone leaves a tie: once VEG-506 lets this owner create a
-    // homebrew "Fighter", both it and the SRD row match, and an unordered
-    // findFirst lets Postgres pick either — so spell slots and weapon
-    // proficiencies would flip between reads of the same character. The owner's
-    // own class wins, deterministically.
-    it('prefers the owner’s homebrew class over an identically-named SRD row (VEG-505)', async () => {
-      prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, class: 'Fighter' });
-      prisma.srdClass.findFirst.mockResolvedValue({
+    // A name tie is resolved by tier, in code, never by a column sort. The
+    // first attempt ordered by `createdById` on the theory that only homebrew
+    // rows carry a creator — but shared rows carry one too
+    // (admin-items.service.ts writes contentSource:'shared' alongside
+    // createdById), so that sort collapsed to comparing two uuids and roughly
+    // half of owners would silently get the shared class instead of their own.
+    describe('resolving a name tie between tiers (VEG-505)', () => {
+      const candidate = (contentSource: string, weaponProficiencies: string[]) => ({
+        contentSource,
         spellcasting: null,
-        weaponProficiencies: [],
+        weaponProficiencies,
       });
 
-      await service.findOne(CHARACTER_ID);
+      // Longswords are martial: a proficient row reads +6 (STR +3, prof +3),
+      // a non-proficient one +3. So the attack bonus names which row won.
+      async function attackBonusFrom(candidates: unknown[]) {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          proficiencies: [],
+          inventory: [tieredLongsword],
+        });
+        prisma.srdClass.findMany.mockResolvedValue(candidates);
+        const result = await service.findOne(CHARACTER_ID);
+        return result.computed.weapons[0].attackBonus;
+      }
 
-      const [args] = prisma.srdClass.findFirst.mock.calls[0];
-      // Homebrew rows carry a creator; srd and shared rows have none, so
-      // ordering owners first and nulls last puts the caller's own class ahead.
-      expect(args.orderBy).toEqual([
-        { createdById: { sort: 'desc', nulls: 'last' } },
-        { id: 'asc' },
-      ]);
+      it('never sorts by a column — every visible row is fetched and picked in code', async () => {
+        await attackBonusFrom([candidate('srd', [])]);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.orderBy).toBeUndefined();
+        expect(args.select).toEqual(classSelect);
+      });
+
+      it('prefers the owner’s homebrew over a shared row that also has a creator', async () => {
+        // Row order is deliberately hostile: shared first, as a uuid sort might
+        // well have returned it.
+        expect(
+          await attackBonusFrom([
+            candidate('shared', []),
+            candidate('homebrew', ['Martial weapons']),
+          ])
+        ).toBe('+6');
+      });
+
+      it('prefers the owner’s homebrew over the SRD row', async () => {
+        expect(
+          await attackBonusFrom([candidate('srd', []), candidate('homebrew', ['Martial weapons'])])
+        ).toBe('+6');
+      });
+
+      it('prefers a shared row over the SRD row when the owner has no homebrew', async () => {
+        expect(
+          await attackBonusFrom([candidate('srd', []), candidate('shared', ['Martial weapons'])])
+        ).toBe('+6');
+      });
+
+      it('falls back to the SRD row when it is the only tier present', async () => {
+        expect(await attackBonusFrom([candidate('srd', ['Martial weapons'])])).toBe('+6');
+      });
+
+      it('is stable regardless of the order Postgres returns the rows in', async () => {
+        const homebrew = candidate('homebrew', ['Martial weapons']);
+        const shared = candidate('shared', []);
+        const srd = candidate('srd', []);
+        expect(await attackBonusFrom([homebrew, shared, srd])).toBe('+6');
+        expect(await attackBonusFrom([srd, shared, homebrew])).toBe('+6');
+        expect(await attackBonusFrom([shared, srd, homebrew])).toBe('+6');
+      });
     });
 
     it('derives a non-proficient row when neither class nor character covers the weapon (VEG-463)', async () => {
@@ -536,7 +591,7 @@ describe('CharactersService', () => {
         inventory: [tieredLongsword],
       });
       // Class not present in the catalog → no class grants.
-      prisma.srdClass.findFirst.mockResolvedValue(null);
+      prisma.srdClass.findMany.mockResolvedValue([]);
 
       const result = await service.findOne(CHARACTER_ID);
 
@@ -553,7 +608,7 @@ describe('CharactersService', () => {
         proficiencies: ['Longswords'],
         inventory: [tieredLongsword],
       });
-      prisma.srdClass.findFirst.mockResolvedValue(null);
+      prisma.srdClass.findMany.mockResolvedValue([]);
 
       const result = await service.findOne(CHARACTER_ID);
 
