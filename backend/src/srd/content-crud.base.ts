@@ -46,7 +46,40 @@ function capitalize(noun: string): string {
  * Columns a client may never set on a tiered row: they decide ownership, tier,
  * provenance and identity.
  */
-const RESERVED_COLUMNS = ['contentSource', 'createdById', 'campaignId', 'source', 'id'] as const;
+interface ReservedColumns extends OwnedContentRow {
+  campaignId: string | null;
+  source: string;
+  id: string;
+}
+
+/**
+ * The reserved set, derived from a type rather than written as loose strings.
+ * A typo (`contentSourc`) is an excess-property error and a dropped entry fails
+ * the `Record`, which matters because this list IS the tier defense on the
+ * update path: a silently misspelled key would let the column through.
+ */
+const RESERVED_SET: Record<keyof ReservedColumns, true> = {
+  contentSource: true,
+  createdById: true,
+  campaignId: true,
+  source: true,
+  id: true,
+};
+
+const RESERVED_COLUMNS = Object.keys(RESERVED_SET) as (keyof ReservedColumns)[];
+
+/** The ownership fields a create forces onto every row, whatever the client sent. */
+interface OwnershipStamp {
+  source: string;
+  contentSource: WritableTier;
+  createdById: string;
+}
+
+/** Every writable tier's `source` label. Total, so a new tier must declare one. */
+const SOURCE_LABEL_BY_TIER: Record<WritableTier, string> = {
+  homebrew: HOMEBREW_SOURCE_LABEL,
+  shared: SHARED_SOURCE_LABEL,
+};
 
 /**
  * Drop the reserved columns from a write payload, in place.
@@ -136,16 +169,17 @@ export abstract class ContentCrudService<
     await this.beforeCreate(data, actor);
     stripReservedColumns(data);
 
+    // Annotated so a misspelled forced field (`contentSourc`) is a compile
+    // error rather than an extra column that silently never gets stamped.
+    const stamp: OwnershipStamp = {
+      source: this.sourceLabel,
+      contentSource: this.tier,
+      createdById: actor.userId,
+    };
+
     try {
       // The ownership stamp is spread last so no hook or DTO field can displace it.
-      return await this.delegate.create({
-        data: {
-          ...data,
-          source: this.sourceLabel,
-          contentSource: this.tier,
-          createdById: actor.userId,
-        },
-      });
+      return await this.delegate.create({ data: { ...data, ...stamp } });
     } catch (err) {
       mapWriteError(err, this.tier, this.noun);
     }
@@ -223,8 +257,15 @@ export abstract class ContentCrudService<
     await this.delegate.delete({ where: { id } });
   }
 
-  /** Display label for the legacy `source` column, derived so it cannot drift. */
+  /**
+   * Display label for the legacy `source` column, derived from the tier so the
+   * two cannot be paired inconsistently. A total map rather than a ternary:
+   * `WritableTier` widens automatically if `ContentSource` gains a member (the
+   * schema already reserves `campaignId` for per-campaign scoping), and a
+   * ternary's else branch would silently label a new tier "Homebrew" where a
+   * missing key here fails to compile.
+   */
   private get sourceLabel(): string {
-    return this.tier === 'shared' ? SHARED_SOURCE_LABEL : HOMEBREW_SOURCE_LABEL;
+    return SOURCE_LABEL_BY_TIER[this.tier];
   }
 }

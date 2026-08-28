@@ -214,6 +214,7 @@ describe.each(CASES)(
             createdById: 'evil',
             source: 'Player’s Handbook',
             id: 'forced-id',
+            campaignId: 'some-campaign',
           } as never,
           creator
         );
@@ -223,6 +224,10 @@ describe.each(CASES)(
         expect(data.createdById).toBe(creator.userId);
         expect(data.source).toBe(sourceLabel);
         expect(data).not.toHaveProperty('id');
+        // campaignId is reserved for per-campaign scoping and is not consulted
+        // yet, which is exactly why it needs pinning now: an unasserted entry in
+        // the reserved list is one a typo could drop unnoticed.
+        expect(data).not.toHaveProperty('campaignId');
       });
 
       it(`maps a duplicate-name P2002 to 409 with ${tier}-tier copy`, async () => {
@@ -318,7 +323,14 @@ describe.each(CASES)(
 
         await service.update(
           'row-1',
-          { name: 'X', contentSource: 'srd', createdById: 'evil', source: 'Forged' } as never,
+          {
+            name: 'X',
+            contentSource: 'srd',
+            createdById: 'evil',
+            source: 'Forged',
+            campaignId: 'some-campaign',
+            id: 'forced-id',
+          } as never,
           editor
         );
 
@@ -326,6 +338,8 @@ describe.each(CASES)(
         expect(data).not.toHaveProperty('contentSource');
         expect(data).not.toHaveProperty('createdById');
         expect(data).not.toHaveProperty('source');
+        expect(data).not.toHaveProperty('campaignId');
+        expect(data).not.toHaveProperty('id');
       });
 
       it('maps a concurrent-delete P2025 to NotFound rather than a 500', async () => {
