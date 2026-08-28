@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { HomebrewBackgroundsService } from './homebrew-backgrounds.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -130,6 +130,23 @@ describe('HomebrewBackgroundsService', () => {
       await expect(
         service.update('bg1', { name: null } as never, { userId: 'stranger-1', isAdmin: false })
       ).rejects.toThrow(NotFoundException);
+      expect(prisma.background.update).not.toHaveBeenCalled();
+    });
+
+    it('authorizes before validating for SRD rows too, so the answer is 403 not 400', async () => {
+      prisma.background.findUnique.mockResolvedValue({
+        id: 'srd1',
+        contentSource: 'srd',
+        createdById: null,
+        originFeatId: null,
+      });
+
+      // Sibling of the case above on the visible-but-immutable path: the row is
+      // readable, so the honest answer is "you may not write this", not a
+      // complaint about a payload that was never going to be applied.
+      await expect(service.update('srd1', { name: null } as never, OWNER)).rejects.toThrow(
+        ForbiddenException
+      );
       expect(prisma.background.update).not.toHaveBeenCalled();
     });
 
