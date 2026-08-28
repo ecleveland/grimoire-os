@@ -50,6 +50,25 @@ describe('HomebrewItemsService', () => {
     expect(prisma.item.update.mock.calls[0][0].data.properties).toEqual([]);
   });
 
+  it('coerces the null boolean flags to false — the columns are non-nullable', async () => {
+    prisma.item.findUnique.mockResolvedValue(homebrewRow);
+    prisma.item.update.mockResolvedValue(homebrewRow);
+
+    // Nulling these three is how the client clears them (VEG-316), but the
+    // columns reject null. This coercion had no test until VEG-336: deleting it
+    // left the whole backend suite green, so nothing would have caught its loss.
+    await service.update(
+      'i1',
+      { stealthDisadvantage: null, requiresAttunement: null, isMagic: null } as never,
+      OWNER
+    );
+
+    const data = prisma.item.update.mock.calls[0][0].data;
+    expect(data.stealthDisadvantage).toBe(false);
+    expect(data.requiresAttunement).toBe(false);
+    expect(data.isMagic).toBe(false);
+  });
+
   it('normalizes empty-string rarity to null so the rarity filter cannot mis-bucket it', async () => {
     prisma.item.findUnique.mockResolvedValue(homebrewRow);
     prisma.item.update.mockResolvedValue(homebrewRow);
