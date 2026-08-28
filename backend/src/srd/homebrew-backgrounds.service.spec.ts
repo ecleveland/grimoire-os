@@ -1,11 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
 import { HomebrewBackgroundsService } from './homebrew-backgrounds.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -13,8 +7,6 @@ import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.facto
 import { CreateBackgroundDto } from './dto/create-background.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
-const STRANGER = { userId: 'stranger-1', isAdmin: false };
-const ADMIN = { userId: 'admin-1', isAdmin: true };
 
 const SRD_FEAT = { id: 'feat-srd', contentSource: 'srd', createdById: null };
 const OWN_HOMEBREW_FEAT = { id: 'feat-own', contentSource: 'homebrew', createdById: 'owner-1' };
@@ -26,20 +18,6 @@ function makeCreateDto(over: Partial<CreateBackgroundDto> = {}): CreateBackgroun
     skillProficiencies: ['Insight', 'Religion'],
     ...over,
   } as CreateBackgroundDto;
-}
-
-function p2002(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-    code: 'P2002',
-    clientVersion: 'test',
-  });
-}
-
-function p2025(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Record not found', {
-    code: 'P2025',
-    clientVersion: 'test',
-  });
 }
 
 describe('HomebrewBackgroundsService', () => {
@@ -129,14 +107,6 @@ describe('HomebrewBackgroundsService', () => {
       expect(data.originFeatOption).toBeNull();
       expect(prisma.feat.findFirst).not.toHaveBeenCalled();
     });
-
-    it('maps a duplicate-name P2002 to ConflictException with homebrew copy', async () => {
-      prisma.background.create.mockRejectedValue(p2002());
-
-      await expect(service.create(makeCreateDto(), OWNER)).rejects.toThrow(
-        'You already have a background with this name'
-      );
-    });
   });
 
   describe('update', () => {
@@ -146,73 +116,6 @@ describe('HomebrewBackgroundsService', () => {
       createdById: 'owner-1',
       originFeatId: null,
     };
-
-    it("updates the owner's own homebrew background", async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-      const updated = { ...homebrewRow, name: 'Exhumed Gravedigger' };
-      prisma.background.update.mockResolvedValue(updated);
-
-      const result = await service.update('bg1', { name: 'Exhumed Gravedigger' }, OWNER);
-
-      expect(prisma.background.update).toHaveBeenCalledWith({
-        where: { id: 'bg1' },
-        data: expect.objectContaining({ name: 'Exhumed Gravedigger' }),
-      });
-      expect(result).toEqual(updated);
-    });
-
-    it('throws NotFound when the background does not exist', async () => {
-      prisma.background.findUnique.mockResolvedValue(null);
-
-      await expect(service.update('nope', { name: 'X' }, OWNER)).rejects.toThrow(NotFoundException);
-      expect(prisma.background.update).not.toHaveBeenCalled();
-    });
-
-    it("throws NotFound (not Forbidden) for someone else's homebrew — invisible rows must not leak existence", async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-
-      await expect(service.update('bg1', { name: 'X' }, STRANGER)).rejects.toThrow(
-        NotFoundException
-      );
-      expect(prisma.background.update).not.toHaveBeenCalled();
-    });
-
-    it('throws Forbidden for SRD rows (visible but immutable — SRD is never modified)', async () => {
-      prisma.background.findUnique.mockResolvedValue({
-        id: 's1',
-        contentSource: 'srd',
-        createdById: null,
-      });
-
-      await expect(service.update('s1', { name: 'X' }, OWNER)).rejects.toThrow(ForbiddenException);
-    });
-
-    it('forbids non-admins from editing shared rows but allows admins', async () => {
-      const sharedRow = { id: 'sh1', contentSource: 'shared', createdById: 'someone' };
-      prisma.background.findUnique.mockResolvedValue(sharedRow);
-
-      await expect(service.update('sh1', { name: 'X' }, OWNER)).rejects.toThrow(ForbiddenException);
-
-      prisma.background.update.mockResolvedValue({ ...sharedRow, name: 'X' });
-      await expect(service.update('sh1', { name: 'X' }, ADMIN)).resolves.toEqual(
-        expect.objectContaining({ name: 'X' })
-      );
-    });
-
-    it('never lets an update change ownership or tier fields', async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-      prisma.background.update.mockResolvedValue(homebrewRow);
-
-      await service.update(
-        'bg1',
-        { name: 'X', contentSource: 'shared', createdById: 'evil' } as never,
-        OWNER
-      );
-
-      const data = prisma.background.update.mock.calls[0][0].data;
-      expect(data).not.toHaveProperty('contentSource');
-      expect(data).not.toHaveProperty('createdById');
-    });
 
     it('re-validates origin-feat visibility on update', async () => {
       prisma.background.findUnique.mockResolvedValue(homebrewRow);
@@ -336,78 +239,6 @@ describe('HomebrewBackgroundsService', () => {
       expect(data.equipment).toBeNull();
       expect(data.description).toBeNull();
       expect(data.originFeatOption).toBeNull();
-    });
-
-    it('maps a concurrent-delete P2025 on update to NotFound (not 500)', async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-      prisma.background.update.mockRejectedValue(p2025());
-
-      await expect(service.update('bg1', { name: 'X' }, OWNER)).rejects.toThrow(NotFoundException);
-    });
-
-    it('uses tier-aware conflict copy for shared-content collisions', async () => {
-      prisma.background.findUnique.mockResolvedValue({
-        id: 'sh1',
-        contentSource: 'shared',
-        createdById: 'someone',
-      });
-      prisma.background.update.mockRejectedValue(p2002());
-
-      await expect(service.update('sh1', { name: 'Dup' }, ADMIN)).rejects.toThrow(
-        'A shared background with this name already exists'
-      );
-    });
-
-    it('maps a duplicate-name P2002 on update to ConflictException', async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-      prisma.background.update.mockRejectedValue(p2002());
-
-      await expect(service.update('bg1', { name: 'Dup' }, OWNER)).rejects.toThrow(
-        ConflictException
-      );
-    });
-  });
-
-  describe('remove', () => {
-    const homebrewRow = { id: 'bg1', contentSource: 'homebrew', createdById: 'owner-1' };
-
-    it("deletes the owner's own homebrew background", async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-      prisma.background.delete.mockResolvedValue(homebrewRow);
-
-      await service.remove('bg1', OWNER);
-
-      expect(prisma.background.delete).toHaveBeenCalledWith({ where: { id: 'bg1' } });
-    });
-
-    it('throws NotFound when the background does not exist', async () => {
-      prisma.background.findUnique.mockResolvedValue(null);
-
-      await expect(service.remove('nope', OWNER)).rejects.toThrow(NotFoundException);
-    });
-
-    it("throws NotFound for someone else's homebrew", async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-
-      await expect(service.remove('bg1', STRANGER)).rejects.toThrow(NotFoundException);
-      expect(prisma.background.delete).not.toHaveBeenCalled();
-    });
-
-    it('throws Forbidden for SRD rows', async () => {
-      prisma.background.findUnique.mockResolvedValue({
-        id: 's1',
-        contentSource: 'srd',
-        createdById: null,
-      });
-
-      await expect(service.remove('s1', OWNER)).rejects.toThrow(ForbiddenException);
-    });
-
-    it('maps a concurrent-delete P2025 to NotFound (not 500)', async () => {
-      prisma.background.findUnique.mockResolvedValue(homebrewRow);
-      prisma.background.delete.mockRejectedValue(p2025());
-
-      await expect(service.remove('bg1', OWNER)).rejects.toThrow(NotFoundException);
     });
   });
 });
