@@ -30,21 +30,14 @@ export class HomebrewSpellsService extends ContentCrudService<
   }
 
   /**
-   * Map a DTO onto Prisma column data, dropping anything that is not a plain
-   * spell column — ownership/tier/source fields can never be set by clients,
-   * even if a raw payload sneaks past DTO validation. `classes`, `ritual`, and
+   * Normalize a DTO into Prisma column data. `classes`, `ritual`, and
    * `concentration` are non-nullable columns, so a null clear (the client's way
    * of resetting an optional field, VEG-316) becomes their empty default.
    */
   protected toColumnData(dto: CreateSpellDto | UpdateSpellDto): ColumnData {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as ColumnData;
+    // Copy so the caller's DTO is never mutated. Reserved ownership/tier
+    // columns are stripped by the base, not here.
+    const data: ColumnData = { ...dto };
     if ('classes' in data && data.classes === null) data.classes = [];
     if ('ritual' in data && data.ritual === null) data.ritual = false;
     if ('concentration' in data && data.concentration === null) data.concentration = false;

@@ -41,9 +41,7 @@ export class HomebrewFeatsService extends ContentCrudService<Feat, CreateFeatDto
   }
 
   /**
-   * Map a DTO onto Prisma column data, dropping anything that is not a plain
-   * feat column — ownership/tier/source fields can never be set by clients,
-   * even if a raw payload sneaks past DTO validation. `repeatable` is a
+   * Normalize a DTO into Prisma column data. `repeatable` is a
    * non-nullable column, so a null clear (the client's way of resetting an
    * optional field, VEG-316) becomes its false default; `benefits` is a
    * nullable Json column, where Prisma requires an explicit DbNull instead of
@@ -52,14 +50,9 @@ export class HomebrewFeatsService extends ContentCrudService<Feat, CreateFeatDto
    * the hasPrerequisite/category filters cannot mis-bucket them.
    */
   protected toColumnData(dto: CreateFeatDto | UpdateFeatDto): ColumnData {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as ColumnData;
+    // Copy so the caller's DTO is never mutated. Reserved ownership/tier
+    // columns are stripped by the base, not here.
+    const data: ColumnData = { ...dto };
     if ('repeatable' in data && data.repeatable === null) data.repeatable = false;
     if ('benefits' in data && data.benefits === null) data.benefits = Prisma.DbNull;
     if (typeof data.prerequisite === 'string' && !data.prerequisite.trim()) {

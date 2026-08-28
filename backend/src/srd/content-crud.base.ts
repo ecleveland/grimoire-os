@@ -43,6 +43,29 @@ function capitalize(noun: string): string {
 }
 
 /**
+ * Columns a client may never set on a tiered row: they decide ownership, tier,
+ * provenance and identity.
+ */
+const RESERVED_COLUMNS = ['contentSource', 'createdById', 'campaignId', 'source', 'id'] as const;
+
+/**
+ * Drop the reserved columns from a write payload, in place.
+ *
+ * On create this is belt-and-braces, because the ownership stamp overwrites
+ * them anyway. On update it is the entire defense: an update applies no stamp,
+ * so without this strip a payload carrying `contentSource: 'srd'` would
+ * escalate a homebrew row out of its owner's tier and into the immutable
+ * catalog. Every entity's column mapping used to re-implement this by hand,
+ * which made the tier defense a thing five separate authors had to remember.
+ * Running it here means an entity mapping can only fail to normalize a column,
+ * never fail to protect one.
+ */
+function stripReservedColumns(data: ColumnData): ColumnData {
+  for (const column of RESERVED_COLUMNS) delete data[column];
+  return data;
+}
+
+/**
  * The write skeleton every tiered-content CRUD service shares (VEG-336).
  *
  * Monsters, spells, feats, items, backgrounds and the admin shared-tier item
@@ -94,10 +117,11 @@ export abstract class ContentCrudService<
   protected abstract get delegate(): ContentWriteDelegate<Row>;
 
   /**
-   * Map a validated DTO onto plain column data, dropping anything that is not a
-   * column of this entity and normalizing nulls the schema cannot take. Ownership
-   * and tier fields must never survive this, even if a raw payload gets past DTO
-   * validation; the stamp applied in {@link create} is the backstop.
+   * Normalize a validated DTO into plain column data: copy it so the caller's
+   * DTO is never mutated, and coerce the nulls the schema cannot take. An
+   * implementation is responsible for normalization ONLY; the reserved
+   * ownership and tier columns are stripped by the skeleton afterwards, so
+   * forgetting to guard them here cannot open a tier escalation.
    */
   protected abstract toColumnData(dto: CreateDto | UpdateDto): ColumnData;
 
@@ -110,6 +134,7 @@ export abstract class ContentCrudService<
     this.contentAccess.assertCanCreate(this.tier, actor);
     const data = this.toColumnData(dto);
     await this.beforeCreate(data, actor);
+    stripReservedColumns(data);
 
     try {
       // The ownership stamp is spread last so no hook or DTO field can displace it.
@@ -130,6 +155,9 @@ export abstract class ContentCrudService<
     const row = await this.findWritableRow(id, actor);
     const data = this.toColumnData(dto);
     await this.beforeUpdate(data, row, actor);
+    // No stamp on this path, so the strip is the only thing standing between a
+    // crafted payload and a tier escalation.
+    stripReservedColumns(data);
 
     try {
       return await this.delegate.update({ where: { id }, data });

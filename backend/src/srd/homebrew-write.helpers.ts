@@ -39,14 +39,9 @@ export function toActor(user: JwtUser): ContentActor {
  * to null) normalizes to null so the rarity filter cannot mis-bucket it.
  */
 export function toItemColumnData(dto: object): Record<string, unknown> {
-  const {
-    contentSource: _contentSource,
-    createdById: _createdById,
-    campaignId: _campaignId,
-    source: _source,
-    id: _id,
-    ...data
-  } = dto as Record<string, unknown>;
+  // Copy so the caller's DTO is never mutated. Reserved ownership/tier columns
+  // are stripped by ContentCrudService, not here.
+  const data: Record<string, unknown> = { ...dto };
   for (const flag of ['stealthDisadvantage', 'requiresAttunement', 'isMagic'] as const) {
     if (flag in data && data[flag] === null) data[flag] = false;
   }

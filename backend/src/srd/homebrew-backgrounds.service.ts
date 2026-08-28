@@ -90,9 +90,7 @@ export class HomebrewBackgroundsService extends ContentCrudService<
   }
 
   /**
-   * Map a DTO onto Prisma column data, dropping anything that is not a plain
-   * background column — ownership/tier/source fields can never be set by
-   * clients, even if a raw payload sneaks past DTO validation. `languages` and
+   * Normalize a DTO into Prisma column data. `languages` and
    * the string-array columns are non-nullable, so a null clear (the client's
    * way of resetting an optional field, VEG-316) becomes their empty default.
    * Blank optional strings (reachable only via raw API writes — the form
@@ -102,14 +100,9 @@ export class HomebrewBackgroundsService extends ContentCrudService<
    * create/update hooks, which know whether a feat is (or stays) linked.
    */
   protected toColumnData(dto: CreateBackgroundDto | UpdateBackgroundDto): ColumnData {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as ColumnData;
+    // Copy so the caller's DTO is never mutated. Reserved ownership/tier
+    // columns are stripped by the base, not here.
+    const data: ColumnData = { ...dto };
 
     // `name` is required and non-nullable; a null "clear" (valid for optional
     // fields per VEG-316) would otherwise reach Prisma and 500.

@@ -49,21 +49,14 @@ export class HomebrewMonstersService extends ContentCrudService<
   }
 
   /**
-   * Map a DTO onto Prisma column data, dropping anything that is not a plain
-   * monster column — ownership/tier/source fields can never be set by clients,
-   * even if a raw payload sneaks past DTO validation. Json columns sent as
+   * Normalize a DTO into Prisma column data. Json columns sent as
    * `null` (the client's way of clearing an optional field, VEG-316) become
    * `Prisma.DbNull`: Prisma rejects plain JS null on Json fields.
    */
   protected toColumnData(dto: CreateMonsterDto | UpdateMonsterDto): ColumnData {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as ColumnData;
+    // Copy so the caller's DTO is never mutated. Reserved ownership/tier
+    // columns are stripped by the base, not here.
+    const data: ColumnData = { ...dto };
     for (const key of JSON_COLUMNS) {
       if (key in data && data[key] === null) data[key] = Prisma.DbNull;
     }
