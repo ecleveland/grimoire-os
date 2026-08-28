@@ -1,12 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Item, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ContentAccessService, ContentActor } from '../../srd/content-access.service';
-import {
-  SHARED_SOURCE_LABEL,
-  mapWriteError,
-  toItemColumnData,
-} from '../../srd/homebrew-write.helpers';
+import { ColumnData, ContentCrudService, ContentWriteDelegate } from '../../srd/content-crud.base';
+import { mapWriteError, toItemColumnData } from '../../srd/homebrew-write.helpers';
 import { CreateItemDto } from '../../srd/dto/create-item.dto';
 import { UpdateItemDto } from '../../srd/dto/update-item.dto';
 import { buildPaginatedResponse } from '../../common/helpers/paginate';
@@ -30,15 +27,27 @@ export interface ListItemsQuery {
  * stay immutable — {@link ContentAccessService.assertWritable} rejects them —
  * so to "edit" a seeded pack an admin recreates it as a shared variant.
  *
- * The write path mirrors {@link HomebrewItemsService}; only the tier differs
- * (`shared`, admin-only) and bundle-contents editing is added on top.
+ * The write path is the shared {@link ContentCrudService} skeleton, exactly as
+ * {@link HomebrewItemsService} uses it; only the tier differs (`shared`,
+ * admin-only, which the base derives the `source` label from) and
+ * bundle-contents editing is added on top.
  */
 @Injectable()
-export class AdminItemsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly contentAccess: ContentAccessService
-  ) {}
+export class AdminItemsService extends ContentCrudService<Item, CreateItemDto, UpdateItemDto> {
+  protected readonly tier = 'shared' as const;
+  protected readonly noun = 'item';
+
+  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
+    super(prisma, contentAccess);
+  }
+
+  protected get delegate(): ContentWriteDelegate<Item> {
+    return this.prisma.item;
+  }
+
+  protected toColumnData(dto: CreateItemDto | UpdateItemDto): ColumnData {
+    return toItemColumnData(dto);
+  }
 
   /** Paginated list of the shared-tier catalog rows admins manage. */
   async list(query: ListItemsQuery) {
@@ -58,43 +67,6 @@ export class AdminItemsService {
       this.prisma.item.count({ where }),
     ]);
     return buildPaginatedResponse(data, total, page, limit);
-  }
-
-  async create(dto: CreateItemDto, actor: ContentActor): Promise<Item> {
-    this.contentAccess.assertCanCreate('shared', actor);
-    try {
-      return await this.prisma.item.create({
-        data: {
-          ...toItemColumnData(dto),
-          source: SHARED_SOURCE_LABEL,
-          contentSource: 'shared',
-          createdById: actor.userId,
-        } as Prisma.ItemUncheckedCreateInput,
-      });
-    } catch (err) {
-      mapWriteError(err, 'shared', 'item');
-    }
-  }
-
-  async update(id: string, dto: UpdateItemDto, actor: ContentActor): Promise<Item> {
-    const row = await this.findWritableRow(id, actor);
-    try {
-      return await this.prisma.item.update({
-        where: { id },
-        data: toItemColumnData(dto) as Prisma.ItemUpdateInput,
-      });
-    } catch (err) {
-      mapWriteError(err, row.contentSource, 'item');
-    }
-  }
-
-  async remove(id: string, actor: ContentActor): Promise<void> {
-    const row = await this.findWritableRow(id, actor);
-    try {
-      await this.prisma.item.delete({ where: { id } });
-    } catch (err) {
-      mapWriteError(err, row.contentSource, 'item');
-    }
   }
 
   /**
@@ -169,19 +141,5 @@ export class AdminItemsService {
         quantity: e.quantity,
       })),
     };
-  }
-
-  /**
-   * Load the row and authorize the write. Rows the actor cannot read 404 (no
-   * existence leak); visible-but-immutable rows (SRD, or shared for non-admins)
-   * 403 — see {@link ContentAccessService.assertWritable}.
-   */
-  private async findWritableRow(id: string, actor: ContentActor): Promise<Item> {
-    const row = await this.prisma.item.findUnique({ where: { id } });
-    if (!row || !this.contentAccess.canRead(row, actor.userId)) {
-      throw new NotFoundException('Item not found');
-    }
-    this.contentAccess.assertWritable(row, actor);
-    return row;
   }
 }

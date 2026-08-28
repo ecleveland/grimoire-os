@@ -1,75 +1,32 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { Item, Prisma } from '@prisma/client';
+import { Injectable } from '@nestjs/common';
+import { Item } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { ContentAccessService, ContentActor } from './content-access.service';
-import { HOMEBREW_SOURCE_LABEL, mapWriteError, toItemColumnData } from './homebrew-write.helpers';
+import { ContentAccessService } from './content-access.service';
+import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
+import { toItemColumnData } from './homebrew-write.helpers';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 
 /**
- * CRUD for user-authored (homebrew) items (VEG-296), following the
- * {@link HomebrewSpellsService} pattern. Authorization is delegated to
- * {@link ContentAccessService}: any authenticated user may create homebrew for
- * themselves; rows are writable per their tier (owner for homebrew, admins for
- * shared, never for SRD).
+ * CRUD for user-authored (homebrew) items (VEG-296). The authorization skeleton
+ * lives in {@link ContentCrudService}; the column mapping is shared with the
+ * admin shared-tier writer via {@link toItemColumnData} so the same `Item`
+ * entity normalizes identically whichever tier writes it.
  */
 @Injectable()
-export class HomebrewItemsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly contentAccess: ContentAccessService
-  ) {}
+export class HomebrewItemsService extends ContentCrudService<Item, CreateItemDto, UpdateItemDto> {
+  protected readonly tier = 'homebrew' as const;
+  protected readonly noun = 'item';
 
-  async create(dto: CreateItemDto, actor: ContentActor): Promise<Item> {
-    this.contentAccess.assertCanCreate('homebrew', actor);
-
-    try {
-      return await this.prisma.item.create({
-        data: {
-          ...toItemColumnData(dto),
-          source: HOMEBREW_SOURCE_LABEL,
-          contentSource: 'homebrew',
-          createdById: actor.userId,
-        } as Prisma.ItemUncheckedCreateInput,
-      });
-    } catch (err) {
-      mapWriteError(err, 'homebrew', 'item');
-    }
+  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
+    super(prisma, contentAccess);
   }
 
-  async update(id: string, dto: UpdateItemDto, actor: ContentActor): Promise<Item> {
-    const row = await this.findWritableRow(id, actor);
-
-    try {
-      return await this.prisma.item.update({
-        where: { id },
-        data: toItemColumnData(dto) as Prisma.ItemUpdateInput,
-      });
-    } catch (err) {
-      mapWriteError(err, row.contentSource, 'item');
-    }
+  protected get delegate(): ContentWriteDelegate<Item> {
+    return this.prisma.item;
   }
 
-  async remove(id: string, actor: ContentActor): Promise<void> {
-    const row = await this.findWritableRow(id, actor);
-    try {
-      await this.prisma.item.delete({ where: { id } });
-    } catch (err) {
-      mapWriteError(err, row.contentSource, 'item');
-    }
-  }
-
-  /**
-   * Load the row and authorize the write. Rows the actor cannot even read
-   * (someone else's homebrew) 404 rather than 403 so their existence does not
-   * leak; visible-but-immutable rows (SRD, shared for non-admins) 403.
-   */
-  private async findWritableRow(id: string, actor: ContentActor): Promise<Item> {
-    const row = await this.prisma.item.findUnique({ where: { id } });
-    if (!row || !this.contentAccess.canRead(row, actor.userId)) {
-      throw new NotFoundException('Item not found');
-    }
-    this.contentAccess.assertWritable(row, actor);
-    return row;
+  protected toColumnData(dto: CreateItemDto | UpdateItemDto): ColumnData {
+    return toItemColumnData(dto);
   }
 }
