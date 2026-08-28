@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { HomebrewBackgroundsService } from './homebrew-backgrounds.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -116,6 +116,22 @@ describe('HomebrewBackgroundsService', () => {
       createdById: 'owner-1',
       originFeatId: null,
     };
+
+    it('authorizes before validating, so a stranger gets 404 rather than a validation 400', async () => {
+      prisma.background.findUnique.mockResolvedValue(homebrewRow);
+
+      // toColumnData rejects a null name with 400, so this payload would fail
+      // validation if it were ever mapped. It must not be: the row belongs to
+      // someone else, and running validation first would answer a stranger with
+      // a 400 that confirms their payload was processed, where an unreadable row
+      // must be indistinguishable from a nonexistent one. Ordering in
+      // ContentCrudService.update (load-and-authorize, then map columns) is what
+      // guarantees this, and nothing else in the suite pins it.
+      await expect(
+        service.update('bg1', { name: null } as never, { userId: 'stranger-1', isAdmin: false })
+      ).rejects.toThrow(NotFoundException);
+      expect(prisma.background.update).not.toHaveBeenCalled();
+    });
 
     it('re-validates origin-feat visibility on update', async () => {
       prisma.background.findUnique.mockResolvedValue(homebrewRow);
