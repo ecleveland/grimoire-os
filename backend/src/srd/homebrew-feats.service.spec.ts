@@ -75,6 +75,33 @@ describe('HomebrewFeatsService', () => {
   });
 
   describe('remove', () => {
+    it('does both writes on the transaction client, not the base connection', async () => {
+      // The shared mock hands the callback the same object as `tx`, so
+      // assertions on `prisma.background.updateMany` pass whether or not the
+      // write happened inside the transaction: moving it out is invisible.
+      // Substituting a distinct client is what makes the atomicity real. The
+      // VEG-431 point is that a failed delete must not leave the referencing
+      // backgrounds half-updated, which only holds if both writes share one
+      // transaction.
+      const tx = {
+        background: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+        feat: { delete: jest.fn().mockResolvedValue({ id: 'f1' }) },
+      };
+      prisma.feat.findUnique.mockResolvedValue(homebrewRow);
+      prisma.$transaction.mockImplementation((fn: (client: unknown) => unknown) => fn(tx));
+
+      await service.remove('f1', OWNER);
+
+      expect(tx.background.updateMany).toHaveBeenCalledWith({
+        where: { originFeatId: 'f1' },
+        data: { originFeatOption: null },
+      });
+      expect(tx.feat.delete).toHaveBeenCalledWith({ where: { id: 'f1' } });
+      // Nothing may reach the base connection: that would be outside the transaction.
+      expect(prisma.background.updateMany).not.toHaveBeenCalled();
+      expect(prisma.feat.delete).not.toHaveBeenCalled();
+    });
+
     it('clears originFeatOption on backgrounds that used the feat — SET NULL only nulls the id (VEG-431)', async () => {
       prisma.feat.findUnique.mockResolvedValue(homebrewRow);
       prisma.feat.delete.mockResolvedValue(homebrewRow);
@@ -87,8 +114,6 @@ describe('HomebrewFeatsService', () => {
         data: { originFeatOption: null },
       });
       expect(prisma.feat.delete).toHaveBeenCalledWith({ where: { id: 'f1' } });
-      // The option clear and the delete ride one transaction so a failed
-      // delete can't leave the referencing backgrounds half-updated.
       expect(prisma.$transaction).toHaveBeenCalled();
     });
   });

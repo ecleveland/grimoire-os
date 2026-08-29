@@ -63,7 +63,22 @@ const RESERVED_SET: Record<keyof ReservedColumns, true> = {
   id: true,
 };
 
-const RESERVED_COLUMNS = Object.keys(RESERVED_SET) as (keyof ReservedColumns)[];
+/**
+ * Prisma relation aliases that write a reserved column by another name.
+ *
+ * The scalar deny-list above is derived from the row type, but a checked write
+ * input also accepts the relation form: `createdBy: { connect: { id } }` sets
+ * `createdById` without the string 'createdById' ever appearing in the payload.
+ * `ColumnData` is `Record<string, unknown>`, so nothing else would stop it.
+ *
+ * Over HTTP the DTO layer rejects it first (`forbidNonWhitelisted`), but this
+ * strip is documented as the defense, and a seed, import or other internal
+ * caller is not behind that pipe. Only `createdById` has an alias on the tiered
+ * models; `campaignId` has no relation field on them.
+ */
+const RESERVED_RELATIONS = ['createdBy'] as const;
+
+const RESERVED_COLUMNS = [...Object.keys(RESERVED_SET), ...RESERVED_RELATIONS] as string[];
 
 /** The ownership fields a create forces onto every row, whatever the client sent. */
 interface OwnershipStamp {

@@ -215,6 +215,9 @@ describe.each(CASES)(
             source: 'Player’s Handbook',
             id: 'forced-id',
             campaignId: 'some-campaign',
+            // Prisma's relation form writes createdById without that string
+            // ever appearing in the payload.
+            createdBy: { connect: { id: 'evil' } },
           } as never,
           creator
         );
@@ -228,6 +231,7 @@ describe.each(CASES)(
         // yet, which is exactly why it needs pinning now: an unasserted entry in
         // the reserved list is one a typo could drop unnoticed.
         expect(data).not.toHaveProperty('campaignId');
+        expect(data).not.toHaveProperty('createdBy');
       });
 
       it(`maps a duplicate-name P2002 to 409 with ${tier}-tier copy`, async () => {
@@ -239,6 +243,19 @@ describe.each(CASES)(
             : `You already have ${/^[aeiou]/i.test(noun) ? 'an' : 'a'} ${noun} with this name`;
 
         await expect(service.create(makeCreateDto() as never, creator)).rejects.toThrow(expected);
+      });
+
+      it('leaves the caller\u2019s DTO untouched', async () => {
+        delegate.create.mockResolvedValue({ id: 'row-1' });
+        const dto = { ...makeCreateDto(), contentSource: 'srd', id: 'forced-id' };
+        const before = JSON.parse(JSON.stringify(dto)) as Record<string, unknown>;
+
+        await service.create(dto as never, creator);
+
+        // The mappings changed from a rest-destructure, which could not touch
+        // the input, to spread-then-delete, which can. The controller still
+        // holds this object after the call returns.
+        expect(dto).toEqual(before);
       });
 
       it('rethrows unknown write errors untouched', async () => {
@@ -330,6 +347,7 @@ describe.each(CASES)(
             source: 'Forged',
             campaignId: 'some-campaign',
             id: 'forced-id',
+            createdBy: { connect: { id: 'evil' } },
           } as never,
           editor
         );
@@ -340,6 +358,7 @@ describe.each(CASES)(
         expect(data).not.toHaveProperty('source');
         expect(data).not.toHaveProperty('campaignId');
         expect(data).not.toHaveProperty('id');
+        expect(data).not.toHaveProperty('createdBy');
       });
 
       it('maps a concurrent-delete P2025 to NotFound rather than a 500', async () => {
@@ -406,6 +425,18 @@ describe.each(CASES)(
         delegate.delete.mockRejectedValue(p2025());
 
         await expect(service.remove('row-1', editor)).rejects.toThrow(NotFoundException);
+      });
+
+      it('keys remove\u2019s conflict copy to the loaded row\u2019s tier, not the service default', async () => {
+        // The same invariant update pins. Without this, changing remove's
+        // mapWriteError to `this.tier` breaks nothing: an admin deleting a
+        // shared row through a homebrew-tier service would get homebrew copy.
+        delegate.findUnique.mockResolvedValue(sharedRow());
+        delegate.delete.mockRejectedValue(p2002());
+
+        await expect(service.remove('row-1', ADMIN)).rejects.toThrow(
+          `A shared ${noun} with this name already exists`
+        );
       });
     });
   }
