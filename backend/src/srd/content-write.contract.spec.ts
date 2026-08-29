@@ -478,15 +478,18 @@ describe('contract enrollment', () => {
     expect(missing.map(s => s.name)).toEqual([]);
   });
 
-  it.each(MODULES)('every ContentCrudService subclass registered in %s is enrolled', (_name, module) => {
-    const enrolled = new Set(CASES.map(c => c.Service));
-    const unenrolled = providerClassesOf(module)
-      .filter(extendsContentCrud)
-      .filter(provider => !enrolled.has(provider as Type<unknown>))
-      .map(provider => (provider as Type<unknown>).name);
+  it.each(MODULES)(
+    'every ContentCrudService subclass registered in %s is enrolled',
+    (_name, module) => {
+      const enrolled = new Set(CASES.map(c => c.Service));
+      const unenrolled = providerClassesOf(module)
+        .filter(extendsContentCrud)
+        .filter(provider => !enrolled.has(provider as Type<unknown>))
+        .map(provider => (provider as Type<unknown>).name);
 
-    expect(unenrolled).toEqual([]);
-  });
+      expect(unenrolled).toEqual([]);
+    }
+  );
 
   it('detects subclasses by prototype chain, not by name', () => {
     class RenamedEntirely extends ContentCrudService<never, never, never> {
@@ -585,6 +588,8 @@ describe('skeleton integrity', () => {
 
     // A field rather than a method: same name, shadows the prototype entirely.
     class FieldShadow extends Intermediate {
+      // The probe mirrors the real async signature; awaiting anything would defeat it.
+      // eslint-disable-next-line @typescript-eslint/require-await
       update = async (): Promise<never> => {
         throw new Error('bypassed');
       };
