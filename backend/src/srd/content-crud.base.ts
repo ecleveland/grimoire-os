@@ -6,6 +6,7 @@ import {
   HOMEBREW_SOURCE_LABEL,
   SHARED_SOURCE_LABEL,
   mapWriteError,
+  notFoundMessage,
 } from './homebrew-write.helpers';
 
 /** Normalized Prisma column data, post-`toColumnData` and pre-ownership stamp. */
@@ -36,10 +37,6 @@ export interface ContentWriteDelegate<Row> {
   create(args: { data: ColumnData }): Promise<Row>;
   update(args: { where: { id: string }; data: ColumnData }): Promise<Row>;
   delete(args: { where: { id: string } }): Promise<Row>;
-}
-
-function capitalize(noun: string): string {
-  return `${noun.charAt(0).toUpperCase()}${noun.slice(1)}`;
 }
 
 /**
@@ -84,8 +81,9 @@ const SOURCE_LABEL_BY_TIER: Record<WritableTier, string> = {
 /**
  * Drop the reserved columns from a write payload, in place.
  *
- * On create this is belt-and-braces, because the ownership stamp overwrites
- * them anyway. On update it is the entire defense: an update applies no stamp,
+ * The ownership stamp forces only `source`, `contentSource` and `createdById`,
+ * so even on create this is the sole defense for `id` and `campaignId`. On
+ * update it is the sole defense for all five: an update applies no stamp,
  * so without this strip a payload carrying `contentSource: 'srd'` would
  * escalate a homebrew row out of its owner's tier and into the immutable
  * catalog. Every entity's column mapping used to re-implement this by hand,
@@ -165,7 +163,7 @@ export abstract class ContentCrudService<
 
   async create(dto: CreateDto, actor: ContentActor): Promise<Row> {
     this.contentAccess.assertCanCreate(this.tier, actor);
-    const data = this.toColumnData(dto);
+    const data = stripReservedColumns(this.toColumnData(dto));
     await this.beforeCreate(data, actor);
     stripReservedColumns(data);
 
@@ -187,7 +185,10 @@ export abstract class ContentCrudService<
 
   async update(id: string, dto: UpdateDto, actor: ContentActor): Promise<Row> {
     const row = await this.findWritableRow(id, actor);
-    const data = this.toColumnData(dto);
+    // Stripped before the hook as well as after: a hook must never read a
+    // reserved column off the request body and mistake it for row state (the
+    // loaded `row` is where that belongs), and must never be able to inject one.
+    const data = stripReservedColumns(this.toColumnData(dto));
     await this.beforeUpdate(data, row, actor);
     // No stamp on this path, so the strip is the only thing standing between a
     // crafted payload and a tier escalation.
@@ -214,13 +215,13 @@ export abstract class ContentCrudService<
    * else's homebrew) 404 rather than 403 so their existence does not leak;
    * visible-but-immutable rows (SRD, shared for non-admins) 403.
    *
-   * Protected rather than private because a subclass with extra write surface
-   * authorizes through it too (see `AdminItemsService.setBundleContents`).
+   * Protected rather than private because a subclass that adds its own write
+   * methods authorizes through it too (see `AdminItemsService.setBundleContents`).
    */
   protected async findWritableRow(id: string, actor: ContentActor): Promise<Row> {
     const row = await this.delegate.findUnique({ where: { id } });
     if (!row || !this.contentAccess.canRead(row, actor.userId)) {
-      throw new NotFoundException(`${capitalize(this.noun)} not found`);
+      throw new NotFoundException(notFoundMessage(this.noun));
     }
     this.contentAccess.assertWritable(row, actor);
     return row;

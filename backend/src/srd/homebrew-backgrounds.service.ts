@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Background } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ContentAccessService, ContentActor } from './content-access.service';
+import { ContentActor } from './content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateBackgroundDto } from './dto/create-background.dto';
 import { UpdateBackgroundDto } from './dto/update-background.dto';
@@ -29,10 +28,6 @@ export class HomebrewBackgroundsService extends ContentCrudService<
 > {
   protected readonly tier = 'homebrew' as const;
   protected readonly noun = 'background';
-
-  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
-    super(prisma, contentAccess);
-  }
 
   protected get delegate(): ContentWriteDelegate<Background> {
     return this.prisma.background;

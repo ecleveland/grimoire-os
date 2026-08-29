@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Feat, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ContentAccessService } from './content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateFeatDto } from './dto/create-feat.dto';
 import { UpdateFeatDto } from './dto/update-feat.dto';
@@ -15,10 +13,6 @@ import { UpdateFeatDto } from './dto/update-feat.dto';
 export class HomebrewFeatsService extends ContentCrudService<Feat, CreateFeatDto, UpdateFeatDto> {
   protected readonly tier = 'homebrew' as const;
   protected readonly noun = 'feat';
-
-  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
-    super(prisma, contentAccess);
-  }
 
   protected get delegate(): ContentWriteDelegate<Feat> {
     return this.prisma.feat;

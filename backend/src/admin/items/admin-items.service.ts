@@ -1,7 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Item, Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
-import { ContentAccessService, ContentActor } from '../../srd/content-access.service';
+import { ContentActor } from '../../srd/content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from '../../srd/content-crud.base';
 import { mapWriteError, toItemColumnData } from '../../srd/homebrew-write.helpers';
 import { CreateItemDto } from '../../srd/dto/create-item.dto';
@@ -36,10 +35,6 @@ export interface ListItemsQuery {
 export class AdminItemsService extends ContentCrudService<Item, CreateItemDto, UpdateItemDto> {
   protected readonly tier = 'shared' as const;
   protected readonly noun = 'item';
-
-  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
-    super(prisma, contentAccess);
-  }
 
   protected get delegate(): ContentWriteDelegate<Item> {
     return this.prisma.item;
@@ -83,6 +78,15 @@ export class AdminItemsService extends ContentCrudService<Item, CreateItemDto, U
    */
   async setBundleContents(id: string, entries: BundleContentEntryDto[], actor: ContentActor) {
     const bundle = await this.findWritableRow(id, actor);
+    // findWritableRow authorizes the write but says nothing about the tier, and
+    // `category` is a free-form string: an admin can create their own homebrew
+    // item called an Equipment Pack and own it, which passes the guard. Bundle
+    // contents only make sense on a globally visible row, since every viewer of
+    // the pack has to resolve its components, so pin the tier explicitly rather
+    // than inferring it from who was allowed to write.
+    if (bundle.contentSource !== 'shared') {
+      throw new BadRequestException('Only shared-tier equipment packs can have contents');
+    }
     if (bundle.category !== 'Equipment Pack') {
       throw new BadRequestException('Only equipment packs can have contents');
     }
@@ -130,7 +134,9 @@ export class AdminItemsService extends ContentCrudService<Item, CreateItemDto, U
           'One or more components were removed while saving; refresh and try again'
         );
       }
-      mapWriteError(err, 'shared', 'item');
+      // Tier from the loaded row, never a literal: the same rule the write
+      // skeleton follows, so this path cannot drift from it.
+      mapWriteError(err, bundle.contentSource, 'item');
     }
 
     return {

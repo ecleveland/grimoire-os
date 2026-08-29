@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Monster, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ContentAccessService } from './content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateMonsterDto } from './dto/create-monster.dto';
 import { UpdateMonsterDto } from './dto/update-monster.dto';
@@ -30,10 +28,6 @@ export class HomebrewMonstersService extends ContentCrudService<
 > {
   protected readonly tier = 'homebrew' as const;
   protected readonly noun = 'monster';
-
-  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
-    super(prisma, contentAccess);
-  }
 
   protected get delegate(): ContentWriteDelegate<Monster> {
     return this.prisma.monster;

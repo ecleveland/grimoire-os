@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Item } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ContentAccessService } from './content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { toItemColumnData } from './homebrew-write.helpers';
 import { CreateItemDto } from './dto/create-item.dto';
@@ -17,10 +15,6 @@ import { UpdateItemDto } from './dto/update-item.dto';
 export class HomebrewItemsService extends ContentCrudService<Item, CreateItemDto, UpdateItemDto> {
   protected readonly tier = 'homebrew' as const;
   protected readonly noun = 'item';
-
-  constructor(prisma: PrismaService, contentAccess: ContentAccessService) {
-    super(prisma, contentAccess);
-  }
 
   protected get delegate(): ContentWriteDelegate<Item> {
     return this.prisma.item;
