@@ -61,6 +61,39 @@ describe('AdminItemsService', () => {
     });
   });
 
+  describe('column normalization', () => {
+    // Shared-tier normalization had no coverage of its own: the equivalent
+    // homebrew tests drive HomebrewItemsService, so swapping this service's
+    // mapping for a plain spread left the entire suite green (VEG-336 review).
+    const sharedRow = { id: 'i1', contentSource: 'shared', createdById: 'admin-9' };
+
+    beforeEach(() => {
+      prisma.item.findUnique.mockResolvedValue(sharedRow);
+      prisma.item.update.mockResolvedValue(sharedRow);
+    });
+
+    it('coerces the null boolean flags to false on a shared-tier write', async () => {
+      await service.update(
+        'i1',
+        { stealthDisadvantage: null, requiresAttunement: null, isMagic: null } as never,
+        ADMIN
+      );
+
+      const data = prisma.item.update.mock.calls[0][0].data;
+      expect(data.stealthDisadvantage).toBe(false);
+      expect(data.requiresAttunement).toBe(false);
+      expect(data.isMagic).toBe(false);
+    });
+
+    it('normalizes null properties and blank rarity on a shared-tier write', async () => {
+      await service.update('i1', { properties: null, rarity: '  ' } as never, ADMIN);
+
+      const data = prisma.item.update.mock.calls[0][0].data;
+      expect(data.properties).toEqual([]);
+      expect(data.rarity).toBeNull();
+    });
+  });
+
   describe('setBundleContents', () => {
     const pack = {
       id: 'pack-1',
@@ -176,6 +209,24 @@ describe('AdminItemsService', () => {
       await expect(
         service.setBundleContents('pack-1', [{ itemId: 'c1', quantity: 1 }], PLAYER)
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects a homebrew pack: bundle contents need a globally visible row', async () => {
+      // `category` is free-form, so an admin can own a homebrew item calling
+      // itself an Equipment Pack, and findWritableRow authorizes them as its
+      // owner. Only the explicit tier check stops contents landing on a row
+      // `list` never returns and other viewers cannot resolve.
+      prisma.item.findUnique.mockResolvedValue({
+        id: 'hb1',
+        category: 'Equipment Pack',
+        contentSource: 'homebrew',
+        createdById: ADMIN.userId,
+      });
+
+      await expect(service.setBundleContents('hb1', [], ADMIN)).rejects.toThrow(
+        'Only shared-tier equipment packs can have contents'
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
     it('rejects setting contents on a non-pack item', async () => {

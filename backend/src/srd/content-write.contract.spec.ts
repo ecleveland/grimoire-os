@@ -42,7 +42,7 @@ const OWNER: ContentActor = { userId: 'owner-1', isAdmin: false };
 const STRANGER: ContentActor = { userId: 'stranger-1', isAdmin: false };
 const ADMIN: ContentActor = { userId: 'admin-1', isAdmin: true };
 
-/** Structural view of the write surface every tiered service exposes. */
+/** Structural view of the write methods every tiered service exposes. */
 interface TieredWriteService {
   create(dto: never, actor: ContentActor): Promise<unknown>;
   update(id: string, dto: never, actor: ContentActor): Promise<unknown>;
@@ -434,16 +434,53 @@ describe('contract enrollment', () => {
     return false;
   }
 
-  function providersOf(module: unknown): unknown[] {
-    return (Reflect.getMetadata(MODULE_METADATA.PROVIDERS, module as object) ?? []) as unknown[];
+  /**
+   * Provider classes registered on a module.
+   *
+   * Nest providers come in several shapes; a bare class and `{ provide, useClass }`
+   * both register a class, and only reading the bare form would make a service
+   * invisible to this guard by the trivial act of registering it with a token.
+   */
+  function providerClassesOf(module: unknown): unknown[] {
+    const raw = (Reflect.getMetadata(MODULE_METADATA.PROVIDERS, module as object) ??
+      []) as unknown[];
+    return raw.map(entry => {
+      if (typeof entry === 'function') return entry;
+      const useClass = (entry as { useClass?: unknown } | null)?.useClass;
+      return typeof useClass === 'function' ? useClass : entry;
+    });
   }
 
-  it.each([
+  const MODULES: [string, unknown][] = [
     ['SrdModule', SrdModule],
     ['AdminModule', AdminModule],
-  ])('every ContentCrudService subclass registered in %s is in the case table', (_name, module) => {
+  ];
+
+  /**
+   * Fail-closed control.
+   *
+   * `expect(unenrolled).toEqual([])` passes just as happily when the metadata
+   * lookup finds nothing at all, so on its own the guard below cannot tell
+   * "every service is enrolled" from "I read the wrong key and saw zero
+   * providers". This pins that the reflection actually works, which is the
+   * assumption the rest of this block rests on.
+   */
+  it.each(MODULES)('reads real providers off %s', (_name, module) => {
+    const providers = providerClassesOf(module);
+    expect(providers.length).toBeGreaterThan(0);
+    expect(providers.filter(extendsContentCrud).length).toBeGreaterThan(0);
+  });
+
+  it('finds every service the case table claims to cover', () => {
+    const discovered = new Set(MODULES.flatMap(([, m]) => providerClassesOf(m)));
+    const missing = CASES.map(c => c.Service).filter(service => !discovered.has(service));
+
+    expect(missing.map(s => s.name)).toEqual([]);
+  });
+
+  it.each(MODULES)('every ContentCrudService subclass registered in %s is enrolled', (_name, module) => {
     const enrolled = new Set(CASES.map(c => c.Service));
-    const unenrolled = providersOf(module)
+    const unenrolled = providerClassesOf(module)
       .filter(extendsContentCrud)
       .filter(provider => !enrolled.has(provider as Type<unknown>))
       .map(provider => (provider as Type<unknown>).name);
@@ -465,5 +502,96 @@ describe('contract enrollment', () => {
 
     expect(extendsContentCrud(RenamedEntirely)).toBe(true);
     expect(extendsContentCrud(ContentAccessService)).toBe(false);
+  });
+
+  it('resolves a useClass provider to its class', () => {
+    expect(providerClassesOf({ __probe: true })).toEqual([]);
+    const asToken = [{ provide: 'TOKEN', useClass: HomebrewFeatsService }];
+    const resolved = asToken.map(e => (typeof e.useClass === 'function' ? e.useClass : e));
+    expect(resolved.filter(extendsContentCrud)).toEqual([HomebrewFeatsService]);
+  });
+});
+
+/**
+ * The skeleton is not overridable, enforced where an ESLint selector cannot reach.
+ *
+ * The lint rule matches method definitions on classes whose immediate superclass
+ * is named ContentCrudService. That misses two real shapes: a class FIELD
+ * (`update = async () => {}`) shadows the prototype method entirely, and a
+ * grandchild (or an intermediate abstract base, which VEG-506/509 may well add)
+ * is not a direct subclass at all. Both bypass authorization with lint green.
+ *
+ * Walking the prototype chain catches every depth, and checking the constructed
+ * instance catches fields, so this holds whatever the selector misses. It also
+ * means the lint rule is fast feedback rather than the load-bearing guard, which
+ * matters because flat config merges `no-restricted-syntax` by name: a later
+ * config object declaring its own would silently drop ours.
+ */
+describe('skeleton integrity', () => {
+  const SKELETON_MEMBERS = ['create', 'update', 'remove', 'findWritableRow'] as const;
+
+  /** Skeleton members redefined anywhere between `cls` and ContentCrudService. */
+  function shadowedOnPrototypeChain(cls: Type<unknown>): string[] {
+    const found: string[] = [];
+    let proto: object | null = cls.prototype as object;
+    while (proto && proto !== ContentCrudService.prototype) {
+      for (const member of SKELETON_MEMBERS) {
+        if (Object.prototype.hasOwnProperty.call(proto, member)) found.push(member);
+      }
+      proto = Object.getPrototypeOf(proto) as object | null;
+    }
+    return found;
+  }
+
+  it.each(CASES.map(c => [c.title, c.Service] as const))(
+    '%s does not redefine a skeleton method',
+    (_title, Service) => {
+      expect(shadowedOnPrototypeChain(Service)).toEqual([]);
+    }
+  );
+
+  it.each(CASES.map(c => [c.title, c.Service] as const))(
+    '%s does not shadow a skeleton method with an instance field',
+    async (_title, Service) => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [Service, ContentAccessService, prismaMockProvider()],
+      }).compile();
+      const instance = module.get<object>(Service as Type<object>);
+
+      const shadowed = SKELETON_MEMBERS.filter(member =>
+        Object.prototype.hasOwnProperty.call(instance, member)
+      );
+      expect(shadowed).toEqual([]);
+    }
+  );
+
+  it('catches both bypass shapes the lint selector misses', () => {
+    class Intermediate extends ContentCrudService<never, never, never> {
+      protected readonly tier = 'homebrew' as const;
+      protected readonly noun = 'thing';
+      protected get delegate(): never {
+        throw new Error('unused');
+      }
+      protected toColumnData(): never {
+        throw new Error('unused');
+      }
+    }
+    // A grandchild: its immediate superclass is not ContentCrudService, so the
+    // lint selector never looks at it.
+    class Grandchild extends Intermediate {
+      async remove(): Promise<void> {}
+    }
+    expect(shadowedOnPrototypeChain(Grandchild)).toContain('remove');
+
+    // A field rather than a method: same name, shadows the prototype entirely.
+    class FieldShadow extends Intermediate {
+      update = async (): Promise<never> => {
+        throw new Error('bypassed');
+      };
+    }
+    const shadowed = SKELETON_MEMBERS.filter(m =>
+      Object.prototype.hasOwnProperty.call(new FieldShadow(null as never, null as never), m)
+    );
+    expect(shadowed).toContain('update');
   });
 });
