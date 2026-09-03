@@ -30,8 +30,9 @@ export function toActor(user: JwtUser): ContentActor {
 /**
  * Map an item DTO onto Prisma column data, shared by the homebrew (VEG-296) and
  * admin shared-tier (VEG-309) item writers so the same `Item` entity normalizes
- * identically in both. Drops ownership/tier/source fields a client must never
- * set, even if a raw payload sneaks past DTO validation. `stealthDisadvantage`,
+ * identically in both. Normalization ONLY: the reserved ownership and tier
+ * columns are stripped by {@link ContentCrudService}, not here, so do not call
+ * this on a raw payload outside that skeleton. `stealthDisadvantage`,
  * `requiresAttunement`, and `isMagic` are non-nullable columns, so a null clear
  * (the client's way of resetting an optional field, VEG-316) becomes their false
  * default; `properties` likewise resets to its empty-array default. A blank
@@ -39,20 +40,29 @@ export function toActor(user: JwtUser): ContentActor {
  * to null) normalizes to null so the rarity filter cannot mis-bucket it.
  */
 export function toItemColumnData(dto: object): Record<string, unknown> {
-  const {
-    contentSource: _contentSource,
-    createdById: _createdById,
-    campaignId: _campaignId,
-    source: _source,
-    id: _id,
-    ...data
-  } = dto as Record<string, unknown>;
+  // Copy so the caller's DTO is never mutated. Reserved ownership/tier columns
+  // are stripped by ContentCrudService, not here.
+  const data: Record<string, unknown> = { ...dto };
   for (const flag of ['stealthDisadvantage', 'requiresAttunement', 'isMagic'] as const) {
     if (flag in data && data[flag] === null) data[flag] = false;
   }
   if ('properties' in data && data.properties === null) data.properties = [];
   if (typeof data.rarity === 'string' && !data.rarity.trim()) data.rarity = null;
   return data;
+}
+
+/**
+ * The body of a not-found response for a tiered entity.
+ *
+ * Two call sites produce this string: the write skeleton's load-and-authorize
+ * guard, and the P2025 branch below when a row vanishes between authorize and
+ * write. They must stay byte-identical, because the whole point of answering
+ * 404 for an unreadable row is that it is indistinguishable from a row that
+ * never existed. Two hand-rolled capitalizations would be an existence oracle
+ * the moment one of them changed.
+ */
+export function notFoundMessage(noun: string): string {
+  return `${noun.charAt(0).toUpperCase()}${noun.slice(1)} not found`;
 }
 
 function isPrismaError(err: unknown, code: string): boolean {
@@ -79,7 +89,7 @@ export function mapWriteError(err: unknown, contentSource: ContentSource, noun: 
     );
   }
   if (isPrismaError(err, 'P2025')) {
-    throw new NotFoundException(`${noun.charAt(0).toUpperCase()}${noun.slice(1)} not found`);
+    throw new NotFoundException(notFoundMessage(noun));
   }
   throw err;
 }

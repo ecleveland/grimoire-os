@@ -37,6 +37,22 @@ export default tseslint.config(
         'warn',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      // TypeScript has no `final`, and ContentCrudService's create/update/remove
+      // ARE the tiered-content authorization sequence (VEG-336): assert the tier,
+      // load-and-guard before any mutation, force the ownership stamp, map write
+      // errors to the loaded row's tier. A subclass that overrides one of them
+      // silently leaves that audited path, which is the drift this base exists to
+      // prevent. Entity-specific behavior belongs in the beforeCreate,
+      // beforeUpdate and performDelete hooks, which run inside the sequence.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "ClassDeclaration[superClass.name='ContentCrudService'] > ClassBody > MethodDefinition[key.name=/^(create|update|remove|findWritableRow)$/]",
+          message:
+            'Do not override the ContentCrudService authorization skeleton (create/update/remove/findWritableRow). Override beforeCreate, beforeUpdate or performDelete instead.',
+        },
+      ],
     },
   },
   {

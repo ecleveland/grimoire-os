@@ -1,8 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { Monster, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
-import { ContentAccessService, ContentActor } from './content-access.service';
-import { HOMEBREW_SOURCE_LABEL, mapWriteError } from './homebrew-write.helpers';
+import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateMonsterDto } from './dto/create-monster.dto';
 import { UpdateMonsterDto } from './dto/update-monster.dto';
 
@@ -18,89 +16,41 @@ const JSON_COLUMNS = [
 
 /**
  * CRUD for user-authored (homebrew) monsters — the first per-type consumer of
- * the generalized content model (VEG-292/VEG-293). Authorization is delegated
- * to {@link ContentAccessService}: any authenticated user may create homebrew
- * for themselves; rows are writable per their tier (owner for homebrew, admins
- * for shared, never for SRD).
+ * the generalized content model (VEG-292/VEG-293). The authorization skeleton
+ * lives in {@link ContentCrudService}; this class supplies the Json-column
+ * normalization and the non-null `actions` guarantee the read side depends on.
  */
 @Injectable()
-export class HomebrewMonstersService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly contentAccess: ContentAccessService
-  ) {}
+export class HomebrewMonstersService extends ContentCrudService<
+  Monster,
+  CreateMonsterDto,
+  UpdateMonsterDto
+> {
+  protected readonly tier = 'homebrew' as const;
+  protected readonly noun = 'monster';
 
-  async create(dto: CreateMonsterDto, actor: ContentActor): Promise<Monster> {
-    this.contentAccess.assertCanCreate('homebrew', actor);
-
-    try {
-      return await this.prisma.monster.create({
-        data: {
-          ...this.toColumnData(dto),
-          // The frontend monster type requires `actions`; never persist null.
-          actions: (dto.actions ?? []) as unknown as Prisma.InputJsonValue,
-          source: HOMEBREW_SOURCE_LABEL,
-          contentSource: 'homebrew',
-          createdById: actor.userId,
-        } as Prisma.MonsterUncheckedCreateInput,
-      });
-    } catch (err) {
-      mapWriteError(err, 'homebrew', 'monster');
-    }
-  }
-
-  async update(id: string, dto: UpdateMonsterDto, actor: ContentActor): Promise<Monster> {
-    const row = await this.findWritableRow(id, actor);
-
-    try {
-      return await this.prisma.monster.update({
-        where: { id },
-        data: this.toColumnData(dto) as Prisma.MonsterUpdateInput,
-      });
-    } catch (err) {
-      mapWriteError(err, row.contentSource, 'monster');
-    }
-  }
-
-  async remove(id: string, actor: ContentActor): Promise<void> {
-    const row = await this.findWritableRow(id, actor);
-    try {
-      await this.prisma.monster.delete({ where: { id } });
-    } catch (err) {
-      mapWriteError(err, row.contentSource, 'monster');
-    }
+  protected get delegate(): ContentWriteDelegate<Monster> {
+    return this.prisma.monster;
   }
 
   /**
-   * Load the row and authorize the write. Rows the actor cannot even read
-   * (someone else's homebrew) 404 rather than 403 so their existence does not
-   * leak; visible-but-immutable rows (SRD, shared for non-admins) 403.
+   * The frontend monster type requires `actions`, so a create must never persist
+   * null or leave it unset. `toColumnData` has already turned an explicit null
+   * into `[]`, which leaves "omitted entirely" as the only case to cover here.
    */
-  private async findWritableRow(id: string, actor: ContentActor): Promise<Monster> {
-    const row = await this.prisma.monster.findUnique({ where: { id } });
-    if (!row || !this.contentAccess.canRead(row, actor.userId)) {
-      throw new NotFoundException('Monster not found');
-    }
-    this.contentAccess.assertWritable(row, actor);
-    return row;
+  protected override beforeCreate(data: ColumnData): void {
+    data.actions ??= [];
   }
 
   /**
-   * Map a DTO onto Prisma column data, dropping anything that is not a plain
-   * monster column — ownership/tier/source fields can never be set by clients,
-   * even if a raw payload sneaks past DTO validation. Json columns sent as
+   * Normalize a DTO into Prisma column data. Json columns sent as
    * `null` (the client's way of clearing an optional field, VEG-316) become
    * `Prisma.DbNull`: Prisma rejects plain JS null on Json fields.
    */
-  private toColumnData(dto: CreateMonsterDto | UpdateMonsterDto): Record<string, unknown> {
-    const {
-      contentSource: _contentSource,
-      createdById: _createdById,
-      campaignId: _campaignId,
-      source: _source,
-      id: _id,
-      ...data
-    } = dto as Record<string, unknown>;
+  protected toColumnData(dto: CreateMonsterDto | UpdateMonsterDto): ColumnData {
+    // Copy so the caller's DTO is never mutated. Reserved ownership/tier
+    // columns are stripped by the base, not here.
+    const data: ColumnData = { ...dto };
     for (const key of JSON_COLUMNS) {
       if (key in data && data[key] === null) data[key] = Prisma.DbNull;
     }
