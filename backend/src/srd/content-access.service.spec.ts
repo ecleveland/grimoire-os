@@ -90,9 +90,12 @@ describe('ContentAccessService', () => {
     });
 
     it('denies a content source it does not recognize', () => {
-      // `createdById` matches `user`, and `admin` is an admin, so both the homebrew
-      // and the shared branch would authorize this row. Only the default can deny it,
-      // which is what pins these assertions to the new branch.
+      // Delete the `default` and this test fails at the first assertion: the
+      // switch falls out, nothing throws, and that silent pass is the bug being
+      // fixed. A misroute is caught too, because the two writable rival branches
+      // split this pair. `homebrew` would pass `user` (the row is theirs) and
+      // `shared` would pass `admin`, so either flips one assertion below. `srd`
+      // denies both, and the message assertion is what catches that one.
       const row = { contentSource: UNKNOWN_SOURCE, createdById: 'user-1' };
       expect(() => service.assertWritable(row, user)).toThrow(ForbiddenException);
       expect(() => service.assertWritable(row, admin)).toThrow(ForbiddenException);
