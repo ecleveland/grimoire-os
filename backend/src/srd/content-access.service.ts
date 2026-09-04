@@ -24,6 +24,23 @@ function isGlobal(source: ContentSource): boolean {
 }
 
 /**
+ * Deny a content source the tier switches below do not handle.
+ *
+ * The parameter is `never`, so a `ContentSource` that no `case` has narrowed away
+ * fails to compile. That matters because `WritableTier` (`content-crud.base.ts`)
+ * is `Exclude<ContentSource, 'srd'>` and widens on its own when a member is added,
+ * so a new tier would otherwise reach these switches through the shared write
+ * skeleton with nobody opting in. Both switches authorize by returning, so
+ * falling out of one reads as a pass.
+ *
+ * Returns `never` rather than a message so the deny cannot be forgotten at a call
+ * site, and so TypeScript treats the `default` as terminating.
+ */
+function denyUnknownSource(value: never): never {
+  throw new ForbiddenException(`Unknown content source: ${String(value)}`);
+}
+
+/**
  * Query-layer and authorization helpers for reference content across all three
  * tiers — monsters, spells, feats, magic items (VEG-292, VEG-310). This is the
  * foundation the per-type CRUD tickets build on: they apply these where-fragments
@@ -85,6 +102,8 @@ export class ContentAccessService {
           throw new ForbiddenException('You can only modify your own homebrew content');
         }
         return;
+      default:
+        denyUnknownSource(row.contentSource);
     }
   }
 
@@ -107,6 +126,8 @@ export class ContentAccessService {
         return;
       case 'homebrew':
         return;
+      default:
+        denyUnknownSource(contentSource);
     }
   }
 }

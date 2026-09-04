@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import { ContentSource } from '@grimoire-os/shared';
 import { ContentAccessService } from './content-access.service';
 
 describe('ContentAccessService', () => {
@@ -11,6 +12,11 @@ describe('ContentAccessService', () => {
   const admin = { userId: 'admin-1', isAdmin: true };
   const user = { userId: 'user-1', isAdmin: false };
   const otherUser = { userId: 'user-2', isAdmin: false };
+
+  // Not a member of `ContentSource`. Cast past the type to stand in for a tier
+  // added later (the schema already reserves `campaignId`) that reaches these
+  // switches without a case of its own.
+  const UNKNOWN_SOURCE = 'campaign' as unknown as ContentSource;
 
   // ── Visibility where-builders ──────────────────────────
 
@@ -82,6 +88,19 @@ describe('ContentAccessService', () => {
       expect(() => service.assertWritable(row, otherUser)).toThrow(ForbiddenException);
       expect(() => service.assertWritable(row, admin)).toThrow(ForbiddenException);
     });
+
+    it('denies a content source it does not recognize', () => {
+      // Delete the `default` and this test fails at the first assertion: the
+      // switch falls out, nothing throws, and that silent pass is the bug being
+      // fixed. A misroute is caught too, because the two writable rival branches
+      // split this pair. `homebrew` would pass `user` (the row is theirs) and
+      // `shared` would pass `admin`, so either flips one assertion below. `srd`
+      // denies both, and the message assertion is what catches that one.
+      const row = { contentSource: UNKNOWN_SOURCE, createdById: 'user-1' };
+      expect(() => service.assertWritable(row, user)).toThrow(ForbiddenException);
+      expect(() => service.assertWritable(row, admin)).toThrow(ForbiddenException);
+      expect(() => service.assertWritable(row, user)).toThrow('Unknown content source: campaign');
+    });
   });
 
   // ── Create authorization ───────────────────────────────
@@ -100,6 +119,16 @@ describe('ContentAccessService', () => {
     it('allows any authenticated user to create homebrew', () => {
       expect(() => service.assertCanCreate('homebrew', user)).not.toThrow();
       expect(() => service.assertCanCreate('homebrew', admin)).not.toThrow();
+    });
+
+    it('denies a content source it does not recognize', () => {
+      // An admin may create either writable tier, so a fall-through would read as
+      // authorized for them. Only the default denies.
+      expect(() => service.assertCanCreate(UNKNOWN_SOURCE, admin)).toThrow(ForbiddenException);
+      expect(() => service.assertCanCreate(UNKNOWN_SOURCE, user)).toThrow(ForbiddenException);
+      expect(() => service.assertCanCreate(UNKNOWN_SOURCE, admin)).toThrow(
+        'Unknown content source: campaign'
+      );
     });
   });
 });
