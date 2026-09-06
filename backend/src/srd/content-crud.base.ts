@@ -101,7 +101,10 @@ const SOURCE_LABEL_BY_TIER: Record<WritableTier, string> = {
  * update it is the sole defense for all five: an update applies no stamp,
  * so without this strip a payload carrying `contentSource: 'srd'` would
  * escalate a homebrew row out of its owner's tier and into the immutable
- * catalog. Every entity's column mapping used to re-implement this by hand,
+ * catalog. That covers what the skeleton hands to
+ * {@link ContentCrudService.performUpdate}; an override composing its own
+ * payload is trusted to keep the reserved columns off it.
+ * Every entity's column mapping used to re-implement this by hand,
  * which made the tier defense a thing five separate authors had to remember.
  * Running it here means an entity mapping can only fail to normalize a column,
  * never fail to protect one.
@@ -274,14 +277,24 @@ export abstract class ContentCrudService<
 
   /**
    * How this entity's update reaches the database. Override when the update has
-   * to span child rows — replacing a class's per-level features, say — and do it
-   * in one transaction so a failure cannot leave the parent updated and the
-   * children half-rewritten. Without this seam the only way to get a transaction
-   * was to authorize via {@link findWritableRow} and then write outside the
-   * skeleton, which is how per-service error-mapping drift gets back in.
+   * to span child rows, replacing a class's per-level features say, and do it in
+   * one transaction so a failure cannot leave the parent updated and the children
+   * half-rewritten. Without this seam the only way to get a transaction was to
+   * authorize via {@link findWritableRow} and then write outside the skeleton,
+   * which is how per-service error-mapping drift gets back in.
    *
-   * Takes no tier or noun, so an override cannot hand-roll its own error copy;
-   * `update` maps the failure with the loaded row's tier.
+   * Takes no tier or noun, so an override cannot hand-roll the tier-keyed copy
+   * for its own P2002/P2025; `update` maps the failure with the loaded row's
+   * tier. An override that writes child rows should catch and translate their
+   * conflicts itself, since that mapping keys everything to the parent noun and
+   * a duplicate child would surface as a duplicate parent. Anything already an
+   * HttpException passes through `mapWriteError` untouched.
+   *
+   * Return the row the transaction wrote. `update` hands this value straight
+   * back to its caller, so it is what the response body carries, and an override
+   * already holds the pre-update `row` from {@link findWritableRow} in scope.
+   * Returning that one serves the client the state it just replaced. Both are
+   * `Row`, so no type catches the mix-up.
    */
   protected async performUpdate(id: string, data: ColumnData): Promise<Row> {
     return this.delegate.update({ where: { id }, data });
