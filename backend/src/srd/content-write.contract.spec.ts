@@ -8,7 +8,11 @@ import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-
 import { SrdModule } from './srd.module';
 import { AdminModule } from '../admin/admin.module';
 import { PrismaService } from '../prisma/prisma.service';
-import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
+import {
+  MockPrismaService,
+  createMockPrismaService,
+  prismaMockProvider,
+} from '../test/prisma-mock.factory';
 import { HomebrewMonstersService } from './homebrew-monsters.service';
 import { HomebrewSpellsService } from './homebrew-spells.service';
 import { HomebrewFeatsService } from './homebrew-feats.service';
@@ -70,6 +74,16 @@ interface ContractCase {
    * their no-op path (backgrounds reads `originFeatId` off the row).
    */
   rowExtras?: Record<string, unknown>;
+  /**
+   * NOTE for the first service that overrides `performUpdate` (VEG-507's class
+   * features are the expected one). The `update` cases below assert against
+   * `delegate.update`, which a transactional override may not call at all, so
+   * that service will fail here with no way to declare the exception. Add a
+   * `performsOwnUpdate?: boolean` and branch those assertions on it. Do not
+   * reach for the other fix and drop the service from CASES: an unenrolled
+   * service is exactly the drift `contract enrollment` below exists to catch,
+   * and it will fail that test instead.
+   */
 }
 
 const CASES: ContractCase[] = [
@@ -668,8 +682,12 @@ describe('update extension points', () => {
     protected readonly tier = 'homebrew' as const;
     protected readonly noun = 'probe';
 
-    constructor(private readonly mock: ProbeDelegate) {
-      super(null as never, new ContentAccessService());
+    // A real Prisma mock rather than null: the override this seam exists for is
+    // `this.prisma.$transaction(...)`, and the factory's `$transaction` runs its
+    // callback, so the probe can demonstrate the seam in the shape a consumer
+    // will actually write.
+    constructor(protected readonly mock: ProbeDelegate) {
+      super(createMockPrismaService() as never, new ContentAccessService());
     }
 
     protected get delegate(): ContentWriteDelegate<ProbeRow> {
@@ -702,6 +720,31 @@ describe('update extension points', () => {
         replaced
       );
       expect(mock.update).not.toHaveBeenCalled();
+    });
+
+    it('supports a real transaction spanning child rows and the parent', async () => {
+      const mock = makeDelegate();
+      const steps: string[] = [];
+      const rewritten: ProbeRow = { ...homebrewRow(), createdById: 'after-tx' };
+      mock.update.mockResolvedValue(rewritten);
+
+      // The shape VEG-507 reaches for: rewrite the children and update the
+      // parent in one transaction, and hand back the row the transaction wrote.
+      class TxProbe extends Probe {
+        protected override performUpdate(id: string, data: ColumnData): Promise<ProbeRow> {
+          return this.prisma.$transaction(async () => {
+            steps.push('children');
+            const updated = await this.delegate.update({ where: { id }, data });
+            steps.push('parent');
+            return updated;
+          });
+        }
+      }
+
+      await expect(new TxProbe(mock).update('row-1', { name: 'X' } as never, OWNER)).resolves.toBe(
+        rewritten
+      );
+      expect(steps).toEqual(['children', 'parent']);
     });
 
     it('runs inside the guard: an unwritable row never reaches it', async () => {
