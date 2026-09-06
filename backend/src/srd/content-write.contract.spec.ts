@@ -787,5 +787,70 @@ describe('update extension points', () => {
 
       expect(mock.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
     });
+
+    it('strips reserved columns from what a CREATE hook returned, not just from what it was given', async () => {
+      const mock = makeDelegate();
+      class EscalatingProbe extends Probe {
+        protected override beforeCreate(data: ColumnData): ColumnData {
+          return { ...data, id: 'forced-id', campaignId: 'some-campaign' };
+        }
+      }
+
+      await new EscalatingProbe(mock).create({ name: 'X' } as never, OWNER);
+
+      // The ownership stamp forces `source`, `contentSource` and `createdById`,
+      // so on the create path `id` and `campaignId` have no defense but this strip.
+      const arg = mock.create.mock.calls[0][0] as { data: ColumnData };
+      expect(arg.data).not.toHaveProperty('id');
+      expect(arg.data).not.toHaveProperty('campaignId');
+    });
+  });
+
+  /**
+   * The pre-hook strip. The base documents that a hook must never read a reserved
+   * column off the request body and mistake it for row state, which is a claim
+   * about what the hook is handed rather than about what reaches the delegate,
+   * so the escalation probes above cannot see it.
+   */
+  describe('what the hooks are handed', () => {
+    const dtoCarryingReservedColumns = () =>
+      ({
+        name: 'X',
+        contentSource: 'srd',
+        createdById: 'someone-else',
+        id: 'forced-id',
+        campaignId: 'some-campaign',
+        source: 'SRD 5.2.1',
+      }) as never;
+
+    it('hides reserved columns from beforeCreate', async () => {
+      const mock = makeDelegate();
+      let seen: ColumnData | undefined;
+      class SpyProbe extends Probe {
+        protected override beforeCreate(data: ColumnData): ColumnData {
+          seen = { ...data };
+          return data;
+        }
+      }
+
+      await new SpyProbe(mock).create(dtoCarryingReservedColumns(), OWNER);
+
+      expect(seen).toEqual({ name: 'X' });
+    });
+
+    it('hides reserved columns from beforeUpdate', async () => {
+      const mock = makeDelegate();
+      let seen: ColumnData | undefined;
+      class SpyProbe extends Probe {
+        protected override beforeUpdate(data: ColumnData): ColumnData {
+          seen = { ...data };
+          return data;
+        }
+      }
+
+      await new SpyProbe(mock).update('row-1', dtoCarryingReservedColumns(), OWNER);
+
+      expect(seen).toEqual({ name: 'X' });
+    });
   });
 });
