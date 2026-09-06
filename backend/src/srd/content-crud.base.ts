@@ -126,7 +126,7 @@ function stripReservedColumns(data: ColumnData): ColumnData {
  * reordered or skipped by a subclass:
  *
  * - `create`  authorize the tier, map columns, run `beforeCreate`, stamp, write.
- * - `update`  load-and-authorize, map columns, run `beforeUpdate`, write.
+ * - `update`  load-and-authorize, map columns, run `beforeUpdate`, `performUpdate`.
  * - `remove`  load-and-authorize, then `performDelete`.
  *
  * Two invariants worth stating because they are easy to break by hand and were
@@ -178,9 +178,11 @@ export abstract class ContentCrudService<
 
   async create(dto: CreateDto, actor: ContentActor): Promise<Row> {
     this.contentAccess.assertCanCreate(this.tier, actor);
-    const data = stripReservedColumns(this.toColumnData(dto));
-    await this.beforeCreate(data, actor);
-    stripReservedColumns(data);
+    const mapped = stripReservedColumns(this.toColumnData(dto));
+    // The strip runs again on what the hook RETURNED, not on what it was handed:
+    // a hook that builds a replacement object would otherwise slip a reserved
+    // column past a guard that only ever inspected the original.
+    const data = stripReservedColumns(await this.beforeCreate(mapped, actor));
 
     // Annotated so a misspelled forced field (`contentSourc`) is a compile
     // error rather than an extra column that silently never gets stamped.
@@ -203,14 +205,14 @@ export abstract class ContentCrudService<
     // Stripped before the hook as well as after: a hook must never read a
     // reserved column off the request body and mistake it for row state (the
     // loaded `row` is where that belongs), and must never be able to inject one.
-    const data = stripReservedColumns(this.toColumnData(dto));
-    await this.beforeUpdate(data, row, actor);
+    const mapped = stripReservedColumns(this.toColumnData(dto));
     // No stamp on this path, so the strip is the only thing standing between a
-    // crafted payload and a tier escalation.
-    stripReservedColumns(data);
+    // crafted payload and a tier escalation. It runs on the hook's return value
+    // so a replacement object is covered as thoroughly as a mutated one.
+    const data = stripReservedColumns(await this.beforeUpdate(mapped, row, actor));
 
     try {
-      return await this.delegate.update({ where: { id }, data });
+      return await this.performUpdate(id, data);
     } catch (err) {
       mapWriteError(err, row.contentSource, this.noun);
     }
@@ -246,18 +248,44 @@ export abstract class ContentCrudService<
    * Last chance to adjust column data before a create is stamped and written.
    * Runs after authorization, so a guard here cannot be reached by an actor who
    * may not create at this tier. Async because guards may hit the database.
+   *
+   * Returns the data rather than mutating it in place: an override written in
+   * the natural immutable style (`data = { ...data, x }`) reassigns its own
+   * parameter, so under a `void` return it compiled, ran, and silently changed
+   * nothing. Forgetting to return is now a compile error. Mutating and returning
+   * the same object stays valid.
    */
-  protected beforeCreate(_data: ColumnData, _actor: ContentActor): Promise<void> | void {}
+  protected beforeCreate(data: ColumnData, _actor: ContentActor): ColumnData | Promise<ColumnData> {
+    return data;
+  }
 
   /**
    * Last chance to adjust column data before an update is written. Receives the
    * already-authorized row so row-aware invariants can compare old against new.
+   * Returns its data for the reason given on {@link beforeCreate}.
    */
   protected beforeUpdate(
-    _data: ColumnData,
+    data: ColumnData,
     _row: Row,
     _actor: ContentActor
-  ): Promise<void> | void {}
+  ): ColumnData | Promise<ColumnData> {
+    return data;
+  }
+
+  /**
+   * How this entity's update reaches the database. Override when the update has
+   * to span child rows — replacing a class's per-level features, say — and do it
+   * in one transaction so a failure cannot leave the parent updated and the
+   * children half-rewritten. Without this seam the only way to get a transaction
+   * was to authorize via {@link findWritableRow} and then write outside the
+   * skeleton, which is how per-service error-mapping drift gets back in.
+   *
+   * Takes no tier or noun, so an override cannot hand-roll its own error copy;
+   * `update` maps the failure with the loaded row's tier.
+   */
+  protected async performUpdate(id: string, data: ColumnData): Promise<Row> {
+    return this.delegate.update({ where: { id }, data });
+  }
 
   /**
    * How this entity is deleted. Override when deletion needs referential cleanup

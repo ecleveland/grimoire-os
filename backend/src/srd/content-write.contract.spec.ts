@@ -3,8 +3,8 @@ import { ConflictException, ForbiddenException, NotFoundException } from '@nestj
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { Prisma } from '@prisma/client';
 import type { Type } from '@nestjs/common';
-import { ContentAccessService, ContentActor } from './content-access.service';
-import { ContentCrudService } from './content-crud.base';
+import { ContentAccessService, ContentActor, OwnedContentRow } from './content-access.service';
+import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { SrdModule } from './srd.module';
 import { AdminModule } from '../admin/admin.module';
 import { PrismaService } from '../prisma/prisma.service';
@@ -629,5 +629,163 @@ describe('skeleton integrity', () => {
       Object.prototype.hasOwnProperty.call(new FieldShadow(null as never, null as never), m)
     );
     expect(shadowed).toContain('update');
+  });
+});
+
+/**
+ * The two extension points `update` offers a subclass, driven through a probe
+ * rather than the six real services, none of which override either today.
+ *
+ * `performUpdate` exists so an entity whose update must span child rows can do
+ * that inside the authorized sequence instead of hand-rolling a transaction
+ * outside it (VEG-512, ahead of the per-level class features in VEG-507). The
+ * hooks return their column data so that an override written in the natural
+ * immutable style cannot silently no-op.
+ */
+describe('update extension points', () => {
+  interface ProbeRow extends OwnedContentRow {
+    id: string;
+  }
+
+  const homebrewRow = (): ProbeRow => ({
+    id: 'row-1',
+    contentSource: 'homebrew',
+    createdById: OWNER.userId,
+  });
+
+  function makeDelegate() {
+    return {
+      findUnique: jest.fn().mockResolvedValue(homebrewRow()),
+      create: jest.fn().mockResolvedValue(homebrewRow()),
+      update: jest.fn().mockResolvedValue(homebrewRow()),
+      delete: jest.fn().mockResolvedValue(homebrewRow()),
+    };
+  }
+
+  type ProbeDelegate = ReturnType<typeof makeDelegate>;
+
+  class Probe extends ContentCrudService<ProbeRow, Record<string, never>, Record<string, never>> {
+    protected readonly tier = 'homebrew' as const;
+    protected readonly noun = 'probe';
+
+    constructor(private readonly mock: ProbeDelegate) {
+      super(null as never, new ContentAccessService());
+    }
+
+    protected get delegate(): ContentWriteDelegate<ProbeRow> {
+      return this.mock as unknown as ContentWriteDelegate<ProbeRow>;
+    }
+
+    protected toColumnData(dto: object): ColumnData {
+      return { ...dto };
+    }
+  }
+
+  describe('performUpdate', () => {
+    it('defaults to a plain delegate update', async () => {
+      const mock = makeDelegate();
+      await new Probe(mock).update('row-1', { name: 'X' } as never, OWNER);
+
+      expect(mock.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
+    });
+
+    it('lets an override replace the write, and returns what the override returns', async () => {
+      const mock = makeDelegate();
+      const replaced: ProbeRow = { ...homebrewRow(), createdById: 'rewritten' };
+      class TxProbe extends Probe {
+        protected override performUpdate(): Promise<ProbeRow> {
+          return Promise.resolve(replaced);
+        }
+      }
+
+      await expect(new TxProbe(mock).update('row-1', { name: 'X' } as never, OWNER)).resolves.toBe(
+        replaced
+      );
+      expect(mock.update).not.toHaveBeenCalled();
+    });
+
+    it('runs inside the guard: an unwritable row never reaches it', async () => {
+      const mock = makeDelegate();
+      mock.findUnique.mockResolvedValue({ id: 'row-1', contentSource: 'srd', createdById: null });
+      let reached = false;
+      class TxProbe extends Probe {
+        protected override async performUpdate(id: string, data: ColumnData): Promise<ProbeRow> {
+          reached = true;
+          return super.performUpdate(id, data);
+        }
+      }
+
+      await expect(
+        new TxProbe(mock).update('row-1', { name: 'X' } as never, ADMIN)
+      ).rejects.toThrow(ForbiddenException);
+      expect(reached).toBe(false);
+    });
+
+    it("maps a failure inside the override to the loaded row's tier, not the service's", async () => {
+      const mock = makeDelegate();
+      mock.findUnique.mockResolvedValue({
+        id: 'row-1',
+        contentSource: 'shared',
+        createdById: 'someone-else',
+      });
+      class TxProbe extends Probe {
+        protected override performUpdate(): Promise<ProbeRow> {
+          return Promise.reject(p2002());
+        }
+      }
+
+      // The probe's own tier is homebrew, which would say "You already have a probe...".
+      await expect(
+        new TxProbe(mock).update('row-1', { name: 'X' } as never, ADMIN)
+      ).rejects.toThrow('A shared probe with this name already exists');
+    });
+  });
+
+  describe('hook return values', () => {
+    it('honours a beforeUpdate that returns a new object instead of mutating', async () => {
+      const mock = makeDelegate();
+      class HookProbe extends Probe {
+        protected override beforeUpdate(data: ColumnData): ColumnData {
+          return { ...data, derived: 'yes' };
+        }
+      }
+
+      await new HookProbe(mock).update('row-1', { name: 'X' } as never, OWNER);
+
+      expect(mock.update).toHaveBeenCalledWith({
+        where: { id: 'row-1' },
+        data: { name: 'X', derived: 'yes' },
+      });
+    });
+
+    it('honours a beforeCreate that returns a new object instead of mutating', async () => {
+      const mock = makeDelegate();
+      class HookProbe extends Probe {
+        protected override beforeCreate(data: ColumnData): ColumnData {
+          return { ...data, derived: 'yes' };
+        }
+      }
+
+      await new HookProbe(mock).create({ name: 'X' } as never, OWNER);
+
+      expect(mock.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ name: 'X', derived: 'yes' }),
+      });
+    });
+
+    it('strips reserved columns from what the hook returned, not just from what it was given', async () => {
+      const mock = makeDelegate();
+      class EscalatingProbe extends Probe {
+        protected override beforeUpdate(data: ColumnData): ColumnData {
+          // A replacement object carrying an escalation. The pre-hook strip never
+          // saw these keys, so only a post-hook strip of the RETURNED object stops them.
+          return { ...data, contentSource: 'srd', createdById: 'someone-else', id: 'other-row' };
+        }
+      }
+
+      await new EscalatingProbe(mock).update('row-1', { name: 'X' } as never, OWNER);
+
+      expect(mock.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
+    });
   });
 });
