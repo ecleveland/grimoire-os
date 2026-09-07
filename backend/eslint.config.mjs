@@ -43,14 +43,15 @@ export default tseslint.config(
       // errors to the loaded row's tier. A subclass that overrides one of them
       // silently leaves that audited path, which is the drift this base exists to
       // prevent. Entity-specific behavior belongs in the beforeCreate,
-      // beforeUpdate and performDelete hooks, which run inside the sequence.
+      // beforeUpdate, performUpdate and performDelete hooks, which run inside
+      // the sequence.
       'no-restricted-syntax': [
         'error',
         {
           selector:
             "ClassDeclaration[superClass.name='ContentCrudService'] > ClassBody > MethodDefinition[key.name=/^(create|update|remove|findWritableRow)$/]",
           message:
-            'Do not override the ContentCrudService authorization skeleton (create/update/remove/findWritableRow). Override beforeCreate, beforeUpdate or performDelete instead.',
+            'Do not override the ContentCrudService authorization skeleton (create/update/remove/findWritableRow). Override beforeCreate, beforeUpdate, performUpdate or performDelete instead.',
         },
       ],
     },

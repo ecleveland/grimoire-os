@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import type { ContentSource } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContentAccessService, ContentActor, OwnedContentRow } from './content-access.service';
@@ -101,7 +101,10 @@ const SOURCE_LABEL_BY_TIER: Record<WritableTier, string> = {
  * update it is the sole defense for all five: an update applies no stamp,
  * so without this strip a payload carrying `contentSource: 'srd'` would
  * escalate a homebrew row out of its owner's tier and into the immutable
- * catalog. Every entity's column mapping used to re-implement this by hand,
+ * catalog. That covers what the skeleton hands to
+ * {@link ContentCrudService.performUpdate}; an override composing its own
+ * payload is trusted to keep the reserved columns off it.
+ * Every entity's column mapping used to re-implement this by hand,
  * which made the tier defense a thing five separate authors had to remember.
  * Running it here means an entity mapping can only fail to normalize a column,
  * never fail to protect one.
@@ -109,6 +112,36 @@ const SOURCE_LABEL_BY_TIER: Record<WritableTier, string> = {
 function stripReservedColumns(data: ColumnData): ColumnData {
   for (const column of RESERVED_COLUMNS) delete data[column];
   return data;
+}
+
+/**
+ * Re-check the ownership columns on the row a write produced.
+ *
+ * `performUpdate` hands a subclass the whole write, so the reserved-column strip
+ * no longer sees every payload that reaches Prisma: an override composing its own
+ * can set `contentSource` or `createdById` and escalate a homebrew row into the
+ * immutable catalog. This is the skeleton's last look at the result and it costs
+ * two comparisons.
+ *
+ * It does NOT catch an override that returns the row it read rather than the row
+ * it wrote. A stale row carries the same tier and owner by definition, so nothing
+ * compared here can distinguish it; that one stays a documented trap on
+ * {@link ContentCrudService.performUpdate}.
+ */
+function assertOwnershipUnchanged<Row extends OwnedContentRow>(
+  written: Row,
+  authorized: Row,
+  noun: string
+): Row {
+  if (
+    written.contentSource !== authorized.contentSource ||
+    written.createdById !== authorized.createdById
+  ) {
+    throw new InternalServerErrorException(
+      `Refusing to return a ${noun} whose ownership changed during the write`
+    );
+  }
+  return written;
 }
 
 /**
@@ -126,7 +159,7 @@ function stripReservedColumns(data: ColumnData): ColumnData {
  * reordered or skipped by a subclass:
  *
  * - `create`  authorize the tier, map columns, run `beforeCreate`, stamp, write.
- * - `update`  load-and-authorize, map columns, run `beforeUpdate`, write.
+ * - `update`  load-and-authorize, map columns, run `beforeUpdate`, `performUpdate`.
  * - `remove`  load-and-authorize, then `performDelete`.
  *
  * Two invariants worth stating because they are easy to break by hand and were
@@ -178,9 +211,11 @@ export abstract class ContentCrudService<
 
   async create(dto: CreateDto, actor: ContentActor): Promise<Row> {
     this.contentAccess.assertCanCreate(this.tier, actor);
-    const data = stripReservedColumns(this.toColumnData(dto));
-    await this.beforeCreate(data, actor);
-    stripReservedColumns(data);
+    const mapped = stripReservedColumns(this.toColumnData(dto));
+    // The strip runs again on what the hook RETURNED, not on what it was handed:
+    // a hook that builds a replacement object would otherwise slip a reserved
+    // column past a guard that only ever inspected the original.
+    const data = stripReservedColumns(await this.beforeCreate(mapped, actor));
 
     // Annotated so a misspelled forced field (`contentSourc`) is a compile
     // error rather than an extra column that silently never gets stamped.
@@ -203,17 +238,20 @@ export abstract class ContentCrudService<
     // Stripped before the hook as well as after: a hook must never read a
     // reserved column off the request body and mistake it for row state (the
     // loaded `row` is where that belongs), and must never be able to inject one.
-    const data = stripReservedColumns(this.toColumnData(dto));
-    await this.beforeUpdate(data, row, actor);
+    const mapped = stripReservedColumns(this.toColumnData(dto));
     // No stamp on this path, so the strip is the only thing standing between a
-    // crafted payload and a tier escalation.
-    stripReservedColumns(data);
+    // crafted payload and a tier escalation. It runs on the hook's return value
+    // so a replacement object is covered as thoroughly as a mutated one.
+    const data = stripReservedColumns(await this.beforeUpdate(mapped, row, actor));
 
+    let written: Row;
     try {
-      return await this.delegate.update({ where: { id }, data });
+      written = await this.performUpdate(id, data);
     } catch (err) {
       mapWriteError(err, row.contentSource, this.noun);
     }
+    // `mapWriteError` returns `never`, so `written` is assigned by here.
+    return assertOwnershipUnchanged(written, row, this.noun);
   }
 
   async remove(id: string, actor: ContentActor): Promise<void> {
@@ -246,18 +284,59 @@ export abstract class ContentCrudService<
    * Last chance to adjust column data before a create is stamped and written.
    * Runs after authorization, so a guard here cannot be reached by an actor who
    * may not create at this tier. Async because guards may hit the database.
+   *
+   * Returns the data rather than mutating it in place: an override written in
+   * the natural immutable style (`data = { ...data, x }`) reassigns its own
+   * parameter, so under a `void` return it compiled, ran, and silently changed
+   * nothing. Forgetting to return is now a compile error. Mutating and returning
+   * the same object stays valid.
    */
-  protected beforeCreate(_data: ColumnData, _actor: ContentActor): Promise<void> | void {}
+  protected beforeCreate(data: ColumnData, _actor: ContentActor): ColumnData | Promise<ColumnData> {
+    return data;
+  }
 
   /**
    * Last chance to adjust column data before an update is written. Receives the
    * already-authorized row so row-aware invariants can compare old against new.
+   * Returns its data for the reason given on {@link beforeCreate}.
    */
   protected beforeUpdate(
-    _data: ColumnData,
+    data: ColumnData,
     _row: Row,
     _actor: ContentActor
-  ): Promise<void> | void {}
+  ): ColumnData | Promise<ColumnData> {
+    return data;
+  }
+
+  /**
+   * How this entity's update reaches the database. Override when the update has
+   * to span child rows, replacing a class's per-level features say, and do it in
+   * one transaction so a failure cannot leave the parent updated and the children
+   * half-rewritten. Without this seam the only way to get a transaction was to
+   * authorize via {@link findWritableRow} and then write outside the skeleton,
+   * which is how per-service error-mapping drift gets back in.
+   *
+   * Takes no tier or noun, so an override cannot hand-roll the tier-keyed copy
+   * for its own P2002/P2025; `update` maps the failure with the loaded row's
+   * tier. An override that writes child rows should catch and translate their
+   * conflicts itself, since that mapping keys everything to the parent noun and
+   * a duplicate child would surface as a duplicate parent. Anything already an
+   * HttpException passes through `mapWriteError` untouched.
+   *
+   * The hook receives `id` and `data` and nothing else. The authorized `row` is
+   * a local of `update`, so an override that needs the old state must re-read it.
+   * Do not stash it on `this` from `beforeUpdate`: providers are singletons, and
+   * two concurrent updates would overwrite each other's stash.
+   *
+   * Return the row the write produced. `update` hands this value straight back to
+   * its caller, so it is what the response body carries, and an override that
+   * re-read the row has both values to hand as `Row`. Returning the pre-write one
+   * serves the client the state it just replaced. The ownership re-check on the
+   * way out cannot catch that: a stale row carries the same tier and owner.
+   */
+  protected async performUpdate(id: string, data: ColumnData): Promise<Row> {
+    return this.delegate.update({ where: { id }, data });
+  }
 
   /**
    * How this entity is deleted. Override when deletion needs referential cleanup

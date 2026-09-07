@@ -38,8 +38,9 @@ export class HomebrewMonstersService extends ContentCrudService<
    * null or leave it unset. `toColumnData` has already turned an explicit null
    * into `[]`, which leaves "omitted entirely" as the only case to cover here.
    */
-  protected override beforeCreate(data: ColumnData): void {
+  protected override beforeCreate(data: ColumnData): ColumnData {
     data.actions ??= [];
+    return data;
   }
 
   /**

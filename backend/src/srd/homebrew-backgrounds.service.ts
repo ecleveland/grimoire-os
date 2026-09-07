@@ -33,11 +33,15 @@ export class HomebrewBackgroundsService extends ContentCrudService<
     return this.prisma.background;
   }
 
-  protected override async beforeCreate(data: ColumnData, actor: ContentActor): Promise<void> {
+  protected override async beforeCreate(
+    data: ColumnData,
+    actor: ContentActor
+  ): Promise<ColumnData> {
     // A create that sets no feat can't carry an option for it (an update may:
     // option-only PATCHes retarget the option of the already-linked feat).
     if (data.originFeatId == null) data.originFeatOption = null;
     await this.assertOriginFeatVisible(data, actor);
+    return data;
   }
 
   /**
@@ -51,7 +55,7 @@ export class HomebrewBackgroundsService extends ContentCrudService<
     data: ColumnData,
     row: Background,
     actor: ContentActor
-  ): Promise<void> {
+  ): Promise<ColumnData> {
     if (data.originFeatId === undefined && row.originFeatId === null) {
       if ('originFeatOption' in data) data.originFeatOption = null;
     }
@@ -63,6 +67,7 @@ export class HomebrewBackgroundsService extends ContentCrudService<
       data.originFeatOption = null;
     }
     await this.assertOriginFeatVisible(data, actor);
+    return data;
   }
 
   /**
