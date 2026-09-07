@@ -16,10 +16,12 @@ import {
 } from 'class-validator';
 import { ABILITY_NAMES, CASTER_TYPES, DIE_TYPES, SKILL_NAMES } from '@grimoire-os/shared';
 import { IsEachInCatalog } from '../../common/validators/is-each-in-catalog.decorator';
-import { IsLevelKeyedMap } from '../../common/validators/level-keyed-map.decorator';
-
-/** Highest level a character reaches; bounds `subclassLevel`. */
-const MAX_CHARACTER_LEVEL = 20;
+import { IsOptionalNotNull } from '../../common/validators/is-optional-not-null.decorator';
+import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
+import {
+  IsLevelKeyedMap,
+  MAX_CHARACTER_LEVEL,
+} from '../../common/validators/level-keyed-map.decorator';
 
 export class ClassSpellcastingDto {
   @ApiProperty({ example: 'Wisdom' })
@@ -27,33 +29,32 @@ export class ClassSpellcastingDto {
   ability!: string;
 
   @ApiPropertyOptional({ description: 'Warlock only: Pact Magic instead of standard slots' })
-  @IsOptional()
-  @Type(() => Boolean)
-  @IsIn([true, false])
+  @IsOptionalNotNull()
+  @IsStrictBoolean()
   pactMagic?: boolean;
 
   @ApiPropertyOptional({ example: { 1: { 1: 2 } } })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsLevelKeyedMap('slotProgression')
   spellSlotProgression?: Record<number, Record<number, number>>;
 
   @ApiPropertyOptional({ example: { 1: { slots: 1, slotLevel: 1 } } })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsLevelKeyedMap('pactProgression')
   pactSlotProgression?: Record<number, { slots: number; slotLevel: number }>;
 
   @ApiPropertyOptional({ example: { 1: 2 } })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsLevelKeyedMap('levelCount')
   cantripsKnown?: Record<number, number>;
 
   @ApiPropertyOptional({ example: { 1: 4 } })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsLevelKeyedMap('levelCount')
   spellsKnown?: Record<number, number>;
 
   @ApiPropertyOptional({ example: 'Wisdom modifier + half your level' })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsString()
   @MaxLength(200)
   preparedFormula?: string;
@@ -106,7 +107,7 @@ export class StartingEquipmentDto {
   choices!: EquipmentChoiceDto[];
 
   @ApiPropertyOptional({ type: [EquipmentChoiceItemDto] })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsArray()
   @ArrayMaxSize(50)
   @ValidateNested({ each: true })
@@ -114,7 +115,7 @@ export class StartingEquipmentDto {
   guaranteed?: EquipmentChoiceItemDto[];
 
   @ApiPropertyOptional({ example: '5d4 x 10 gp' })
-  @IsOptional()
+  @IsOptionalNotNull()
   @IsString()
   @MaxLength(100)
   startingGold?: string;
@@ -156,12 +157,12 @@ export class ClassMulticlassingDto {
   casterType!: string | null;
 
   @ApiPropertyOptional({
-    enum: ['AND', 'OR'],
-    description: 'Absent means every prerequisite must be met',
+    enum: ['OR'],
+    description: 'Present only to flag the exception; absent means every prerequisite must be met',
   })
-  @IsOptional()
-  @IsIn(['AND', 'OR'])
-  prerequisiteLogic?: 'AND' | 'OR';
+  @IsOptionalNotNull()
+  @IsIn(['OR'])
+  prerequisiteLogic?: 'OR';
 }
 
 /**

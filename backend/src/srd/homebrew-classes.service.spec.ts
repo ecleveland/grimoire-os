@@ -150,6 +150,12 @@ describe('HomebrewClassesService', () => {
       expect(prisma.subclass.count).toHaveBeenCalledWith({ where: { classId: 'c1' } });
     });
 
+    it('says "1 subclass", not "1 subclasses", when exactly one is blocking', async () => {
+      prisma.subclass.count.mockResolvedValue(1);
+
+      await expect(service.remove('c1', OWNER)).rejects.toThrow(/1 subclass\. Delete it first/);
+    });
+
     it('maps the FK violation to the same 409 when a subclass lands after the check', async () => {
       // The pre-check gives the good message; the ON DELETE RESTRICT constraint is
       // what actually holds the line, because read-committed lets a subclass be

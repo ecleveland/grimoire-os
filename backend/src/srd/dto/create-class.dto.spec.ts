@@ -152,6 +152,18 @@ describe('CreateClassDto (through the production ValidationPipe)', () => {
     );
   });
 
+  // pactMagic is a boolean, and the global pipe's enableImplicitConversion turns
+  // any truthy value into `true` before a validator sees it. VEG-323 is why
+  // IsStrictBoolean exists; the guardrail spec only greps for @IsBoolean(, so a
+  // hand-rolled boolean check slips past both.
+  it.each(['false', 'no', 1, {}])('rejects the non-boolean pactMagic %s', async value => {
+    await reject(validBody({ spellcasting: { ability: 'Wisdom', pactMagic: value } }));
+  });
+
+  it.each([true, false])('accepts the real boolean pactMagic %s', async value => {
+    await accept(validBody({ spellcasting: { ability: 'Wisdom', pactMagic: value } }));
+  });
+
   // ── equipmentChoices ──────────────────────────────────
 
   it('rejects an equipment choice missing its `choose` count', async () => {
@@ -170,6 +182,30 @@ describe('CreateClassDto (through the production ValidationPipe)', () => {
         },
       })
     );
+  });
+
+  it('rejects an explicit null inside a Json blob, where there is no column to clear', async () => {
+    // @IsOptional() means "null clears this column" (VEG-316), which is meaningless
+    // inside a Json object and would store a null the shared type forbids.
+    await reject(validBody({ spellcasting: { ability: 'Wisdom', spellSlotProgression: null } }));
+    await reject(
+      validBody({
+        multiclassing: {
+          prerequisites: [],
+          proficienciesGained: [],
+          casterType: null,
+          prerequisiteLogic: null,
+        },
+      })
+    );
+  });
+
+  it('still allows null to clear the Json column itself', async () => {
+    await accept(validBody({ spellcasting: null, multiclassing: null }));
+  });
+
+  it('requires casterType — nullable is not the same as optional', async () => {
+    await reject(validBody({ multiclassing: { prerequisites: [], proficienciesGained: [] } }));
   });
 
   // ── multiclassing ─────────────────────────────────────
@@ -202,14 +238,14 @@ describe('CreateClassDto (through the production ValidationPipe)', () => {
     );
   });
 
-  it('rejects a prerequisiteLogic outside the union', async () => {
+  it('rejects AND — absent already means every prerequisite must be met', async () => {
     await reject(
       validBody({
         multiclassing: {
           prerequisites: [],
           proficienciesGained: [],
           casterType: null,
-          prerequisiteLogic: 'XOR',
+          prerequisiteLogic: 'AND',
         },
       })
     );

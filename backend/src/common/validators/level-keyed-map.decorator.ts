@@ -21,7 +21,7 @@ import {
  */
 
 /** Levels a D&D character can reach; progression tables are keyed by these. */
-const MAX_CHARACTER_LEVEL = 20;
+export const MAX_CHARACTER_LEVEL = 20;
 
 /** Generous upper bound on any single count. Guards typos, not game balance. */
 const MAX_COUNT = 99;
