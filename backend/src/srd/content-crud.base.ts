@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import type { ContentSource } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { ContentAccessService, ContentActor, OwnedContentRow } from './content-access.service';
@@ -115,6 +115,36 @@ function stripReservedColumns(data: ColumnData): ColumnData {
 }
 
 /**
+ * Re-check the ownership columns on the row a write produced.
+ *
+ * `performUpdate` hands a subclass the whole write, so the reserved-column strip
+ * no longer sees every payload that reaches Prisma: an override composing its own
+ * can set `contentSource` or `createdById` and escalate a homebrew row into the
+ * immutable catalog. This is the skeleton's last look at the result and it costs
+ * two comparisons.
+ *
+ * It does NOT catch an override that returns the row it read rather than the row
+ * it wrote. A stale row carries the same tier and owner by definition, so nothing
+ * compared here can distinguish it; that one stays a documented trap on
+ * {@link ContentCrudService.performUpdate}.
+ */
+function assertOwnershipUnchanged<Row extends OwnedContentRow>(
+  written: Row,
+  authorized: Row,
+  noun: string
+): Row {
+  if (
+    written.contentSource !== authorized.contentSource ||
+    written.createdById !== authorized.createdById
+  ) {
+    throw new InternalServerErrorException(
+      `Refusing to return a ${noun} whose ownership changed during the write`
+    );
+  }
+  return written;
+}
+
+/**
  * The write skeleton every tiered-content CRUD service shares (VEG-336).
  *
  * Monsters, spells, feats, items, backgrounds and the admin shared-tier item
@@ -214,11 +244,14 @@ export abstract class ContentCrudService<
     // so a replacement object is covered as thoroughly as a mutated one.
     const data = stripReservedColumns(await this.beforeUpdate(mapped, row, actor));
 
+    let written: Row;
     try {
-      return await this.performUpdate(id, data);
+      written = await this.performUpdate(id, data);
     } catch (err) {
       mapWriteError(err, row.contentSource, this.noun);
     }
+    // `mapWriteError` returns `never`, so `written` is assigned by here.
+    return assertOwnershipUnchanged(written, row, this.noun);
   }
 
   async remove(id: string, actor: ContentActor): Promise<void> {
@@ -290,11 +323,16 @@ export abstract class ContentCrudService<
    * a duplicate child would surface as a duplicate parent. Anything already an
    * HttpException passes through `mapWriteError` untouched.
    *
-   * Return the row the transaction wrote. `update` hands this value straight
-   * back to its caller, so it is what the response body carries, and an override
-   * already holds the pre-update `row` from {@link findWritableRow} in scope.
-   * Returning that one serves the client the state it just replaced. Both are
-   * `Row`, so no type catches the mix-up.
+   * The hook receives `id` and `data` and nothing else. The authorized `row` is
+   * a local of `update`, so an override that needs the old state must re-read it.
+   * Do not stash it on `this` from `beforeUpdate`: providers are singletons, and
+   * two concurrent updates would overwrite each other's stash.
+   *
+   * Return the row the write produced. `update` hands this value straight back to
+   * its caller, so it is what the response body carries, and an override that
+   * re-read the row has both values to hand as `Row`. Returning the pre-write one
+   * serves the client the state it just replaced. The ownership re-check on the
+   * way out cannot catch that: a stale row carries the same tier and owner.
    */
   protected async performUpdate(id: string, data: ColumnData): Promise<Row> {
     return this.delegate.update({ where: { id }, data });

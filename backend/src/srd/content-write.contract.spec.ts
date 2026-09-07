@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { MODULE_METADATA } from '@nestjs/common/constants';
 import { Prisma } from '@prisma/client';
 import type { Type } from '@nestjs/common';
@@ -74,18 +79,16 @@ interface ContractCase {
    * their no-op path (backgrounds reads `originFeatId` off the row).
    */
   rowExtras?: Record<string, unknown>;
-  /**
-   * NOTE for the first service that overrides `performUpdate` (VEG-507's class
-   * features are the expected one). The `update` cases below assert against
-   * `delegate.update`, which a transactional override may not call at all, so
-   * that service will fail here with no way to declare the exception. Add a
-   * `performsOwnUpdate?: boolean` and branch those assertions on it. Do not
-   * reach for the other fix and drop the service from CASES: an unenrolled
-   * service is exactly the drift `contract enrollment` below exists to catch,
-   * and it will fail that test instead.
-   */
 }
 
+// NOTE for the first service that overrides `performUpdate` (VEG-507's class
+// features are the expected one). The `update` cases below assert against
+// `delegate.update`, which a transactional override may not call at all, so that
+// service will fail them with no way to declare the exception. Add a
+// `performsOwnUpdate?: boolean` to ContractCase and branch those assertions on
+// it. Do not reach for the other fix and drop the service from CASES: an
+// unenrolled service is exactly the drift `contract enrollment` below exists to
+// catch, and it will fail that test instead.
 const CASES: ContractCase[] = [
   {
     title: 'HomebrewMonstersService',
@@ -656,10 +659,30 @@ describe('skeleton integrity', () => {
  * hooks return their column data so that an override written in the natural
  * immutable style cannot silently no-op.
  */
+/**
+ * The two extension points `update` offers a subclass, driven through a probe
+ * rather than the six real services, none of which override either today.
+ *
+ * `performUpdate` exists so an entity whose update must span child rows can do
+ * that inside the authorized sequence instead of hand-rolling a transaction
+ * outside it (VEG-512, ahead of the per-level class features in VEG-507). The
+ * hooks return their column data so an override written in the natural immutable
+ * style cannot silently no-op.
+ *
+ * The probe shares one `createMockPrismaService()` with the test, so `delegate`
+ * and the client `$transaction` yields are reachable separately. That is what
+ * lets the transaction case assert the parent write landed on the transaction
+ * client and not on the pool, which is the difference between a real transaction
+ * and two independent writes wearing one.
+ */
 describe('update extension points', () => {
   interface ProbeRow extends OwnedContentRow {
     id: string;
+    name?: string;
   }
+
+  /** Any tiered model on the mock works; the probe only needs one delegate. */
+  const PROBE_MODEL = 'monster' as const;
 
   const homebrewRow = (): ProbeRow => ({
     id: 'row-1',
@@ -667,31 +690,26 @@ describe('update extension points', () => {
     createdById: OWNER.userId,
   });
 
-  function makeDelegate() {
-    return {
-      findUnique: jest.fn().mockResolvedValue(homebrewRow()),
-      create: jest.fn().mockResolvedValue(homebrewRow()),
-      update: jest.fn().mockResolvedValue(homebrewRow()),
-      delete: jest.fn().mockResolvedValue(homebrewRow()),
-    };
+  function makeProbeEnv() {
+    const prisma = createMockPrismaService();
+    const delegate = prisma[PROBE_MODEL];
+    delegate.findUnique.mockResolvedValue(homebrewRow());
+    delegate.create.mockResolvedValue(homebrewRow());
+    delegate.update.mockResolvedValue(homebrewRow());
+    delegate.delete.mockResolvedValue(homebrewRow());
+    return { prisma, delegate };
   }
-
-  type ProbeDelegate = ReturnType<typeof makeDelegate>;
 
   class Probe extends ContentCrudService<ProbeRow, Record<string, never>, Record<string, never>> {
     protected readonly tier = 'homebrew' as const;
     protected readonly noun = 'probe';
 
-    // A real Prisma mock rather than null: the override this seam exists for is
-    // `this.prisma.$transaction(...)`, and the factory's `$transaction` runs its
-    // callback, so the probe can demonstrate the seam in the shape a consumer
-    // will actually write.
-    constructor(protected readonly mock: ProbeDelegate) {
-      super(createMockPrismaService() as never, new ContentAccessService());
+    constructor(prisma: MockPrismaService) {
+      super(prisma as never, new ContentAccessService());
     }
 
     protected get delegate(): ContentWriteDelegate<ProbeRow> {
-      return this.mock as unknown as ContentWriteDelegate<ProbeRow>;
+      return this.prisma[PROBE_MODEL] as unknown as ContentWriteDelegate<ProbeRow>;
     }
 
     protected toColumnData(dto: object): ColumnData {
@@ -701,55 +719,80 @@ describe('update extension points', () => {
 
   describe('performUpdate', () => {
     it('defaults to a plain delegate update', async () => {
-      const mock = makeDelegate();
-      await new Probe(mock).update('row-1', { name: 'X' } as never, OWNER);
+      const { prisma, delegate } = makeProbeEnv();
 
-      expect(mock.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
+      await new Probe(prisma).update('row-1', { name: 'X' } as never, OWNER);
+
+      expect(delegate.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
     });
 
     it('lets an override replace the write, and returns what the override returns', async () => {
-      const mock = makeDelegate();
-      const replaced: ProbeRow = { ...homebrewRow(), createdById: 'rewritten' };
+      const { prisma, delegate } = makeProbeEnv();
+      const replaced: ProbeRow = { ...homebrewRow(), name: 'from the override' };
       class TxProbe extends Probe {
         protected override performUpdate(): Promise<ProbeRow> {
           return Promise.resolve(replaced);
         }
       }
 
-      await expect(new TxProbe(mock).update('row-1', { name: 'X' } as never, OWNER)).resolves.toBe(
-        replaced
-      );
-      expect(mock.update).not.toHaveBeenCalled();
+      await expect(
+        new TxProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
+      ).resolves.toBe(replaced);
+      expect(delegate.update).not.toHaveBeenCalled();
     });
 
-    it('supports a real transaction spanning child rows and the parent', async () => {
-      const mock = makeDelegate();
-      const steps: string[] = [];
-      const rewritten: ProbeRow = { ...homebrewRow(), createdById: 'after-tx' };
-      mock.update.mockResolvedValue(rewritten);
+    it('writes through the transaction client, not the pooled delegate', async () => {
+      const { prisma, delegate } = makeProbeEnv();
+      const written: ProbeRow = { ...homebrewRow(), name: 'written in the transaction' };
+      // A transaction client distinct from the pooled one. The factory's own
+      // `$transaction` hands back the same object, which cannot tell the two
+      // apart, and telling them apart is the whole property under test: a write
+      // issued on the pool inside `$transaction` is not in the transaction.
+      const tx = { [PROBE_MODEL]: { update: jest.fn().mockResolvedValue(written) } };
+      prisma.$transaction = jest.fn((fn: (client: unknown) => unknown) => Promise.resolve(fn(tx)));
 
-      // The shape VEG-507 reaches for: rewrite the children and update the
-      // parent in one transaction, and hand back the row the transaction wrote.
       class TxProbe extends Probe {
         protected override performUpdate(id: string, data: ColumnData): Promise<ProbeRow> {
-          return this.prisma.$transaction(async () => {
-            steps.push('children');
-            const updated = await this.delegate.update({ where: { id }, data });
-            steps.push('parent');
-            return updated;
+          return this.prisma.$transaction(async client => {
+            const c = client as unknown as typeof tx;
+            // Children would be rewritten on the same client, here and now.
+            return (await c[PROBE_MODEL].update({ where: { id }, data })) as ProbeRow;
           });
         }
       }
 
-      await expect(new TxProbe(mock).update('row-1', { name: 'X' } as never, OWNER)).resolves.toBe(
-        rewritten
-      );
-      expect(steps).toEqual(['children', 'parent']);
+      await expect(
+        new TxProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
+      ).resolves.toBe(written);
+      expect(prisma.$transaction).toHaveBeenCalled();
+      expect(tx[PROBE_MODEL].update).toHaveBeenCalledWith({
+        where: { id: 'row-1' },
+        data: { name: 'X' },
+      });
+      expect(delegate.update).not.toHaveBeenCalled();
+    });
+
+    it('maps a rejection raised inside the transaction', async () => {
+      const { prisma } = makeProbeEnv();
+      prisma.$transaction = jest.fn(() => Promise.reject(p2002()));
+      class TxProbe extends Probe {
+        protected override performUpdate(): Promise<ProbeRow> {
+          return this.prisma.$transaction(() => Promise.resolve(homebrewRow()));
+        }
+      }
+
+      await expect(
+        new TxProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
+      ).rejects.toThrow(ConflictException);
     });
 
     it('runs inside the guard: an unwritable row never reaches it', async () => {
-      const mock = makeDelegate();
-      mock.findUnique.mockResolvedValue({ id: 'row-1', contentSource: 'srd', createdById: null });
+      const { prisma, delegate } = makeProbeEnv();
+      delegate.findUnique.mockResolvedValue({
+        id: 'row-1',
+        contentSource: 'srd',
+        createdById: null,
+      });
       let reached = false;
       class TxProbe extends Probe {
         protected override async performUpdate(id: string, data: ColumnData): Promise<ProbeRow> {
@@ -759,14 +802,14 @@ describe('update extension points', () => {
       }
 
       await expect(
-        new TxProbe(mock).update('row-1', { name: 'X' } as never, ADMIN)
+        new TxProbe(prisma).update('row-1', { name: 'X' } as never, ADMIN)
       ).rejects.toThrow(ForbiddenException);
       expect(reached).toBe(false);
     });
 
     it("maps a failure inside the override to the loaded row's tier, not the service's", async () => {
-      const mock = makeDelegate();
-      mock.findUnique.mockResolvedValue({
+      const { prisma, delegate } = makeProbeEnv();
+      delegate.findUnique.mockResolvedValue({
         id: 'row-1',
         contentSource: 'shared',
         createdById: 'someone-else',
@@ -779,45 +822,74 @@ describe('update extension points', () => {
 
       // The probe's own tier is homebrew, which would say "You already have a probe...".
       await expect(
-        new TxProbe(mock).update('row-1', { name: 'X' } as never, ADMIN)
+        new TxProbe(prisma).update('row-1', { name: 'X' } as never, ADMIN)
       ).rejects.toThrow('A shared probe with this name already exists');
+    });
+
+    it('refuses a returned row whose ownership changed during the write', async () => {
+      const { prisma } = makeProbeEnv();
+      // `performUpdate` owns the whole write, so the reserved-column strip never
+      // sees a payload an override composed itself. This is the only thing left
+      // between such an override and a homebrew row escalated into the catalog.
+      class EscalatingProbe extends Probe {
+        protected override performUpdate(): Promise<ProbeRow> {
+          return Promise.resolve({ ...homebrewRow(), contentSource: 'srd' });
+        }
+      }
+
+      await expect(
+        new EscalatingProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
+      ).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('refuses a returned row whose owner changed during the write', async () => {
+      const { prisma } = makeProbeEnv();
+      class StealingProbe extends Probe {
+        protected override performUpdate(): Promise<ProbeRow> {
+          return Promise.resolve({ ...homebrewRow(), createdById: 'someone-else' });
+        }
+      }
+
+      await expect(
+        new StealingProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
+      ).rejects.toThrow(InternalServerErrorException);
     });
   });
 
   describe('hook return values', () => {
     it('honours a beforeUpdate that returns a new object instead of mutating', async () => {
-      const mock = makeDelegate();
+      const { prisma, delegate } = makeProbeEnv();
       class HookProbe extends Probe {
         protected override beforeUpdate(data: ColumnData): ColumnData {
           return { ...data, derived: 'yes' };
         }
       }
 
-      await new HookProbe(mock).update('row-1', { name: 'X' } as never, OWNER);
+      await new HookProbe(prisma).update('row-1', { name: 'X' } as never, OWNER);
 
-      expect(mock.update).toHaveBeenCalledWith({
+      expect(delegate.update).toHaveBeenCalledWith({
         where: { id: 'row-1' },
         data: { name: 'X', derived: 'yes' },
       });
     });
 
     it('honours a beforeCreate that returns a new object instead of mutating', async () => {
-      const mock = makeDelegate();
+      const { prisma, delegate } = makeProbeEnv();
       class HookProbe extends Probe {
         protected override beforeCreate(data: ColumnData): ColumnData {
           return { ...data, derived: 'yes' };
         }
       }
 
-      await new HookProbe(mock).create({ name: 'X' } as never, OWNER);
+      await new HookProbe(prisma).create({ name: 'X' } as never, OWNER);
 
-      expect(mock.create).toHaveBeenCalledWith({
+      expect(delegate.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ name: 'X', derived: 'yes' }),
       });
     });
 
     it('strips reserved columns from what the hook returned, not just from what it was given', async () => {
-      const mock = makeDelegate();
+      const { prisma, delegate } = makeProbeEnv();
       class EscalatingProbe extends Probe {
         protected override beforeUpdate(data: ColumnData): ColumnData {
           // A replacement object carrying an escalation. The pre-hook strip never
@@ -826,24 +898,24 @@ describe('update extension points', () => {
         }
       }
 
-      await new EscalatingProbe(mock).update('row-1', { name: 'X' } as never, OWNER);
+      await new EscalatingProbe(prisma).update('row-1', { name: 'X' } as never, OWNER);
 
-      expect(mock.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
+      expect(delegate.update).toHaveBeenCalledWith({ where: { id: 'row-1' }, data: { name: 'X' } });
     });
 
     it('strips reserved columns from what a CREATE hook returned, not just from what it was given', async () => {
-      const mock = makeDelegate();
+      const { prisma, delegate } = makeProbeEnv();
       class EscalatingProbe extends Probe {
         protected override beforeCreate(data: ColumnData): ColumnData {
           return { ...data, id: 'forced-id', campaignId: 'some-campaign' };
         }
       }
 
-      await new EscalatingProbe(mock).create({ name: 'X' } as never, OWNER);
+      await new EscalatingProbe(prisma).create({ name: 'X' } as never, OWNER);
 
       // The ownership stamp forces `source`, `contentSource` and `createdById`,
       // so on the create path `id` and `campaignId` have no defense but this strip.
-      const arg = mock.create.mock.calls[0][0] as { data: ColumnData };
+      const arg = delegate.create.mock.calls[0][0] as { data: ColumnData };
       expect(arg.data).not.toHaveProperty('id');
       expect(arg.data).not.toHaveProperty('campaignId');
     });
@@ -864,10 +936,13 @@ describe('update extension points', () => {
         id: 'forced-id',
         campaignId: 'some-campaign',
         source: 'SRD 5.2.1',
+        // The relation alias from RESERVED_RELATIONS: it sets `createdById`
+        // without that string appearing anywhere in the payload.
+        createdBy: { connect: { id: 'someone-else' } },
       }) as never;
 
     it('hides reserved columns from beforeCreate', async () => {
-      const mock = makeDelegate();
+      const { prisma } = makeProbeEnv();
       let seen: ColumnData | undefined;
       class SpyProbe extends Probe {
         protected override beforeCreate(data: ColumnData): ColumnData {
@@ -876,13 +951,13 @@ describe('update extension points', () => {
         }
       }
 
-      await new SpyProbe(mock).create(dtoCarryingReservedColumns(), OWNER);
+      await new SpyProbe(prisma).create(dtoCarryingReservedColumns(), OWNER);
 
       expect(seen).toEqual({ name: 'X' });
     });
 
     it('hides reserved columns from beforeUpdate', async () => {
-      const mock = makeDelegate();
+      const { prisma } = makeProbeEnv();
       let seen: ColumnData | undefined;
       class SpyProbe extends Probe {
         protected override beforeUpdate(data: ColumnData): ColumnData {
@@ -891,7 +966,7 @@ describe('update extension points', () => {
         }
       }
 
-      await new SpyProbe(mock).update('row-1', dtoCarryingReservedColumns(), OWNER);
+      await new SpyProbe(prisma).update('row-1', dtoCarryingReservedColumns(), OWNER);
 
       expect(seen).toEqual({ name: 'X' });
     });
