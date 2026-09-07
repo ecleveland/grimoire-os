@@ -15,6 +15,7 @@ import { HomebrewSpellsService } from './homebrew-spells.service';
 import { HomebrewFeatsService } from './homebrew-feats.service';
 import { HomebrewBackgroundsService } from './homebrew-backgrounds.service';
 import { HomebrewItemsService } from './homebrew-items.service';
+import { HomebrewClassesService } from './homebrew-classes.service';
 
 @Module({
   controllers: [
@@ -37,6 +38,7 @@ import { HomebrewItemsService } from './homebrew-items.service';
     HomebrewFeatsService,
     HomebrewBackgroundsService,
     HomebrewItemsService,
+    HomebrewClassesService,
   ],
   exports: [SrdService, ContentAccessService],
 })
