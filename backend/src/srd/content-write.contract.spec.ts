@@ -24,6 +24,7 @@ import { HomebrewFeatsService } from './homebrew-feats.service';
 import { HomebrewItemsService } from './homebrew-items.service';
 import { HomebrewBackgroundsService } from './homebrew-backgrounds.service';
 import { AdminItemsService } from '../admin/items/admin-items.service';
+import { HomebrewClassesService } from './homebrew-classes.service';
 
 /**
  * The tiered-content write contract (VEG-336), asserted identically against
@@ -59,7 +60,7 @@ interface TieredWriteService {
 }
 
 /** Prisma model keys the mock factory exposes, narrowed to the tiered entities. */
-type TieredModel = 'monster' | 'spell' | 'feat' | 'item' | 'background';
+type TieredModel = 'monster' | 'spell' | 'feat' | 'item' | 'background' | 'srdClass';
 
 interface ContractCase {
   /** Display name for the describe block. */
@@ -135,6 +136,15 @@ const CASES: ContractCase[] = [
     sourceLabel: 'Homebrew',
     makeCreateDto: () => ({ name: 'Sky Pilot', description: 'You flew the mail runs.' }),
     rowExtras: { originFeatId: null, originFeatOption: null },
+  },
+  {
+    title: 'HomebrewClassesService',
+    Service: HomebrewClassesService,
+    model: 'srdClass',
+    noun: 'class',
+    tier: 'homebrew',
+    sourceLabel: 'Homebrew',
+    makeCreateDto: () => ({ name: 'Warden', hitDie: 'd10' }),
   },
   {
     title: 'AdminItemsService (shared tier)',

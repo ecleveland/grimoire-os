@@ -41,7 +41,19 @@ export default async function globalSetup(): Promise<void> {
   // same reason, VEG-317/VEG-293).
   // The identifier quotes are backslash-escaped because the whole statement is
   // interpolated into a double-quoted `psql -c "..."` shell argument below.
-  const homebrewCleanup = ['monsters', 'spells', 'items', 'feats', 'backgrounds']
+  // Order matters within this list: `subclasses` must precede `srd_classes`,
+  // because subclasses_classId_fkey is ON DELETE RESTRICT and a homebrew class
+  // with a surviving homebrew subclass cannot be deleted. UsersService.remove
+  // deletes them in the same order for the same reason (VEG-505).
+  const homebrewCleanup = [
+    'monsters',
+    'spells',
+    'items',
+    'feats',
+    'backgrounds',
+    'subclasses',
+    'srd_classes',
+  ]
     .map(t => `DELETE FROM ${t} WHERE \\"contentSource\\" = 'homebrew';`)
     .join(' ');
   const sql = `TRUNCATE TABLE ${tables} RESTART IDENTITY CASCADE; ${homebrewCleanup} DELETE FROM users;`;

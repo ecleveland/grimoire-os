@@ -4,8 +4,11 @@ import { ClassesController, SubclassesController } from './classes.controller';
 import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
+import { HomebrewClassesService } from './homebrew-classes.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type {
+  AuthenticatedRequest,
   JwtUser,
   OptionallyAuthenticatedRequest,
 } from '../auth/interfaces/jwt-payload.interface';
@@ -17,6 +20,8 @@ function authedReq(user: JwtUser = PLAYER): OptionallyAuthenticatedRequest {
   return { user } as OptionallyAuthenticatedRequest;
 }
 const anonReq = {} as OptionallyAuthenticatedRequest;
+const writeReq = { user: PLAYER } as AuthenticatedRequest;
+const ACTOR = { userId: 'u1', isAdmin: false };
 
 describe('ClassesController', () => {
   let controller: ClassesController;
@@ -27,6 +32,7 @@ describe('ClassesController', () => {
     searchSubclasses: jest.Mock;
     findSubclass: jest.Mock;
   };
+  let homebrewClasses: { create: jest.Mock; update: jest.Mock; remove: jest.Mock };
 
   beforeEach(async () => {
     srdService = {
@@ -36,10 +42,19 @@ describe('ClassesController', () => {
       findSubclass: jest.fn().mockResolvedValue(null),
     };
 
+    homebrewClasses = {
+      create: jest.fn().mockResolvedValue({ id: 'cls-1' }),
+      update: jest.fn().mockResolvedValue({ id: 'cls-1' }),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ClassesController, SubclassesController],
       imports: [CacheModule.register()],
-      providers: [{ provide: SrdService, useValue: srdService }],
+      providers: [
+        { provide: SrdService, useValue: srdService },
+        { provide: HomebrewClassesService, useValue: homebrewClasses },
+      ],
     }).compile();
 
     controller = module.get(ClassesController);
@@ -70,6 +85,46 @@ describe('ClassesController', () => {
     await subclasses.searchSubclasses(authedReq());
 
     expect(srdService.searchSubclasses).toHaveBeenCalledWith(undefined, 'u1');
+  });
+
+  // The write half (VEG-506). The controller's only job is to turn the JWT user
+  // into a ContentActor and delegate; every authorization decision belongs to the
+  // service, which the contract suite drives.
+  describe('homebrew writes', () => {
+    it('creates with the caller as the actor', async () => {
+      const dto = { name: 'Warden', hitDie: 'd10' };
+
+      await controller.createClass(dto as never, writeReq);
+
+      expect(homebrewClasses.create).toHaveBeenCalledWith(dto, ACTOR);
+    });
+
+    it('updates with the caller as the actor', async () => {
+      const dto = { description: 'Rewritten.' };
+
+      await controller.updateClass('cls-1', dto as never, writeReq);
+
+      expect(homebrewClasses.update).toHaveBeenCalledWith('cls-1', dto, ACTOR);
+    });
+
+    it('deletes with the caller as the actor', async () => {
+      await controller.removeClass('cls-1', writeReq);
+
+      expect(homebrewClasses.remove).toHaveBeenCalledWith('cls-1', ACTOR);
+    });
+
+    it('marks an admin caller as one, since shared-tier writes turn on it', async () => {
+      const adminReq = {
+        user: { userId: 'a1', username: 'admin', role: Role.ADMIN },
+      } as AuthenticatedRequest;
+
+      await controller.createClass({ name: 'X', hitDie: 'd6' } as never, adminReq);
+
+      expect(homebrewClasses.create).toHaveBeenCalledWith(expect.anything(), {
+        userId: 'a1',
+        isAdmin: true,
+      });
+    });
   });
 });
 
@@ -108,6 +163,26 @@ describe('class routes are off the shared URL-keyed cache (VEG-505)', () => {
         );
         expect(names).toContain(OptionalJwtAuthGuard.name);
       }
+    }
+  });
+
+  // A write route given OptionalJwtAuthGuard still routes for an anonymous
+  // caller, and `toActor(req.user)` then reads userId off undefined. The guard is
+  // the only thing standing between that and a 500 (or worse, an unowned write),
+  // and nothing else here would notice the swap.
+  it('guards every write route with the strict JwtAuthGuard, never the optional one', () => {
+    for (const handler of ['createClass', 'updateClass', 'removeClass']) {
+      const fn = (ClassesController.prototype as unknown as Record<string, unknown>)[
+        handler
+      ] as object;
+      const guards = Reflect.getMetadata('__guards__', fn) ?? [];
+      const names = guards.map((g: unknown) =>
+        typeof g === 'function'
+          ? g.name
+          : (g as { constructor: { name: string } })?.constructor?.name
+      );
+      expect(names).toContain(JwtAuthGuard.name);
+      expect(names).not.toContain(OptionalJwtAuthGuard.name);
     }
   });
 

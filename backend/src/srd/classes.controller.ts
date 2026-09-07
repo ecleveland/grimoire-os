@@ -1,9 +1,31 @@
-import { Controller, Get, Param, Query, Req, UseGuards, UseInterceptors } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
+import { HomebrewClassesService } from './homebrew-classes.service';
+import { toActor } from './homebrew-write.helpers';
+import { CreateClassDto } from './dto/create-class.dto';
+import { UpdateClassDto } from './dto/update-class.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
-import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
+import type {
+  AuthenticatedRequest,
+  OptionallyAuthenticatedRequest,
+} from '../auth/interfaces/jwt-payload.interface';
 
 /**
  * Class and subclass reads (VEG-505). Split out of {@link SrdController} for
@@ -16,15 +38,17 @@ import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payl
  * responses (the bare global catalog) are cached by URL, authenticated ones
  * bypass the cache entirely (VEG-333).
  *
- * Homebrew class CRUD lands here in VEG-506. Until then these are reads only,
- * and with no homebrew rows in existence every caller sees the same catalog —
- * the split is in place first so VEG-506 cannot ship the leak.
+ * Homebrew class CRUD (VEG-506) is the write half below. The split was put in
+ * place by VEG-505 first, precisely so these routes could land without the leak.
  */
 @ApiTags('SRD')
 @Controller('srd/classes')
 @UseInterceptors(AnonymousCacheInterceptor)
 export class ClassesController {
-  constructor(private readonly srdService: SrdService) {}
+  constructor(
+    private readonly srdService: SrdService,
+    private readonly homebrewClasses: HomebrewClassesService
+  ) {}
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
@@ -38,6 +62,38 @@ export class ClassesController {
   @ApiOperation({ summary: 'Get class by ID (includes subclasses)' })
   findClass(@Param('id') id: string, @Req() req: OptionallyAuthenticatedRequest) {
     return this.srdService.findClass(id, req.user?.userId);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a homebrew class owned by the caller' })
+  createClass(@Body() dto: CreateClassDto, @Req() req: AuthenticatedRequest) {
+    return this.homebrewClasses.create(dto, toActor(req.user));
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a class (own homebrew; shared requires admin)' })
+  updateClass(
+    @Param('id') id: string,
+    @Body() dto: UpdateClassDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return this.homebrewClasses.update(id, dto, toActor(req.user));
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a class (own homebrew; shared requires admin)',
+    description: 'Refused with 409 while any subclass still points at the class.',
+  })
+  removeClass(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.homebrewClasses.remove(id, toActor(req.user));
   }
 }
 
