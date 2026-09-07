@@ -17,6 +17,33 @@ export interface ClassSpellcasting {
   preparedFormula?: string;
 }
 
+/** How a class behaves when multiclassed into (SRD "Multiclassing" table). */
+export const CASTER_TYPES = ['full', 'half', 'pact'] as const;
+export type CasterType = (typeof CASTER_TYPES)[number];
+
+/** One ability minimum a character must meet to multiclass into or out of a class. */
+export interface MulticlassPrerequisite {
+  ability: string;
+  minimum: number;
+}
+
+/**
+ * Multiclassing rules for a class: what you must have to take it, what you gain
+ * when you do, and how it contributes to the multiclass spell-slot table.
+ *
+ * `casterType` is null for a class that contributes nothing (Fighter, Rogue and
+ * the other non-casters); `pact` is Warlock, whose slots are tracked separately
+ * from the shared table. `prerequisiteLogic` is absent for the usual case where
+ * every prerequisite must be met, and 'OR' where any one suffices (Bard is the
+ * SRD's only such class).
+ */
+export interface ClassMulticlassing {
+  prerequisites: MulticlassPrerequisite[];
+  proficienciesGained: string[];
+  casterType: CasterType | null;
+  prerequisiteLogic?: 'AND' | 'OR';
+}
+
 /** A class or subclass feature unlocked at a specific level */
 export interface ClassFeature {
   /**
@@ -206,6 +233,7 @@ export interface SrdClass {
   features: ClassFeature[];
   spellcasting?: ClassSpellcasting;
   equipmentChoices?: StartingEquipment;
+  multiclassing?: ClassMulticlassing;
   subclassLevel?: number;
   source: string;
 }
