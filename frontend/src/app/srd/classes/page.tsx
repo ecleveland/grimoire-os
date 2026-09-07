@@ -88,14 +88,16 @@ export default async function ClassListPage() {
               <div>
                 <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {/* Keyed by level and name, not name alone: VEG-507 widened the
+                  {/* Keyed per row, not by name: VEG-507 widened the
                       class_features unique key to [classId, name, level], so one
                       name recurring at several levels — Ability Score Improvement
-                      at 4, 8 and 12 — is now a legal class. Under a name-only key
-                      React would collapse those rows into one chip. Not reachable
-                      while this page fetches anonymously, but VEG-508 makes the
-                      list owner-aware and a silently-dropped chip is not the way
-                      to find that out. */}
+                      at 4, 8 and 12 — is now a legal class. React does still
+                      render every duplicate-keyed sibling on a first mount; what
+                      it does is warn, and then attach state to the wrong sibling
+                      on re-render. So the spec asserts the absence of that
+                      warning rather than counting chips, which passes either way.
+                      Not reachable while this page fetches anonymously, but
+                      VEG-508 makes the list owner-aware. */}
                   {cls.features.map(f =>
                     f.id ? (
                       <PrintToggle

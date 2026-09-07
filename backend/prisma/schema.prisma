@@ -468,6 +468,13 @@ model SrdClass {
   @@map("srd_classes")
 }
 
+// Untiered on purpose: no contentSource, no CRUD, seed-only. Two branches in
+// srd.service.ts depend on that — `visibleFeatureParentWhere` and
+// `featureParentVisibilitySql` both return "add no condition" for race traits.
+// Adding a contentSource column here would leave both compiling and both failing
+// OPEN, since an absent check and a check that matches everything are
+// indistinguishable. Re-tier this model and those two branches must change with
+// it (VEG-507).
 model Race {
   id              String   @id @default(uuid())
   name            String   @unique

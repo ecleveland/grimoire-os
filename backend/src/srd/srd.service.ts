@@ -52,9 +52,14 @@ function aliasedVisibleSourceSql(alias: Prisma.Sql, userId?: string): Prisma.Sql
 // (the parents have both) and force aliasing every source, feature or not.
 // EXISTS keeps the change confined to the one fragment that needs it.
 //
-// This and the Prisma relation filter are two encodings of one rule. They are
-// exercised against the same fixtures in backend/test/db so a divergence fails a
-// test rather than leaking.
+// This and the Prisma relation filter are two encodings of one rule, and nothing
+// at the type level forces them to agree — a type over string fragments could
+// only prove shape, not semantics. So the enforcement is a real database:
+// backend/test/db/class-features.db-spec.ts drives both encodings over one
+// fixture set covering all four parent types, with absolute per-parent
+// assertions rather than only comparing the two totals to each other (two
+// encodings broken the same way would still agree). Deleting any one of these
+// predicates fails it.
 function featureParentVisibilitySql(parent: FeatureParentType, userId?: string): Prisma.Sql | null {
   switch (parent) {
     case 'class':
@@ -646,9 +651,18 @@ export class SrdService {
    * `*WhereInput`, so a misspelled relation key (`clas`, `subClass`) is an
    * excess-property error rather than a silently-deleted check — the failure
    * mode VEG-505 hit and fixed the same way on `visibleSubclassWhere`. The
-   * annotation has to sit on the local, not on the return type: callers spread
-   * the result into an untyped `where`, so a declared return type would be
-   * widened away and check nothing.
+   * annotations sit on the locals because one function serves four tables and
+   * there is no single honest return type to declare, not because a declared
+   * return type would fail to check: it checks a returned object literal
+   * identically. `Record<string, unknown>` is the widening the four kinds force,
+   * and it costs nothing downstream, since every caller spreads the result into
+   * a `where` that Prisma accepts.
+   *
+   * The slip this does NOT catch is a wrong tag rather than a wrong spelling.
+   * Passing `'subclass'` in the class branch is caught, because Prisma brands
+   * its filters per model. Passing `'race'` returns `{}`, which is assignable to
+   * every `WhereInput`, compiles silently, and hands every homebrew feature to
+   * everyone. Only `backend/test/db/class-features.db-spec.ts` catches that.
    *
    * The raw-SQL counterpart is `featureParentVisibilitySql` at the top of this
    * file; the two must agree, and backend/test/db drives both.
@@ -711,6 +725,11 @@ export class SrdService {
   // deliberately: computing them apart is how a scoped page ends up with an
   // unscoped total, which both breaks the pager and discloses that rows the
   // caller cannot see exist.
+  //
+  // Each is annotated because the visibility fragment spreads in as
+  // `Record<string, unknown>` (see `visibleFeatureParentWhere`), which would
+  // otherwise widen the whole literal and leave `classId`, `subclassId`,
+  // `raceId` and `backgroundId` as unchecked strings.
   private async queryFeatureTable(
     kind: FeatureParentType,
     nameFilter: Record<string, unknown>,
@@ -718,7 +737,7 @@ export class SrdService {
     userId?: string
   ): Promise<{ hits: FeatureSearchHit[]; total: number }> {
     if (kind === 'class') {
-      const where = {
+      const where: Prisma.ClassFeatureWhereInput = {
         ...nameFilter,
         ...(parentId ? { classId: parentId } : {}),
         ...this.visibleFeatureParentWhere('class', userId),
@@ -743,7 +762,7 @@ export class SrdService {
       };
     }
     if (kind === 'subclass') {
-      const where = {
+      const where: Prisma.SubclassFeatureWhereInput = {
         ...nameFilter,
         ...(parentId ? { subclassId: parentId } : {}),
         ...this.visibleFeatureParentWhere('subclass', userId),
@@ -768,7 +787,7 @@ export class SrdService {
       };
     }
     if (kind === 'race') {
-      const where = {
+      const where: Prisma.RaceTraitWhereInput = {
         ...nameFilter,
         ...(parentId ? { raceId: parentId } : {}),
         ...this.visibleFeatureParentWhere('race', userId),
@@ -792,7 +811,7 @@ export class SrdService {
       };
     }
     // background
-    const where = {
+    const where: Prisma.BackgroundFeatureWhereInput = {
       ...nameFilter,
       ...(parentId ? { backgroundId: parentId } : {}),
       ...this.visibleFeatureParentWhere('background', userId),

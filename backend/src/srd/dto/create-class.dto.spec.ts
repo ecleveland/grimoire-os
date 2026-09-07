@@ -377,6 +377,26 @@ describe('UpdateClassDto', () => {
     await accept({ features: null }, updateMeta);
   });
 
+  // The whole difference between "leave the class's features alone" and "delete
+  // every one of them" is `'features' in data` in the service, and that rests on
+  // class-transformer not materializing an unset optional property. If a library
+  // upgrade started emitting `features: undefined`, every unrelated PATCH would
+  // silently wipe a class's features and no other unit test would notice.
+  it('omits the features key entirely when the body does not mention it', async () => {
+    const dto = (await pipe.transform({ description: 'Rewritten.' }, updateMeta)) as object;
+
+    expect('features' in dto).toBe(false);
+    // ...and survives the spread `toColumnData` makes before the service reads it.
+    expect('features' in { ...dto }).toBe(false);
+  });
+
+  it('keeps the key when the body sends an explicit null clear', async () => {
+    const dto = (await pipe.transform({ features: null }, updateMeta)) as { features?: unknown };
+
+    expect('features' in dto).toBe(true);
+    expect(dto.features).toBeNull();
+  });
+
   it('still enforces the feature constraints it inherits', async () => {
     await reject({ features: [{ name: 'Rage', level: 99 }] }, updateMeta);
     await reject(

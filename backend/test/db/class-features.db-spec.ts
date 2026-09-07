@@ -26,6 +26,7 @@ import {
   type SeedContext,
 } from './db-harness';
 import { SrdService } from '../../src/srd/srd.service';
+import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
 
 const HOMEBREW_LABEL = 'Homebrew';
@@ -42,6 +43,7 @@ const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 describe('class features — real DB (VEG-507)', () => {
   let ctx: SeedContext;
   let srd: SrdService;
+  let homebrewClasses: HomebrewClassesService;
 
   let ownerId: string;
   let strangerId: string;
@@ -52,6 +54,14 @@ describe('class features — real DB (VEG-507)', () => {
   let brewClassId: string;
   let brewFeatureIds: string[];
   const BREW_FEATURE_NAME = 'Veg507 Wardens Bond';
+
+  // The other three tiered parents, so every branch of the visibility rule has a
+  // row that distinguishes it. Without these the subclass and background
+  // branches of the raw-SQL gate were asserted only by the table name appearing
+  // in the generated string, which is true whether or not the tier is checked.
+  const SUBCLASS_FEATURE_NAME = 'Veg507 Ashen Step';
+  const GRANDPARENT_FEATURE_NAME = 'Veg507 Buried Rite';
+  const BACKGROUND_FEATURE_NAME = 'Veg507 Guild Writ';
 
   beforeAll(async () => {
     ctx = await createSeedContext();
@@ -93,6 +103,57 @@ describe('class features — real DB (VEG-507)', () => {
     });
     brewClassId = brew.id;
     brewFeatureIds = brew.features.map(f => f.id);
+
+    homebrewClasses = new HomebrewClassesService(ctx.prisma, new ContentAccessService());
+
+    // Hop 1: a homebrew subclass under an SRD class. Its own tier is what hides
+    // it; the parent is visible to everyone.
+    await ctx.prisma.subclass.create({
+      data: {
+        name: `Path of Ash ${Date.now()}`,
+        classId: srdClassId,
+        contentSource: 'homebrew',
+        createdById: ownerId,
+        source: HOMEBREW_LABEL,
+        features: {
+          create: [{ name: SUBCLASS_FEATURE_NAME, level: 3, description: 'Step through cinders.' }],
+        },
+      },
+    });
+
+    // Hop 2, and the only reason the grandparent check exists: a globally
+    // visible subclass hanging off a class only its owner can see. Its own tier
+    // says "show this to everyone"; its parent says otherwise, and the parent
+    // has to win. VEG-505 pinned exactly this fixture on the Prisma side.
+    await ctx.prisma.subclass.create({
+      data: {
+        name: `Rite of Loam ${Date.now()}`,
+        classId: brewClassId,
+        contentSource: 'shared',
+        createdById: ownerId,
+        source: 'Shared',
+        features: {
+          create: [
+            { name: GRANDPARENT_FEATURE_NAME, level: 3, description: 'Speak with the buried.' },
+          ],
+        },
+      },
+    });
+
+    // The background branch, which shares this code path and is what unblocks
+    // VEG-472. Nothing can author a homebrew BackgroundFeature over HTTP yet, so
+    // this row is written directly — the read path is what is under test.
+    await ctx.prisma.background.create({
+      data: {
+        name: `Guild Artisan ${Date.now()}`,
+        contentSource: 'homebrew',
+        createdById: ownerId,
+        source: HOMEBREW_LABEL,
+        features: {
+          create: [{ name: BACKGROUND_FEATURE_NAME, description: 'A letter of passage.' }],
+        },
+      },
+    });
   }, 300_000);
 
   afterAll(async () => {
@@ -275,19 +336,78 @@ describe('class features — real DB (VEG-507)', () => {
         expect(page.total).toBe(0);
       });
 
-      // The point of running both encodings over one fixture: a relation filter
-      // and an EXISTS subquery that disagree mean one of them leaks, and each
-      // one's own unit spec would still pass.
-      it('agrees with searchFeatures about what each caller can see', async () => {
-        for (const caller of [ownerId, strangerId, undefined]) {
-          const viaPrisma = await srd.searchFeatures({ parentType: 'class' }, caller);
-          const viaRawSql = await srd.search(
-            { types: ['feature'], parentType: 'class', limit: 1 },
-            caller
-          );
+      // The point of running both encodings over one fixture set: a relation
+      // filter and an EXISTS subquery that disagree mean one of them leaks, and
+      // each one's own unit spec would still pass.
+      //
+      // Every parent type, not just class. The unit spec asserts the raw SQL by
+      // looking for the parent's table name in the generated string, which is
+      // there whether or not the tier is actually checked — so deleting the
+      // subclass grandparent predicate, or the background predicate, left all
+      // 139 unit tests green. These four fixtures are what make those branches
+      // falsifiable.
+      it('agrees with searchFeatures about what each caller can see, for every parent', async () => {
+        for (const parentType of ['class', 'subclass', 'background', 'race'] as const) {
+          for (const caller of [ownerId, strangerId, undefined]) {
+            const viaPrisma = await srd.searchFeatures({ parentType }, caller);
+            const viaRawSql = await srd.search(
+              { types: ['feature'], parentType, limit: 1 },
+              caller
+            );
 
-          expect(viaRawSql.total).toBe(viaPrisma.total);
+            expect({ parentType, caller, total: viaRawSql.total }).toEqual({
+              parentType,
+              caller,
+              total: viaPrisma.total,
+            });
+          }
         }
+      });
+    });
+
+    // One case per remaining tiered branch, named so a failure says which rule
+    // broke rather than just "a total disagreed".
+    describe('the other tiered parents', () => {
+      const totalFor = async (q: string, caller?: string) =>
+        (await srd.searchFeatures({ q }, caller)).total;
+      const rawTotalFor = async (q: string, caller?: string) =>
+        (await srd.search({ types: ['feature'], q }, caller)).total;
+
+      it('hides a homebrew subclass’s features from a stranger', async () => {
+        expect(await totalFor(SUBCLASS_FEATURE_NAME, ownerId)).toBe(1);
+        expect(await totalFor(SUBCLASS_FEATURE_NAME, strangerId)).toBe(0);
+        expect(await rawTotalFor(SUBCLASS_FEATURE_NAME, ownerId)).toBe(1);
+        expect(await rawTotalFor(SUBCLASS_FEATURE_NAME, strangerId)).toBe(0);
+      });
+
+      // The grandparent hop, and the only fixture that distinguishes it from a
+      // one-hop check: the subclass is `shared`, so its OWN tier makes it
+      // globally visible. Only its parent class hides it. Drop the second
+      // aliasedVisibleSourceSql call from the subclass branch and this is the
+      // assertion that fails.
+      it('hides a globally-visible subclass’s features when its class is homebrew', async () => {
+        expect(await totalFor(GRANDPARENT_FEATURE_NAME, ownerId)).toBe(1);
+        expect(await totalFor(GRANDPARENT_FEATURE_NAME, strangerId)).toBe(0);
+        expect(await rawTotalFor(GRANDPARENT_FEATURE_NAME, ownerId)).toBe(1);
+        expect(await rawTotalFor(GRANDPARENT_FEATURE_NAME, strangerId)).toBe(0);
+      });
+
+      // Shares the code path with classes, and is what unblocks VEG-472.
+      it('hides a homebrew background’s features from a stranger', async () => {
+        expect(await totalFor(BACKGROUND_FEATURE_NAME, ownerId)).toBe(1);
+        expect(await totalFor(BACKGROUND_FEATURE_NAME, strangerId)).toBe(0);
+        expect(await rawTotalFor(BACKGROUND_FEATURE_NAME, ownerId)).toBe(1);
+        expect(await rawTotalFor(BACKGROUND_FEATURE_NAME, strangerId)).toBe(0);
+      });
+
+      // Race is the one parent with no tier. Asserted so "unscoped" stays a
+      // decision with a test behind it rather than a branch nobody exercises.
+      it('shows race traits to everyone, since Race carries no tier', async () => {
+        const anon = await srd.searchFeatures({ parentType: 'race' });
+        const stranger = await srd.searchFeatures({ parentType: 'race' }, strangerId);
+
+        expect(anon.total).toBeGreaterThan(0);
+        expect(anon.total).toBe(stranger.total);
       });
     });
 
@@ -320,6 +440,104 @@ describe('class features — real DB (VEG-507)', () => {
 
         expect(rows.map(r => r.id)).toEqual([srdFeatureId]);
       });
+    });
+  });
+
+  // The atomicity of the feature replacement, which nothing else can reach.
+  //
+  // performUpdate does `srdClass.update`, then `classFeature.deleteMany`, then
+  // `createMany`, all on the transaction client. Swapping `tx` for `this.prisma`
+  // inside the callback moves every write onto the pool connection and destroys
+  // the rollback property — and the unit spec cannot see it, because the Prisma
+  // mock's $transaction hands the callback the same mock object, so `tx.x` and
+  // `this.prisma.x` are one jest.fn. Only a real transaction distinguishes them.
+  describe('a failed feature replacement rolls the whole update back', () => {
+    it('leaves the class description AND its original features untouched', async () => {
+      const owner = { userId: ownerId, isAdmin: false };
+      const cls = await ctx.prisma.srdClass.create({
+        data: {
+          name: `Rollback Warden ${Date.now()}`,
+          hitDie: 'd8',
+          description: 'before',
+          contentSource: 'homebrew',
+          createdById: ownerId,
+          source: HOMEBREW_LABEL,
+          features: {
+            create: [
+              { name: 'Keep Me', level: 1, description: 'original' },
+              { name: 'Keep Me Too', level: 2, description: 'original' },
+            ],
+          },
+        },
+      });
+
+      // Called on the service directly, bypassing the DTO: @ArrayUnique is what
+      // normally refuses a repeated (name, level), so this is the one way to
+      // drive createMany into the real index and make the third write fail after
+      // the first two have already run.
+      await expect(
+        homebrewClasses.update(
+          cls.id,
+          {
+            description: 'after',
+            features: [
+              { name: 'Ability Score Improvement', level: 4 },
+              { name: 'Ability Score Improvement', level: 4 },
+            ],
+          } as never,
+          owner
+        )
+      ).rejects.toThrow(/feature/i);
+
+      const after = await ctx.prisma.srdClass.findUniqueOrThrow({
+        where: { id: cls.id },
+        include: { features: { orderBy: { level: 'asc' } } },
+      });
+
+      // The parent update came first and the delete second; if either escaped
+      // the transaction, one of these two assertions fails.
+      expect(after.description).toBe('before');
+      expect(after.features.map(f => f.name)).toEqual(['Keep Me', 'Keep Me Too']);
+    });
+
+    // The same path on its happy branch, so the rollback case above cannot pass
+    // by the update silently doing nothing at all.
+    it('commits both halves when the insert succeeds', async () => {
+      const owner = { userId: ownerId, isAdmin: false };
+      const cls = await ctx.prisma.srdClass.create({
+        data: {
+          name: `Commit Warden ${Date.now()}`,
+          hitDie: 'd8',
+          description: 'before',
+          contentSource: 'homebrew',
+          createdById: ownerId,
+          source: HOMEBREW_LABEL,
+          features: { create: [{ name: 'Replace Me', level: 1, description: 'original' }] },
+        },
+      });
+
+      await homebrewClasses.update(
+        cls.id,
+        {
+          description: 'after',
+          features: [
+            { name: 'Ability Score Improvement', level: 4 },
+            { name: 'Ability Score Improvement', level: 8 },
+          ],
+        } as never,
+        owner
+      );
+
+      const after = await ctx.prisma.srdClass.findUniqueOrThrow({
+        where: { id: cls.id },
+        include: { features: { orderBy: { level: 'asc' } } },
+      });
+
+      expect(after.description).toBe('after');
+      expect(after.features.map(f => [f.level, f.name])).toEqual([
+        [4, 'Ability Score Improvement'],
+        [8, 'Ability Score Improvement'],
+      ]);
     });
   });
 });

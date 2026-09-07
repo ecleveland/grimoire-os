@@ -38,6 +38,22 @@ describe('ClassFeaturesEditor', () => {
       expect(onChange).toHaveBeenCalledWith([{ name: '', level: 1, description: '' }]);
     });
 
+    // Every other fixture sets a description, so the `?? ''` fallback was never
+    // rendered. A controlled textarea handed undefined switches to uncontrolled
+    // and React warns, which is the actual failure this guards.
+    it('renders a row whose description is absent without dropping to uncontrolled', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { description: _omitted, ...noDescription } = f();
+
+      render(<ClassFeaturesEditor value={[noDescription]} onChange={vi.fn()} />);
+
+      expect((screen.getByLabelText('Feature description') as HTMLTextAreaElement).value).toBe('');
+      expect(errorSpy.mock.calls.filter(call => String(call[0]).includes('uncontrolled'))).toEqual(
+        []
+      );
+      errorSpy.mockRestore();
+    });
+
     it('prefills every field from the value', () => {
       render(<ClassFeaturesEditor value={[f()]} onChange={vi.fn()} />);
 
@@ -185,6 +201,23 @@ describe('ClassFeaturesEditor', () => {
 
     // The whole point of widening the key (VEG-507): a recurring feature name is
     // how real classes are written, so this must NOT be flagged.
+    // Three rows, not two: the first index is recorded and every later one added,
+    // so a bug that only ever flagged the last pair would still pass at two.
+    it('flags all three when a name and level repeat three times', () => {
+      render(
+        <ClassFeaturesEditor
+          value={[
+            f({ name: 'Rage', level: 1 }),
+            f({ name: 'Rage', level: 1 }),
+            f({ name: 'Rage', level: 1 }),
+          ]}
+          onChange={vi.fn()}
+        />
+      );
+
+      expect(screen.getAllByText(/already used at this level/i)).toHaveLength(3);
+    });
+
     it('leaves one name recurring at different levels alone', () => {
       render(
         <ClassFeaturesEditor

@@ -370,5 +370,10 @@ export class CreateClassDto {
   @ArrayUnique(featureIdentity)
   @ValidateNested({ each: true })
   @Type(() => ClassFeatureDto)
-  features?: ClassFeatureDto[];
+  // `| null` because null is a real, tested input here, not a stray: it is how
+  // the client clears the list (VEG-316), the same as the String[] columns
+  // above. Declaring it `ClassFeatureDto[] | undefined` would be the type
+  // saying a value the service handles on purpose cannot arrive, which is what
+  // forced the mapping helper to take `unknown` and cast.
+  features?: ClassFeatureDto[] | null;
 }

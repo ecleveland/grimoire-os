@@ -73,9 +73,16 @@ function isFeatureConflict(err: unknown): boolean {
  * Order is preserved from the payload but is not load-bearing: every read path
  * sorts by `(level, name)`.
  */
-function toFeatureRows(value: unknown): FeatureRow[] {
-  if (value === null || value === undefined) return [];
-  return (value as ClassFeatureDto[]).map(f => ({
+function toFeatureRows(value: ClassFeatureDto[] | null | undefined): FeatureRow[] {
+  if (!value) return [];
+  // Named fields, not a spread. A spread into an object literal skips
+  // excess-property checking, so `tsc` cannot tell the two apart and any extra
+  // key on the payload would ride through to the insert — `id` most of all,
+  // which would let a caller choose a row's primary key. The DTO already
+  // refuses both over HTTP; this is the copy of that rule that a seed or import
+  // caller, which the write skeleton documents as bypassing the pipe, still
+  // meets.
+  return value.map(f => ({
     name: f.name,
     level: f.level,
     description: f.description ?? '',
@@ -155,7 +162,14 @@ export class HomebrewClassesService extends ContentCrudService<
       if (features.length > 0) {
         try {
           await tx.classFeature.createMany({
-            data: features.map(f => ({ classId: id, ...f })),
+            // `classId` last so a row cannot override the parent id. This is
+            // the second of two guards and no test distinguishes it, because
+            // the first one already holds: `toFeatureRows` builds each row from
+            // three named fields, so a stray `classId` never reaches here. Kept
+            // because it is free and it makes the question local — under the
+            // other order, whether a feature can reparent itself depends on a
+            // whitelist two functions away.
+            data: features.map(f => ({ ...f, classId: id })),
           });
         } catch (err) {
           // Unreachable through the HTTP boundary today: the DTO's @ArrayUnique
@@ -253,7 +267,10 @@ export class HomebrewClassesService extends ContentCrudService<
     if (typeof data.description === 'string' && !data.description.trim()) {
       data.description = null;
     }
-    if ('features' in data) data.features = toFeatureRows(data.features);
+    // Read off the DTO rather than the copied ColumnData: `data.features` is
+    // `unknown` there, and casting it back would reintroduce exactly the
+    // unchecked hop the typed DTO field exists to remove.
+    if ('features' in data) data.features = toFeatureRows(dto.features);
     return data;
   }
 }

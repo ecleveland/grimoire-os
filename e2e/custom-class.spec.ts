@@ -311,14 +311,24 @@ test.describe('Custom classes (VEG-506)', () => {
     });
     expect((await strangerCards.json()).groups[0].cards).toEqual([]);
 
-    // The route moved off SrdController's blanket URL-keyed cache in this slice.
-    // An anonymous request to the same URL the owner just used must not be served
-    // the owner's cached response — the failure mode the move exists to prevent.
-    const anonSearch = await strangerPage.request.get(
-      `${BACKEND}/api/srd/features?q=${encodeURIComponent(featureName)}`,
-      { headers: { Cookie: '' } }
+    // The anonymous path, which is a different branch rather than a stronger
+    // version of the stranger case above: an authenticated stranger gets the
+    // catalog OR-ed with their own homebrew, while an anonymous caller gets the
+    // bare catalog — and only the anonymous response is cacheable under
+    // AnonymousCacheInterceptor, so it is the one a stale entry could serve.
+    // It does NOT independently prove the blanket-cache regression; the stranger
+    // assertion above already would, since under the old interceptor they would
+    // be handed the owner's cached total of 1.
+    //
+    // A fresh context, not `headers: { Cookie: '' }`: Playwright merges the
+    // context's cookie jar into the request, so that would have been a third
+    // logged-in stranger call dressed up as an anonymous one.
+    const anon = await browser.newContext();
+    const anonSearch = await anon.request.get(
+      `${BACKEND}/api/srd/features?q=${encodeURIComponent(featureName)}`
     );
     expect((await anonSearch.json()).total).toBe(0);
+    await anon.close();
 
     // The SRD catalog is still there for everyone — the scoping narrowed the
     // right thing, not everything.

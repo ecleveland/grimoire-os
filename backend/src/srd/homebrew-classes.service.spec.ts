@@ -299,6 +299,46 @@ describe('HomebrewClassesService', () => {
       expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
     });
 
+    // Pins the field mapping, which is the guard that actually enforces this:
+    // replacing its named fields with a spread makes this test fail. (The
+    // `classId`-last ordering at the insert is a second, cheaper layer that no
+    // test distinguishes, precisely because this one holds first.) Worth a test
+    // because tsc cannot see the loss — a spread into an object literal skips
+    // excess-property checking, so the mapping can be widened silently.
+    it('never lets a row reparent itself or smuggle an id past the field mapping', async () => {
+      await service.update(
+        'c1',
+        {
+          features: [{ name: 'Rage', level: 1, classId: 'other-class', id: 'f9' }],
+        } as never,
+        OWNER
+      );
+
+      expect(prisma.classFeature.createMany).toHaveBeenCalledWith({
+        data: [{ classId: 'c1', name: 'Rage', level: 1, description: '' }],
+      });
+    });
+
+    // The NOT NULL column's default on the update path. Create already pins it;
+    // update went through a different helper call and did not.
+    it('defaults a missing description to the empty string on the update path', async () => {
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+
+      const { data } = prisma.classFeature.createMany.mock.calls[0][0] as {
+        data: { description: string }[];
+      };
+      expect(data[0].description).toBe('');
+    });
+
+    // A features-only PATCH leaves nothing for the parent columns, so Prisma is
+    // asked to update with an empty object. It works, but until now only the
+    // E2E proved that — the slowest gate in the project for a one-line fact.
+    it('still issues the parent update when only features changed', async () => {
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+
+      expect(prisma.srdClass.update).toHaveBeenCalledWith({ where: { id: 'c1' }, data: {} });
+    });
+
     it('runs the parent update and both child writes inside one transaction', async () => {
       await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
 
