@@ -88,10 +88,18 @@ export default async function ClassListPage() {
               <div>
                 <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
                 <div className="flex flex-wrap gap-1 mt-1">
+                  {/* Keyed by level and name, not name alone: VEG-507 widened the
+                      class_features unique key to [classId, name, level], so one
+                      name recurring at several levels — Ability Score Improvement
+                      at 4, 8 and 12 — is now a legal class. Under a name-only key
+                      React would collapse those rows into one chip. Not reachable
+                      while this page fetches anonymously, but VEG-508 makes the
+                      list owner-aware and a silently-dropped chip is not the way
+                      to find that out. */}
                   {cls.features.map(f =>
                     f.id ? (
                       <PrintToggle
-                        key={f.name}
+                        key={f.id}
                         type="feature"
                         id={f.id}
                         name={f.name}
@@ -99,7 +107,7 @@ export default async function ClassListPage() {
                       />
                     ) : (
                       <span
-                        key={f.name}
+                        key={`${f.level}-${f.name}`}
                         className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
                       >
                         {f.name}

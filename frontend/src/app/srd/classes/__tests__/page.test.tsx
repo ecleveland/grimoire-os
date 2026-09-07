@@ -152,4 +152,57 @@ describe('ClassListPage', () => {
       errorSpy.mockRestore();
     });
   });
+
+  // VEG-507 widened class_features to [classId, name, level], so one name
+  // recurring at several levels is a legal class — Ability Score Improvement at
+  // 4, 8 and 12, in every class in the game.
+  //
+  // The assertion is on React's duplicate-key warning rather than on the chip
+  // count, and that is the whole point: React renders duplicate-keyed siblings
+  // anyway on a first mount and only complains, so counting chips passes with or
+  // without the fix and proves nothing. The warning is the only observable
+  // difference, and the damage it predicts — state attaching to the wrong
+  // sibling on re-render — is real once VEG-508 makes this list owner-aware and
+  // the chips carry print-tray state.
+  describe('a feature name recurring at several levels', () => {
+    const duplicateKeyWarnings = (spy: ReturnType<typeof vi.spyOn>) =>
+      spy.mock.calls.filter(call => String(call[0]).includes('same key'));
+
+    it('gives each level its own React key', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetchSrdList.mockResolvedValue([
+        makeClass({
+          features: [
+            { id: 'cf-asi-4', name: 'Ability Score Improvement', level: 4 },
+            { id: 'cf-asi-8', name: 'Ability Score Improvement', level: 8 },
+            { id: 'cf-asi-12', name: 'Ability Score Improvement', level: 12 },
+          ],
+        }),
+      ]);
+
+      await renderPage();
+
+      expect(duplicateKeyWarnings(errorSpy)).toEqual([]);
+      expect(screen.getAllByText('Ability Score Improvement')).toHaveLength(3);
+      errorSpy.mockRestore();
+    });
+
+    it('keeps the id-less fallback chips distinct too', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockFetchSrdList.mockResolvedValue([
+        makeClass({
+          features: [
+            { name: 'Ability Score Improvement', level: 4 },
+            { name: 'Ability Score Improvement', level: 8 },
+          ],
+        }),
+      ]);
+
+      await renderPage();
+
+      expect(duplicateKeyWarnings(errorSpy)).toEqual([]);
+      expect(screen.getAllByText('Ability Score Improvement')).toHaveLength(2);
+      errorSpy.mockRestore();
+    });
+  });
 });

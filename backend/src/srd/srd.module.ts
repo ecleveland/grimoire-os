@@ -6,6 +6,7 @@ import { FeatsController } from './feats.controller';
 import { BackgroundsController } from './backgrounds.controller';
 import { ClassesController, SubclassesController } from './classes.controller';
 import { ItemsController } from './items.controller';
+import { FeaturesController } from './features.controller';
 import { SearchController } from './search.controller';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
@@ -27,6 +28,7 @@ import { HomebrewClassesService } from './homebrew-classes.service';
     ClassesController,
     SubclassesController,
     ItemsController,
+    FeaturesController,
     SearchController,
   ],
   providers: [

@@ -16,7 +16,6 @@ import { SkipCsrf } from '../auth/guards/csrf.guard';
 import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { SrdService } from './srd.service';
 import { PrintableCardsService } from './printable-cards.service';
-import { QueryFeaturesDto } from './dto/query-features.dto';
 import { HydratePrintCardsDto } from './dto/hydrate-cards.dto';
 
 @ApiTags('SRD')
@@ -31,10 +30,10 @@ export class SrdController {
   // Spell routes live in SpellsController (VEG-294), monster routes in
   // MonstersController (VEG-293), feat routes in FeatsController (VEG-295),
   // item routes in ItemsController (VEG-296), background routes in
-  // BackgroundsController (VEG-431), and class/subclass routes in
-  // ClassesController (VEG-505): their responses vary per user (caller's
-  // homebrew included), so they must stay off this controller's URL-keyed
-  // CacheInterceptor.
+  // BackgroundsController (VEG-431), class/subclass routes in
+  // ClassesController (VEG-505), and feature routes in FeaturesController
+  // (VEG-507): their responses vary per user (caller's homebrew included), so
+  // they must stay off this controller's URL-keyed CacheInterceptor.
 
   // ── Races ───────────────────────────────────────────
 
@@ -123,15 +122,9 @@ export class SrdController {
     return this.srdService.findRulesByCategory(category);
   }
 
-  // ── Features (cross-parent search) ──────────────────
-
-  @Get('features')
-  @ApiOperation({
-    summary: 'Search class/subclass/race/background features',
-  })
-  searchFeatures(@Query() query: QueryFeaturesDto) {
-    return this.srdService.searchFeatures(query);
-  }
+  // Features moved to FeaturesController (VEG-507): a feature's tier is its
+  // parent's, so scoping the search makes the response vary per caller and it
+  // can no longer sit behind this controller's blanket URL-keyed cache.
 
   // The unified search route lives in SearchController (VEG-294): the caller's
   // homebrew spells ride along, so it must stay off this controller's

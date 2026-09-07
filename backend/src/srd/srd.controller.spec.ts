@@ -34,7 +34,6 @@ describe('SrdController', () => {
       findLanguage: jest.fn(),
       findAllRules: jest.fn(),
       findRulesByCategory: jest.fn(),
-      searchFeatures: jest.fn(),
     };
 
     printableCardsService = { hydrate: jest.fn() };
@@ -212,18 +211,8 @@ describe('SrdController', () => {
     });
   });
 
-  describe('searchFeatures', () => {
-    it('delegates to service with query', async () => {
-      const query = { q: 'rage', parentType: 'class' as const };
-      service.searchFeatures.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
-
-      const result = await controller.searchFeatures(query as any);
-
-      expect(service.searchFeatures).toHaveBeenCalledWith(query);
-      expect(result).toEqual({ data: [], total: 0, page: 1, lastPage: 1 });
-    });
-  });
-
+  // The feature search route moved to FeaturesController (VEG-507) — see
+  // features.controller.spec.ts, which also pins that it left this controller.
   // The unified search route moved to SearchController (VEG-294) — see search.controller.spec.ts.
 
   describe('hydrateCards (POST /srd/cards)', () => {

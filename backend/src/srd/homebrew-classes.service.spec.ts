@@ -28,6 +28,14 @@ function p2003(): Prisma.PrismaClientKnownRequestError {
   });
 }
 
+function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'test',
+    meta: { target },
+  });
+}
+
 describe('HomebrewClassesService', () => {
   let service: HomebrewClassesService;
   let prisma: MockPrismaService;
@@ -171,6 +179,163 @@ describe('HomebrewClassesService', () => {
       prisma.srdClass.delete.mockRejectedValue(new Error('connection reset'));
 
       await expect(service.remove('c1', OWNER)).rejects.toThrow('connection reset');
+    });
+  });
+
+  // ── Features as child rows (VEG-507) ────────────────────
+
+  describe('features on create', () => {
+    it('writes them as a nested create alongside the class columns', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+
+      await service.create(
+        makeCreateDto({
+          features: [
+            { name: 'Rage', level: 1, description: 'Primal ferocity.' },
+            { name: 'Extra Attack', level: 5, description: 'Twice, not once.' },
+          ],
+        }),
+        OWNER
+      );
+
+      expect(prisma.srdClass.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          name: 'Warden',
+          features: {
+            create: [
+              { name: 'Rage', level: 1, description: 'Primal ferocity.' },
+              { name: 'Extra Attack', level: 5, description: 'Twice, not once.' },
+            ],
+          },
+        }),
+      });
+    });
+
+    it('defaults a missing description to the empty string — the column is NOT NULL', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+
+      await service.create(makeCreateDto({ features: [{ name: 'Rage', level: 1 }] }), OWNER);
+
+      const { data } = prisma.srdClass.create.mock.calls[0][0] as {
+        data: { features: { create: { description: string }[] } };
+      };
+      expect(data.features.create[0].description).toBe('');
+    });
+
+    it('sends no features key at all when the body omits it', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+
+      await service.create(makeCreateDto(), OWNER);
+
+      const { data } = prisma.srdClass.create.mock.calls[0][0] as { data: Record<string, unknown> };
+      expect(data).not.toHaveProperty('features');
+    });
+
+    it('sends an empty nested create for an explicitly empty list', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+
+      await service.create(makeCreateDto({ features: [] }), OWNER);
+
+      const { data } = prisma.srdClass.create.mock.calls[0][0] as {
+        data: { features: { create: unknown[] } };
+      };
+      expect(data.features.create).toEqual([]);
+    });
+  });
+
+  describe('features on update', () => {
+    beforeEach(() => {
+      prisma.srdClass.findUnique.mockResolvedValue(homebrewRow);
+      prisma.srdClass.update.mockResolvedValue(homebrewRow);
+      prisma.classFeature.deleteMany.mockResolvedValue({ count: 0 });
+      prisma.classFeature.createMany.mockResolvedValue({ count: 0 });
+    });
+
+    it('replaces the whole list: delete every row, then insert the payload', async () => {
+      await service.update(
+        'c1',
+        { features: [{ name: 'Rage', level: 1, description: 'Rewritten.' }] } as never,
+        OWNER
+      );
+
+      expect(prisma.classFeature.deleteMany).toHaveBeenCalledWith({ where: { classId: 'c1' } });
+      expect(prisma.classFeature.createMany).toHaveBeenCalledWith({
+        data: [{ classId: 'c1', name: 'Rage', level: 1, description: 'Rewritten.' }],
+      });
+    });
+
+    it('keeps features out of the parent column data', async () => {
+      await service.update(
+        'c1',
+        { description: 'New prose.', features: [{ name: 'Rage', level: 1 }] } as never,
+        OWNER
+      );
+
+      const { data } = prisma.srdClass.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(data).not.toHaveProperty('features');
+      expect(data.description).toBe('New prose.');
+    });
+
+    it('leaves the existing rows alone when the body omits features', async () => {
+      await service.update('c1', { description: 'New prose.' } as never, OWNER);
+
+      expect(prisma.classFeature.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
+    });
+
+    it('clears every row for an empty array, without an empty insert', async () => {
+      await service.update('c1', { features: [] } as never, OWNER);
+
+      expect(prisma.classFeature.deleteMany).toHaveBeenCalledWith({ where: { classId: 'c1' } });
+      expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
+    });
+
+    it('clears every row for a null, matching the null-clear convention', async () => {
+      await service.update('c1', { features: null } as never, OWNER);
+
+      expect(prisma.classFeature.deleteMany).toHaveBeenCalledWith({ where: { classId: 'c1' } });
+      expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
+    });
+
+    it('runs the parent update and both child writes inside one transaction', async () => {
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      // A failure part-way through must not leave the parent updated and the
+      // children half-rewritten, which is the whole reason VEG-512 added the seam.
+      const order = [
+        prisma.srdClass.update.mock.invocationCallOrder[0],
+        prisma.classFeature.deleteMany.mock.invocationCallOrder[0],
+        prisma.classFeature.createMany.mock.invocationCallOrder[0],
+      ];
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+    });
+
+    it('returns the row the update produced, not the row it authorized', async () => {
+      const written = { ...homebrewRow, description: 'Rewritten.' };
+      prisma.srdClass.update.mockResolvedValue(written);
+
+      await expect(
+        service.update('c1', { description: 'Rewritten.' } as never, OWNER)
+      ).resolves.toEqual(written);
+    });
+
+    it('reports a duplicate feature as a feature conflict, not a duplicate class name', async () => {
+      prisma.classFeature.createMany.mockRejectedValue(p2002(['classId', 'name', 'level']));
+
+      await expect(
+        service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER)
+      ).rejects.toThrow(/feature/i);
+    });
+
+    it('still maps a duplicate class name to the class-level conflict copy', async () => {
+      prisma.srdClass.update.mockRejectedValue(p2002(['name']));
+
+      await expect(service.update('c1', { name: 'Fighter' } as never, OWNER)).rejects.toThrow(
+        /class with this name/i
+      );
     });
   });
 });

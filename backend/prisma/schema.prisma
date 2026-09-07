@@ -583,7 +583,13 @@ model ClassFeature {
 
   class SrdClass @relation(fields: [classId], references: [id], onDelete: Cascade)
 
-  @@unique([classId, name])
+  // Keyed on level as well as name (VEG-507). The original [classId, name] made
+  // a recurring feature unrepresentable, and recurrence is how real classes are
+  // written: Ability Score Improvement lands at 4, 8, 12, 16 and 19 in every
+  // one of them. The SRD seed never hit the limit — it omits ASI as a universal
+  // rule and lists Extra Attack once per class — so nothing surfaced it until a
+  // user could author a class by hand.
+  @@unique([classId, name, level])
   @@index([name])
   @@index([classId])
   @@map("class_features")
@@ -598,7 +604,12 @@ model SubclassFeature {
 
   subclass Subclass @relation(fields: [subclassId], references: [id], onDelete: Cascade)
 
-  @@unique([subclassId, name])
+  // Widened alongside ClassFeature above, in the same migration (VEG-507).
+  // Subclass features are not authorable until VEG-509, so this key guards
+  // nothing today; it is here because the two tables are the same shape and a
+  // second migration to bring one in line with the other is a change nobody
+  // would think to look for.
+  @@unique([subclassId, name, level])
   @@index([name])
   @@index([subclassId])
   @@map("subclass_features")

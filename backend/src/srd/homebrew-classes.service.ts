@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { Prisma, SrdClass } from '@prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
-import { CreateClassDto } from './dto/create-class.dto';
+import { ClassFeatureDto, CreateClassDto } from './dto/create-class.dto';
 import { UpdateClassDto } from './dto/update-class.dto';
+import { ContentActor } from './content-access.service';
 
 /** `numSkillChoices` is `Int @default(2)`; a null clear resets to that. */
 const DEFAULT_NUM_SKILL_CHOICES = 2;
@@ -20,6 +21,67 @@ const STRING_ARRAY_COLUMNS = [
 /** Nullable `Json?` columns: Prisma wants DbNull, not a plain null. */
 const JSON_COLUMNS = ['spellcasting', 'equipmentChoices', 'multiclassing'] as const;
 
+/** A normalized `ClassFeature` row, parent id excluded. */
+interface FeatureRow {
+  name: string;
+  level: number;
+  description: string;
+}
+
+/**
+ * Pull the normalized feature list off column data, leaving the parent columns
+ * behind. `undefined` means the request said nothing about features; an array
+ * (possibly empty) means replace the lot.
+ *
+ * Mutates rather than returning a copy so there is exactly one object in play:
+ * a `{ rest, features }` split would leave the caller free to write the wrong
+ * half, and `features` reaching `srdClass.update` as a column is a Prisma error
+ * at best and a silent nested write at worst.
+ */
+function takeFeatures(data: ColumnData): FeatureRow[] | undefined {
+  if (!('features' in data)) return undefined;
+  const rows = data.features as FeatureRow[];
+  delete data.features;
+  return rows;
+}
+
+/**
+ * Whether a Prisma error is a unique violation on the class_features index
+ * rather than on the parent class's name.
+ *
+ * `level` is the discriminator because none of the class-name indexes carry it:
+ * the three partial uniques on `srd_classes` key on `name` and `createdById`
+ * (VEG-505), while `class_features` keys on `[classId, name, level]`. Prisma
+ * reports the field names rather than the index name — verified against a live
+ * Postgres, where the duplicate raises `meta.target = ['classId','name','level']`
+ * — so this reads the same list the unit spec constructs.
+ */
+function isFeatureConflict(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
+  const target = (err.meta as { target?: unknown } | undefined)?.target;
+  return Array.isArray(target) && target.includes('level');
+}
+
+/**
+ * Normalize the DTO's feature list into insertable rows.
+ *
+ * `description` is optional on the DTO and NOT NULL on the column, so a missing
+ * one becomes the empty string rather than reaching Prisma as undefined — a
+ * half-drafted feature is a real state and should not need invented prose. A
+ * null list clears every row, matching the `String[]` null-clear convention.
+ *
+ * Order is preserved from the payload but is not load-bearing: every read path
+ * sorts by `(level, name)`.
+ */
+function toFeatureRows(value: unknown): FeatureRow[] {
+  if (value === null || value === undefined) return [];
+  return (value as ClassFeatureDto[]).map(f => ({
+    name: f.name,
+    level: f.level,
+    description: f.description ?? '',
+  }));
+}
+
 /**
  * CRUD for user-authored (homebrew) classes (VEG-506), the first new consumer of
  * the {@link ContentCrudService} skeleton since VEG-336 held it once. The
@@ -27,8 +89,9 @@ const JSON_COLUMNS = ['spellcasting', 'equipmentChoices', 'multiclassing'] as co
  * from the base; this class supplies the column mapping and the one rule a class
  * delete needs.
  *
- * A class created here has no features and no subclasses. Those arrive with
- * VEG-507 and VEG-509.
+ * Features are child `ClassFeature` rows written in the same request (VEG-507),
+ * which makes this the first consumer of the skeleton's `performUpdate` seam.
+ * Subclasses still arrive with VEG-509.
  */
 @Injectable()
 export class HomebrewClassesService extends ContentCrudService<
@@ -41,6 +104,78 @@ export class HomebrewClassesService extends ContentCrudService<
 
   protected get delegate(): ContentWriteDelegate<SrdClass> {
     return this.prisma.srdClass;
+  }
+
+  /**
+   * Turn the normalized feature list into Prisma's nested-create form.
+   *
+   * Not done in {@link toColumnData}, which is handed a `CreateClassDto |
+   * UpdateClassDto` and cannot tell which: the update path needs the same rows
+   * as a plain array so {@link performUpdate} can delete-then-insert them, and
+   * a nested `create` there would append to the existing rows instead of
+   * replacing them.
+   *
+   * An absent `features` key stays absent, so a create that says nothing about
+   * features writes no child rows rather than an empty relation.
+   */
+  protected override beforeCreate(data: ColumnData, _actor: ContentActor): ColumnData {
+    const features = takeFeatures(data);
+    if (features) data.features = { create: features };
+    return data;
+  }
+
+  /**
+   * Replace the class's features in the same transaction as the parent update.
+   *
+   * Full replacement, not a merge — see the `features` docs on
+   * {@link CreateClassDto}. Delete-then-insert rather than a diff: the row's
+   * only natural key is `(name, level)`, so a rename is indistinguishable from
+   * a delete plus an add and any merge would have to guess which the author
+   * meant. Feature ids are therefore not stable across a write, which is why
+   * the printable-card contract addresses features by id read fresh from
+   * `GET /srd/classes/:id` rather than holding one across an edit.
+   *
+   * The transaction is what makes the replacement safe: without it a failure
+   * between the delete and the insert would leave the class with no features at
+   * all, having been asked to change two of them.
+   *
+   * Returns the row the parent update produced, per the hook's contract — not a
+   * re-read, and not the row `update` authorized, either of which would serve
+   * the caller state it just replaced. Features are deliberately not included:
+   * the delegate's `create` cannot include them, so including them here would
+   * make POST and PATCH disagree about what a class response contains.
+   */
+  protected override async performUpdate(id: string, data: ColumnData): Promise<SrdClass> {
+    const features = takeFeatures(data);
+    if (!features) return this.delegate.update({ where: { id }, data });
+
+    return this.prisma.$transaction(async tx => {
+      const updated = await tx.srdClass.update({ where: { id }, data });
+      await tx.classFeature.deleteMany({ where: { classId: id } });
+      if (features.length > 0) {
+        try {
+          await tx.classFeature.createMany({
+            data: features.map(f => ({ classId: id, ...f })),
+          });
+        } catch (err) {
+          // Unreachable through the HTTP boundary today: the DTO's @ArrayUnique
+          // rejects a payload that repeats a (name, level) pair, and the
+          // deleteMany above clears the only other rows the index could collide
+          // with. Kept because `update` maps every failure with the parent's
+          // noun, so without this a duplicate *feature* would reach the client
+          // as "you already have a class with this name" — a message about the
+          // wrong entity is worse than no message. Anything already an
+          // HttpException passes through mapWriteError untouched.
+          if (isFeatureConflict(err)) {
+            throw new ConflictException(
+              'Two features share a name at the same level; each pairing must be unique'
+            );
+          }
+          throw err;
+        }
+      }
+      return updated;
+    });
   }
 
   /**
@@ -89,6 +224,11 @@ export class HomebrewClassesService extends ContentCrudService<
    * three `Json?` columns are nullable but need `Prisma.DbNull`, since Prisma
    * rejects a plain null there. `subclassLevel` is genuinely nullable, so its null
    * passes through untouched — a class with no subclass level is a real state.
+   *
+   * `features` is normalized here into a plain row array and reshaped for Prisma
+   * by whichever hook runs next, since create and update need different shapes.
+   * A null clears the list, the same convention the six `String[]` columns above
+   * follow.
    */
   protected toColumnData(dto: CreateClassDto | UpdateClassDto): ColumnData {
     // Copy so the caller's DTO is never mutated. Reserved ownership/tier columns
@@ -113,6 +253,7 @@ export class HomebrewClassesService extends ContentCrudService<
     if (typeof data.description === 'string' && !data.description.trim()) {
       data.description = null;
     }
+    if ('features' in data) data.features = toFeatureRows(data.features);
     return data;
   }
 }
