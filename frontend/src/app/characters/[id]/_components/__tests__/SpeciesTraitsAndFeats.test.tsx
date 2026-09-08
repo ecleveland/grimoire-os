@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import SpeciesTraitsAndFeats from '../SpeciesTraitsAndFeats';
 import type { Character } from '@/lib/types';
@@ -152,6 +152,50 @@ describe('SpeciesTraitsAndFeats', () => {
       expect(screen.getByText('Species Traits')).toBeInTheDocument();
       expect(screen.getByText('Feats')).toBeInTheDocument();
       expect(screen.getByText('Lucky')).toBeInTheDocument();
+    });
+  });
+
+  // VEG-454. Both list renders here keyed on `feature.name`: the species traits
+  // and the legacy feature-shaped feats. Neither name is unique by construction —
+  // CharacterEditorForm drops only blank-named rows — so the key has to carry
+  // more than the name.
+  describe('repeated feature names (VEG-454)', () => {
+    it('renders both of two identically-named species traits without a duplicate-key warning', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      render(
+        <SpeciesTraitsAndFeats
+          character={{
+            ...baseCharacter,
+            feats: [],
+            features: [
+              { name: 'Darkvision', source: 'Dwarf' },
+              { name: 'Darkvision', source: 'Dwarf' },
+            ],
+          }}
+        />
+      );
+      expect(screen.getAllByText('Darkvision')).toHaveLength(2);
+      expect(consoleError).not.toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
+
+    it('renders both of two identically-named legacy feature-feats without a duplicate-key warning', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      render(
+        <SpeciesTraitsAndFeats
+          character={{
+            ...baseCharacter,
+            feats: [],
+            features: [
+              { name: 'Lucky', source: 'Feat' },
+              { name: 'Lucky', source: 'Feat' },
+            ],
+          }}
+        />
+      );
+      expect(screen.getAllByText('Lucky')).toHaveLength(2);
+      expect(consoleError).not.toHaveBeenCalled();
+      consoleError.mockRestore();
     });
   });
 });

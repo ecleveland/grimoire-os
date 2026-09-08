@@ -15,6 +15,7 @@ import {
   hpGain,
   MAX_LEVEL,
 } from '@/lib/character-level';
+import { characterFeatureIdentity, featureRenderKey } from '@/lib/character-features';
 import type { CharacterPatch } from './useCharacterMutation';
 import { formatModifier } from './utils';
 
@@ -45,8 +46,10 @@ export default function LevelUpDialog({
   const newLevel = character.level + 1;
   const [mode, setMode] = useState<'average' | 'roll'>('average');
   const [roll, setRoll] = useState<number | null>(null);
-  // Names the player unchecked — defaulting to "none" keeps every suggested
-  // feature checked without syncing state when the class catalog resolves.
+  // Identities the player unchecked — defaulting to "none" keeps every suggested
+  // feature checked without syncing state when the class catalog resolves. Keyed
+  // the same way the rows are, rather than on the bare name, so the checkbox
+  // state doesn't quietly depend on names being unique within one level.
   const [unchecked, setUnchecked] = useState<ReadonlySet<string>>(new Set());
   // Level the confirmed write targets, or null before confirming. The dialog
   // closes only once the bumped character flows back down — a failed write
@@ -88,25 +91,26 @@ export default function LevelUpDialog({
   const base = mode === 'average' ? averageHpForDie(die) : roll;
   const gain = hasHitPoints && base !== null ? hpGain(base, conMod) : null;
 
-  // Never re-offer a feature the character already owns (e.g. after a manual
-  // level revert) — a duplicate append would collide on the sheet's
-  // name-keyed feature list.
-  const ownedFeatureKeys = new Set(
-    (character.features ?? []).map(f => `${f.name}\u0000${f.source ?? ''}`)
-  );
+  // Never re-offer a grant the character already owns *at this level* (e.g. after
+  // a manual level revert) — a duplicate append would put two identical entries
+  // on the sheet. The level is load-bearing: keyed on name and source alone this
+  // also swallowed every recurring feature after the first, so a class carrying
+  // Ability Score Improvement at 4 and 8 silently granted it once (VEG-454).
+  // A stored feature with no level can't claim one, so it no longer suppresses.
+  const ownedFeatureKeys = new Set((character.features ?? []).map(characterFeatureIdentity));
   const suggestedFeatures = (srdClass ? classFeaturesAtLevel(srdClass, newLevel) : []).filter(
-    f => !ownedFeatureKeys.has(`${f.name}\u0000${f.source ?? ''}`)
+    f => !ownedFeatureKeys.has(characterFeatureIdentity(f))
   );
-  const chosenFeatures = suggestedFeatures.filter(f => !unchecked.has(f.name));
+  const chosenFeatures = suggestedFeatures.filter(f => !unchecked.has(characterFeatureIdentity(f)));
 
   const oldProf = proficiencyBonus(character.level);
   const newProf = proficiencyBonus(newLevel);
 
-  const toggleFeature = (name: string) => {
+  const toggleFeature = (identity: string) => {
     setUnchecked(prev => {
       const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
+      if (next.has(identity)) next.delete(identity);
+      else next.add(identity);
       return next;
     });
   };
@@ -208,16 +212,16 @@ export default function LevelUpDialog({
         {suggestedFeatures.length > 0 && (
           <div className="space-y-2">
             <h3 className={sectionTitleClass}>New Features at Level {newLevel}</h3>
-            {suggestedFeatures.map(feature => (
+            {suggestedFeatures.map((feature, i) => (
               <label
-                key={feature.name}
+                key={featureRenderKey(feature, i)}
                 className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300"
               >
                 <input
                   type="checkbox"
                   aria-label={feature.name}
-                  checked={!unchecked.has(feature.name)}
-                  onChange={() => toggleFeature(feature.name)}
+                  checked={!unchecked.has(characterFeatureIdentity(feature))}
+                  onChange={() => toggleFeature(characterFeatureIdentity(feature))}
                   className="mt-0.5"
                 />
                 <span>

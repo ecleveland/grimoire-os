@@ -63,4 +63,21 @@ describe('FeaturesEditor', () => {
     const options = datalist?.querySelectorAll('option') ?? [];
     expect(Array.from(options).map(o => o.getAttribute('value'))).toEqual(['Fighter', 'Elf']);
   });
+
+  // VEG-454. The editor offers no level input — a hand-entered row has no
+  // granting level to record. What matters is that it doesn't *erase* one:
+  // `update` spreads the existing feature, so a level written by the level-up
+  // dialog survives an unrelated edit here rather than being dropped and
+  // silently re-collapsing two grants of a recurring name into one.
+  it('preserves a level written by the level-up dialog through an unrelated edit', () => {
+    const onChange = vi.fn();
+    const granted = f({ name: 'Ability Score Improvement', level: 8 });
+    render(<FeaturesEditor value={[granted]} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Feature description'), {
+      target: { value: 'Raise an ability score by 2.' },
+    });
+    expect(onChange).toHaveBeenLastCalledWith([
+      { ...granted, description: 'Raise an ability score by 2.' },
+    ]);
+  });
 });

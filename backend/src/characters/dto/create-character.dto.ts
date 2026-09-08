@@ -371,6 +371,19 @@ class FeatureDto implements Feature {
   @IsString()
   source?: string;
 
+  // The character level this grant arrived at (VEG-454), which is what separates
+  // one occurrence of a recurring feature name from the next. Same bounds as the
+  // character's own `level` two screens down, for the same reason: 5e caps at 20.
+  // `implements Feature` does not require an optional member, so nothing but the
+  // spec catches this field going missing — and without it forbidNonWhitelisted
+  // 400s every level-up write that carries one (the VEG-349 deathSaves trap).
+  @ApiPropertyOptional({ example: 8, description: 'Character level the feature was gained at' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  level?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

@@ -1226,6 +1226,63 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
     });
   });
 
+  describe('features (VEG-454)', () => {
+    // Validated under the app's real strictness (whitelist + forbidNonWhitelisted).
+    // `class FeatureDto implements Feature` compiles fine with `level` missing —
+    // an optional interface member is not required by `implements` — so nothing
+    // but this spec catches the field being stripped or 400'd at runtime. That is
+    // the VEG-349 deathSaves trap, and the level-up write is the caller that
+    // would hit it.
+    it('accepts a feature carrying the level it was granted at (not rejected as unwhitelisted)', async () => {
+      const dto = toDto({
+        ...baseDto,
+        features: [
+          {
+            name: 'Ability Score Improvement',
+            source: 'Fighter',
+            level: 8,
+            description: 'Raise an ability score.',
+          },
+        ],
+      });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'features')).toHaveLength(0);
+    });
+
+    it('accepts two grants of one name at different levels', async () => {
+      const dto = toDto({
+        ...baseDto,
+        features: [
+          { name: 'Ability Score Improvement', source: 'Fighter', level: 4 },
+          { name: 'Ability Score Improvement', source: 'Fighter', level: 8 },
+        ],
+      });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'features')).toHaveLength(0);
+    });
+
+    // Species traits and hand-entered rows have no granting level.
+    it('accepts a feature with no level', async () => {
+      const dto = toDto({ ...baseDto, features: [{ name: 'Darkvision', source: 'Elf' }] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      expect(errors.filter(e => e.property === 'features')).toHaveLength(0);
+    });
+
+    it.each([
+      ['zero', 0, 'min'],
+      ['past the level-20 cap', 21, 'max'],
+      ['fractional', 2.5, 'isInt'],
+      ['a numeric string', '4', 'isInt'],
+    ])('rejects a level that is %s', async (_label, level, constraint) => {
+      const dto = toDto({ ...baseDto, features: [{ name: 'Rage', level }] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      const levelError = errors
+        .find(e => e.property === 'features')
+        ?.children?.[0]?.children?.find(c => c.property === 'level');
+      expect(levelError?.constraints).toHaveProperty(constraint);
+    });
+  });
+
   describe('all new fields optional', () => {
     it('passes validation with none of the new fields set', async () => {
       const dto = toDto(baseDto);

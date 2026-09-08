@@ -1,4 +1,5 @@
 import type { Character } from '@/lib/types';
+import { featureRenderKey } from '@/lib/character-features';
 
 interface SpeciesTraitsAndFeatsProps {
   character: Character;
@@ -35,8 +36,8 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
           Species Traits
         </h3>
         <div className="space-y-3">
-          {speciesTraits.map(feature => (
-            <div key={feature.name}>
+          {speciesTraits.map((feature, i) => (
+            <div key={featureRenderKey(feature, i)}>
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feature.name}
               </span>
@@ -67,8 +68,8 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
               </span>
             </div>
           ))}
-          {featureFeats.map(feature => (
-            <div key={`feature:${feature.name}`}>
+          {featureFeats.map((feature, i) => (
+            <div key={`feature:${featureRenderKey(feature, i)}`}>
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feature.name}
               </span>

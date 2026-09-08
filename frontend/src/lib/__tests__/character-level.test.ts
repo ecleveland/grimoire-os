@@ -86,18 +86,42 @@ describe('hpGain', () => {
 describe('classFeaturesAtLevel', () => {
   it('returns only the features unlocked at exactly that level, tagged with the class as source', () => {
     expect(classFeaturesAtLevel(srdClass(), 2)).toEqual([
-      { name: 'Action Surge', source: 'Fighter', description: 'Take one additional action.' },
+      {
+        name: 'Action Surge',
+        source: 'Fighter',
+        level: 2,
+        description: 'Take one additional action.',
+      },
     ]);
   });
 
   it('omits description when the catalog feature has none', () => {
     expect(classFeaturesAtLevel(srdClass(), 5)).toEqual([
-      { name: 'Extra Attack', source: 'Fighter' },
+      { name: 'Extra Attack', source: 'Fighter', level: 5 },
     ]);
   });
 
   it('returns an empty list for a level with no new features', () => {
     expect(classFeaturesAtLevel(srdClass(), 3)).toEqual([]);
+  });
+
+  // VEG-454. `level` is what separates one grant of a recurring name from the
+  // next once VEG-507 let a class carry "Ability Score Improvement" at 4 and 8.
+  // Dropping it here is where the level-up dedupe lost the ability to tell them
+  // apart, so each projection carries the level it was granted at.
+  it('carries the granting level onto every projected feature', () => {
+    const cls = srdClass({
+      features: [
+        { name: 'Ability Score Improvement', level: 4 },
+        { name: 'Ability Score Improvement', level: 8 },
+      ],
+    });
+    expect(classFeaturesAtLevel(cls, 4)).toEqual([
+      { name: 'Ability Score Improvement', source: 'Fighter', level: 4 },
+    ]);
+    expect(classFeaturesAtLevel(cls, 8)).toEqual([
+      { name: 'Ability Score Improvement', source: 'Fighter', level: 8 },
+    ]);
   });
 });
 

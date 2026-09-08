@@ -42,6 +42,18 @@ const fighterClass: SrdClass = {
   source: 'SRD 5.2.1',
 };
 
+// VEG-454. A class carrying one feature name at two levels — legal since
+// VEG-507 widened the unique key to [classId, name, level], and the shape every
+// real class has for Ability Score Improvement. Kept separate from
+// `fighterClass` so the level-6 assertions above don't have to absorb it.
+const fighterWithRecurringAsi: SrdClass = {
+  ...fighterClass,
+  features: [
+    { name: 'Ability Score Improvement', level: 4, description: 'Raise an ability score.' },
+    { name: 'Ability Score Improvement', level: 6, description: 'Raise an ability score.' },
+  ],
+};
+
 const onPatch = vi.fn();
 const editable = { editable: true as const, onPatch, isSaving: false };
 
@@ -294,8 +306,8 @@ describe('LevelUpSection', () => {
         expect.objectContaining({
           features: [
             { name: 'Second Wind', source: 'Fighter' },
-            { name: 'Extra Attack', source: 'Fighter', description: 'Attack twice.' },
-            { name: 'Another Level-6 Boon', source: 'Fighter' },
+            { name: 'Extra Attack', source: 'Fighter', level: 6, description: 'Attack twice.' },
+            { name: 'Another Level-6 Boon', source: 'Fighter', level: 6 },
           ],
         })
       );
@@ -310,7 +322,7 @@ describe('LevelUpSection', () => {
       await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
       const patch = onPatch.mock.calls[0][0];
       expect(patch.features).toEqual([
-        { name: 'Extra Attack', source: 'Fighter', description: 'Attack twice.' },
+        { name: 'Extra Attack', source: 'Fighter', level: 6, description: 'Attack twice.' },
       ]);
     });
 
@@ -414,11 +426,16 @@ describe('LevelUpSection', () => {
       expect(onPatch).toHaveBeenCalledTimes(1);
     });
 
-    it('does not offer or re-append a feature the character already owns', async () => {
+    // The revert guard: a character knocked back a level and re-leveled must not
+    // collect a second copy of the same grant. Keyed on name + source + level
+    // since VEG-454, so the stored feature carries the level it was granted at.
+    it('does not offer or re-append a feature the character already owns at that level', async () => {
       mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
       const user = userEvent.setup();
       renderSection({
-        features: [{ name: 'Extra Attack', source: 'Fighter', description: 'Attack twice.' }],
+        features: [
+          { name: 'Extra Attack', source: 'Fighter', level: 6, description: 'Attack twice.' },
+        ],
       });
       const dialog = await openDialog(user);
       expect(
@@ -427,9 +444,61 @@ describe('LevelUpSection', () => {
       await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
       const patch = onPatch.mock.calls[0][0];
       expect(patch.features).toEqual([
-        { name: 'Extra Attack', source: 'Fighter', description: 'Attack twice.' },
-        { name: 'Another Level-6 Boon', source: 'Fighter' },
+        { name: 'Extra Attack', source: 'Fighter', level: 6, description: 'Attack twice.' },
+        { name: 'Another Level-6 Boon', source: 'Fighter', level: 6 },
       ]);
+    });
+
+    // VEG-454, the bug itself. Owning the level-4 Ability Score Improvement must
+    // not suppress the level-6 one — before the fix the section rendered nothing,
+    // `applyLevelUp` wrote no feature, and no error was shown.
+    it('still offers a recurring feature name at a level the character has not reached it', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterWithRecurringAsi] });
+      const user = userEvent.setup();
+      renderSection({
+        features: [
+          {
+            name: 'Ability Score Improvement',
+            source: 'Fighter',
+            level: 4,
+            description: 'Raise an ability score.',
+          },
+        ],
+      });
+      const dialog = await openDialog(user);
+      expect(
+        within(dialog).getByRole('checkbox', { name: /ability score improvement/i })
+      ).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+      expect(onPatch.mock.calls[0][0].features).toEqual([
+        {
+          name: 'Ability Score Improvement',
+          source: 'Fighter',
+          level: 4,
+          description: 'Raise an ability score.',
+        },
+        {
+          name: 'Ability Score Improvement',
+          source: 'Fighter',
+          level: 6,
+          description: 'Raise an ability score.',
+        },
+      ]);
+    });
+
+    // Features stored before VEG-454 carry no level, so they can't claim a
+    // specific one. Re-offering is the deliberate choice over suppressing: the
+    // checkbox is visible and the player can uncheck it, whereas suppression
+    // would silently deny a legacy character every recurring grant it already
+    // holds one copy of. The first post-fix level-up writes the level.
+    it('re-offers a match against a legacy feature stored without a level', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+      const user = userEvent.setup();
+      renderSection({
+        features: [{ name: 'Extra Attack', source: 'Fighter', description: 'Attack twice.' }],
+      });
+      const dialog = await openDialog(user);
+      expect(within(dialog).getByRole('checkbox', { name: /extra attack/i })).toBeInTheDocument();
     });
 
     it('can be cancelled without patching', async () => {
