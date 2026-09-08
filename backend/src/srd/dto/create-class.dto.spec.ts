@@ -244,7 +244,12 @@ describe('CreateClassDto (through the production ValidationPipe)', () => {
     );
     await reject(validBody({ features: [{ name: 'x'.repeat(201), level: 1 }] }));
     await reject(
-      validBody({ features: [{ name: 'Rage', level: 1, description: 'x'.repeat(10_001) }] })
+      validBody({ features: [{ name: 'Rage', level: 1, description: 'x'.repeat(2_001) }] })
+    );
+    // Comfortably above the longest SRD entry (411 chars), so the bound cannot
+    // be tightened into rejecting real content without this failing.
+    await accept(
+      validBody({ features: [{ name: 'Rage', level: 1, description: 'x'.repeat(2_000) }] })
     );
   });
 

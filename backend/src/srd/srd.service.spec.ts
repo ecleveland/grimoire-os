@@ -853,6 +853,52 @@ describe('SrdService', () => {
       });
     });
 
+    // VEG-507 makes a name tie the normal case within one class (ASI at 4, 8, 12,
+    // 16, 19), and searchFeatures sorts in memory then slices. Without a
+    // tiebreak the page boundary follows physical row order, so a row can land
+    // on two pages or on none.
+    describe('pagination is total, not just sorted by name', () => {
+      const tied = (id: string, level: number) => ({
+        id,
+        name: 'Ability Score Improvement',
+        level,
+        description: '',
+        classId: 'cls-1',
+        class: { id: 'cls-1', name: 'Warden' },
+      });
+
+      it('orders rows sharing a name by id, whatever order the DB returned them', async () => {
+        const rows = [tied('f-3', 12), tied('f-1', 4), tied('f-2', 8)];
+        prisma.classFeature.findMany.mockResolvedValue(rows);
+        prisma.classFeature.count.mockResolvedValue(rows.length);
+
+        const forward = await service.searchFeatures({ parentType: 'class' }, 'u-1');
+
+        // Same rows, hostile order: the answer must not move.
+        prisma.classFeature.findMany.mockResolvedValue([...rows].reverse());
+        const reversed = await service.searchFeatures({ parentType: 'class' }, 'u-1');
+
+        expect(forward.data.map(f => f.id)).toEqual(['f-1', 'f-2', 'f-3']);
+        expect(reversed.data.map(f => f.id)).toEqual(forward.data.map(f => f.id));
+      });
+
+      it('never serves one row on two pages, nor drops it from both', async () => {
+        const rows = [tied('f-3', 12), tied('f-1', 4), tied('f-2', 8)];
+        prisma.classFeature.findMany.mockResolvedValue(rows);
+        prisma.classFeature.count.mockResolvedValue(rows.length);
+
+        const first = await service.searchFeatures({ parentType: 'class', page: 1, limit: 2 }, 'u');
+        prisma.classFeature.findMany.mockResolvedValue([...rows].reverse());
+        const second = await service.searchFeatures(
+          { parentType: 'class', page: 2, limit: 2 },
+          'u'
+        );
+
+        const seen = [...first.data, ...second.data].map(f => f.id);
+        expect([...seen].sort()).toEqual(['f-1', 'f-2', 'f-3']);
+      });
+    });
+
     describe('unified search (raw SQL)', () => {
       beforeEach(() => {
         prisma.$queryRaw.mockResolvedValue([]);

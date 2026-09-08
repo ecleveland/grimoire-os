@@ -62,6 +62,29 @@ export interface ClassFeature {
   description?: string;
 }
 
+/**
+ * The identity a class or subclass feature is unique by: its level and name,
+ * with the parent id supplied by whatever holds it.
+ *
+ * One copy, because there were three and two of them disagreed. The backend DTO
+ * feeds it to `@ArrayUnique` so a payload is refused exactly when the
+ * `[classId, name, level]` index would refuse it; the editor uses it to flag a
+ * collision as the author types; the class list uses it as a React key. If those
+ * drift — one folds case, another trims — the warning shown in the browser stops
+ * matching the 400 the server returns, and nothing fails to tell you.
+ *
+ * Case-sensitive and untrimmed on purpose: the index is a plain btree over text,
+ * so "Rage" and "rage" are two rows to Postgres, and a rule stricter than the
+ * constraint is one nobody can find by reading the schema.
+ *
+ * The separator is a character `level` cannot contain — it is validated as an
+ * integer at the write boundary — so the prefix before the first `|` is
+ * unambiguous and ("a|1", 1) cannot collide with ("a", "1|1").
+ */
+export function classFeatureIdentity(f: Pick<ClassFeature, 'name' | 'level'>): string {
+  return `${f.level}|${f.name}`;
+}
+
 /** A starting equipment choice group for character creation */
 export interface EquipmentChoiceItem {
   name: string;

@@ -210,7 +210,14 @@ export class ClassFeatureDto {
   @ApiPropertyOptional({ example: 'In battle, you fight with primal ferocity.' })
   @IsOptional()
   @IsString()
-  @MaxLength(10_000)
+  // 2_000, not the 10_000 the class's own description gets. `findAllClasses`
+  // includes every feature's full description with no `select`, and that list is
+  // the character-creation wizard's first-load payload, so this bound multiplied
+  // by MAX_CLASS_FEATURES is the worst case one homebrew class can add to it:
+  // 200KB here, 1MB at 10_000. Measured against the seed for headroom — the
+  // longest SRD class-feature description is 411 characters and the mean is 204,
+  // so this leaves roughly five times the longest real one.
+  @MaxLength(2_000)
   description?: string;
 }
 

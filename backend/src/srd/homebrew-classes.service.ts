@@ -21,6 +21,10 @@ const STRING_ARRAY_COLUMNS = [
 /** Nullable `Json?` columns: Prisma wants DbNull, not a plain null. */
 const JSON_COLUMNS = ['spellcasting', 'equipmentChoices', 'multiclassing'] as const;
 
+/** Copy for a repeated (name, level) pairing, shared by both write paths. */
+const DUPLICATE_FEATURE_MESSAGE =
+  'Two features share a name at the same level; each pairing must be unique';
+
 /** A normalized `ClassFeature` row, parent id excluded. */
 interface FeatureRow {
   name: string;
@@ -39,10 +43,12 @@ interface FeatureRow {
  * at best and a silent nested write at worst.
  */
 function takeFeatures(data: ColumnData): FeatureRow[] | undefined {
-  if (!('features' in data)) return undefined;
-  const rows = data.features as FeatureRow[];
+  const rows = data.features;
+  // Always drop the key, even when the value is undefined: `features` reaching
+  // `srdClass.update` as a scalar column is a Prisma error at best and a silent
+  // nested write at worst, and an undefined own-key is still an own key.
   delete data.features;
-  return rows;
+  return rows === undefined ? undefined : (rows as FeatureRow[]);
 }
 
 /**
@@ -60,6 +66,22 @@ function isFeatureConflict(err: unknown): boolean {
   if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
   const target = (err.meta as { target?: unknown } | undefined)?.target;
   return Array.isArray(target) && target.includes('level');
+}
+
+/**
+ * Refuse a feature list that repeats a (name, level) pairing.
+ *
+ * Mirrors the DTO's `@ArrayUnique`, for the callers that never meet it. Same
+ * copy as the conflict `performUpdate` translates, so the two write paths answer
+ * a duplicate feature identically instead of one of them blaming the class.
+ */
+function assertNoDuplicateFeatures(rows: FeatureRow[]): void {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = `${row.level}|${row.name}`;
+    if (seen.has(key)) throw new ConflictException(DUPLICATE_FEATURE_MESSAGE);
+    seen.add(key);
+  }
 }
 
 /**
@@ -127,7 +149,18 @@ export class HomebrewClassesService extends ContentCrudService<
    */
   protected override beforeCreate(data: ColumnData, _actor: ContentActor): ColumnData {
     const features = takeFeatures(data);
-    if (features) data.features = { create: features };
+    if (features) {
+      // Same reasoning as the catch in performUpdate, applied to the path that
+      // cannot catch. `create` is final, and the skeleton maps every failure
+      // from it with the parent noun, so a P2002 from the nested feature insert
+      // would reach the client as "you already have a class with this name" — a
+      // message about the wrong entity. There is no seam to translate it after
+      // the fact, so the check happens before the write instead. The DTO's
+      // @ArrayUnique makes it unreachable over HTTP; the write skeleton names
+      // seed and import callers as sitting outside that pipe.
+      assertNoDuplicateFeatures(features);
+      data.features = { create: features };
+    }
     return data;
   }
 
@@ -138,9 +171,19 @@ export class HomebrewClassesService extends ContentCrudService<
    * {@link CreateClassDto}. Delete-then-insert rather than a diff: the row's
    * only natural key is `(name, level)`, so a rename is indistinguishable from
    * a delete plus an add and any merge would have to guess which the author
-   * meant. Feature ids are therefore not stable across a write, which is why
-   * the printable-card contract addresses features by id read fresh from
-   * `GET /srd/classes/:id` rather than holding one across an edit.
+   * meant.
+   *
+   * Feature ids are therefore not stable across a write, and one consumer does
+   * hold them across one: the print tray persists `{ type, id }` pairs to
+   * localStorage indefinitely (`print-tray-context.tsx:137`). A class feature
+   * toggled into the tray and then edited by its owner leaves behind an id that
+   * no longer resolves, and `hydrateFeatures` drops unresolvable ids silently,
+   * so the card disappears from `/srd/print` without explanation. That is the
+   * accepted cost of replacement over merge — a merge would have to guess
+   * whether a changed name is an edit or a delete plus an add — and it is
+   * bounded to the owner's own tray entries for the class they just edited.
+   * Recorded rather than papered over: stable ids would need a client-supplied
+   * key on each row, which is a design change and not a fix.
    *
    * The transaction is what makes the replacement safe: without it a failure
    * between the delete and the insert would leave the class with no features at
@@ -181,9 +224,7 @@ export class HomebrewClassesService extends ContentCrudService<
           // wrong entity is worse than no message. Anything already an
           // HttpException passes through mapWriteError untouched.
           if (isFeatureConflict(err)) {
-            throw new ConflictException(
-              'Two features share a name at the same level; each pairing must be unique'
-            );
+            throw new ConflictException(DUPLICATE_FEATURE_MESSAGE);
           }
           throw err;
         }
@@ -267,10 +308,22 @@ export class HomebrewClassesService extends ContentCrudService<
     if (typeof data.description === 'string' && !data.description.trim()) {
       data.description = null;
     }
-    // Read off the DTO rather than the copied ColumnData: `data.features` is
-    // `unknown` there, and casting it back would reintroduce exactly the
-    // unchecked hop the typed DTO field exists to remove.
-    if ('features' in data) data.features = toFeatureRows(dto.features);
+    // Keyed on the VALUE, never on `'features' in data`. Under `target: ES2023`
+    // TypeScript gives declared class fields [[Define]] semantics, so a
+    // pipe-produced CreateClassDto carries `features` as an OWN key holding
+    // undefined even when the body never mentioned it — measured, not assumed.
+    // A presence check therefore reads "the client sent features" on every
+    // single create. Today that only writes an empty nested relation, a Prisma
+    // no-op. On the update path it would mean `deleteMany` on every unrelated
+    // PATCH, wiping a class's whole feature list; that path is safe right now
+    // only because `PartialType` happens to emit a class with no field
+    // declarations, which is an accident of a library and not a decision anyone
+    // recorded. Reading the value makes the rule independent of both.
+    //
+    // undefined -> absent, leave the rows alone. null -> clear them. An array
+    // replaces them.
+    if (dto.features !== undefined) data.features = toFeatureRows(dto.features);
+    else delete data.features;
     return data;
   }
 }

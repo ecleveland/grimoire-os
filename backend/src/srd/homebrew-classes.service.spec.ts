@@ -5,7 +5,10 @@ import { HomebrewClassesService } from './homebrew-classes.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
+import { ValidationPipe } from '@nestjs/common';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../bootstrap-config';
 import { CreateClassDto } from './dto/create-class.dto';
+import { UpdateClassDto } from './dto/update-class.dto';
 
 /**
  * Class-specific write behavior only. The authorization skeleton — the 404-vs-403
@@ -184,6 +187,47 @@ describe('HomebrewClassesService', () => {
 
   // ── Features as child rows (VEG-507) ────────────────────
 
+  // Everything else in this file builds DTOs as plain object literals cast with
+  // `as CreateClassDto`. That is what let the create path's invariant be wrong
+  // and documented as right: a literal has no `features` key, while a real
+  // pipe-produced DTO carries every declared field as an own key holding
+  // undefined (ES2023 [[Define]] semantics on class fields). These two cases run
+  // the production pipe so the service sees what the controller actually hands
+  // it.
+  describe('against a real pipe-produced DTO', () => {
+    const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
+    const transform = <T>(body: object, metatype: T) =>
+      pipe.transform(body, { type: 'body' as const, metatype: metatype as never });
+
+    it('writes no features relation when the create body never mentioned them', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      const dto = await transform({ name: 'Warden', hitDie: 'd10' }, CreateClassDto);
+
+      // Guard the premise rather than assume it: if this stops holding, the
+      // assertion below stops testing anything.
+      expect('features' in (dto as object)).toBe(true);
+      expect((dto as { features?: unknown }).features).toBeUndefined();
+
+      await service.create(dto as CreateClassDto, OWNER);
+
+      const { data } = prisma.srdClass.create.mock.calls[0][0] as { data: Record<string, unknown> };
+      expect(data).not.toHaveProperty('features');
+    });
+
+    it('leaves existing rows alone when the patch body never mentioned features', async () => {
+      prisma.srdClass.findUnique.mockResolvedValue(homebrewRow);
+      prisma.srdClass.update.mockResolvedValue(homebrewRow);
+      const dto = await transform({ description: 'Rewritten.' }, UpdateClassDto);
+
+      await service.update('c1', dto as UpdateClassDto, OWNER);
+
+      expect(prisma.classFeature.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      const { data } = prisma.srdClass.update.mock.calls[0][0] as { data: Record<string, unknown> };
+      expect(data).not.toHaveProperty('features');
+    });
+  });
+
   describe('features on create', () => {
     it('writes them as a nested create alongside the class columns', async () => {
       prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
@@ -229,6 +273,44 @@ describe('HomebrewClassesService', () => {
 
       const { data } = prisma.srdClass.create.mock.calls[0][0] as { data: Record<string, unknown> };
       expect(data).not.toHaveProperty('features');
+    });
+
+    // The create path cannot translate a child conflict after the fact — `create`
+    // is final and the skeleton maps its failures with the parent noun — so the
+    // check runs before the write. Without it a seed or import caller passing
+    // two features at one level is told it has a duplicate CLASS name.
+    it('refuses a repeated (name, level) with feature copy, not class copy', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+
+      await expect(
+        service.create(
+          makeCreateDto({
+            features: [
+              { name: 'Ability Score Improvement', level: 4 },
+              { name: 'Ability Score Improvement', level: 4 },
+            ],
+          } as Partial<CreateClassDto>),
+          OWNER
+        )
+      ).rejects.toThrow(/feature/i);
+
+      expect(prisma.srdClass.create).not.toHaveBeenCalled();
+    });
+
+    it('allows the same name at different levels, which is the point', async () => {
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+
+      await service.create(
+        makeCreateDto({
+          features: [
+            { name: 'Ability Score Improvement', level: 4 },
+            { name: 'Ability Score Improvement', level: 8 },
+          ],
+        } as Partial<CreateClassDto>),
+        OWNER
+      );
+
+      expect(prisma.srdClass.create).toHaveBeenCalled();
     });
 
     it('sends an empty nested create for an explicitly empty list', async () => {

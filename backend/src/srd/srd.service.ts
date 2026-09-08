@@ -714,7 +714,18 @@ export class SrdService {
     const allHits: FeatureSearchHit[] = queries.flatMap(q => q.hits);
     const total = queries.reduce((sum, q) => sum + q.total, 0);
 
-    allHits.sort((a, b) => a.name.localeCompare(b.name));
+    // Sorted by name, then broken by id. The tiebreak is not decoration: this
+    // sorts the whole result set in memory and then slices a page out of it, so
+    // rows that compare equal are ordered by whatever Postgres happened to
+    // return. Before VEG-507 a name tie inside one class was impossible
+    // (`@@unique([classId, name])`); widening that key makes ties the normal
+    // case, because Ability Score Improvement recurs at 4, 8, 12, 16 and 19. An
+    // unbroken tie means the page boundary moves with physical row order, so a
+    // row can be served on two pages or on none — and the new parent EXISTS
+    // filter is exactly the kind of change that flips the plan and reorders the
+    // tie group. `id` is unique across every feature table, so the order is
+    // total.
+    allHits.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     const start = (page - 1) * limit;
     const data = allHits.slice(start, start + limit);
 
@@ -1012,8 +1023,11 @@ export class SrdService {
   //   4) Hydrate full payloads by primary key per source.
 
   // Takes an optional userId (VEG-294/295/296): the spell, feat, and item
-  // sources widen to the caller's own homebrew. Features stay pinned to the
-  // global catalog — they have no homebrew tier.
+  // sources widen to the caller's own homebrew. Feature sources do too, as of
+  // VEG-507: a feature row still carries no tier of its own, but it inherits its
+  // parent's, so each feature source gates on an EXISTS against a
+  // visibility-scoped parent. Race traits are the exception — Race is untiered,
+  // so that source carries no gate.
   async search(dto: QuerySearchDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;

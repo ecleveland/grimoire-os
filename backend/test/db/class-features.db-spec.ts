@@ -180,9 +180,15 @@ describe('class features — real DB (VEG-507)', () => {
           description: '',
         },
       });
-      expect(third.level).toBe(12);
-
-      await ctx.prisma.classFeature.delete({ where: { id: third.id } });
+      try {
+        expect(third.level).toBe(12);
+      } finally {
+        // truncateAll runs once in beforeAll, so a row leaked by a failing
+        // assertion outlives this test and breaks every later case that pins a
+        // feature count — turning one real failure into most of the file going
+        // red, in the suite built to say exactly which rule broke.
+        await ctx.prisma.classFeature.delete({ where: { id: third.id } });
+      }
     });
 
     it('still refuses the same name at the same level under one class', async () => {
@@ -203,8 +209,14 @@ describe('class features — real DB (VEG-507)', () => {
         data: { classId: srdClassId, name: BREW_FEATURE_NAME, level: 1, description: '' },
       });
 
-      expect(created.classId).toBe(srdClassId);
-      await ctx.prisma.classFeature.delete({ where: { id: created.id } });
+      // Reuses BREW_FEATURE_NAME, which the visibility cases below pin to a
+      // total of exactly 1 — so leaking this row would break them rather than
+      // this one.
+      try {
+        expect(created.classId).toBe(srdClassId);
+      } finally {
+        await ctx.prisma.classFeature.delete({ where: { id: created.id } });
+      }
     });
 
     // Subclass features are not authorable until VEG-509; the key was widened in
@@ -220,15 +232,19 @@ describe('class features — real DB (VEG-507)', () => {
           data: { subclassId, name: 'Veg507 Recurring', level: 9, description: '' },
         }),
       ]);
-      expect(rows.map(r => r.level)).toEqual([3, 9]);
+      try {
+        expect(rows.map(r => r.level)).toEqual([3, 9]);
 
-      await expect(
-        ctx.prisma.subclassFeature.create({
-          data: { subclassId, name: 'Veg507 Recurring', level: 3, description: '' },
-        })
-      ).rejects.toThrow(/Unique constraint failed on the fields: \(`subclassId`,`name`,`level`\)/);
-
-      await ctx.prisma.subclassFeature.deleteMany({ where: { id: { in: rows.map(r => r.id) } } });
+        await expect(
+          ctx.prisma.subclassFeature.create({
+            data: { subclassId, name: 'Veg507 Recurring', level: 3, description: '' },
+          })
+        ).rejects.toThrow(
+          /Unique constraint failed on the fields: \(`subclassId`,`name`,`level`\)/
+        );
+      } finally {
+        await ctx.prisma.subclassFeature.deleteMany({ where: { id: { in: rows.map(r => r.id) } } });
+      }
     });
   });
 
