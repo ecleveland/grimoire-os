@@ -208,6 +208,108 @@ describe('CreateClassDto (through the production ValidationPipe)', () => {
     await reject(validBody({ multiclassing: { prerequisites: [], proficienciesGained: [] } }));
   });
 
+  // ── features (VEG-507) ────────────────────────────────
+
+  it('accepts a features array', async () => {
+    await accept(
+      validBody({
+        features: [
+          { name: 'Rage', level: 1, description: 'You can enter a rage.' },
+          { name: 'Extra Attack', level: 5 },
+        ],
+      })
+    );
+  });
+
+  it('accepts an empty features array — the explicit "no features" state', async () => {
+    await accept(validBody({ features: [] }));
+  });
+
+  it('requires a name and a level on every feature', async () => {
+    await reject(validBody({ features: [{ level: 1 }] }));
+    await reject(validBody({ features: [{ name: 'Rage' }] }));
+    await reject(validBody({ features: [{ name: '', level: 1 }] }));
+  });
+
+  it('bounds the level to a real character level', async () => {
+    await reject(validBody({ features: [{ name: 'Rage', level: 0 }] }));
+    await reject(validBody({ features: [{ name: 'Rage', level: 21 }] }));
+    await reject(validBody({ features: [{ name: 'Rage', level: 1.5 }] }));
+    await accept(validBody({ features: [{ name: 'Rage', level: 20 }] }));
+  });
+
+  it('caps the array and the per-field lengths', async () => {
+    await reject(
+      validBody({ features: Array.from({ length: 101 }, (_, i) => ({ name: `F${i}`, level: 1 })) })
+    );
+    await reject(validBody({ features: [{ name: 'x'.repeat(201), level: 1 }] }));
+    await reject(
+      validBody({ features: [{ name: 'Rage', level: 1, description: 'x'.repeat(2_001) }] })
+    );
+    // Comfortably above the longest SRD entry (411 chars), so the bound cannot
+    // be tightened into rejecting real content without this failing.
+    await accept(
+      validBody({ features: [{ name: 'Rage', level: 1, description: 'x'.repeat(2_000) }] })
+    );
+  });
+
+  it('rejects anything that is not an array of feature objects', async () => {
+    await reject(validBody({ features: 'Rage' }));
+    await reject(validBody({ features: ['Rage'] }));
+    await reject(validBody({ features: [null] }));
+    await reject(validBody({ features: [1] }));
+    await reject(validBody({ features: [{ name: 'Rage', level: 1, classId: 'c1' }] }));
+    await reject(validBody({ features: [{ name: 'Rage', level: 1, id: 'f1' }] }));
+  });
+
+  // @ValidateNested({ each: true }) alone lets this through: it reads a nested
+  // array as a collection and validates its (zero) members, so every constraint
+  // passes vacuously and `{ name: undefined, level: undefined }` reaches the
+  // insert as a 500. @IsObject({ each: true }) is what refuses it.
+  it('rejects a nested array masquerading as a feature', async () => {
+    await reject(validBody({ features: [[]] }));
+    await reject(validBody({ features: [[{ name: 'Rage', level: 1 }]] }));
+  });
+
+  // The DTO check and the [classId, name, level] unique index must reject the
+  // same set. These two cases are the boundary: same name at two levels is the
+  // whole point of VEG-507 widening the key, and the same name at the same
+  // level is what the index still refuses.
+  it('accepts one name recurring at different levels', async () => {
+    await accept(
+      validBody({
+        features: [
+          { name: 'Ability Score Improvement', level: 4 },
+          { name: 'Ability Score Improvement', level: 8 },
+          { name: 'Ability Score Improvement', level: 12 },
+        ],
+      })
+    );
+  });
+
+  it('rejects the same name twice at the same level', async () => {
+    await reject(
+      validBody({
+        features: [
+          { name: 'Ability Score Improvement', level: 4 },
+          { name: 'Ability Score Improvement', level: 4 },
+        ],
+      })
+    );
+  });
+
+  // Case-sensitive, matching the btree index rather than being stricter than it.
+  it('treats names differing only by case as distinct, as the index does', async () => {
+    await accept(
+      validBody({
+        features: [
+          { name: 'Rage', level: 1 },
+          { name: 'rage', level: 1 },
+        ],
+      })
+    );
+  });
+
   // ── multiclassing ─────────────────────────────────────
 
   it.each(['full', 'half', 'pact', null])('accepts casterType %s', async casterType => {
@@ -269,5 +371,47 @@ describe('UpdateClassDto', () => {
   it('still rejects the reserved columns', async () => {
     await reject({ contentSource: 'srd' }, updateMeta);
     await reject({ createdById: 'someone-else' }, updateMeta);
+  });
+
+  // PATCH semantics for the child collection (VEG-507): the array is a full
+  // replacement, an empty array clears, and null clears too — the null-clear
+  // convention (VEG-316) the six String[] columns already follow.
+  it('carries the features array, empty array and null clear', async () => {
+    await accept({ features: [{ name: 'Rage', level: 1 }] }, updateMeta);
+    await accept({ features: [] }, updateMeta);
+    await accept({ features: null }, updateMeta);
+  });
+
+  // The whole difference between "leave the class's features alone" and "delete
+  // every one of them" is `'features' in data` in the service, and that rests on
+  // class-transformer not materializing an unset optional property. If a library
+  // upgrade started emitting `features: undefined`, every unrelated PATCH would
+  // silently wipe a class's features and no other unit test would notice.
+  it('omits the features key entirely when the body does not mention it', async () => {
+    const dto = (await pipe.transform({ description: 'Rewritten.' }, updateMeta)) as object;
+
+    expect('features' in dto).toBe(false);
+    // ...and survives the spread `toColumnData` makes before the service reads it.
+    expect('features' in { ...dto }).toBe(false);
+  });
+
+  it('keeps the key when the body sends an explicit null clear', async () => {
+    const dto = (await pipe.transform({ features: null }, updateMeta)) as { features?: unknown };
+
+    expect('features' in dto).toBe(true);
+    expect(dto.features).toBeNull();
+  });
+
+  it('still enforces the feature constraints it inherits', async () => {
+    await reject({ features: [{ name: 'Rage', level: 99 }] }, updateMeta);
+    await reject(
+      {
+        features: [
+          { name: 'Rage', level: 1 },
+          { name: 'Rage', level: 1 },
+        ],
+      },
+      updateMeta
+    );
   });
 });

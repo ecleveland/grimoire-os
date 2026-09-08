@@ -735,6 +735,234 @@ describe('SrdService', () => {
     });
   });
 
+  // ── Feature-table visibility (VEG-507) ───────────────
+  //
+  // ClassFeature, SubclassFeature and BackgroundFeature carry no contentSource
+  // of their own; their tier is their parent's. Every query against them has to
+  // join back to a visibility-scoped parent or a homebrew class's features leak
+  // into everyone else's search results — VEG-335 in a new place. There are two
+  // encodings of the one rule (a Prisma relation filter, and an EXISTS subquery
+  // in the unified search's raw SQL), so both are pinned here.
+  describe('feature-table visibility scoping (VEG-507)', () => {
+    const GLOBAL = { contentSource: { in: ['srd', 'shared'] } };
+    const visible = (userId?: string) =>
+      userId ? { OR: [GLOBAL, { createdById: userId }] } : GLOBAL;
+
+    beforeEach(() => {
+      for (const model of [
+        prisma.classFeature,
+        prisma.subclassFeature,
+        prisma.raceTrait,
+        prisma.backgroundFeature,
+      ]) {
+        model.findMany.mockResolvedValue([]);
+        model.count.mockResolvedValue(0);
+      }
+    });
+
+    describe('searchFeatures', () => {
+      it('requires the parent class to be visible', async () => {
+        await service.searchFeatures({ parentType: 'class' }, 'user-1');
+
+        const [args] = prisma.classFeature.findMany.mock.calls[0];
+        expect(args.where).toEqual({ class: { is: visible('user-1') } });
+      });
+
+      it('requires a subclass feature’s subclass AND its class to be visible', async () => {
+        await service.searchFeatures({ parentType: 'subclass' }, 'user-1');
+
+        const [args] = prisma.subclassFeature.findMany.mock.calls[0];
+        expect(args.where).toEqual({
+          subclass: { is: { ...visible('user-1'), srdClass: { is: visible('user-1') } } },
+        });
+      });
+
+      it('requires the parent background to be visible', async () => {
+        await service.searchFeatures({ parentType: 'background' }, 'user-1');
+
+        const [args] = prisma.backgroundFeature.findMany.mock.calls[0];
+        expect(args.where).toEqual({ background: { is: visible('user-1') } });
+      });
+
+      // Race is the one parent with no contentSource column: every row is seed
+      // content, so there is nothing to scope and a filter would be a lie.
+      it('leaves race traits unscoped, because Race is not tiered', async () => {
+        await service.searchFeatures({ parentType: 'race' }, 'user-1');
+
+        const [args] = prisma.raceTrait.findMany.mock.calls[0];
+        expect(args.where).toEqual({});
+      });
+
+      it('shows an anonymous caller the global catalog only', async () => {
+        await service.searchFeatures({ parentType: 'class' });
+
+        const [args] = prisma.classFeature.findMany.mock.calls[0];
+        expect(args.where).toEqual({ class: { is: GLOBAL } });
+      });
+
+      // The count is a second query, and `total` is what paginates. An unscoped
+      // count would report rows the caller can never page to, which is both a
+      // broken pager and a disclosure that the rows exist.
+      it('scopes the count as well as the rows', async () => {
+        await service.searchFeatures({ parentType: 'class' }, 'user-1');
+
+        const [args] = prisma.classFeature.count.mock.calls[0];
+        expect(args.where).toEqual({ class: { is: visible('user-1') } });
+      });
+
+      it('keeps the name and parentId filters alongside the scoping', async () => {
+        await service.searchFeatures({ parentType: 'class', q: 'rage', parentId: 'cls-1' }, 'u-1');
+
+        const [args] = prisma.classFeature.findMany.mock.calls[0];
+        expect(args.where).toEqual({
+          name: { contains: 'rage', mode: 'insensitive' },
+          classId: 'cls-1',
+          class: { is: visible('u-1') },
+        });
+      });
+    });
+
+    describe('findFeaturesByIds', () => {
+      // The printable-cards batch endpoint hydrates by client-supplied id, so an
+      // enumerated id must not resolve past the caller's visibility (VEG-311).
+      it('scopes every one of the four tables it probes', async () => {
+        await service.findFeaturesByIds(['f-1'], 'user-1');
+
+        expect(prisma.classFeature.findMany.mock.calls[0][0].where).toEqual({
+          id: { in: ['f-1'] },
+          class: { is: visible('user-1') },
+        });
+        expect(prisma.subclassFeature.findMany.mock.calls[0][0].where).toEqual({
+          id: { in: ['f-1'] },
+          subclass: { is: { ...visible('user-1'), srdClass: { is: visible('user-1') } } },
+        });
+        expect(prisma.backgroundFeature.findMany.mock.calls[0][0].where).toEqual({
+          id: { in: ['f-1'] },
+          background: { is: visible('user-1') },
+        });
+        expect(prisma.raceTrait.findMany.mock.calls[0][0].where).toEqual({ id: { in: ['f-1'] } });
+      });
+
+      it('scopes an anonymous caller to the global catalog', async () => {
+        await service.findFeaturesByIds(['f-1']);
+
+        expect(prisma.classFeature.findMany.mock.calls[0][0].where).toEqual({
+          id: { in: ['f-1'] },
+          class: { is: GLOBAL },
+        });
+      });
+    });
+
+    // VEG-507 makes a name tie the normal case within one class (ASI at 4, 8, 12,
+    // 16, 19), and searchFeatures sorts in memory then slices. Without a
+    // tiebreak the page boundary follows physical row order, so a row can land
+    // on two pages or on none.
+    describe('pagination is total, not just sorted by name', () => {
+      const tied = (id: string, level: number) => ({
+        id,
+        name: 'Ability Score Improvement',
+        level,
+        description: '',
+        classId: 'cls-1',
+        class: { id: 'cls-1', name: 'Warden' },
+      });
+
+      it('orders rows sharing a name by id, whatever order the DB returned them', async () => {
+        const rows = [tied('f-3', 12), tied('f-1', 4), tied('f-2', 8)];
+        prisma.classFeature.findMany.mockResolvedValue(rows);
+        prisma.classFeature.count.mockResolvedValue(rows.length);
+
+        const forward = await service.searchFeatures({ parentType: 'class' }, 'u-1');
+
+        // Same rows, hostile order: the answer must not move.
+        prisma.classFeature.findMany.mockResolvedValue([...rows].reverse());
+        const reversed = await service.searchFeatures({ parentType: 'class' }, 'u-1');
+
+        expect(forward.data.map(f => f.id)).toEqual(['f-1', 'f-2', 'f-3']);
+        expect(reversed.data.map(f => f.id)).toEqual(forward.data.map(f => f.id));
+      });
+
+      it('never serves one row on two pages, nor drops it from both', async () => {
+        const rows = [tied('f-3', 12), tied('f-1', 4), tied('f-2', 8)];
+        prisma.classFeature.findMany.mockResolvedValue(rows);
+        prisma.classFeature.count.mockResolvedValue(rows.length);
+
+        const first = await service.searchFeatures({ parentType: 'class', page: 1, limit: 2 }, 'u');
+        prisma.classFeature.findMany.mockResolvedValue([...rows].reverse());
+        const second = await service.searchFeatures(
+          { parentType: 'class', page: 2, limit: 2 },
+          'u'
+        );
+
+        const seen = [...first.data, ...second.data].map(f => f.id);
+        expect([...seen].sort()).toEqual(['f-1', 'f-2', 'f-3']);
+      });
+    });
+
+    describe('unified search (raw SQL)', () => {
+      beforeEach(() => {
+        prisma.$queryRaw.mockResolvedValue([]);
+        prisma.spell.findMany.mockResolvedValue([]);
+        prisma.feat.findMany.mockResolvedValue([]);
+        prisma.item.findMany.mockResolvedValue([]);
+      });
+
+      const idSql = () => (prisma.$queryRaw.mock.calls[0][0] as { sql: string }).sql;
+      const idValues = () => (prisma.$queryRaw.mock.calls[0][0] as { values: unknown[] }).values;
+
+      it('gates each tiered feature table on a visible parent', async () => {
+        await service.search({ types: ['feature'] }, 'user-1');
+
+        const sql = idSql();
+        expect(sql).toContain('"srd_classes"');
+        expect(sql).toContain('"subclasses"');
+        expect(sql).toContain('"backgrounds"');
+        expect(sql).toContain('EXISTS');
+      });
+
+      it('binds the caller’s id as a parameter, not as interpolated SQL', async () => {
+        await service.search({ types: ['feature'] }, 'user-1');
+
+        expect(idValues()).toContain('user-1');
+        expect(idSql()).not.toContain('user-1');
+      });
+
+      it('gates an anonymous caller on the global catalog with no owner clause', async () => {
+        await service.search({ types: ['feature'] });
+
+        expect(idSql()).toContain('EXISTS');
+        expect(idSql()).not.toContain('"createdById"');
+      });
+
+      // A subclass feature is two hops from a tier: its subclass has one, and so
+      // does that subclass's class. Matching visibleSubclassWhere on the Prisma
+      // side means the join has to climb both.
+      it('climbs from a subclass feature to its subclass AND that subclass’s class', async () => {
+        await service.search({ types: ['feature'], parentType: 'subclass' }, 'user-1');
+
+        const sql = idSql();
+        expect(sql).toContain('"subclasses"');
+        expect(sql).toContain('"srd_classes"');
+      });
+
+      it('adds no parent gate for race traits', async () => {
+        await service.search({ types: ['feature'], parentType: 'race' }, 'user-1');
+
+        expect(idSql()).not.toContain('EXISTS');
+      });
+
+      // The count query paginates the response; scoping only the id query would
+      // report a total the caller can never reach.
+      it('gates the count query the same way as the id query', async () => {
+        await service.search({ types: ['feature'] }, 'user-1');
+
+        const countSql = (prisma.$queryRaw.mock.calls[1][0] as { sql: string }).sql;
+        expect(countSql).toContain('EXISTS');
+        expect(countSql).toContain('"srd_classes"');
+      });
+    });
+  });
+
   describe('findClass', () => {
     it('includes subclasses and features (with subclass features) ordered', async () => {
       prisma.srdClass.findFirst.mockResolvedValue({
@@ -1970,18 +2198,18 @@ describe('SrdService', () => {
       const ids = ['cf-1', 'scf-1', 'rt-1', 'bf-1'];
       const result = await service.findFeaturesByIds(ids);
 
-      expect(prisma.classFeature.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ids } } })
-      );
-      expect(prisma.subclassFeature.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ids } } })
-      );
-      expect(prisma.raceTrait.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ids } } })
-      );
-      expect(prisma.backgroundFeature.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: { in: ids } } })
-      );
+      // The id filter survives alongside the parent-visibility scoping VEG-507
+      // added; the exact scoping shape is pinned in its own describe above.
+      for (const model of [
+        prisma.classFeature,
+        prisma.subclassFeature,
+        prisma.raceTrait,
+        prisma.backgroundFeature,
+      ]) {
+        expect(model.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ id: { in: ids } }) })
+        );
+      }
 
       expect(result).toEqual([
         {

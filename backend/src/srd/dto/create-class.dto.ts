@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayUnique,
   IsArray,
   IsIn,
   IsInt,
@@ -165,6 +166,61 @@ export class ClassMulticlassingDto {
   prerequisiteLogic?: 'OR';
 }
 
+/** Ceiling on a class's feature list. A 20-level SRD class carries 5 to 18 rows;
+ * this leaves generous room for a densely-written homebrew class while keeping
+ * one request from writing an unbounded number of child rows. */
+const MAX_CLASS_FEATURES = 100;
+
+/**
+ * Identity a feature row is unique by, matching the
+ * `[classId, name, level]` unique index VEG-507 widened the table to.
+ *
+ * Case-sensitive on purpose. The index is a plain btree over text, so "Rage" and
+ * "rage" are two rows to Postgres; folding case here would make the DTO reject a
+ * body the database would happily store, which is a rule nobody could find by
+ * reading the schema. The two must refuse the same set and nothing more.
+ *
+ * The separator is a character `level` cannot contain, so ("a|1", 1) and
+ * ("a", "1|1") cannot collide the way a bare concatenation would.
+ */
+function featureIdentity(f: ClassFeatureDto): string {
+  return `${f.level}|${f.name}`;
+}
+
+/**
+ * One per-level entry in a class's feature list (VEG-507).
+ *
+ * `description` is optional here but the column is NOT NULL; the service
+ * defaults a missing one to the empty string, so a half-drafted feature can be
+ * saved without inventing prose for it.
+ */
+export class ClassFeatureDto {
+  @ApiProperty({ example: 'Rage' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  name!: string;
+
+  @ApiProperty({ example: 1, description: 'Character level at which the feature is gained' })
+  @IsInt()
+  @Min(1)
+  @Max(MAX_CHARACTER_LEVEL)
+  level!: number;
+
+  @ApiPropertyOptional({ example: 'In battle, you fight with primal ferocity.' })
+  @IsOptional()
+  @IsString()
+  // 2_000, not the 10_000 the class's own description gets. `findAllClasses`
+  // includes every feature's full description with no `select`, and that list is
+  // the character-creation wizard's first-load payload, so this bound multiplied
+  // by MAX_CLASS_FEATURES is the worst case one homebrew class can add to it:
+  // 200KB here, 1MB at 10_000. Measured against the seed for headroom — the
+  // longest SRD class-feature description is 411 characters and the mean is 204,
+  // so this leaves roughly five times the longest real one.
+  @MaxLength(2_000)
+  description?: string;
+}
+
 /**
  * Body for creating a homebrew class (VEG-506). Ownership and tier columns are
  * never accepted from the client; {@link ContentCrudService} stamps
@@ -177,8 +233,22 @@ export class ClassMulticlassingDto {
  * written here fails at render time on someone's character rather than at the
  * request that stored it.
  *
- * Features and subclasses are deliberately absent: a class created here has
- * neither, and they arrive with VEG-507 and VEG-509 respectively.
+ * `features` are written as child `ClassFeature` rows in the same request
+ * (VEG-507). On PATCH the array is a full **replacement**, not a merge: the
+ * class's existing rows are deleted and the payload's are inserted, so every
+ * feature gets a fresh id on every write. Merge was not an option worth having —
+ * with the row's only natural key being its name and level, a rename plus a
+ * re-add is indistinguishable from an edit, so a merge would have to guess.
+ * Omitting the key leaves the existing rows untouched; `[]` or `null` clears
+ * them all.
+ *
+ * Both write responses carry the class row **without** its features, on POST and
+ * PATCH alike. Re-read `GET /srd/classes/:id` for the rows. The shared write
+ * skeleton's delegate takes no `include` and its `create` is final, so returning
+ * them on one path and not the other was the only alternative, and an asymmetry
+ * between the two verbs is worse than a uniform absence.
+ *
+ * Subclasses are still absent; they arrive with VEG-509.
  */
 export class CreateClassDto {
   @ApiProperty({ example: 'Warden' })
@@ -283,4 +353,34 @@ export class CreateClassDto {
   @ValidateNested()
   @Type(() => ClassMulticlassingDto)
   multiclassing?: ClassMulticlassingDto;
+
+  @ApiPropertyOptional({
+    type: [ClassFeatureDto],
+    description:
+      'Per-level features. Replaces the class’s existing features outright; ' +
+      'omit to leave them alone, send [] or null to clear them.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_CLASS_FEATURES)
+  // `@ValidateNested({ each: true })` does not reject an element that is itself
+  // an array: it treats one as a nested collection and validates its members, so
+  // `features: [[]]` passes every constraint below with nothing to check. That
+  // reached the service as `{ name: undefined, level: undefined }` and became a
+  // 500 at the insert. `@IsObject` excludes arrays, which closes it — the same
+  // pairing the three Json columns above already use.
+  @IsObject({ each: true })
+  // Rejects here what the [classId, name, level] index would reject at the
+  // write, so the author gets a 400 naming the field rather than a 409 or —
+  // before this ran — a duplicate-*class*-name conflict from the shared error
+  // mapper, which keys everything to the parent noun.
+  @ArrayUnique(featureIdentity)
+  @ValidateNested({ each: true })
+  @Type(() => ClassFeatureDto)
+  // `| null` because null is a real, tested input here, not a stray: it is how
+  // the client clears the list (VEG-316), the same as the String[] columns
+  // above. Declaring it `ClassFeatureDto[] | undefined` would be the type
+  // saying a value the service handles on purpose cannot arrive, which is what
+  // forced the mapping helper to take `unknown` and cast.
+  features?: ClassFeatureDto[] | null;
 }

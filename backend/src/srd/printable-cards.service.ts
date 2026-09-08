@@ -172,7 +172,7 @@ export class PrintableCardsService {
       case 'background':
         return this.hydrateBackgrounds(ids, userId);
       case 'feature':
-        return this.hydrateFeatures(ids);
+        return this.hydrateFeatures(ids, userId);
     }
   }
 
@@ -317,8 +317,13 @@ export class PrintableCardsService {
     }));
   }
 
-  private async hydrateFeatures(ids: string[]): Promise<PrintableCard[]> {
-    const features = await this.srdService.findFeaturesByIds(ids);
+  // A feature's tier is its parent's, so the scoping happens inside
+  // findFeaturesByIds against the parent tables (VEG-507). Until then this was
+  // the one hydrator that resolved a client-supplied id with no visibility check
+  // at all — invisible while every feature row belonged to an SRD parent, a leak
+  // the moment a homebrew class could carry one.
+  private async hydrateFeatures(ids: string[], userId?: string): Promise<PrintableCard[]> {
+    const features = await this.srdService.findFeaturesByIds(ids, userId);
     return features.map(feature => ({
       type: 'feature' as const,
       id: feature.id,

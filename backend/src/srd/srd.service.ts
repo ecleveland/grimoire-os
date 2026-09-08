@@ -28,6 +28,73 @@ function visibleSourceSql(userId?: string): Prisma.Sql {
   return Prisma.sql`(${GLOBAL_SOURCE_SQL} OR "createdById" = ${userId})`;
 }
 
+// The same predicate, qualified by a table alias. The unqualified form above is
+// fine for the flat spell/feat/item sources, where the only table in scope is
+// the one being filtered; the feature sources below reach into a parent table
+// inside a subquery, where a bare "contentSource" would be ambiguous or — worse,
+// since Postgres resolves an unqualified name to the innermost table that has it
+// — would silently filter the wrong one.
+function aliasedVisibleSourceSql(alias: Prisma.Sql, userId?: string): Prisma.Sql {
+  const global = Prisma.sql`${alias}."contentSource"::text IN (${Prisma.join([
+    ...GLOBAL_CONTENT_SOURCES,
+  ])})`;
+  if (!userId) return global;
+  return Prisma.sql`(${global} OR ${alias}."createdById" = ${userId})`;
+}
+
+// Raw-SQL counterpart of SrdService.visibleFeatureParentWhere (VEG-507).
+//
+// A feature row carries no contentSource of its own — its tier is its parent's —
+// so every query against the four feature tables has to climb to that parent.
+// The unified search assembles its sources as `SELECT … FROM <table> <where>`
+// fragments UNION ALLed together, so this has to be a WHERE condition rather
+// than a JOIN: adding a join would make the outer `"id"` and `"name"` ambiguous
+// (the parents have both) and force aliasing every source, feature or not.
+// EXISTS keeps the change confined to the one fragment that needs it.
+//
+// This and the Prisma relation filter are two encodings of one rule, and nothing
+// at the type level forces them to agree — a type over string fragments could
+// only prove shape, not semantics. So the enforcement is a real database:
+// backend/test/db/class-features.db-spec.ts drives both encodings over one
+// fixture set covering all four parent types, with absolute per-parent
+// assertions rather than only comparing the two totals to each other (two
+// encodings broken the same way would still agree). Deleting any one of these
+// predicates fails it.
+function featureParentVisibilitySql(parent: FeatureParentType, userId?: string): Prisma.Sql | null {
+  switch (parent) {
+    case 'class':
+      return Prisma.sql`EXISTS (
+        SELECT 1 FROM "srd_classes" AS p
+        WHERE p."id" = "class_features"."classId"
+          AND ${aliasedVisibleSourceSql(Prisma.sql`p`, userId)}
+      )`;
+    // Two hops, matching visibleSubclassWhere: a subclass has its own tier and
+    // so does the class it hangs off, and either one being invisible hides the
+    // feature. Dropping the second check would leak a shared subclass's features
+    // out of a homebrew class nobody else can see.
+    case 'subclass':
+      return Prisma.sql`EXISTS (
+        SELECT 1 FROM "subclasses" AS p
+        JOIN "srd_classes" AS gp ON gp."id" = p."classId"
+        WHERE p."id" = "subclass_features"."subclassId"
+          AND ${aliasedVisibleSourceSql(Prisma.sql`p`, userId)}
+          AND ${aliasedVisibleSourceSql(Prisma.sql`gp`, userId)}
+      )`;
+    case 'background':
+      return Prisma.sql`EXISTS (
+        SELECT 1 FROM "backgrounds" AS p
+        WHERE p."id" = "background_features"."backgroundId"
+          AND ${aliasedVisibleSourceSql(Prisma.sql`p`, userId)}
+      )`;
+    // Race has no contentSource column and no CRUD — every row is seed content,
+    // so there is no tier to check. Returning null rather than a tautology keeps
+    // an unnecessary subquery out of the plan and makes the absence deliberate
+    // rather than an omission.
+    case 'race':
+      return null;
+  }
+}
+
 // Minimum query length that triggers pg_trgm similarity matching. Below this we
 // fall back to plain ILIKE substring matching — single-char fuzzy queries return
 // too much noise (every word has at least one character of overlap).
@@ -571,7 +638,67 @@ export class SrdService {
 
   // ── Features (cross-parent search) ──────────────────
 
-  async searchFeatures(dto: QueryFeaturesDto) {
+  /**
+   * Where-fragment restricting a feature table to rows whose parent the caller
+   * may read (VEG-507).
+   *
+   * A feature row has no `contentSource` of its own; its tier is its parent's.
+   * Every one of these tables is therefore only as scoped as the join it carries,
+   * and a query without one hands a homebrew class's features to every user —
+   * the VEG-335 leak in a new place.
+   *
+   * Each branch's literal is annotated with that table's generated
+   * `*WhereInput`, so a misspelled relation key (`clas`, `subClass`) is an
+   * excess-property error rather than a silently-deleted check — the failure
+   * mode VEG-505 hit and fixed the same way on `visibleSubclassWhere`. The
+   * annotations sit on the locals because one function serves four tables and
+   * there is no single honest return type to declare, not because a declared
+   * return type would fail to check: it checks a returned object literal
+   * identically. `Record<string, unknown>` is the widening the four kinds force,
+   * and it costs nothing downstream, since every caller spreads the result into
+   * a `where` that Prisma accepts.
+   *
+   * The slip this does NOT catch is a wrong tag rather than a wrong spelling.
+   * Passing `'subclass'` in the class branch is caught, because Prisma brands
+   * its filters per model. Passing `'race'` returns `{}`, which is assignable to
+   * every `WhereInput`, compiles silently, and hands every homebrew feature to
+   * everyone. Only `backend/test/db/class-features.db-spec.ts` catches that.
+   *
+   * The raw-SQL counterpart is `featureParentVisibilitySql` at the top of this
+   * file; the two must agree, and backend/test/db drives both.
+   */
+  private visibleFeatureParentWhere(
+    kind: FeatureParentType,
+    userId?: string
+  ): Record<string, unknown> {
+    switch (kind) {
+      case 'class': {
+        const where: Prisma.ClassFeatureWhereInput = {
+          class: { is: this.contentAccess.visibleTo(userId) },
+        };
+        return where;
+      }
+      case 'subclass': {
+        const where: Prisma.SubclassFeatureWhereInput = {
+          subclass: { is: this.visibleSubclassWhere(userId) },
+        };
+        return where;
+      }
+      case 'background': {
+        const where: Prisma.BackgroundFeatureWhereInput = {
+          background: { is: this.contentAccess.visibleTo(userId) },
+        };
+        return where;
+      }
+      // Race carries no contentSource and has no CRUD: every row is seed
+      // content, so there is nothing to scope. Empty on purpose, not by
+      // oversight — see the matching branch in featureParentVisibilitySql.
+      case 'race':
+        return {};
+    }
+  }
+
+  async searchFeatures(dto: QueryFeaturesDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
     const types: FeatureParentType[] = dto.parentType
@@ -581,26 +708,51 @@ export class SrdService {
     const nameFilter = dto.q ? { name: { contains: dto.q, mode: 'insensitive' as const } } : {};
 
     const queries = await Promise.all(
-      types.map(type => this.queryFeatureTable(type, nameFilter, dto.parentId))
+      types.map(type => this.queryFeatureTable(type, nameFilter, dto.parentId, userId))
     );
 
     const allHits: FeatureSearchHit[] = queries.flatMap(q => q.hits);
     const total = queries.reduce((sum, q) => sum + q.total, 0);
 
-    allHits.sort((a, b) => a.name.localeCompare(b.name));
+    // Sorted by name, then broken by id. The tiebreak is not decoration: this
+    // sorts the whole result set in memory and then slices a page out of it, so
+    // rows that compare equal are ordered by whatever Postgres happened to
+    // return. Before VEG-507 a name tie inside one class was impossible
+    // (`@@unique([classId, name])`); widening that key makes ties the normal
+    // case, because Ability Score Improvement recurs at 4, 8, 12, 16 and 19. An
+    // unbroken tie means the page boundary moves with physical row order, so a
+    // row can be served on two pages or on none — and the new parent EXISTS
+    // filter is exactly the kind of change that flips the plan and reorders the
+    // tie group. `id` is unique across every feature table, so the order is
+    // total.
+    allHits.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     const start = (page - 1) * limit;
     const data = allHits.slice(start, start + limit);
 
     return buildPaginatedResponse(data, total, page, limit);
   }
 
+  // `where` is shared between the findMany and the count in every branch below,
+  // deliberately: computing them apart is how a scoped page ends up with an
+  // unscoped total, which both breaks the pager and discloses that rows the
+  // caller cannot see exist.
+  //
+  // Each is annotated because the visibility fragment spreads in as
+  // `Record<string, unknown>` (see `visibleFeatureParentWhere`), which would
+  // otherwise widen the whole literal and leave `classId`, `subclassId`,
+  // `raceId` and `backgroundId` as unchecked strings.
   private async queryFeatureTable(
     kind: FeatureParentType,
     nameFilter: Record<string, unknown>,
-    parentId: string | undefined
+    parentId: string | undefined,
+    userId?: string
   ): Promise<{ hits: FeatureSearchHit[]; total: number }> {
     if (kind === 'class') {
-      const where = { ...nameFilter, ...(parentId ? { classId: parentId } : {}) };
+      const where: Prisma.ClassFeatureWhereInput = {
+        ...nameFilter,
+        ...(parentId ? { classId: parentId } : {}),
+        ...this.visibleFeatureParentWhere('class', userId),
+      };
       const [rows, total] = await Promise.all([
         this.prisma.classFeature.findMany({
           where,
@@ -621,7 +773,11 @@ export class SrdService {
       };
     }
     if (kind === 'subclass') {
-      const where = { ...nameFilter, ...(parentId ? { subclassId: parentId } : {}) };
+      const where: Prisma.SubclassFeatureWhereInput = {
+        ...nameFilter,
+        ...(parentId ? { subclassId: parentId } : {}),
+        ...this.visibleFeatureParentWhere('subclass', userId),
+      };
       const [rows, total] = await Promise.all([
         this.prisma.subclassFeature.findMany({
           where,
@@ -642,7 +798,11 @@ export class SrdService {
       };
     }
     if (kind === 'race') {
-      const where = { ...nameFilter, ...(parentId ? { raceId: parentId } : {}) };
+      const where: Prisma.RaceTraitWhereInput = {
+        ...nameFilter,
+        ...(parentId ? { raceId: parentId } : {}),
+        ...this.visibleFeatureParentWhere('race', userId),
+      };
       const [rows, total] = await Promise.all([
         this.prisma.raceTrait.findMany({
           where,
@@ -662,7 +822,11 @@ export class SrdService {
       };
     }
     // background
-    const where = { ...nameFilter, ...(parentId ? { backgroundId: parentId } : {}) };
+    const where: Prisma.BackgroundFeatureWhereInput = {
+      ...nameFilter,
+      ...(parentId ? { backgroundId: parentId } : {}),
+      ...this.visibleFeatureParentWhere('background', userId),
+    };
     const [rows, total] = await Promise.all([
       this.prisma.backgroundFeature.findMany({
         where,
@@ -690,26 +854,32 @@ export class SrdService {
   // produce no row. Results are ordered class → subclass → race → background,
   // matching the unified-search source order; callers needing request order
   // re-sort by id.
+  //
+  // Scoped to the caller's visibility (VEG-507). This endpoint hydrates by
+  // client-supplied id, so the id alone cannot be trusted to be one the caller
+  // was ever shown — an id out of visibility must resolve to nothing, exactly as
+  // hydrateBackgrounds already does (VEG-311/331). An id that scopes out is
+  // indistinguishable from one that never existed, which is the point.
 
-  async findFeaturesByIds(ids: string[]): Promise<UnifiedFeatureData[]> {
+  async findFeaturesByIds(ids: string[], userId?: string): Promise<UnifiedFeatureData[]> {
     if (ids.length === 0) return [];
 
-    const where = { id: { in: ids } };
+    const byId = { id: { in: ids } };
     const [classFeatures, subclassFeatures, raceTraits, backgroundFeatures] = await Promise.all([
       this.prisma.classFeature.findMany({
-        where,
+        where: { ...byId, ...this.visibleFeatureParentWhere('class', userId) },
         include: { class: { select: { id: true, name: true } } },
       }),
       this.prisma.subclassFeature.findMany({
-        where,
+        where: { ...byId, ...this.visibleFeatureParentWhere('subclass', userId) },
         include: { subclass: { select: { id: true, name: true } } },
       }),
       this.prisma.raceTrait.findMany({
-        where,
+        where: { ...byId, ...this.visibleFeatureParentWhere('race', userId) },
         include: { race: { select: { id: true, name: true } } },
       }),
       this.prisma.backgroundFeature.findMany({
-        where,
+        where: { ...byId, ...this.visibleFeatureParentWhere('background', userId) },
         include: { background: { select: { id: true, name: true } } },
       }),
     ]);
@@ -853,8 +1023,11 @@ export class SrdService {
   //   4) Hydrate full payloads by primary key per source.
 
   // Takes an optional userId (VEG-294/295/296): the spell, feat, and item
-  // sources widen to the caller's own homebrew. Features stay pinned to the
-  // global catalog — they have no homebrew tier.
+  // sources widen to the caller's own homebrew. Feature sources do too, as of
+  // VEG-507: a feature row still carries no tier of its own, but it inherits its
+  // parent's, so each feature source gates on an EXISTS against a
+  // visibility-scoped parent. Race traits are the exception — Race is untiered,
+  // so that source carries no gate.
   async search(dto: QuerySearchDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
@@ -928,7 +1101,7 @@ export class SrdService {
         sources.push({
           tag: FEATURE_TAG[parent],
           table: FEATURE_TABLE[parent],
-          whereSql: this.buildFeatureWhereSql(dto, parent),
+          whereSql: this.buildFeatureWhereSql(dto, parent, userId),
         });
       }
     }
@@ -974,8 +1147,17 @@ export class SrdService {
     return joinWhere(conds);
   }
 
-  private buildFeatureWhereSql(dto: QuerySearchDto, parent: FeatureParentType): Prisma.Sql {
+  private buildFeatureWhereSql(
+    dto: QuerySearchDto,
+    parent: FeatureParentType,
+    userId?: string
+  ): Prisma.Sql {
     const conds: Prisma.Sql[] = [];
+    // First, so the visibility gate cannot be dropped by a later `conds` edit
+    // that forgets it — the same reason every sibling builder leads with
+    // visibleSourceSql.
+    const parentVisible = featureParentVisibilitySql(parent, userId);
+    if (parentVisible) conds.push(parentVisible);
     if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
     if (dto.parentId) {
       conds.push(Prisma.sql`${FEATURE_PARENT_COLUMN[parent]} = ${dto.parentId}`);
@@ -987,6 +1169,15 @@ export class SrdService {
   // hydrate query) are silently dropped; `total` is computed independently,
   // so a page can briefly show one card fewer than the count. Accepted —
   // the race self-heals on the next query.
+  //
+  // Deliberately unscoped, features included (VEG-507). Every id here came from
+  // the id query above, which is already filtered to what the caller may read —
+  // by contentSource for spells, feats and items, and by the parent EXISTS gate
+  // for features. Re-filtering would re-derive the same answer at the cost of
+  // four more joins per page, and the seven branches would then have to agree
+  // with `buildUnifiedSources` about the rule rather than simply inheriting it.
+  // `findFeaturesByIds` is the opposite case and IS scoped: its ids come from
+  // the client, not from a query this service ran.
   private async hydrateUnifiedHits(idRows: UnifiedIdRow[]): Promise<UnifiedSearchHit[]> {
     const idsBySource: Record<UnifiedSourceTag, string[]> = {
       spell: [],

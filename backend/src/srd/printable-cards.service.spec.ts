@@ -326,7 +326,7 @@ describe('PrintableCardsService', () => {
 
       const result = await service.hydrate([{ type: 'feature', ids: ['feat-1'] }]);
 
-      expect(srdService.findFeaturesByIds).toHaveBeenCalledWith(['feat-1']);
+      expect(srdService.findFeaturesByIds).toHaveBeenCalledWith(['feat-1'], undefined);
       expect(result.groups[0].cards[0]).toEqual({
         type: 'feature',
         id: 'feat-1',
@@ -541,6 +541,17 @@ describe('PrintableCardsService', () => {
           })
         );
       }
+    });
+
+    // Features were the one hydrator that resolved a client-supplied id with no
+    // visibility check of any kind, because a feature row has no contentSource
+    // to check — its tier is its parent's (VEG-507). The scoping itself lives in
+    // findFeaturesByIds; what this pins is that the caller reaches it at all,
+    // since the parameter is easy to drop and nothing else here would notice.
+    it('carries the caller through to the feature hydrator', async () => {
+      await service.hydrate([{ type: 'feature', ids: ['feat-1'] }], 'u1');
+
+      expect(srdService.findFeaturesByIds).toHaveBeenCalledWith(['feat-1'], 'u1');
     });
   });
 
