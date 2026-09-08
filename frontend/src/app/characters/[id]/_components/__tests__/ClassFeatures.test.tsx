@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ClassFeatures from '../ClassFeatures';
 import type { Character } from '@/lib/types';
@@ -66,5 +66,49 @@ describe('ClassFeatures', () => {
     const char = { ...baseCharacter, features: [] };
     const { container } = render(<ClassFeatures character={char} />);
     expect(container.innerHTML).toBe('');
+  });
+
+  // VEG-454. Rows were keyed on `feature.name` alone, which the level-up dedupe
+  // existed to protect. Now that a recurring grant can legitimately appear twice,
+  // the key has to separate them or React attaches state to the wrong sibling.
+  describe('repeated feature names (VEG-454)', () => {
+    const withRecurringAsi: Character = {
+      ...baseCharacter,
+      features: [
+        { name: 'Ability Score Improvement', source: 'Fighter', level: 4 },
+        { name: 'Ability Score Improvement', source: 'Fighter', level: 8 },
+      ],
+    };
+
+    it('renders both grants of one recurring name', () => {
+      render(<ClassFeatures character={withRecurringAsi} />);
+      expect(screen.getAllByText('Ability Score Improvement')).toHaveLength(2);
+    });
+
+    it('does not warn about duplicate React keys', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      render(<ClassFeatures character={withRecurringAsi} />);
+      expect(consoleError).not.toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
+
+    // Reachable without any level-up: CharacterEditorForm drops only blank-named
+    // rows, so a player can type one name into two feature rows.
+    it('does not warn for two hand-entered rows that are identical', () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      render(
+        <ClassFeatures
+          character={{
+            ...baseCharacter,
+            features: [
+              { name: 'Lucky', source: 'Fighter' },
+              { name: 'Lucky', source: 'Fighter' },
+            ],
+          }}
+        />
+      );
+      expect(consoleError).not.toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
   });
 });

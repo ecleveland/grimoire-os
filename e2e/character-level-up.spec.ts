@@ -69,4 +69,92 @@ test.describe('character sheet — level up', () => {
       page.getByTestId('spell-slots-level-3').locator('[data-testid="slot-empty"]')
     ).toHaveCount(2);
   });
+
+  // VEG-454. The dedupe was keyed on name + source, which lost nothing while a
+  // class could carry one feature name at one level. VEG-507 widened the unique
+  // key to [classId, name, level] so an author can write Ability Score
+  // Improvement the way every real class does, and the guard then swallowed every
+  // occurrence after the first — silently, on the main path.
+  //
+  // What this covers that the unit suites cannot: `level` is a new field on the
+  // stored `Feature`, and `forbidNonWhitelisted` strips or 400s anything not on
+  // `CreateCharacterDto`. `class FeatureDto implements Feature` compiles either
+  // way and the mocked-PATCH unit tests pass either way — only a real round trip
+  // through the pipe proves the level survives both the POST and the level-up
+  // PATCH. That is the VEG-349 deathSaves trap.
+  test('re-offers a recurring feature name at each level a homebrew class grants it', async ({
+    page,
+  }) => {
+    await registerAndLogin(page, 'level-up-recurring', 'Leveler Two');
+    const headers = await csrfHeaders(page);
+    const className = `Warden ${Date.now()}`;
+
+    const classRes = await page.request.post(`${BACKEND}/api/srd/classes`, {
+      data: {
+        name: className,
+        hitDie: 'd10',
+        features: [
+          { name: 'Ability Score Improvement', level: 2, description: 'Raise an ability score.' },
+          { name: 'Ability Score Improvement', level: 3, description: 'Raise an ability score.' },
+        ],
+      },
+      headers,
+    });
+    expect(classRes.ok(), `class create failed: ${classRes.status()}`).toBeTruthy();
+
+    // Level 2, already holding the level-2 grant — the state the sheet would be
+    // in after leveling into it. The stored `level: 2` is what the DTO has to
+    // accept and echo back.
+    const charRes = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Bryn Oakenshield',
+        class: className,
+        level: 2,
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
+        hitPoints: { max: 20, current: 20, temporary: 0 },
+        hitDice: { dieType: 'd10', total: 2, spent: 0 },
+        features: [
+          {
+            name: 'Ability Score Improvement',
+            source: className,
+            level: 2,
+            description: 'Raise an ability score.',
+          },
+        ],
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      },
+      headers,
+    });
+    expect(charRes.ok(), `character create failed: ${charRes.status()}`).toBeTruthy();
+    const created = await charRes.json();
+    // The write boundary accepted `level` rather than stripping it.
+    expect(created.features[0]).toMatchObject({ name: 'Ability Score Improvement', level: 2 });
+    const characterId = created.id as string;
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByTestId('level-badge')).toHaveText('2');
+    await expect(
+      page.getByTestId('class-features').getByText('Ability Score Improvement', { exact: true })
+    ).toHaveCount(1);
+
+    // 2 → 3 grants the second Ability Score Improvement. Before the fix the
+    // section rendered nothing and the patch carried no feature at all.
+    await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Level 2 → 3')).toBeVisible();
+    await expect(dialog.getByRole('checkbox', { name: 'Ability Score Improvement' })).toBeChecked();
+    await dialog.getByRole('button', { name: 'Confirm Level Up' }).click();
+
+    // Both grants now sit on the sheet, rendered without a duplicate React key.
+    await expect(page.getByTestId('level-badge')).toHaveText('3');
+    await expect(
+      page.getByTestId('class-features').getByText('Ability Score Improvement', { exact: true })
+    ).toHaveCount(2);
+
+    // And the level-3 copy persisted — the PATCH kept the field too.
+    const reread = await page.request.get(`${BACKEND}/api/characters/${characterId}`);
+    expect(reread.ok()).toBeTruthy();
+    const levels = ((await reread.json()).features as { level?: number }[]).map(f => f.level);
+    expect(levels).toEqual([2, 3]);
+  });
 });

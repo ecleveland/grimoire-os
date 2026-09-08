@@ -184,9 +184,22 @@ export interface Currency {
   pp: number;
 }
 
+/**
+ * A feature or trait stored on a character sheet. `source` tags where the grant
+ * came from — the class name, the species name, or something else, which is how
+ * the sheet groups them into Class Features / Species Traits / Feats.
+ *
+ * `level` records the character level the grant arrived at, and is what tells one
+ * occurrence of a recurring name from the next: since VEG-507 a class may carry
+ * "Ability Score Improvement" at 4, 8, 12, 16 and 19, and without the level those
+ * five are indistinguishable. Absent on species traits and on anything typed by
+ * hand in the editor, neither of which has a granting level, so it narrows an
+ * identity rather than defining one (VEG-454).
+ */
 export interface Feature {
   name: string;
   source?: string;
+  level?: number;
   description?: string;
 }
 

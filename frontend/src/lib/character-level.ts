@@ -44,7 +44,9 @@ export function hpGain(base: number, conMod: number): number {
 /**
  * Catalog features unlocked at exactly `level`, shaped as stored character
  * features with the class name as `source` — the grouping key
- * `ClassFeatures.tsx` renders by.
+ * `ClassFeatures.tsx` renders by — and the granting level, which is what
+ * `characterFeatureIdentity` needs to tell one occurrence of a recurring name
+ * from the next (VEG-454). Dropping it here was where that information was lost.
  */
 export function classFeaturesAtLevel(cls: SrdClass, level: number): Feature[] {
   return cls.features
@@ -52,6 +54,7 @@ export function classFeaturesAtLevel(cls: SrdClass, level: number): Feature[] {
     .map(f => ({
       name: f.name,
       source: cls.name,
+      level: f.level,
       ...(f.description !== undefined && { description: f.description }),
     }));
 }
