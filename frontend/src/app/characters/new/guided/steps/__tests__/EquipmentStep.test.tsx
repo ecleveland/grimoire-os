@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -259,5 +259,55 @@ describe('EquipmentStep — starting equipment vs gold', () => {
     // No background coin is auto-added; only class guaranteed items resolve.
     expect(gp()).toBe('0');
     expect(inventory()).toBe("Explorer's pack:1");
+  });
+});
+
+// VEG-524. The starting equipment written into the draft comes off the resolved
+// class row, so a duplicate-named homebrew class shadowing the SRD one hands the
+// character the wrong gear. Both orderings, because with one of them a
+// name-based `.find` coincidentally agrees with the id.
+describe.each([
+  ['homebrew first', true],
+  ['SRD first', false],
+])('EquipmentStep — duplicate class names, catalog %s (VEG-524)', (_label, homebrewFirst) => {
+  // Same name as FIGHTER, a deliberately different guaranteed pack.
+  const HOMEBREW_FIGHTER: SrdClass = {
+    ...FIGHTER,
+    id: 'cls-hb-fighter',
+    contentSource: 'homebrew',
+    equipmentChoices: {
+      choices: [],
+      guaranteed: [{ name: 'Smuggler’s kit', quantity: 1 }],
+    },
+  };
+  const catalog = homebrewFirst ? [HOMEBREW_FIGHTER, FIGHTER] : [FIGHTER, HOMEBREW_FIGHTER];
+
+  it('grants the equipment of the class the stored id names', async () => {
+    routeApiFetch(catalog);
+    renderStep({ class: 'Fighter', classId: 'cls-hb-fighter' });
+    await waitFor(() => expect(inventory()).toBe('Smuggler’s kit:1'));
+  });
+
+  it('grants the SRD equipment when the stored id names the SRD row', async () => {
+    routeApiFetch(catalog);
+    renderStep({ class: 'Fighter', classId: 'fighter' });
+    await waitFor(() => expect(inventory()).toBe("Explorer's pack:1"));
+  });
+
+  // No id and two same-named rows: grant nothing rather than the wrong class's
+  // starting gear.
+  it('grants nothing when a colliding name has no stored id', async () => {
+    routeApiFetch(catalog);
+    renderStep({ class: 'Fighter', classId: '' });
+
+    // Settle the catalog fetch BEFORE asserting absence. A bare
+    // waitFor(...toBeNull()) passes on the first tick, before the query has even
+    // resolved, so it would stay green against a resolver that grants the wrong
+    // class's gear — the unfalsifiable shape VEG-525 tracks.
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes'));
+    await act(async () => {});
+
+    expect(inventory()).toBe('');
+    expect(screen.queryByRole('radio', { name: /chain mail/i })).toBeNull();
   });
 });

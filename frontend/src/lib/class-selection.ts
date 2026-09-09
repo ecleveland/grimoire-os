@@ -3,7 +3,7 @@ import type { SrdComboboxOption } from '@/components/SrdCombobox';
 import {
   resolveByIdThenUniqueName,
   sourceLabelledOptions,
-  type IdName,
+  type CatalogSelection,
 } from '@/lib/content-selection';
 
 /**
@@ -23,10 +23,10 @@ import {
  * instead of quietly using the wrong die. See `resolveByIdThenUniqueName` for
  * the full rule set, which is shared with `resolveBackground`.
  */
-export function resolveClass<T extends IdName>(
-  classes: T[],
-  selection: { id: string; name: string }
-): T | undefined {
+export function resolveClass(
+  classes: SrdClass[],
+  selection: CatalogSelection
+): SrdClass | undefined {
   return resolveByIdThenUniqueName(classes, selection);
 }
 

@@ -29,9 +29,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
         hitDie: 'd12',
         primaryAbilities: ['Strength'],
         savingThrows: ['Strength', 'Constitution'],
-        features: [
-          { name: 'Blood Frenzy', level: 6, description: 'A homebrew-only grant.' },
-        ],
+        features: [{ name: 'Blood Frenzy', level: 6, description: 'A homebrew-only grant.' }],
       },
       headers,
     });
@@ -96,14 +94,24 @@ test.describe('character class id round-trip (VEG-524)', () => {
   // The other half of the contract: deleting the homebrew row leaves a stale id
   // behind, and the character must degrade to the unambiguous-name path rather
   // than losing its class data.
-  test('a stale id degrades to the name path once the homebrew class is deleted', async ({
+  //
+  // The homebrew class deliberately reuses the SRD name "Wizard", so the
+  // degradation is actually observable. Naming it something unique would delete
+  // the only row with that name, leaving neither key resolvable — a crash guard
+  // on a dangling soft ref, but not a test of the name path resolving.
+  test('a stale id degrades to the SRD row of the same name once the homebrew class is deleted', async ({
     page,
   }) => {
     await registerAndLogin(page, 'class-id-stale', 'E2E Stale Ider');
     const headers = await csrfHeaders(page);
 
     const created = await page.request.post(`${BACKEND}/api/srd/classes`, {
-      data: { name: 'Warden', hitDie: 'd12', savingThrows: ['Strength'] },
+      data: {
+        name: 'Wizard',
+        hitDie: 'd12',
+        savingThrows: ['Strength'],
+        features: [{ name: 'Arcane Surge', level: 6, description: 'A homebrew-only grant.' }],
+      },
       headers,
     });
     expect(created.status(), await created.text()).toBe(201);
@@ -111,12 +119,11 @@ test.describe('character class id round-trip (VEG-524)', () => {
 
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
-        name: 'Orphaned Warden',
-        // A name only the (about to be deleted) homebrew row has, so after the
-        // delete neither key resolves and the sheet must still render.
-        class: 'Warden',
+        name: 'Orphaned Wizard',
+        class: 'Wizard',
         classId: homebrew.id,
         level: 5,
+        experiencePoints: 14000,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 44, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
@@ -126,20 +133,36 @@ test.describe('character class id round-trip (VEG-524)', () => {
     expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
     const character = await res.json();
 
+    // While the homebrew row exists the id wins outright: d12 average is 7,
+    // +2 CON = +9 HP.
+    await page.goto(`/characters/${character.id}`);
+    await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();
+    await expect(page.getByRole('dialog').getByTestId('hp-gain-preview')).toContainText('+9 HP');
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+
     const deleted = await page.request.delete(`${BACKEND}/api/srd/classes/${homebrew.id}`, {
       headers,
     });
     expect(deleted.ok(), `delete failed: ${deleted.status()}`).toBeTruthy();
 
     // The read path must not 500 on a dangling soft ref — it is not an FK, so
-    // nothing at the database level cleaned it up.
+    // nothing at the database level cleaned it up, and the stale id is still there.
     const reload = await page.request.get(`${BACKEND}/api/characters/${character.id}`);
     expect(reload.ok(), `reload failed: ${reload.status()}`).toBeTruthy();
     expect((await reload.json()).classId).toBe(homebrew.id);
 
-    // And the sheet still renders, keeping the display name.
-    await page.goto(`/characters/${character.id}`);
-    await expect(page.getByRole('heading', { name: 'Orphaned Warden' })).toBeVisible();
-    await expect(page.getByTestId('field-class')).toContainText('Warden');
+    // The degradation itself. "Wizard" is unambiguous again now that the
+    // homebrew row is gone, so the stale id falls through to it: the SRD d6
+    // (average floor(6/2)+1 = 4, +2 CON = +6 HP) replaces the homebrew d12's
+    // +9, and the
+    // homebrew-only feature is no longer offered. A resolver that gave up on a
+    // stale id would show the "class data unavailable" warning instead.
+    await page.reload();
+    await expect(page.getByTestId('field-class')).toContainText('Wizard');
+    await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('hp-gain-preview')).toContainText('+6 HP');
+    await expect(dialog.getByRole('checkbox', { name: /arcane surge/i })).toHaveCount(0);
+    await expect(dialog.getByText(/class data is unavailable/i)).toHaveCount(0);
   });
 });

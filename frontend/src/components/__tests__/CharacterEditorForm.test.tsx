@@ -589,6 +589,99 @@ describe('CharacterEditorForm autofill', () => {
     }
   });
 
+  // VEG-524. The pure-function tests above cover characterToFormValues and
+  // characterFormPayload, but not the component wiring that has to call them
+  // with the right id — reverting the picker to its pre-fix form left the entire
+  // frontend suite green. These are the tests that notice.
+  it('resolves a duplicate-named class by id when picked from the list (VEG-524)', async () => {
+    // A homebrew "Fighter" shares the SRD name but grants a different hit die
+    // and different armor/weapon training.
+    const homebrewFighter: SrdClass = {
+      ...srdClasses[0],
+      id: 'cls-fighter-hb',
+      contentSource: 'homebrew',
+      hitDie: 'd12',
+      armorProficiencies: [],
+      weaponProficiencies: ['Improvised'],
+      savingThrows: ['Dexterity', 'Charisma'],
+    };
+    srdClasses.push(homebrewFighter);
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.name = 'Hero';
+      const { onSubmit } = renderForm({ initialValues: initial });
+      const user = userEvent.setup();
+
+      await user.click(screen.getByLabelText(/^class/i));
+      await user.click(await screen.findByRole('option', { name: 'Fighter (Homebrew)' }));
+      // The committed value stays the bare name; the id disambiguates behind it.
+      expect((screen.getByLabelText(/^class/i) as HTMLInputElement).value).toBe('Fighter');
+
+      // Grants come off the HOMEBREW row, resolved by id, not the SRD one.
+      await user.click(await screen.findByRole('button', { name: /apply fighter traits/i }));
+      await user.click(screen.getByRole('button', { name: /create character/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.classId).toBe('cls-fighter-hb');
+      expect(submitted.class).toBe('Fighter');
+      expect(submitted.savingThrows).toEqual(['Dexterity', 'Charisma']);
+      expect(submitted.hitDice.dieType).toBe('d12');
+    } finally {
+      srdClasses.pop();
+    }
+  });
+
+  it('picks the SRD row when that is the one selected (VEG-524)', async () => {
+    const homebrewFighter: SrdClass = {
+      ...srdClasses[0],
+      id: 'cls-fighter-hb',
+      contentSource: 'homebrew',
+      hitDie: 'd12',
+      savingThrows: ['Dexterity', 'Charisma'],
+    };
+    // Homebrew FIRST, the array order that made the old name-based `.find`
+    // return the wrong row.
+    srdClasses.unshift(homebrewFighter);
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.name = 'Hero';
+      const { onSubmit } = renderForm({ initialValues: initial });
+      const user = userEvent.setup();
+
+      await user.click(screen.getByLabelText(/^class/i));
+      await user.click(await screen.findByRole('option', { name: 'Fighter (SRD)' }));
+      await user.click(await screen.findByRole('button', { name: /apply fighter traits/i }));
+      await user.click(screen.getByRole('button', { name: /create character/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.classId).toBe('cls-fighter');
+      expect(submitted.savingThrows).toEqual(['Strength', 'Constitution']);
+      expect(submitted.hitDice.dieType).toBe('d10');
+    } finally {
+      srdClasses.shift();
+    }
+  });
+
+  // The only id-clearing site in the classic editor. Typing over a resolved name
+  // must drop the id, or a stale one keeps resolving to a class the user has
+  // edited away from.
+  it('clears the captured classId when the name is typed over (VEG-524)', async () => {
+    const initial = emptyCharacterFormValues();
+    initial.name = 'Hero';
+    const { onSubmit } = renderForm({ initialValues: initial });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByLabelText(/^class/i));
+    await user.click(await screen.findByRole('option', { name: 'Fighter' }));
+    await user.type(screen.getByLabelText(/^class/i), ' the Bold');
+    await user.click(screen.getByRole('button', { name: /create character/i }));
+
+    const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+    expect(submitted.class).toBe('Fighter the Bold');
+    // '' in form state; characterFormPayload converts it to null at the wire.
+    expect(submitted.classId).toBe('');
+  });
+
   it('re-applying the same grants is a no-op (idempotent + "already applied" toast)', async () => {
     const initial = emptyCharacterFormValues();
     initial.name = 'Hero';

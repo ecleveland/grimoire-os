@@ -77,8 +77,8 @@ export default function LevelUpDialog({
   // stored id resolves to nothing, which surfaces as the warning below rather
   // than a confident wrong die.
   const srdClass = resolveClass(classesQuery.data ?? [], {
-    id: character.classId ?? '',
-    name: character.class ?? '',
+    id: character.classId,
+    name: character.class,
   });
   // Confirming before the catalog resolves would silently drop this level's
   // feature suggestions (and fall back to the wrong hit die), so a classed

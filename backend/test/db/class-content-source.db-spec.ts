@@ -25,6 +25,17 @@ const HOMEBREW_LABEL = 'Homebrew';
 const contentAccess = new ContentAccessService();
 const visibleTo = (userId?: string) => contentAccess.visibleTo(userId);
 
+// The exact `where` loadClassData builds since VEG-524 — id OR name, both under
+// an AND with the visibility fragment. Written once here so these specs exercise
+// the real query shape rather than a hand-copied approximation that can drift
+// away from the service (this block modelled the pre-VEG-524 shape until the id
+// landed). The AND nesting is load-bearing: `visibleTo` returns a bare
+// `{ OR: [...] }`, so spreading it beside the id-or-name OR would have one key
+// overwrite the other and silently drop the scoping.
+const candidateWhere = (name: string, userId?: string, classId?: string) => ({
+  AND: [{ OR: [...(classId ? [{ id: classId }] : []), { name }] }, visibleTo(userId)],
+});
+
 describe('class content-source tiering — real DB (VEG-505)', () => {
   let ctx: SeedContext;
   let userId: string;
@@ -378,7 +389,7 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
 
     it('offers the owner exactly one row per tier under a single name', async () => {
       const candidates = await ctx.prisma.srdClass.findMany({
-        where: { name: srdClassName, ...visibleTo(userId) },
+        where: candidateWhere(srdClassName, userId),
         select: { contentSource: true, createdById: true },
       });
 
@@ -393,11 +404,88 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
 
     it('offers only the global tiers to an owner with no homebrew of that name', async () => {
       const candidates = await ctx.prisma.srdClass.findMany({
-        where: { name: srdClassName, ...visibleTo('user-with-no-homebrew') },
+        where: candidateWhere(srdClassName, 'user-with-no-homebrew'),
         select: { contentSource: true },
       });
 
       expect(candidates.map(c => c.contentSource).sort()).toEqual(['shared', 'srd']);
+    });
+
+    // VEG-524 added the id branch, and `Character.classId` is client-supplied
+    // with no foreign key behind it — so the id is attacker-controlled input on
+    // the write path. characters.service.spec.ts asserts the `where` object
+    // literal, which proves the clause is *built* correctly but not that
+    // Postgres excludes anything; only a real database shows that. Without the
+    // visibility fragment wrapping the id branch, naming another user's private
+    // homebrew class id would hand back that row and drive this character's
+    // spell slots and weapon proficiencies off a stranger's content.
+    describe('the id branch (VEG-524)', () => {
+      let otherUsersHomebrewId: string;
+
+      beforeAll(async () => {
+        const row = await ctx.prisma.srdClass.findFirstOrThrow({
+          where: { name: srdClassName, contentSource: 'homebrew', createdById: otherUserId },
+        });
+        otherUsersHomebrewId = row.id;
+      });
+
+      it('resolves the owner’s own homebrew class by id', async () => {
+        const own = await ctx.prisma.srdClass.findFirstOrThrow({
+          where: { name: srdClassName, contentSource: 'homebrew', createdById: userId },
+        });
+
+        const candidates = await ctx.prisma.srdClass.findMany({
+          where: candidateWhere(srdClassName, userId, own.id),
+          select: { id: true },
+        });
+
+        expect(candidates.map(c => c.id)).toContain(own.id);
+      });
+
+      // The security property. Delete `visibleTo` from candidateWhere's AND and
+      // this goes red.
+      it('never returns another user’s homebrew class, even when its id is named outright', async () => {
+        const candidates = await ctx.prisma.srdClass.findMany({
+          where: candidateWhere(srdClassName, userId, otherUsersHomebrewId),
+          select: { id: true, contentSource: true, createdById: true },
+        });
+
+        expect(candidates.map(c => c.id)).not.toContain(otherUsersHomebrewId);
+        // Scoped to homebrew deliberately. The shared row in this fixture also
+        // carries `otherUserId` as its creator and is *supposed* to come back —
+        // shared content is global, and that authorship is exactly what broke
+        // the discarded createdById sort. Asserting "no row by otherUser" would
+        // fail on legitimate behavior; the property is that no row PRIVATE to
+        // another user is reachable.
+        const foreignHomebrew = candidates.filter(
+          c => c.contentSource === 'homebrew' && c.createdById === otherUserId
+        );
+        expect(foreignHomebrew).toEqual([]);
+      });
+
+      // Same guarantee for a caller with no identity at all: an anonymous read
+      // must not be able to name a private row into visibility either.
+      it('never returns a homebrew class to an anonymous caller naming its id', async () => {
+        const candidates = await ctx.prisma.srdClass.findMany({
+          where: candidateWhere(srdClassName, undefined, otherUsersHomebrewId),
+          select: { id: true, contentSource: true },
+        });
+
+        expect(candidates.map(c => c.id)).not.toContain(otherUsersHomebrewId);
+        expect(candidates.every(c => c.contentSource !== 'homebrew')).toBe(true);
+      });
+
+      // A stale id (deleted homebrew) must not suppress the name candidates —
+      // that is what lets loadClassData degrade to its tier heuristic rather
+      // than dropping the character's class data entirely.
+      it('still returns the name candidates when the id matches nothing', async () => {
+        const candidates = await ctx.prisma.srdClass.findMany({
+          where: candidateWhere(srdClassName, userId, '00000000-0000-4000-8000-000000000000'),
+          select: { contentSource: true },
+        });
+
+        expect(candidates.map(c => c.contentSource).sort()).toEqual(['homebrew', 'shared', 'srd']);
+      });
     });
   });
 

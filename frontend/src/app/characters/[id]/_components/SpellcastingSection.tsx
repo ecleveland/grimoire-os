@@ -76,8 +76,8 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   // id-first (VEG-524) so the budget follows the class the character actually
   // has, not whichever duplicate name sorted first.
   const classSpellcasting = resolveClass(classesQuery.data ?? [], {
-    id: character.classId ?? '',
-    name: character.class ?? '',
+    id: character.classId,
+    name: character.class,
   })?.spellcasting;
   const prepSummary = classSpellcasting
     ? spellPreparationSummary(

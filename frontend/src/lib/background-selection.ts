@@ -3,7 +3,7 @@ import type { SrdComboboxOption } from '@/components/SrdCombobox';
 import {
   resolveByIdThenUniqueName,
   sourceLabelledOptions,
-  type IdName,
+  type CatalogSelection,
 } from '@/lib/content-selection';
 
 /**
@@ -19,10 +19,10 @@ import {
  * selection needed the identical contract and two copies of logic this subtle
  * would drift.
  */
-export function resolveBackground<T extends IdName>(
-  backgrounds: T[],
-  selection: { id: string; name: string }
-): T | undefined {
+export function resolveBackground(
+  backgrounds: SrdBackground[],
+  selection: CatalogSelection
+): SrdBackground | undefined {
   return resolveByIdThenUniqueName(backgrounds, selection);
 }
 

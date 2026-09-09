@@ -13,6 +13,22 @@ export interface IdNameSourced extends IdName {
 }
 
 /**
+ * What the caller is trying to resolve: a display name, plus the id of the row
+ * the picker landed on if there was one.
+ *
+ * Deliberately NOT `IdName`. An `IdName.id` is a real row id; a selection's is
+ * "the id, if any" — blank for a free-typed name, absent on a character saved
+ * before the column existed. Both producers are admitted unconverted: form state
+ * spells absent as `''` (a controlled input's real DOM value), while a loaded
+ * character spells it as `null`. Narrowing handles the rest, and the resolver's
+ * first act is a falsiness check either way.
+ */
+export interface CatalogSelection {
+  id: string | null | undefined;
+  name: string | null | undefined;
+}
+
+/**
  * Resolve a selection out of a merged (srd + shared + homebrew) catalog.
  *
  * Homebrew rows may legally reuse an SRD row's name — per-tier partial unique
@@ -42,7 +58,7 @@ export interface IdNameSourced extends IdName {
  */
 export function resolveByIdThenUniqueName<T extends IdName>(
   rows: T[],
-  selection: { id: string; name: string }
+  selection: CatalogSelection
 ): T | undefined {
   if (selection.id) {
     const byId = rows.find(r => r.id === selection.id);

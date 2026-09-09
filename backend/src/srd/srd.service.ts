@@ -509,6 +509,12 @@ export class SrdService {
   // stable; `id` is unique, so no tie survives it. This does not make the name
   // unambiguous — only the character's stored `classId` does that — it just
   // stops the ambiguity being intermittent.
+  //
+  // Do not read a tier preference into the `contentSource` key. Postgres sorts
+  // an enum by its internal sort order, not alphabetically or by the order in
+  // schema.prisma: `shared` was appended by a later ALTER TYPE ADD VALUE, so the
+  // real order is srd, homebrew, shared. Stability is the only property claimed
+  // here. The deliberate tier preference lives in loadClassData, in code.
   async findAllClasses(userId?: string) {
     return this.prisma.srdClass.findMany({
       where: { ...this.contentAccess.visibleTo(userId) },
