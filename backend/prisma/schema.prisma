@@ -155,9 +155,25 @@ model Character {
   // so `class` alone stopped identifying a row: two "Fighter"s tie under
   // findAllClasses' name sort and whichever Postgres returned first drove the
   // level-up dialog's hit die and feature grants. Not a FK — homebrew rows are
-  // deletable — so both loadClassData and the frontend resolver degrade on a
-  // stale/unknown id to the unambiguous-name path. `class` (the display string)
-  // stays authoritative for free-typed names.
+  // deletable — so a stale or unknown id degrades rather than erroring.
+  //
+  // Kept consistent with `class` on write, not reconciled on read:
+  // CharactersService.update clears this when the name changes without a new id.
+  // Once the two disagree the read path cannot tell which side went stale — a
+  // renamed class row and a name-only PATCH produce the identical disagreement —
+  // so the invariant is maintained where the information to maintain it exists.
+  //
+  // The two resolvers degrade DIFFERENTLY, and the difference is not yet a
+  // decision anyone made (VEG-528). `loadClassData` falls back to a tier
+  // preference (homebrew > shared > srd) so computed stats always produce
+  // something; the frontend resolver refuses to resolve an ambiguous name at
+  // all, because the values it feeds — the offered features, and the hit die
+  // that becomes a permanent HP maximum — are worse wrong than absent. So one
+  // sheet can have its computed block driven by a class its level-up dialog
+  // declines to name. An earlier version of this comment claimed both degrade
+  // "to the unambiguous-name path"; that was only ever true of the frontend.
+  //
+  // `class` (the display string) stays authoritative for free-typed names.
   classId             String?
   level               Int      @default(1)
   subclass            String?
