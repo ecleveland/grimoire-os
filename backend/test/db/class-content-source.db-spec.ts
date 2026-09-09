@@ -429,17 +429,31 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
         otherUsersHomebrewId = row.id;
       });
 
-      it('resolves the owner’s own homebrew class by id', async () => {
-        const own = await ctx.prisma.srdClass.findFirstOrThrow({
-          where: { name: srdClassName, contentSource: 'homebrew', createdById: userId },
+      // The id branch has to be the ONLY thing that can return this row, or the
+      // test passes on the name branch alone and proves nothing. So the row gets
+      // a name of its own and the query asks for a different name — the exact
+      // shape of a character whose display string was edited away from the class
+      // it still points at. Delete the `{ id: classId }` disjunct from
+      // candidateWhere and this is the test that goes red.
+      it('resolves a class by id when the name argument does not match it', async () => {
+        const own = await ctx.prisma.srdClass.create({
+          data: {
+            name: `Id Only ${Date.now()}`,
+            hitDie: 'd8',
+            contentSource: 'homebrew',
+            createdById: userId,
+            source: HOMEBREW_LABEL,
+          },
         });
 
         const candidates = await ctx.prisma.srdClass.findMany({
           where: candidateWhere(srdClassName, userId, own.id),
-          select: { id: true },
+          select: { id: true, name: true },
         });
 
+        // Present despite sharing no name with the query.
         expect(candidates.map(c => c.id)).toContain(own.id);
+        expect(candidates.find(c => c.id === own.id)?.name).not.toBe(srdClassName);
       });
 
       // The security property. Delete `visibleTo` from candidateWhere's AND and

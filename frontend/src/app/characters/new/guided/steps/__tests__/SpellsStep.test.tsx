@@ -382,9 +382,9 @@ describe.each([
     routeApiFetch(catalog);
     renderStep({ ...wizardDraft, classId: '' });
 
-    // Settle the catalog fetch first — see the EquipmentStep equivalent. Without
-    // it the absence assertion passes before the query resolves and proves
-    // nothing.
+    // See the EquipmentStep equivalent for why both lines are needed: the
+    // expectation holds synchronously, and it is `waitFor` yielding timer time
+    // plus `act` flushing the render that actually settles the query.
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes'));
     await act(async () => {});
 

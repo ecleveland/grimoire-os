@@ -351,9 +351,9 @@ describe('AbilitiesStep — recommended primary abilities (VEG-447)', () => {
     it('recommends nothing when a colliding name has no stored id', async () => {
       renderStep({ class: 'Fighter', classId: '' }, catalog);
 
-      // Settle the catalog fetch first — see the EquipmentStep equivalent. A
-      // bare waitFor(...toBeNull()) passes before the query resolves, so it
-      // would stay green against a resolver recommending the wrong class.
+      // See the EquipmentStep equivalent for why both lines are needed: the
+      // expectation holds synchronously, and it is `waitFor` yielding timer time
+      // plus `act` flushing the render that actually settles the query.
       await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes'));
       await act(async () => {});
 

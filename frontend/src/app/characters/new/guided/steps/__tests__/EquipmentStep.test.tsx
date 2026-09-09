@@ -300,10 +300,18 @@ describe.each([
     routeApiFetch(catalog);
     renderStep({ class: 'Fighter', classId: '' });
 
-    // Settle the catalog fetch BEFORE asserting absence. A bare
-    // waitFor(...toBeNull()) passes on the first tick, before the query has even
-    // resolved, so it would stay green against a resolver that grants the wrong
-    // class's gear — the unfalsifiable shape VEG-525 tracks.
+    // Let the catalog query resolve and render BEFORE asserting absence. A bare
+    // waitFor(...toBeNull()) passes on the first tick, before the fetch has
+    // resolved, so it would stay green against a resolver that picks the wrong
+    // duplicate — the unfalsifiable shape VEG-525 tracks.
+    //
+    // Both lines are load-bearing, and not for the obvious reason. The
+    // expectation below already holds synchronously (apiFetch runs during
+    // mount), so it is documentation of what we are waiting on, not the
+    // mechanism. What advances the pipeline is `waitFor` yielding real timer
+    // time inside RTL's async-act wrapper; `act` then flushes the render that
+    // resolution triggers. Measured: either line alone leaves the mutation
+    // green, both together turn it red.
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes'));
     await act(async () => {});
 
