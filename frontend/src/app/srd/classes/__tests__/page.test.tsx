@@ -21,6 +21,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   return {
     id: 'class-1',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['STR'],
     savingThrows: ['STR', 'CON'],

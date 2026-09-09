@@ -28,8 +28,25 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 // has no constructor dependencies.
 const visibleToOwner = new ContentAccessService().visibleTo(USER_ID);
 // Every visible row with the name is fetched and the tier picked in code, so
-// resolution never depends on a column sort (VEG-505).
-const classSelect = { contentSource: true, spellcasting: true, weaponProficiencies: true };
+// resolution never depends on a column sort (VEG-505). `id` joined the select in
+// VEG-524 so a stored classId can be matched against the candidates.
+const classSelect = {
+  id: true,
+  contentSource: true,
+  spellcasting: true,
+  weaponProficiencies: true,
+};
+
+// The id-or-name disjunction sits under an explicit AND with the visibility
+// fragment (VEG-524): visibleTo() is itself a bare `{ OR: [...] }`, so spreading
+// the two side by side would have one key overwrite the other and drop the
+// scoping entirely.
+const classWhere = (name: string, classId?: string) => ({
+  AND: [
+    { OR: [...(classId ? [{ id: classId }] : []), { name }] },
+    visibleToOwner as Record<string, unknown>,
+  ],
+});
 
 describe('CharactersService', () => {
   let service: CharactersService;
@@ -116,6 +133,22 @@ describe('CharactersService', () => {
         data: expect.objectContaining({ backgroundId }),
       });
       expect(result.backgroundId).toBe(backgroundId);
+    });
+
+    it('round-trips classId through the response DTO (VEG-524)', async () => {
+      // Same @Expose whitelist guard as backgroundId above. The column and the
+      // create DTO are both necessary and neither is sufficient: without the
+      // @Expose the id never reaches the client, and the sheet silently falls
+      // back to resolving a duplicate class name by guesswork.
+      const classId = '223e4567-e89b-42d3-a456-426614174000';
+      prisma.character.create.mockResolvedValue({ ...mockCharacter, classId });
+
+      const result = await service.create(USER_ID, { ...createCharacterDto, classId });
+
+      expect(prisma.character.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ classId }),
+      });
+      expect(result.classId).toBe(classId);
     });
 
     it('does not check campaign membership when no campaignId is given', async () => {
@@ -400,7 +433,7 @@ describe('CharactersService', () => {
       const result = await service.findOne(CHARACTER_ID);
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
-        where: { name: 'Wizard', ...visibleToOwner },
+        where: classWhere('Wizard'),
         select: classSelect,
       });
       // INT 16 → mod 3, prof 3 at level 5: DC = 8 + 3 + 3 = 14; attack = 6.
@@ -484,7 +517,7 @@ describe('CharactersService', () => {
       // STR 16 → +3, prof +3 granted by the class list.
       expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
-        where: { name: 'Fighter', ...visibleToOwner },
+        where: classWhere('Fighter'),
         select: classSelect,
       });
     });
@@ -507,8 +540,15 @@ describe('CharactersService', () => {
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: {
-          name: 'Fighter',
-          OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: mockCharacter.userId }],
+          AND: [
+            { OR: [{ name: 'Fighter' }] },
+            {
+              OR: [
+                { contentSource: { in: ['srd', 'shared'] } },
+                { createdById: mockCharacter.userId },
+              ],
+            },
+          ],
         },
         select: classSelect,
       });
@@ -583,6 +623,126 @@ describe('CharactersService', () => {
         expect(await attackBonusFrom([homebrew, shared, srd])).toBe('+6');
         expect(await attackBonusFrom([srd, shared, homebrew])).toBe('+6');
         expect(await attackBonusFrom([shared, srd, homebrew])).toBe('+6');
+      });
+    });
+
+    // VEG-524. The tier preference above is a heuristic for characters that
+    // predate the id: it guesses which "Fighter" the owner meant. A stored
+    // classId says so outright, and must win — otherwise the backend computes
+    // spell slots and weapon grants from one row while the sheet displays
+    // another.
+    describe('resolving the class by stored classId (VEG-524)', () => {
+      const HOMEBREW_ID = 'cls-homebrew';
+      const SRD_ID = 'cls-srd';
+
+      const row = (id: string, contentSource: string, weaponProficiencies: string[]) => ({
+        id,
+        contentSource,
+        spellcasting: null,
+        weaponProficiencies,
+      });
+
+      // Same observable seam the tier tests use: longswords are martial, so a
+      // proficient row reads +6 (STR +3, prof +3) and a non-proficient one +3.
+      // The attack bonus names which row won.
+      async function attackBonusFor(classId: string | null, candidates: unknown[]) {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId,
+          proficiencies: [],
+          inventory: [tieredLongsword],
+        });
+        prisma.srdClass.findMany.mockResolvedValue(candidates);
+        const result = await service.findOne(CHARACTER_ID);
+        return result.computed.weapons[0].attackBonus;
+      }
+
+      // The heuristic would take the homebrew row here; the id says SRD.
+      it('prefers the row the stored id names over the homebrew tier preference', async () => {
+        expect(
+          await attackBonusFor(SRD_ID, [
+            row(HOMEBREW_ID, 'homebrew', []),
+            row(SRD_ID, 'srd', ['Martial weapons']),
+          ])
+        ).toBe('+6');
+      });
+
+      it('prefers the stored id when it names the homebrew row', async () => {
+        expect(
+          await attackBonusFor(HOMEBREW_ID, [
+            row(SRD_ID, 'srd', []),
+            row(HOMEBREW_ID, 'homebrew', ['Martial weapons']),
+          ])
+        ).toBe('+6');
+      });
+
+      it('is stable regardless of the order Postgres returns the rows in', async () => {
+        const homebrew = row(HOMEBREW_ID, 'homebrew', []);
+        const srd = row(SRD_ID, 'srd', ['Martial weapons']);
+        expect(await attackBonusFor(SRD_ID, [homebrew, srd])).toBe('+6');
+        expect(await attackBonusFor(SRD_ID, [srd, homebrew])).toBe('+6');
+      });
+
+      // Homebrew rows are deletable, so a stored id can outlive its row. It
+      // degrades to the pre-VEG-524 name heuristic rather than dropping the
+      // class entirely — the character keeps its spell slots.
+      it('falls back to the tier heuristic when the stored id resolves to nothing', async () => {
+        expect(
+          await attackBonusFor('cls-deleted', [
+            row(SRD_ID, 'srd', []),
+            row(HOMEBREW_ID, 'homebrew', ['Martial weapons']),
+          ])
+        ).toBe('+6');
+      });
+
+      it('uses the tier heuristic unchanged when no id is stored', async () => {
+        expect(
+          await attackBonusFor(null, [
+            row(SRD_ID, 'srd', []),
+            row(HOMEBREW_ID, 'homebrew', ['Martial weapons']),
+          ])
+        ).toBe('+6');
+      });
+
+      // The id is a soft ref with no FK, so it is attacker-controlled input on
+      // the write path. Scoping has to wrap the id lookup as well as the name
+      // one, or a guessed id would read a stranger's homebrew class.
+      it('scopes the id lookup to the owner’s visible content', async () => {
+        await attackBonusFor(HOMEBREW_ID, [row(HOMEBREW_ID, 'homebrew', ['Martial weapons'])]);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where).toEqual({
+          AND: [
+            { OR: [{ id: HOMEBREW_ID }, { name: 'Fighter' }] },
+            { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }] },
+          ],
+        });
+        // Still picked in code, never by a column sort (VEG-505).
+        expect(args.orderBy).toBeUndefined();
+      });
+
+      // visibleTo() returns a bare { OR: [...] }. Spreading it next to the
+      // id-or-name OR would have one key silently overwrite the other and drop
+      // the scoping — hence the AND nesting asserted above.
+      it('does not let the id-or-name OR collide with the visibility OR', async () => {
+        await attackBonusFor(HOMEBREW_ID, [row(HOMEBREW_ID, 'homebrew', ['Martial weapons'])]);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where.OR).toBeUndefined();
+        expect(args.where.AND).toHaveLength(2);
+      });
+
+      it('queries by name alone when no id is stored', async () => {
+        await attackBonusFor(null, [row(SRD_ID, 'srd', ['Martial weapons'])]);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where).toEqual({
+          AND: [
+            { OR: [{ name: 'Fighter' }] },
+            { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }] },
+          ],
+        });
       });
     });
 
@@ -831,6 +991,27 @@ describe('CharactersService', () => {
         whitelist: true,
         forbidNonWhitelisted: true,
       });
+      expect(errors).toHaveLength(0);
+    });
+
+    // VEG-349: an editable field needs to be on the DTO, not just on the Prisma
+    // model — forbidNonWhitelisted 400s anything it does not declare. The sheet
+    // PATCHes classId whenever the class picker resolves a row, so a missing
+    // declaration would reject the whole save, not just drop the field.
+    it('accepts classId on the update DTO (VEG-524)', async () => {
+      const dto = plainToInstance(UpdateCharacterDto, {
+        class: 'Fighter',
+        classId: '223e4567-e89b-42d3-a456-426614174000',
+      });
+      const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+      expect(errors).toHaveLength(0);
+    });
+
+    // Typing over a resolved class clears the id, and the payload sends null
+    // rather than '' to keep the column a clean soft ref (characterFormPayload).
+    it('accepts a null classId so a stale id can be cleared (VEG-524)', async () => {
+      const dto = plainToInstance(UpdateCharacterDto, { class: 'Homebrew Knight', classId: null });
+      const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
       expect(errors).toHaveLength(0);
     });
   });

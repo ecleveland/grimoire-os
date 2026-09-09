@@ -498,12 +498,21 @@ export class SrdService {
 
   // Tiered since VEG-505: the response now varies per caller, which is why the
   // class routes moved off SrdController's blanket URL-keyed cache and onto
-  // ClassesController's AnonymousCacheInterceptor. Nothing can create a
-  // homebrew class until VEG-506, so today every caller sees the same rows.
+  // ClassesController's AnonymousCacheInterceptor. Since VEG-506 shipped, users
+  // really can add rows here, so callers no longer all see the same catalog.
+  //
+  // The sort carries a tiebreak past `name` (VEG-524). Once VEG-506 let a user
+  // own a homebrew "Fighter" beside the SRD one, a name-only sort left the two
+  // tied, and a tie has no defined order — Postgres returns whatever the plan
+  // produces, so a client picking the first match could resolve the same
+  // character differently between loads. `contentSource` then `id` makes that
+  // stable; `id` is unique, so no tie survives it. This does not make the name
+  // unambiguous — only the character's stored `classId` does that — it just
+  // stops the ambiguity being intermittent.
   async findAllClasses(userId?: string) {
     return this.prisma.srdClass.findMany({
       where: { ...this.contentAccess.visibleTo(userId) },
-      orderBy: { name: 'asc' },
+      orderBy: [{ name: 'asc' }, { contentSource: 'asc' }, { id: 'asc' }],
       include: { features: { orderBy: CLASS_FEATURE_ORDER } },
     });
   }

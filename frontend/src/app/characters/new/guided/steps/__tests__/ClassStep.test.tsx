@@ -20,6 +20,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   return {
     id: 'fighter',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['Strength'],
     savingThrows: ['Strength', 'Constitution'],
@@ -38,6 +39,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
 const WIZARD = makeClass({
   id: 'wizard',
   name: 'Wizard',
+  contentSource: 'srd',
   hitDie: 'd6',
   savingThrows: ['Intelligence', 'Wisdom'],
   armorProficiencies: [],
@@ -51,6 +53,7 @@ const WIZARD = makeClass({
 const CLERIC = makeClass({
   id: 'cleric',
   name: 'Cleric',
+  contentSource: 'srd',
   hitDie: 'd8',
   savingThrows: ['Wisdom', 'Charisma'],
   armorProficiencies: ['Light armor', 'Medium armor', 'Shields'],
@@ -86,6 +89,7 @@ function Harness({ onValid, seed }: { onValid: (valid: boolean) => void; seed?: 
       <div data-testid="draft-skills">{api.draft.skills.join(',')}</div>
       <div data-testid="draft-subclass">{api.draft.subclass}</div>
       <div data-testid="draft-spell">{api.draft.spellcastingAbility}</div>
+      <div data-testid="draft-classId">{api.draft.classId}</div>
     </DraftProvider>
   );
 }
@@ -298,5 +302,78 @@ describe('ClassStep — SRD class selection', () => {
     expect(screen.queryByRole('group', { name: /class grants/i })).toBeNull();
     expect(screen.queryByRole('group', { name: /skills/i })).toBeNull();
     expect(screen.getByTestId('draft-spell')).toHaveTextContent('');
+  });
+});
+
+// VEG-524. VEG-506 made a class name non-unique, so the picker has to record
+// *which* row was chosen. These mirror the background picker's VEG-473 suite.
+describe('ClassStep — duplicate class names (VEG-524)', () => {
+  const homebrewFighter = makeClass({
+    id: 'cls-hb-fighter',
+    name: 'Fighter',
+    contentSource: 'homebrew',
+    createdById: 'u1',
+    hitDie: 'd12',
+  });
+
+  it('captures the picked class id, and labels the colliding options by source', async () => {
+    const user = userEvent.setup();
+    renderStep([homebrewFighter, makeClass()]);
+
+    const input = screen.getByRole('combobox', { name: /^class/i });
+    await user.type(input, 'Fighter');
+    await user.click(await screen.findByRole('option', { name: 'Fighter (Homebrew)' }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-classId')).toHaveTextContent('cls-hb-fighter')
+    );
+    // The committed display value stays the bare name; only the id disambiguates.
+    expect(input).toHaveValue('Fighter');
+    // The homebrew hit die proves the resolver followed the id, not the name.
+    const summary = await screen.findByRole('group', { name: /class grants/i });
+    expect(within(summary).getByText(/d12/)).toBeInTheDocument();
+  });
+
+  it('does not decorate a class name that does not collide', async () => {
+    const user = userEvent.setup();
+    renderStep([makeClass(), WIZARD]);
+
+    await user.type(screen.getByRole('combobox', { name: /^class/i }), 'Wizard');
+
+    expect(await screen.findByRole('option', { name: 'Wizard' })).toBeInTheDocument();
+  });
+
+  it('clears the captured id when the name is edited (VEG-524)', async () => {
+    const user = userEvent.setup();
+    renderStep([makeClass()]);
+
+    await pickClass(user, 'Fighter');
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toHaveTextContent('fighter'));
+
+    // Editing the committed name into a custom value drops the id so a stale id
+    // can't keep granting the old class.
+    await user.type(screen.getByRole('combobox', { name: /^class/i }), ' the Bold');
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
+  });
+
+  // The safety property: re-typing a name back into a collision must resolve to
+  // nothing rather than silently swapping to the other tier's grants.
+  it('grants nothing when a picked name is edited back into a collision', async () => {
+    const user = userEvent.setup();
+    renderStep([homebrewFighter, makeClass()]);
+
+    const input = screen.getByRole('combobox', { name: /^class/i });
+    await user.type(input, 'Fighter');
+    await user.click(await screen.findByRole('option', { name: 'Fighter (Homebrew)' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-classId')).toHaveTextContent('cls-hb-fighter')
+    );
+
+    await user.clear(input);
+    await user.type(input, 'Fighter');
+
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
+    // No grants summary at all — the name is ambiguous, so nothing resolved.
+    expect(screen.queryByRole('group', { name: /class grants/i })).toBeNull();
   });
 });

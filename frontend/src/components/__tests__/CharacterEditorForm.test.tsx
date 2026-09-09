@@ -25,6 +25,7 @@ const srdClasses: SrdClass[] = [
   {
     id: 'cls-fighter',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['Strength'],
     savingThrows: ['Strength', 'Constitution'],
@@ -39,6 +40,7 @@ const srdClasses: SrdClass[] = [
   {
     id: 'cls-wizard',
     name: 'Wizard',
+    contentSource: 'srd',
     hitDie: 'd6',
     primaryAbilities: ['Intelligence'],
     savingThrows: ['Intelligence', 'Wisdom'],
@@ -54,6 +56,7 @@ const srdClasses: SrdClass[] = [
   {
     id: 'cls-monk',
     name: 'Monk',
+    contentSource: 'srd',
     hitDie: 'd8',
     primaryAbilities: ['Dexterity', 'Wisdom'],
     savingThrows: ['Strength', 'Dexterity'],
@@ -231,6 +234,35 @@ describe('pure helpers', () => {
       armorTraining: [],
       spellcastingAbility: '',
     });
+  });
+
+  // VEG-524: same contract as backgroundId below, for class. A loaded character
+  // carries classId so its hit die and per-level features resolve by id even
+  // when a homebrew class reuses the SRD name (legal since VEG-506).
+  it('characterToFormValues seeds classId from the character', () => {
+    const v = characterToFormValues(makeCharacter({ classId: 'cls-123' }));
+    expect(v.classId).toBe('cls-123');
+  });
+
+  it('characterToFormValues leaves classId blank when the character has none', () => {
+    const v = characterToFormValues(makeCharacter({ classId: undefined }));
+    expect(v.classId).toBe('');
+  });
+
+  it('characterFormPayload sends the selected classId', () => {
+    const payload = characterFormPayload(
+      characterToFormValues(makeCharacter({ classId: 'cls-123' }))
+    );
+    expect(payload.classId).toBe('cls-123');
+  });
+
+  // Null, not '': a free-typed class has no catalog row, and the column is a
+  // soft ref that should hold an id or nothing.
+  it('characterFormPayload sends null for a free-typed class (no id)', () => {
+    const payload = characterFormPayload(
+      characterToFormValues(makeCharacter({ classId: undefined }))
+    );
+    expect(payload.classId).toBeNull();
   });
 
   // VEG-476: a loaded character now carries backgroundId so its background

@@ -150,6 +150,15 @@ model Character {
   campaignId          String?
   race                String?
   class               String?
+  // Resolution key for the selected class (VEG-524), same soft-ref contract as
+  // `backgroundId` below. VEG-506 let a user's homebrew class reuse an SRD name,
+  // so `class` alone stopped identifying a row: two "Fighter"s tie under
+  // findAllClasses' name sort and whichever Postgres returned first drove the
+  // level-up dialog's hit die and feature grants. Not a FK — homebrew rows are
+  // deletable — so both loadClassData and the frontend resolver degrade on a
+  // stale/unknown id to the unambiguous-name path. `class` (the display string)
+  // stays authoritative for free-typed names.
+  classId             String?
   level               Int      @default(1)
   subclass            String?
   background          String?

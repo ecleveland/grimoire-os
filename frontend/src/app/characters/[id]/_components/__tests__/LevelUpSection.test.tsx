@@ -25,6 +25,7 @@ vi.mock('@/lib/dice', async importOriginal => ({
 const fighterClass: SrdClass = {
   id: 'cls-fighter',
   name: 'Fighter',
+  contentSource: 'srd',
   hitDie: 'd10',
   primaryAbilities: ['Strength'],
   savingThrows: ['Strength', 'Constitution'],
@@ -508,6 +509,118 @@ describe('LevelUpSection', () => {
       await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(onPatch).not.toHaveBeenCalled();
+    });
+  });
+  // VEG-524. VEG-506 let a user own a homebrew "Fighter" beside the SRD one, so
+  // /srd/classes can return two rows with the same name. Resolving by name took
+  // whichever sorted first, and the dialog reads two things off that row: the
+  // per-level features it offers, and the hit die that hpGain turns into a
+  // *permanent* HP maximum. Neither errors when it picks the wrong one.
+  //
+  // The catalogs below deliberately put the homebrew row first — the array order
+  // that made the old `.find` return it for an SRD character.
+  describe('resolving a duplicate class name (VEG-524)', () => {
+    const homebrewFighter: SrdClass = {
+      ...fighterClass,
+      id: 'cls-hb-fighter',
+      contentSource: 'homebrew',
+      hitDie: 'd12',
+      features: [{ name: 'Blood Frenzy', level: 6, description: 'Homebrew grant.' }],
+    };
+    // Asserted against BOTH orderings. With one order a name-based `.find`
+    // coincidentally agrees with the id, so a single-order test would pass
+    // against the very bug it guards; running both means one of the two always
+    // discriminates, whichever row the query plan puts first.
+    const orderings: [string, SrdClass[]][] = [
+      ['homebrew first', [homebrewFighter, fighterClass]],
+      ['SRD first', [fighterClass, homebrewFighter]],
+    ];
+
+    describe.each(orderings)('with the catalog returned %s', (_label, catalog) => {
+      it('offers the features of the class the stored id names', async () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        const user = userEvent.setup();
+        renderSection({ class: 'Fighter', classId: 'cls-hb-fighter' });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('checkbox', { name: /blood frenzy/i })).toBeInTheDocument();
+        expect(within(dialog).queryByRole('checkbox', { name: /extra attack/i })).toBeNull();
+      });
+
+      it('offers the SRD features when the stored id names the SRD row', async () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        const user = userEvent.setup();
+        renderSection({ class: 'Fighter', classId: 'cls-fighter' });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('checkbox', { name: /extra attack/i })).toBeInTheDocument();
+        expect(within(dialog).queryByRole('checkbox', { name: /blood frenzy/i })).toBeNull();
+      });
+
+      // The HP consequence, stated directly: the seeded pool die follows the id.
+      // Picking the wrong row here writes a wrong permanent maximum.
+      it('seeds the homebrew hit die when the stored id names that row', async () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        const user = userEvent.setup();
+        renderSection({ class: 'Fighter', classId: 'cls-hb-fighter', hitDice: null });
+        const dialog = await openDialog(user);
+        await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+
+        expect(onPatch).toHaveBeenCalledWith(
+          expect.objectContaining({ hitDice: { dieType: 'd12', total: 6, spent: 0 } })
+        );
+      });
+
+      it('seeds the SRD hit die when the stored id names the SRD row', async () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        const user = userEvent.setup();
+        renderSection({ class: 'Fighter', classId: 'cls-fighter', hitDice: null });
+        const dialog = await openDialog(user);
+        await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+
+        expect(onPatch).toHaveBeenCalledWith(
+          expect.objectContaining({ hitDice: { dieType: 'd10', total: 6, spent: 0 } })
+        );
+      });
+    });
+
+    const collidingCatalog = [homebrewFighter, fighterClass];
+
+    // The intended degradation. A character saved before the column existed has
+    // no id, and with two same-named rows there is no correct answer — so the
+    // dialog warns instead of silently picking one and seeding its die.
+    it('warns rather than guessing when a colliding name has no stored id', async () => {
+      mockUseApiQuery.mockReturnValue({ data: collidingCatalog });
+      const user = userEvent.setup();
+      renderSection({ class: 'Fighter', classId: null });
+      const dialog = await openDialog(user);
+
+      expect(within(dialog).getByText(/class data is unavailable/i)).toBeInTheDocument();
+      expect(within(dialog).queryByRole('checkbox', { name: /blood frenzy/i })).toBeNull();
+      expect(within(dialog).queryByRole('checkbox', { name: /extra attack/i })).toBeNull();
+    });
+
+    // An unambiguous name still resolves with no id, so the millions of
+    // characters predating the column keep working.
+    it('still resolves an unambiguous name with no stored id', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+      const user = userEvent.setup();
+      renderSection({ class: 'Fighter', classId: null });
+      const dialog = await openDialog(user);
+
+      expect(within(dialog).getByRole('checkbox', { name: /extra attack/i })).toBeInTheDocument();
+      expect(within(dialog).queryByText(/class data is unavailable/i)).toBeNull();
+    });
+
+    // Homebrew classes are deletable, so a persisted id outlives its row.
+    it('degrades a stale id to the unambiguous-name path', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+      const user = userEvent.setup();
+      renderSection({ class: 'Fighter', classId: 'cls-deleted' });
+      const dialog = await openDialog(user);
+
+      expect(within(dialog).getByRole('checkbox', { name: /extra attack/i })).toBeInTheDocument();
+      expect(within(dialog).queryByText(/class data is unavailable/i)).toBeNull();
     });
   });
 });

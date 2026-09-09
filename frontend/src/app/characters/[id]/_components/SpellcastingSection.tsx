@@ -15,6 +15,7 @@ import {
   toSpellEntry,
 } from '@/lib/character-spells';
 import { useApiQuery } from '@/lib/query';
+import { resolveClass } from '@/lib/class-selection';
 import SrdSpellSearch from '@/components/SrdSpellSearch';
 import SpellCardModal from './SpellCardModal';
 
@@ -72,7 +73,12 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   // Prepared/known budget for this class+level (VEG-405). Null until the class
   // list resolves or for a class with no spellcasting data — the indicator is
   // simply omitted then.
-  const classSpellcasting = classesQuery.data?.find(c => c.name === character.class)?.spellcasting;
+  // id-first (VEG-524) so the budget follows the class the character actually
+  // has, not whichever duplicate name sorted first.
+  const classSpellcasting = resolveClass(classesQuery.data ?? [], {
+    id: character.classId ?? '',
+    name: character.class ?? '',
+  })?.spellcasting;
   const prepSummary = classSpellcasting
     ? spellPreparationSummary(
         classSpellcasting,

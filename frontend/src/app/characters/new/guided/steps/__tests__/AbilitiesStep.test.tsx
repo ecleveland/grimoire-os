@@ -19,6 +19,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   return {
     id: 'fighter',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['Strength'],
     savingThrows: ['Strength', 'Constitution'],
@@ -36,6 +37,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
 const MONK = makeClass({
   id: 'monk',
   name: 'Monk',
+  contentSource: 'srd',
   hitDie: 'd8',
   primaryAbilities: ['Dexterity', 'Wisdom'],
 });

@@ -18,6 +18,7 @@ vi.mock('@/lib/api', () => ({
 const FIGHTER: SrdClass = {
   id: 'fighter',
   name: 'Fighter',
+  contentSource: 'srd',
   hitDie: 'd10',
   primaryAbilities: ['Strength'],
   savingThrows: ['Strength', 'Constitution'],

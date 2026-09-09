@@ -18,6 +18,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 const SC_BASE = {
   id: 'base',
+  contentSource: 'srd',
   hitDie: 'd6',
   primaryAbilities: ['Intelligence'],
   savingThrows: ['Intelligence', 'Wisdom'],

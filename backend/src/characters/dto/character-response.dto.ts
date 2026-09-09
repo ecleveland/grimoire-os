@@ -30,6 +30,7 @@ export class CharacterDto {
   @Expose() name!: string;
   @Expose() race!: string | null;
   @Expose() class!: string | null;
+  @Expose() classId!: string | null;
   @Expose() level!: number;
   @Expose() subclass!: string | null;
   @Expose() background!: string | null;

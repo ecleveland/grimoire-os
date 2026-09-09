@@ -16,6 +16,7 @@ function srdClass(over: Partial<SrdClass> = {}): SrdClass {
   return {
     id: 'cls-1',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['Strength'],
     savingThrows: ['Strength', 'Constitution'],

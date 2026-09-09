@@ -103,6 +103,49 @@ describe('SpellcastingSection', () => {
       expect(screen.queryByTestId('prep-over-warning')).toBeNull();
     });
 
+    // VEG-524. The allowance comes off the resolved class row, so a
+    // duplicate-named homebrew class shadowing the SRD one silently reported a
+    // different prepared budget. Both orderings, because with one of them a
+    // name-based `.find` coincidentally agrees with the id.
+    describe.each([
+      ['homebrew first', true],
+      ['SRD first', false],
+    ])('resolving a duplicate class name, catalog %s', (_label, homebrewFirst) => {
+      // Same name, a deliberately different budget: 3 cantrips instead of 4.
+      const HOMEBREW_WIZARD = {
+        id: 'cls-hb-wizard',
+        name: 'Wizard',
+        spellcasting: {
+          ability: 'Intelligence',
+          cantripsKnown: { 5: 3 },
+          preparedFormula: 'level + intelligence modifier',
+        },
+      };
+      const catalog = homebrewFirst
+        ? [HOMEBREW_WIZARD, WIZARD_CLASS]
+        : [WIZARD_CLASS, HOMEBREW_WIZARD];
+
+      it('uses the budget of the class the stored id names', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(<SpellcastingSection character={{ ...baseCharacter, classId: 'cls-hb-wizard' }} />);
+        expect(screen.getByTestId('cantrip-summary')).toHaveTextContent('2 / 3');
+      });
+
+      it('uses the SRD budget when the stored id names the SRD row', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(<SpellcastingSection character={{ ...baseCharacter, classId: 'wizard' }} />);
+        expect(screen.getByTestId('cantrip-summary')).toHaveTextContent('2 / 4');
+      });
+
+      // No id and two same-named rows: omit the indicator rather than assert a
+      // budget that may belong to the other class.
+      it('omits the indicator when a colliding name has no stored id', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(<SpellcastingSection character={{ ...baseCharacter, classId: null }} />);
+        expect(screen.queryByTestId('cantrip-summary')).toBeNull();
+      });
+    });
+
     it('warns (non-blocking) when the prepared/known count exceeds the allowance', () => {
       mockUseApiQuery.mockReturnValue({
         data: [

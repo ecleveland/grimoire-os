@@ -12,6 +12,7 @@ import {
   SKILL_ABILITY_MAP,
 } from '@/lib/ability-math';
 import { useApiQuery } from '@/lib/query';
+import { resolveClass } from '@/lib/class-selection';
 import {
   RecommendedAbilitiesSummary,
   RecommendedAbilityTag,
@@ -69,12 +70,14 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
   const [assignments, setAssignments] =
     useState<Record<AbilityKey, number | null>>(emptyAssignments);
 
-  // Resolve the draft's class to its SRD record (by name, like OriginStep does
-  // for backgrounds) to surface its recommended primary abilities. A free-typed
-  // or homebrew class with no match resolves to no recommendation. The catalog
-  // is a small full array; a failed load just shows no recommendation.
+  // Resolve the draft's class to its catalog record to surface its recommended
+  // primary abilities. id-first (VEG-524), like the background resolver: a
+  // homebrew class may share an SRD name, and a colliding name with no id
+  // resolves to nothing rather than recommending the wrong class's abilities. A
+  // free-typed class also resolves to no recommendation. The catalog is a small
+  // full array; a failed load just shows no recommendation.
   const classes = useApiQuery<SrdClass[]>('/srd/classes').data ?? [];
-  const selectedClass = classes.find(c => c.name === value.class);
+  const selectedClass = resolveClass(classes, { id: value.classId, name: value.class });
   const recommended = recommendedAbilityKeys(selectedClass?.primaryAbilities);
   const isRecommended = (k: AbilityKey) => recommended.includes(k);
 

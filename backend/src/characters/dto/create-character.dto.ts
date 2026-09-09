@@ -500,6 +500,16 @@ export class CreateCharacterDto {
   @Max(20)
   level?: number;
 
+  // VEG-524: soft ref to the selected class row, so a loaded character resolves
+  // its class by id once a homebrew row reuses an SRD name (VEG-506 made that
+  // legal). Same contract as `backgroundId` below — not a UUID-validated FK,
+  // because homebrew rows are deletable and both loadClassData and the frontend
+  // resolver degrade safely on a stale/unknown id.
+  @ApiPropertyOptional({ description: 'Resolution key for the selected class (VEG-524)' })
+  @IsOptional()
+  @IsString()
+  classId?: string;
+
   @ApiPropertyOptional({ example: 'Champion' })
   @IsOptional()
   @IsString()
