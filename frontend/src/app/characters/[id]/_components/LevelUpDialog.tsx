@@ -5,6 +5,7 @@ import type { Character, SrdClass } from '@/lib/types';
 import { asDieType } from '@/lib/types';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
+import { resolveClass } from '@/lib/class-selection';
 import { rollDie } from '@/lib/dice';
 import { proficiencyBonus } from '@/lib/ability-math';
 import {
@@ -70,7 +71,15 @@ export default function LevelUpDialog({
 
   // Cached and shared with SpellcastingSection's identical fetch.
   const classesQuery = useApiQuery<SrdClass[]>('/srd/classes');
-  const srdClass = classesQuery.data?.find(c => c.name === character.class);
+  // id-first (VEG-524). Both reads below are silently wrong against the wrong
+  // row: the feature list is this class's per-level grants, and the hit die feeds
+  // hpGain, which writes a *permanent* HP maximum. A colliding name with no
+  // stored id resolves to nothing, which surfaces as the warning below rather
+  // than a confident wrong die.
+  const srdClass = resolveClass(classesQuery.data ?? [], {
+    id: character.classId,
+    name: character.class,
+  });
   // Confirming before the catalog resolves would silently drop this level's
   // feature suggestions (and fall back to the wrong hit die), so a classed
   // character waits for it. Once settled, a load failure — or a class the SRD

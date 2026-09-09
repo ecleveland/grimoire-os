@@ -500,6 +500,22 @@ export class CreateCharacterDto {
   @Max(20)
   level?: number;
 
+  // VEG-524: soft ref to the selected class row, so a loaded character resolves
+  // its class by id once a homebrew row reuses an SRD name (VEG-506 made that
+  // legal). Same contract as `backgroundId` below — not a UUID-validated FK,
+  // because homebrew rows are deletable and both loadClassData and the frontend
+  // resolver degrade safely on a stale/unknown id.
+  //
+  // Typed `| null` because that is what the client actually sends: a free-typed
+  // class has no catalog row, and characterFormPayload sends null (not '') to
+  // keep the column a clean soft ref. @IsOptional() skips validation for null
+  // and undefined alike, so this declares the existing wire contract rather than
+  // changing it.
+  @ApiPropertyOptional({ description: 'Resolution key for the selected class (VEG-524)' })
+  @IsOptional()
+  @IsString()
+  classId?: string | null;
+
   @ApiPropertyOptional({ example: 'Champion' })
   @IsOptional()
   @IsString()
@@ -514,10 +530,13 @@ export class CreateCharacterDto {
   // resolve its background by id when a homebrew row reuses an SRD name (VEG-473).
   // Not a UUID-validated FK — homebrew rows are deletable, and the frontend
   // resolver degrades safely on a stale/unknown id.
+  // `| null` for the same reason as classId above — the client has always sent
+  // null here to clear a stale id, and the declared `string` was a lie the
+  // `as unknown as Prisma.*Input` cast in the service happened to hide.
   @ApiPropertyOptional({ description: 'Resolution key for the selected background (VEG-476)' })
   @IsOptional()
   @IsString()
-  backgroundId?: string;
+  backgroundId?: string | null;
 
   @ApiPropertyOptional({ example: 'Lawful Good' })
   @IsOptional()

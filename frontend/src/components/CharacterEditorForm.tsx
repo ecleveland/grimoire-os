@@ -38,6 +38,7 @@ import {
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
 import { backgroundOptions, resolveBackground } from '@/lib/background-selection';
+import { classOptions, resolveClass } from '@/lib/class-selection';
 import ToggleChips from '@/components/ToggleChips';
 import TokenListEditor from '@/components/TokenListEditor';
 import WeaponsEditor from '@/components/WeaponsEditor';
@@ -52,6 +53,13 @@ export interface CharacterFormValues {
   name: string;
   race: string;
   class: string;
+  /**
+   * Resolution key for the selected SRD/homebrew class (VEG-524). Same contract
+   * as `backgroundId` below: VEG-506 let homebrew classes reuse an SRD name, so
+   * the class's hit die and per-level features must resolve by id, not name.
+   * `''` when free-typed (no catalog row). Persisted to `Character.classId`.
+   */
+  classId: string;
   subclass: string;
   level: number;
   background: string;
@@ -145,6 +153,7 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     name: '',
     race: '',
     class: '',
+    classId: '',
     subclass: '',
     level: 1,
     background: '',
@@ -189,6 +198,11 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     class: c.class ?? '',
     subclass: c.subclass ?? '',
     level: c.level,
+    // Seed the persisted id (VEG-524) so the class resolves by id on load, even
+    // when its display name now collides with a homebrew class. Blank for
+    // characters saved before the column existed, or free-typed names — those
+    // fall back to the unambiguous-name resolver.
+    classId: c.classId ?? '',
     background: c.background ?? '',
     // Seed the persisted id (VEG-476) so the background resolves by id on load,
     // even when its display name now collides with a homebrew row (VEG-473).
@@ -239,6 +253,7 @@ type CharacterWriteFields = Pick<
   | 'name'
   | 'race'
   | 'class'
+  | 'classId'
   | 'subclass'
   | 'level'
   | 'background'
@@ -282,6 +297,10 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     name: v.name,
     race: v.race,
     class: v.class,
+    // `class` is the display string; `classId` (VEG-524) is the resolution key.
+    // A free-typed class has no catalog row, so send null rather than an empty
+    // string to keep the column a clean soft ref.
+    classId: v.classId === '' ? null : v.classId,
     subclass: v.subclass,
     level: v.level,
     // `background` is the display string; `backgroundId` (VEG-476) is the
@@ -633,6 +652,9 @@ export default function CharacterEditorForm({
   // Memoized so typing in the background combobox doesn't rebuild the
   // collision-count map on every keystroke.
   const bgOptions = useMemo(() => backgroundOptions(backgrounds), [backgrounds]);
+  // Memoized for the same reason as bgOptions: re-typing in the combobox must
+  // not rebuild the collision-count map on every keystroke.
+  const classOpts = useMemo(() => classOptions(classes), [classes]);
   const languageSuggestions = (useApiQuery<SrdLanguage[]>('/srd/languages').data ?? []).map(
     l => l.name
   );
@@ -640,7 +662,9 @@ export default function CharacterEditorForm({
   // Resolve the current free-text values back to SRD entities (by name) so we
   // can scope subclasses and offer the autofill action — works whether the user
   // just picked from the list or loaded an existing character.
-  const selectedClass = classes.find(c => c.name === values.class);
+  // id-first so a duplicate-named homebrew class resolves unambiguously once
+  // picked; falls back to name for a loaded character that has no id (VEG-524).
+  const selectedClass = resolveClass(classes, { id: values.classId, name: values.class });
   const selectedRace = races.find(r => r.name === values.race);
   // id-first so a duplicate-named homebrew background resolves unambiguously once
   // picked; falls back to name for a loaded character that has no id (VEG-473).
@@ -704,11 +728,13 @@ export default function CharacterEditorForm({
           <SrdCombobox
             label="Class"
             value={values.class}
-            options={classes}
-            onChange={v => set('class', v)}
-            // Picking a class invalidates any chosen subclass (subclasses are
-            // scoped to the class), so clear it to avoid a mismatched pair.
-            onSelect={() => set('subclass', '')}
+            options={classOpts}
+            // Typing clears the id so a stale one can't linger and silently
+            // resolve to the wrong duplicate-named class (VEG-524).
+            onChange={v => setValues(prev => ({ ...prev, class: v, classId: '' }))}
+            // Picking captures the id, and invalidates any chosen subclass
+            // (subclasses are scoped to the class) to avoid a mismatched pair.
+            onSelect={opt => setValues(prev => ({ ...prev, classId: opt.id, subclass: '' }))}
             helperText="Pick from the SRD or type a custom class."
           />
         </div>

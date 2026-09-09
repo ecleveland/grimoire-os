@@ -634,10 +634,30 @@ describe('SrdService', () => {
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: { contentSource: { in: ['srd', 'shared'] } },
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }, { contentSource: 'asc' }, { id: 'asc' }],
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
       expect(result).toEqual(classes);
+    });
+
+    // VEG-524. Sorting on name alone leaves two same-named rows tied, and
+    // Postgres is free to return a tie in whatever order the plan produces — so
+    // a client resolving by name could get a different row between two loads of
+    // the same character. The tiebreak does not make the name unambiguous (only
+    // the stored classId does that); it makes the ambiguity *stable*, which is
+    // what stops a bug reproducing only intermittently.
+    it('breaks a duplicate-name tie deterministically (VEG-524)', async () => {
+      prisma.srdClass.findMany.mockResolvedValue([]);
+
+      await service.findAllClasses('user-1');
+
+      const [args] = prisma.srdClass.findMany.mock.calls[0];
+      expect(Array.isArray(args.orderBy)).toBe(true);
+      // Name first so the catalog still reads alphabetically; the remaining keys
+      // only ever apply within a tie. `id` is the terminal key: it is unique, so
+      // no tie can survive it.
+      expect(args.orderBy[0]).toEqual({ name: 'asc' });
+      expect(args.orderBy[args.orderBy.length - 1]).toEqual({ id: 'asc' });
     });
   });
 

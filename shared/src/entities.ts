@@ -54,6 +54,14 @@ export interface Character {
   name: string;
   race?: string;
   class?: string;
+  /**
+   * Resolution key for the selected class (VEG-524). Same soft-ref contract as
+   * `backgroundId` below: VEG-506 let homebrew classes reuse an SRD class name,
+   * so the name alone no longer identifies a row. `class` (the display string)
+   * stays authoritative for free-typed names. Nullable at the API boundary (the
+   * column is `String?`); `undefined` when the client never sends it.
+   */
+  classId?: string | null;
   level: number;
   subclass?: string;
   background?: string;

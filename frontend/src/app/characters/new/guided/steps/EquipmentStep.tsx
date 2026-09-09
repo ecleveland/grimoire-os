@@ -8,6 +8,7 @@ import {
   type ParsedEquipmentOption,
 } from './equipment-resolve';
 import { resolveBackground } from '@/lib/background-selection';
+import { resolveClass } from '@/lib/class-selection';
 import type { WizardStepProps } from './types';
 
 const cardClass = 'rounded-md border border-gray-200 p-3 dark:border-gray-700';
@@ -47,9 +48,11 @@ export default function EquipmentStep({ value, onChange }: WizardStepProps) {
   const classes = classesQuery.data;
   const backgrounds = backgroundsQuery.data;
 
+  // id-first (VEG-524) so the starting equipment follows the exact class picked,
+  // even when a homebrew one shares an SRD name.
   const selectedClass = useMemo(
-    () => classes?.find(c => c.name === value.class),
-    [classes, value.class]
+    () => resolveClass(classes ?? [], { id: value.classId, name: value.class }),
+    [classes, value.classId, value.class]
   );
   // Resolve by id (the Origin step wrote it into the draft) so the starting
   // equipment follows the exact background picked, even when a homebrew one shares

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -19,6 +19,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   return {
     id: 'fighter',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['Strength'],
     savingThrows: ['Strength', 'Constitution'],
@@ -36,6 +37,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
 const MONK = makeClass({
   id: 'monk',
   name: 'Monk',
+  contentSource: 'srd',
   hitDie: 'd8',
   primaryAbilities: ['Dexterity', 'Wisdom'],
 });
@@ -311,5 +313,52 @@ describe('AbilitiesStep — recommended primary abilities (VEG-447)', () => {
     await screen.findByText('Abilities');
     expect(screen.queryByTestId('recommended-summary')).not.toBeInTheDocument();
     expect(screen.queryByTestId('recommended-tag')).not.toBeInTheDocument();
+  });
+
+  // VEG-524. Every other fixture in this file uses a unique class name, so the
+  // resolver is never actually observed here — reverting the call site to a
+  // name match left all 62 tests in these three step suites green. Both
+  // orderings, because with one of them a name-based `.find` coincidentally
+  // agrees with the id.
+  describe.each([
+    ['homebrew first', true],
+    ['SRD first', false],
+  ])('duplicate class names, catalog %s', (_label, homebrewFirst) => {
+    const HOMEBREW_FIGHTER = makeClass({
+      id: 'cls-hb-fighter',
+      name: 'Fighter',
+      contentSource: 'homebrew',
+      primaryAbilities: ['Dexterity'],
+    });
+    const catalog = homebrewFirst
+      ? [HOMEBREW_FIGHTER, makeClass()]
+      : [makeClass(), HOMEBREW_FIGHTER];
+
+    it('recommends the abilities of the class the stored id names', async () => {
+      renderStep({ class: 'Fighter', classId: 'cls-hb-fighter' }, catalog);
+      const summary = await screen.findByTestId('recommended-summary');
+      expect(summary).toHaveTextContent('Recommended for Fighter: Dexterity');
+    });
+
+    it('recommends the SRD abilities when the stored id names the SRD row', async () => {
+      renderStep({ class: 'Fighter', classId: 'fighter' }, catalog);
+      const summary = await screen.findByTestId('recommended-summary');
+      expect(summary).toHaveTextContent('Recommended for Fighter: Strength');
+    });
+
+    // No id and two same-named rows: recommend nothing rather than the wrong
+    // class's abilities.
+    it('recommends nothing when a colliding name has no stored id', async () => {
+      renderStep({ class: 'Fighter', classId: '' }, catalog);
+
+      // See the EquipmentStep equivalent for why both lines are needed: the
+      // expectation holds synchronously, and it is `waitFor` yielding timer time
+      // plus `act` flushing the render that actually settles the query.
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes'));
+      await act(async () => {});
+
+      expect(screen.queryByTestId('recommended-summary')).toBeNull();
+      expect(screen.queryAllByTestId('recommended-tag')).toHaveLength(0);
+    });
   });
 });

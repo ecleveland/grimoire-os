@@ -63,28 +63,60 @@ export class CharactersService {
   }
 
   // Spell-slot maxima need the class's progression table (VEG-346) and weapon
-  // proficiency grants need its weapon list (VEG-463) — one lookup serves
-  // both. Still resolved by name because `Character.class` is a free-text
-  // column, not an FK (VEG-477 tracks making it id-keyed).
+  // proficiency grants need its weapon list (VEG-463) — one lookup serves both.
+  //
+  // Resolved id-first since VEG-524. `Character.classId` is a soft ref, not an
+  // FK, written whenever the picker resolved a catalog row; `Character.class`
+  // (free text) remains the display value and the only key a pre-VEG-524
+  // character or a free-typed name has.
   //
   // Scoped to `ownerId`'s visible content since VEG-505 tiered SrdClass: the
   // name is no longer globally unique, so two users may each own a homebrew
   // "Fighter" alongside the SRD one. An unscoped findFirst here would let
   // whichever row Postgres returned first — possibly a stranger's homebrew —
-  // drive this character's spell slots and weapon proficiencies. Unknown
-  // classes resolve to nothing, in which case slots are omitted and weapon
-  // grants fall back to the character's own proficiencies column.
+  // drive this character's spell slots and weapon proficiencies. The scoping
+  // wraps the id lookup too: the id is client-supplied with no FK behind it, so
+  // an unscoped read would hand a guessed id a stranger's homebrew class.
+  // Unknown classes resolve to nothing, in which case slots are omitted and
+  // weapon grants fall back to the character's own proficiencies column.
   private async loadClassData(
     className: string | null,
+    classId: string | null,
     characterId: string,
     ownerId: string
   ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
     const none = { spellcasting: null, weaponProficiencies: [] };
-    if (!className) return none;
-    // Scoping narrows the ambiguity but does not remove it: once VEG-506 lets
-    // this owner create a homebrew "Fighter", it and the SRD row both match, and
-    // an unordered read lets Postgres return either — so the same character's
-    // spell slots and weapon proficiencies could flip between reads.
+    if (!className && !classId) return none;
+    // One round trip fetches both keys' candidates. The disjunction sits under
+    // an explicit AND with the visibility fragment rather than being spread
+    // beside it: `visibleTo` is itself a bare `{ OR: [...] }`, so two OR keys in
+    // one object would have the later silently overwrite the former and drop the
+    // scoping — the exact leak the scoping exists to prevent.
+    const candidates = await this.prisma.srdClass.findMany({
+      where: {
+        AND: [
+          {
+            OR: [
+              ...(classId ? [{ id: classId }] : []),
+              ...(className ? [{ name: className }] : []),
+            ],
+          },
+          this.contentAccess.visibleTo(ownerId),
+        ],
+      },
+      select: { id: true, contentSource: true, spellcasting: true, weaponProficiencies: true },
+    });
+
+    // A stored id is authoritative — it records which row the picker actually
+    // resolved, so it outranks the name heuristic below (same contract as the
+    // frontend's resolveClass and VEG-476's resolveBackground).
+    const byId = classId ? candidates.find(c => c.id === classId) : undefined;
+
+    // Name fallback, for a character with no stored id (pre-VEG-524, or a
+    // free-typed name) and for one whose id went stale when its homebrew row was
+    // deleted. Scoping narrows the name ambiguity but does not remove it: once
+    // this owner has a homebrew "Fighter", it and the SRD row both match, and an
+    // unordered read lets Postgres return either.
     //
     // Resolved by tier, in code. An earlier attempt sorted by `createdById` on
     // the theory that only homebrew rows carry a creator; shared rows carry one
@@ -97,25 +129,24 @@ export class CharactersService {
     // of which there is at most one. So the fetch is bounded at three rows and
     // the preference below picks the same one every time.
     //
-    // Consequence worth knowing: because `Character.class` is free text with no
-    // id recorded, creating a homebrew class named "Fighter" retroactively
-    // repoints every one of this owner's existing Fighters at it, and deleting
-    // it flips them back. Preferring the SRD row instead would be equally
-    // surprising in the other direction — a homebrew class the owner made and
-    // selected would be ignored. VEG-477 removes the guesswork by keying the
-    // column to an id; until then this is a documented heuristic, not a rule.
-    const candidates = await this.prisma.srdClass.findMany({
-      where: { name: className, ...this.contentAccess.visibleTo(ownerId) },
-      select: { contentSource: true, spellcasting: true, weaponProficiencies: true },
-    });
+    // Consequence worth knowing, and the reason VEG-524 added the id: for a
+    // character with no id recorded, creating a homebrew class named "Fighter"
+    // retroactively repoints every one of this owner's existing Fighters at it,
+    // and deleting it flips them back. Preferring the SRD row instead would be
+    // equally surprising in the other direction. This stays a documented
+    // heuristic for id-less characters, not a rule.
+    //
+    // Scanning every candidate is safe rather than sloppy: reaching here means
+    // `byId` found nothing, so no fetched row carries `classId` and every row
+    // present came from the name clause. Re-filtering on name would be dead.
     const ofTier = (tier: ContentSource) => candidates.find(c => c.contentSource === tier);
-    const cls = ofTier('homebrew') ?? ofTier('shared') ?? ofTier('srd');
+    const cls = byId ?? ofTier('homebrew') ?? ofTier('shared') ?? ofTier('srd');
     if (!cls) {
       // A non-null class with no matching row (typo or homebrew not in the
       // catalog) silently drops spell slots — log so it's diagnosable rather
       // than presenting as an inexplicably slot-less caster.
       this.logger.warn(
-        `Character ${characterId}: class "${className}" not found in srd_classes; spell slots and class weapon proficiencies omitted`
+        `Character ${characterId}: class "${className}"${classId ? ` (id ${classId})` : ''} not found in srd_classes; spell slots and class weapon proficiencies omitted`
       );
       return none;
     }
@@ -140,7 +171,12 @@ export class CharactersService {
         `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
       );
     }
-    const classData = await this.loadClassData(character.class, character.id, character.userId);
+    const classData = await this.loadClassData(
+      character.class,
+      character.classId,
+      character.id,
+      character.userId
+    );
     const computed = computeCharacterStats(
       {
         level: character.level,

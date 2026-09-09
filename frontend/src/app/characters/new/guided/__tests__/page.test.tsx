@@ -28,6 +28,7 @@ vi.mock('sonner', () => ({
 const WIZARD: SrdClass = {
   id: 'wizard',
   name: 'Wizard',
+  contentSource: 'srd',
   hitDie: 'd6',
   primaryAbilities: ['Intelligence'],
   savingThrows: ['Intelligence', 'Wisdom'],
@@ -409,6 +410,7 @@ describe('GuidedCharacterPage — wizard shell', () => {
       ...WIZARD,
       id: 'fighter',
       name: 'Fighter',
+      contentSource: 'srd',
       hitDie: 'd10',
       skillChoices: ['Acrobatics', 'Athletics', 'History', 'Insight', 'Perception'],
       spellcasting: undefined,
@@ -458,6 +460,7 @@ describe('GuidedCharacterPage — cross-step grant reconciliation', () => {
   const FIGHTER: SrdClass = {
     id: 'fighter',
     name: 'Fighter',
+    contentSource: 'srd',
     hitDie: 'd10',
     primaryAbilities: ['Strength'],
     savingThrows: ['Strength', 'Constitution'],

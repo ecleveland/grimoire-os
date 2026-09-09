@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
@@ -18,6 +18,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 const SC_BASE = {
   id: 'base',
+  contentSource: 'srd',
   hitDie: 'd6',
   primaryAbilities: ['Intelligence'],
   savingThrows: ['Intelligence', 'Wisdom'],
@@ -338,5 +339,55 @@ describe('SpellsStep — spell selection', () => {
     });
     renderStep(wizardDraft);
     expect(await screen.findByText(/couldn.t load spell options/i)).toBeInTheDocument();
+  });
+});
+
+// VEG-524. The cantrip/prepared allowances the step writes into the draft come
+// off the resolved class row, so a duplicate-named homebrew class shadowing the
+// SRD one silently changes the budget. Every other fixture here uses a unique
+// class name, so the resolver was never observed. Both orderings, because with
+// one of them a name-based `.find` coincidentally agrees with the id.
+describe.each([
+  ['homebrew first', true],
+  ['SRD first', false],
+])('SpellsStep — duplicate class names, catalog %s (VEG-524)', (_label, homebrewFirst) => {
+  // Same name as WIZARD, a deliberately different cantrip budget: 1, not 3.
+  const HOMEBREW_WIZARD: SrdClass = {
+    ...WIZARD,
+    id: 'cls-hb-wizard',
+    contentSource: 'homebrew',
+    spellcasting: {
+      ability: 'Intelligence',
+      cantripsKnown: { 1: 1 },
+      preparedFormula: 'level + intelligence modifier',
+    },
+  };
+  const catalog = homebrewFirst ? [HOMEBREW_WIZARD, WIZARD] : [WIZARD, HOMEBREW_WIZARD];
+
+  it('uses the cantrip allowance of the class the stored id names', async () => {
+    routeApiFetch(catalog);
+    renderStep({ ...wizardDraft, classId: 'cls-hb-wizard' });
+    expect(await screen.findByText(/0 of 1 chosen/i)).toBeInTheDocument();
+  });
+
+  it('uses the SRD allowance when the stored id names the SRD row', async () => {
+    routeApiFetch(catalog);
+    renderStep({ ...wizardDraft, classId: 'wizard' });
+    expect(await screen.findByText(/0 of 3 chosen/i)).toBeInTheDocument();
+  });
+
+  // No id and two same-named rows: no class resolves, so the step offers no
+  // spellcasting sections rather than a budget that may belong to the other row.
+  it('offers no allowance when a colliding name has no stored id', async () => {
+    routeApiFetch(catalog);
+    renderStep({ ...wizardDraft, classId: '' });
+
+    // See the EquipmentStep equivalent for why both lines are needed: the
+    // expectation holds synchronously, and it is `waitFor` yielding timer time
+    // plus `act` flushing the render that actually settles the query.
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/classes'));
+    await act(async () => {});
+
+    expect(screen.queryByText(/chosen/i)).toBeNull();
   });
 });

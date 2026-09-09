@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/query';
 import { asDieType, type SrdClass, type SrdSubclass } from '@/lib/types';
 import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
 import { useDraftGrants } from '../useCharacterDraft';
+import { classOptions, resolveClass } from '@/lib/class-selection';
 import type { WizardStepProps } from './types';
 
 /**
@@ -18,7 +19,11 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
   const { grants, reconcileSource, setSourceField } = useDraftGrants();
   const classesQuery = useApiQuery<SrdClass[]>('/srd/classes');
   const classes = classesQuery.data ?? [];
-  const selectedClass = classes.find(c => c.name === value.class);
+  // id-first (VEG-524): a homebrew class may share an SRD name, and the hit die
+  // and grants folded into the draft below must follow the exact row picked.
+  const selectedClass = resolveClass(classes, { id: value.classId, name: value.class });
+  // Memoized so re-typing in the combobox doesn't rebuild the collision map.
+  const classOpts = useMemo(() => classOptions(classes), [classes]);
 
   // Subclasses are only chosen now when the class does so at level 1 (cleric,
   // sorcerer, warlock); otherwise the choice is deferred to a later level.
@@ -93,10 +98,13 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
         label="Class"
         required
         value={value.class}
-        // Just set the name on change/pick; the effect above reconciles the
-        // grants once value.class resolves to (or away from) an SRD class.
-        onChange={v => onChange({ class: v })}
-        options={classes.map(c => ({ id: c.id, name: c.name }))}
+        // Typing sets the name and clears the id so a stale one can't linger and
+        // silently resolve to the wrong duplicate-named class (VEG-524); picking
+        // captures it. Either way the effect above reconciles the grants once
+        // the selection resolves to (or away from) a catalog class.
+        onChange={v => onChange({ class: v, classId: '' })}
+        onSelect={opt => onChange({ classId: opt.id })}
+        options={classOpts}
         loading={classesQuery.isLoading}
         placeholder="Search classes…"
         helperText="Pick your class — its hit die, saves, and proficiencies fill in automatically."

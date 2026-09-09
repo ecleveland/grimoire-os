@@ -246,7 +246,7 @@ export interface SrdItem extends ContentOwnership {
   contents?: SrdItemBundleComponent[];
 }
 
-export interface SrdClass {
+export interface SrdClass extends ContentOwnership {
   id: string;
   name: string;
   hitDie: string;

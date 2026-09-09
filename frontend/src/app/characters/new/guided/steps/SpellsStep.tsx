@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useApiQuery } from '@/lib/query';
+import { resolveClass } from '@/lib/class-selection';
 import type { PaginatedResponse, SrdClass, SrdSpell } from '@/lib/types';
 import { formatModifier } from '@/lib/ability-math';
 import {
@@ -93,9 +94,11 @@ function SpellChecklist({
 export default function SpellsStep({ value, onChange, onValidChange }: WizardStepProps) {
   const classesQuery = useApiQuery<SrdClass[]>('/srd/classes');
 
+  // id-first (VEG-524): the spell list and cantrip/slot allowances below come
+  // off this row, so a duplicate-named homebrew class must not shadow the SRD one.
   const selectedClass = useMemo(
-    () => classesQuery.data?.find(c => c.name === value.class),
-    [classesQuery.data, value.class]
+    () => resolveClass(classesQuery.data ?? [], { id: value.classId, name: value.class }),
+    [classesQuery.data, value.classId, value.class]
   );
   const spellcasting = selectedClass?.spellcasting;
 
