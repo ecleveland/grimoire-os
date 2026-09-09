@@ -20,6 +20,7 @@ import { computeCharacterStats, isKnownAbilityName } from './compute/compute-sta
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { autoEquipStartingArmor } from './inventory/auto-equip';
 import { ContentAccessService } from '../srd/content-access.service';
+import { resolveCatalogRef } from '../srd/resolve-catalog-ref';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -34,26 +35,42 @@ const characterListSelect = {
   updatedAt: true,
 } satisfies Prisma.CharacterSelect;
 
-// The one name-matching rule, shared by the read path (loadClassData) and the
-// write path (deriveClassId) so they cannot drift (VEG-528).
+// Escape the LIKE metacharacters Postgres would otherwise honour in the value
+// below. Backslash first, or it would re-escape the escapes it just added.
+const escapeLike = (value: string) => value.replace(/[\\%_]/g, character => `\\${character}`);
+
+// SQL-side narrowing for a class-name lookup. Both the read path (loadClassData)
+// and the write path (deriveClassId) go through it, so they fetch the same
+// candidates, and both then decide with `resolveCatalogRef` (VEG-528).
 //
 // Case-insensitive to match the client's `resolveByIdThenUniqueName`, which folds
-// case. Postgres compares `=` case-sensitively, so before this a free-typed
-// "fighter" resolved on the sheet — offering d10 and Fighter's features — and
+// case. Postgres compares `=` case-sensitively, so before VEG-528 a free-typed
+// "fighter" resolved on the sheet, offering d10 and Fighter's features, and
 // matched nothing here, leaving the same character without spellcasting or
 // weapon grants.
 //
-// Folding widens what counts as a collision, and it has to: the partial unique
-// indexes are case-sensitive (`ON srd_classes(name)`), so "Fighter" and
-// "fighter" can both be legitimate rows. Both callers treat more than one match
-// as unresolvable, so the wider net never turns into an arbitrary pick.
+// THE ESCAPING IS LOAD-BEARING. Prisma compiles `mode: 'insensitive'` to
+// `name ILIKE $1` and binds the value as a *pattern*, not a string. Measured
+// against the dev database on Prisma 6.19.2: `equals: 'Fighte_'` returned the SRD
+// Fighter, `equals: 'Wiz%'` returned Wizard, and `equals: '%'` returned every
+// class. A character free-typed as "Wizar_" would have had the SRD Wizard's id
+// derived and written to `classId` permanently, granting a real class's spell
+// slots to a class that does not exist, while the frontend resolver and the
+// backfill migration, both plain case-folded equality, refused the same name.
+// That is the divergence this ticket exists to remove, reintroduced by its fix.
 //
-// Prisma emits ILIKE for this, which cannot use `srd_classes_name_idx`
-// (20260826180000_index_class_lookups). Accepted: srd_classes is a bounded
-// reference table, this fetch is capped at srd + shared + one owner's homebrew,
-// and since the backfill most reads resolve by `classId` on the primary key.
+// Escaping alone would be enough, but no caller relies on it: they hand the rows
+// to `resolveCatalogRef`, whose case-folded comparison decides. A future change
+// to the emitted SQL therefore cannot silently widen what resolves, only what is
+// fetched.
 const classNameWhere = (name: string) => ({
-  name: { equals: name, mode: Prisma.QueryMode.insensitive },
+  name: { equals: escapeLike(name), mode: Prisma.QueryMode.insensitive },
+});
+
+/** Project a resolved class row onto the two grants loadClassData returns. */
+const classDataFrom = (row: { spellcasting: unknown; weaponProficiencies: string[] | null }) => ({
+  spellcasting: (row.spellcasting as ClassSpellcasting | null) ?? null,
+  weaponProficiencies: row.weaponProficiencies ?? [],
 });
 
 @Injectable()
@@ -71,14 +88,15 @@ export class CharactersService {
   // still a narrow projection — update/remove don't pay for a full computed DTO +
   // class lookup just to authorize; the detail read path (findOneForUser) returns
   // the computed block. `class` rides along because `update` needs the stored name
-  // to tell a real class change from a re-save of the same one.
+  // to tell a real class change from a re-save of the same one, and `classId`
+  // because a re-save can only safely heal a key that is currently absent.
   private async assertOwnership(
     id: string,
     userId: string
-  ): Promise<{ userId: string; class: string | null }> {
+  ): Promise<{ userId: string; class: string | null; classId: string | null }> {
     const character = await this.prisma.character.findUnique({
       where: { id },
-      select: { userId: true, class: true },
+      select: { userId: true, class: true, classId: true },
     });
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
@@ -99,13 +117,11 @@ export class CharactersService {
   //
   // Scoped to `ownerId`'s visible content since VEG-505 tiered SrdClass: the
   // name is no longer globally unique, so two users may each own a homebrew
-  // "Fighter" alongside the SRD one. An unscoped findFirst here would let
-  // whichever row Postgres returned first — possibly a stranger's homebrew —
-  // drive this character's spell slots and weapon proficiencies. The scoping
-  // wraps the id lookup too: the id is client-supplied with no FK behind it, so
-  // an unscoped read would hand a guessed id a stranger's homebrew class.
-  // Unknown classes resolve to nothing, in which case slots are omitted and
-  // weapon grants fall back to the character's own proficiencies column.
+  // "Fighter" alongside the SRD one. An unscoped read would let whichever row
+  // Postgres returned first — possibly a stranger's homebrew — drive this
+  // character's spell slots and weapon proficiencies. Unknown classes resolve to
+  // nothing, in which case slots are omitted and weapon grants fall back to the
+  // character's own proficiencies column.
   //
   // VEG-528 settled the two questions VEG-524 left answered differently here and
   // on the client. Both resolvers now fold case, and both refuse a name matching
@@ -118,67 +134,80 @@ export class CharactersService {
   ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
     const none = { spellcasting: null, weaponProficiencies: [] };
     if (!className && !classId) return none;
-    // One round trip fetches both keys' candidates. The disjunction sits under
-    // an explicit AND with the visibility fragment rather than being spread
-    // beside it: `visibleTo` is itself a bare `{ OR: [...] }`, so two OR keys in
-    // one object would have the later silently overwrite the former and drop the
-    // scoping — the exact leak the scoping exists to prevent.
-    const candidates = await this.prisma.srdClass.findMany({
-      where: {
-        AND: [
-          {
-            OR: [
-              ...(classId ? [{ id: classId }] : []),
-              ...(className ? [classNameWhere(className)] : []),
-            ],
-          },
-          this.contentAccess.visibleTo(ownerId),
-        ],
-      },
-      select: { id: true, spellcasting: true, weaponProficiencies: true },
-    });
+    const select = { id: true, name: true, spellcasting: true, weaponProficiencies: true };
 
-    // A stored id is authoritative — it records which row the picker actually
-    // resolved, so it outranks the name reasoning below (same contract as the
-    // frontend's resolveClass and VEG-476's resolveBackground).
-    const byId = classId ? candidates.find(c => c.id === classId) : undefined;
+    // The id is looked up on its own, BEFORE the name, and that split is a
+    // performance property rather than a stylistic one. The previous shape put
+    // both keys in one `OR`, which Postgres cannot serve from two indexes when
+    // one branch is not indexable: measured on a 5,000-row srd_classes, the
+    // `(id = $1 OR name ILIKE $2)` form planned as a sequential scan at 0.836 ms
+    // and never touched the primary key, against 0.026 ms for a BitmapOr of both
+    // indexes. Since the backfill most characters carry an id, so the common read
+    // is now a primary-key hit that never evaluates the name predicate at all,
+    // and only an id-less or stale-id character pays for the scan.
+    //
+    // Scoped to `ownerId`'s visible content in both branches. The id is
+    // client-supplied with no FK behind it, so an unscoped read would hand a
+    // guessed id a stranger's homebrew class.
+    if (classId) {
+      const byId = await this.prisma.srdClass.findFirst({
+        where: { AND: [{ id: classId }, this.contentAccess.visibleTo(ownerId)] },
+        select,
+      });
+      // A resolved id is authoritative — it records the row the picker actually
+      // landed on, so it outranks any name reasoning. A stale or unknown id falls
+      // through to the name path rather than clearing the class, so a character
+      // keeps its grants for as long as the name stays unique.
+      if (byId) return classDataFrom(byId);
+    }
+    if (!className) return this.warnUnresolvedClass(characterId, className, classId, 0);
 
     // Name fallback, for a character with no stored id (pre-VEG-524, or a
     // free-typed name) and for one whose id went stale when its homebrew row was
-    // deleted. Scoping narrows the name ambiguity but does not remove it: once
-    // this owner has a homebrew "Fighter", it and the SRD row both match.
+    // deleted. Scoping narrows the ambiguity but does not remove it: once this
+    // owner has a homebrew "Fighter", it and the SRD row both match.
     //
     // It resolves only when the name matches exactly one visible row. VEG-524
-    // shipped a tier preference here (homebrew ?? shared ?? srd) instead, which
-    // meant authoring a homebrew "Wizard" retroactively repointed every one of
-    // this owner's id-less Wizards at it and deleting it flipped them back, with
-    // nothing on the sheet saying so — and it disagreed with the client, which
+    // shipped a tier preference here (homebrew ?? shared ?? srd), which meant
+    // authoring a homebrew "Wizard" retroactively repointed every one of this
+    // owner's id-less Wizards at it and deleting it flipped them back, with
+    // nothing on the sheet saying so. It also disagreed with the client, which
     // has always refused. VEG-528 chose refusal for both: a wrong spell-slot
     // progression is worse than an absent one, and the accompanying backfill
-    // pinned an id on every character whose name resolves cleanly today, so few
-    // reach this at all.
-    //
-    // Counting every candidate is safe rather than sloppy: reaching here means
-    // `byId` found nothing, so no fetched row carries `classId` and every row
-    // present came from the name clause. Re-filtering on name would be dead.
-    const cls = byId ?? (candidates.length === 1 ? candidates[0] : undefined);
+    // pinned an id on every character whose name resolves cleanly today.
+    const candidates = await this.prisma.srdClass.findMany({
+      where: { AND: [classNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
+      select,
+    });
+    const cls = resolveCatalogRef(candidates, { name: className });
     if (!cls) {
-      // Either reason drops spell slots, so log which one — an unknown name is a
-      // typo to fix, a collision is a class the owner can re-pick in the editor.
-      // Without this the sheet just presents as an inexplicably slot-less caster.
-      const reason =
-        candidates.length > 1
-          ? `matches ${candidates.length} visible classes`
-          : 'not found in srd_classes';
-      this.logger.warn(
-        `Character ${characterId}: class "${className}"${classId ? ` (id ${classId})` : ''} ${reason}; spell slots and class weapon proficiencies omitted`
-      );
-      return none;
+      return this.warnUnresolvedClass(characterId, className, classId, candidates.length);
     }
-    return {
-      spellcasting: (cls.spellcasting as ClassSpellcasting | null) ?? null,
-      weaponProficiencies: cls.weaponProficiencies ?? [],
-    };
+    return classDataFrom(cls);
+  }
+
+  /**
+   * Log why a class resolved to nothing, and return the empty grant.
+   *
+   * Both reasons drop spell slots, so the message says which one: an unknown name
+   * is a typo to fix, a collision is a class the owner can re-pick in the editor.
+   * The colliding ids are listed because they are the one fact that makes the
+   * warning actionable — an operator otherwise cannot tell the owner which two
+   * rows to choose between. Without any of this the sheet simply presents as an
+   * inexplicably slot-less caster.
+   */
+  private warnUnresolvedClass(
+    characterId: string,
+    className: string | null,
+    classId: string | null,
+    matchCount: number
+  ): { spellcasting: null; weaponProficiencies: string[] } {
+    const reason =
+      matchCount > 1 ? `matches ${matchCount} visible classes` : 'not found in srd_classes';
+    this.logger.warn(
+      `Character ${characterId}: class "${className}"${classId ? ` (id ${classId})` : ''} ${reason}; spell slots and class weapon proficiencies omitted`
+    );
+    return { spellcasting: null, weaponProficiencies: [] };
   }
 
   /**
@@ -192,17 +221,22 @@ export class CharactersService {
    * unambiguous, before a later homebrew class of the same name can make it
    * unanswerable.
    *
-   * Same name rule and same visibility scoping as `loadClassData`, so a name
-   * that resolves on read resolves identically on write. `take: 2` because the
-   * only question is none / one / several.
+   * Same name rule and same visibility scoping as `loadClassData`, and the same
+   * `resolveCatalogRef` decides, so a name that resolves on read resolves
+   * identically on write.
+   *
+   * No `take`, and `name` is selected: the SQL predicate narrows but does not
+   * decide, so the rows are counted by the same case-folded equality the read
+   * path uses. An earlier version trusted `take: 2` plus the ILIKE predicate,
+   * which is what let a class named "Wizar_" derive and permanently persist the
+   * SRD Wizard's id. The fetch is bounded by the visibility scope anyway.
    */
   private async deriveClassId(className: string, ownerId: string): Promise<string | null> {
-    const matches = await this.prisma.srdClass.findMany({
+    const candidates = await this.prisma.srdClass.findMany({
       where: { AND: [classNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
-      select: { id: true },
-      take: 2,
+      select: { id: true, name: true },
     });
-    return matches.length === 1 ? matches[0].id : null;
+    return resolveCatalogRef(candidates, { name: className })?.id ?? null;
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -281,10 +315,13 @@ export class CharactersService {
     // Every API create used to land here with a null classId and never acquire
     // one. A supplied id is left alone: the picker already said which row it
     // meant, and overriding it would break picking a duplicate-named class.
+    // `||` rather than `??` on purpose: `''` is legal under `@IsOptional()
+    // @IsString()` and means "no row", not "this row", so it falls through to
+    // derivation and is normalised away instead of being stored as a key that
+    // fails every id lookup while looking like one.
     const classId =
-      !persisted.classId && persisted.class
-        ? await this.deriveClassId(persisted.class, userId)
-        : undefined;
+      persisted.classId ||
+      (persisted.class ? await this.deriveClassId(persisted.class, userId) : null);
 
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
@@ -293,7 +330,7 @@ export class CharactersService {
       data: {
         ...(persisted as unknown as Prisma.CharacterUncheckedCreateInput),
         ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
-        ...(classId !== undefined && { classId }),
+        classId,
         userId,
       },
     });
@@ -375,13 +412,31 @@ export class CharactersService {
       changes.class !== undefined &&
       changes.classId === undefined &&
       changes.class !== existing.class;
-    if (renamedWithoutKey || changes.classId === null) {
+    // `''` groups with `null`, not with a real id: both mean "the picker landed
+    // on no row", and `create` normalises them the same way. Storing the empty
+    // string leaves a value that fails every id lookup, that the backfill's
+    // `classId IS NULL` skips, and that no repair path can reach.
+    const clearedKey = changes.classId !== undefined && !changes.classId;
+    // A re-save of the SAME name heals a key that is currently absent. Without
+    // this the schema comment's claim that "an edit heals the column" held only
+    // for the browser editor, which happens to send `classId: null` on every
+    // save; an API client re-sending the same name never healed, and that is
+    // precisely the population the ticket exists for.
+    //
+    // Gated on the STORED key being empty, which is why `assertOwnership` selects
+    // it. Re-deriving unconditionally would be destructive, not merely wasteful:
+    // for an owner whose homebrew "Wizard" collides with the SRD one, derivation
+    // returns null, so a plain `PATCH {"class":"Wizard"}` would erase the very id
+    // that was pinning their character to the right row.
+    const healsAbsentKey =
+      changes.class !== undefined && changes.classId === undefined && !existing.classId;
+    if (renamedWithoutKey || clearedKey || healsAbsentKey) {
       // `!== undefined`, not `??`. @IsOptional() skips validation for null as
       // well as undefined, so `class: null` arrives as a real value meaning
       // "this character has no class" — and `??` would have read straight past
       // it to the OLD name, pinning that row's id onto a now-classless sheet.
-      // loadClassData short-circuits on a present id, so the character would
-      // have gone on computing its old class's spell slots forever.
+      // loadClassData resolves a present id first, so the character would have
+      // gone on computing its old class's spell slots forever.
       const name = changes.class !== undefined ? changes.class : existing.class;
       changes.classId = name ? await this.deriveClassId(name, userId) : null;
     }

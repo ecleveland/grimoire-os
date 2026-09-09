@@ -455,6 +455,44 @@ describe('LevelUpSection', () => {
         expect(within(dialog).getAllByText(/class data.*unavailable/i)).toHaveLength(1);
       });
 
+      // The selector made `die` mutable mid-dialog for the first time, and `roll`
+      // is a bare number with no record of which die produced it. Rolling high on
+      // a d12 and then correcting to d4 would otherwise write the d12 result into
+      // a permanent HP maximum beside a d4 pool.
+      it('discards a roll taken on the previous die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        mockRollDie.mockReturnValue(11);
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd12');
+        await user.click(within(dialog).getByRole('radio', { name: /roll/i }));
+        await user.click(within(dialog).getByRole('button', { name: /roll d12/i }));
+        expect(within(dialog).getByTestId('hp-roll-result')).toHaveTextContent('11');
+
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd4');
+
+        expect(within(dialog).queryByTestId('hp-roll-result')).not.toBeInTheDocument();
+        // And with no roll there is no gain, so confirm is blocked rather than
+        // writing the stale number.
+        expect(within(dialog).getByRole('button', { name: /confirm level up/i })).toBeDisabled();
+      });
+
+      // The sheet has no HP block, so applyLevelUp skips hitPoints entirely and
+      // the pre-existing note says so. Promising a permanent maximum here would
+      // contradict it; the die still matters because it seeds the pool.
+      it('does not promise an HP change for a sheet with no hit points', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ ...unresolvable, hitPoints: null });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+        expect(within(dialog).getByText(/pool is seeded with d8/i)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/permanent maximum/i)).not.toBeInTheDocument();
+      });
+
       it('rolls the picked die rather than a d8', async () => {
         mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
         mockRollDie.mockReturnValue(11);

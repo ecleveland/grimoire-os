@@ -16,7 +16,7 @@ import {
   RerollField,
   StatBlockAction,
 } from './npc-generator.types';
-import { resolveBackgroundRef } from './resolve-background';
+import { resolveCatalogRef } from '../../srd/resolve-catalog-ref';
 import { SeededRng } from '../../common/helpers/seeded-rng';
 import { LootRoller } from '../../loot/loot-roller';
 import { normalizeLootOverrides } from '../../loot/loot-overrides';
@@ -295,7 +295,7 @@ export class NpcPipeline {
       // correct even if a same-named tier is added later. A free-typed custom or
       // an ambiguous name resolves to no row → id null, degrading to the
       // unambiguous-name read path (which yields no personality for a collision).
-      const row = resolveBackgroundRef(this.data.backgrounds, { name: constraints.background });
+      const row = resolveCatalogRef(this.data.backgrounds, { name: constraints.background });
       return { name: constraints.background, id: row?.id ?? null };
     }
     if (this.data.backgrounds.length === 0) return null;
@@ -439,7 +439,7 @@ export class NpcPipeline {
     // id-first (VEG-481): resolve the exact pool row the background was chosen
     // from, not whichever duplicate name sorts first. A legacy decision with no
     // persisted id, or an ambiguous name, degrades to the unambiguous-name path.
-    const ref = resolveBackgroundRef(this.data.backgrounds, {
+    const ref = resolveCatalogRef(this.data.backgrounds, {
       id: decisions.backgroundId,
       name: bg,
     });

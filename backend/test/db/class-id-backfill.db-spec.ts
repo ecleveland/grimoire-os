@@ -13,46 +13,15 @@
 // visibility join, and a HAVING that refuses to guess. This spec runs the
 // migration's real SQL against real rows, the way
 // character-legacy-proficiencies.db-spec.ts does for VEG-493.
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import {
+  applyMigration,
   createSeedContext,
   teardownSeedContext,
   truncateAll,
   type SeedContext,
 } from './db-harness';
 
-const MIGRATION_SQL = readFileSync(
-  join(
-    __dirname,
-    '../../prisma/migrations/20260909170000_backfill_character_class_id/migration.sql'
-  ),
-  'utf8'
-);
-
-/**
- * Split the migration into individual statements.
- *
- * `$executeRawUnsafe` sends one prepared statement per call and Postgres refuses
- * multiple commands in one, so the file is replayed statement by statement.
- * Comment lines are stripped first: they contain apostrophes that would
- * otherwise look like string delimiters to the split.
- */
-function migrationStatements(sql: string): string[] {
-  return sql
-    .split('\n')
-    .filter(line => !line.trimStart().startsWith('--'))
-    .join('\n')
-    .split(';')
-    .map(statement => statement.trim())
-    .filter(statement => statement.length > 0);
-}
-
-async function applyMigration(ctx: SeedContext): Promise<void> {
-  for (const statement of migrationStatements(MIGRATION_SQL)) {
-    await ctx.prisma.$executeRawUnsafe(statement);
-  }
-}
+const MIGRATION_DIR = '20260909170000_backfill_character_class_id';
 
 // Only `name`, `hitDie` and the array columns are required; the rest default.
 const classRow = (name: string, over: Record<string, unknown> = {}) => ({
@@ -142,7 +111,7 @@ describe('VEG-528 classId backfill — real DB', () => {
     const before = await ctx.prisma.character.count({ where: { classId: { not: null } } });
     expect(before).toBe(1); // only `alreadyPinned`
 
-    await applyMigration(ctx);
+    await applyMigration(ctx.prisma, MIGRATION_DIR);
   }, 300_000);
 
   afterAll(async () => {
@@ -214,7 +183,7 @@ describe('VEG-528 classId backfill — real DB', () => {
       orderBy: { id: 'asc' },
     });
 
-    await applyMigration(ctx);
+    await applyMigration(ctx.prisma, MIGRATION_DIR);
 
     expect(
       await ctx.prisma.character.findMany({

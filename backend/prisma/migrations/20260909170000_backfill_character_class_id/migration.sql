@@ -44,4 +44,11 @@ FROM (
   GROUP BY ch.id
   HAVING COUNT(*) = 1
 ) sub
-WHERE c.id = sub.character_id;
+WHERE c.id = sub.character_id
+  -- Repeated from the subquery deliberately. Postgres runs at READ COMMITTED
+  -- even inside Prisma Migrate's transaction, and when it re-checks a row that
+  -- was updated concurrently it re-evaluates only this outer qualifier, not the
+  -- subquery. Without the condition here a classId written between the scan and
+  -- the update would be overwritten, so the "only ever writes rows that are
+  -- currently null" claim above would hold on a re-run but not under concurrency.
+  AND c."classId" IS NULL;

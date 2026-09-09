@@ -75,10 +75,23 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
   // simply omitted then.
   // id-first (VEG-524) so the budget follows the class the character actually
   // has, not whichever duplicate name sorted first.
-  const classSpellcasting = resolveClass(classesQuery.data ?? [], {
+  const resolvedClass = resolveClass(classesQuery.data ?? [], {
     id: character.classId,
     name: character.class,
-  })?.spellcasting;
+  });
+  const classSpellcasting = resolvedClass?.spellcasting;
+  // VEG-528 made an ambiguous class name resolve to NOTHING on both sides rather
+  // than to a guessed tier. That is the right call — a wrong spell-slot
+  // progression is worse than an absent one — but it is only defensible if the
+  // absence is visible. Without this the slot table and the preparation budget
+  // simply vanish from the sheet, with the sole explanation living in a server
+  // log and in a dialog the player may never open.
+  //
+  // The trigger is narrow on purpose: a class is named, the catalog has loaded
+  // and answered, and nothing matched. A classless character, a still-loading
+  // catalog, and a legitimately non-casting class all say nothing.
+  const classUnresolved =
+    !!character.class && !classesQuery.isPending && !classesQuery.isError && !resolvedClass;
   const prepSummary = classSpellcasting
     ? spellPreparationSummary(
         classSpellcasting,
@@ -114,6 +127,18 @@ export default function SpellcastingSection(props: SpellcastingSectionProps) {
 
   return (
     <div className="space-y-4">
+      {classUnresolved && (
+        <p
+          role="status"
+          data-testid="class-unresolved-note"
+          className="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded px-3 py-2"
+        >
+          &ldquo;{character.class}&rdquo; doesn&apos;t match exactly one class in your catalog, so
+          spell slots and the preparation budget can&apos;t be calculated. Re-pick the class in the
+          editor to fix it.
+        </p>
+      )}
+
       {/* Spellcasting Stats Bar */}
       <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
         <div className="grid grid-cols-4 gap-4 text-center">

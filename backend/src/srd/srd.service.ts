@@ -514,7 +514,10 @@ export class SrdService {
   // an enum by its internal sort order, not alphabetically or by the order in
   // schema.prisma: `shared` was appended by a later ALTER TYPE ADD VALUE, so the
   // real order is srd, homebrew, shared. Stability is the only property claimed
-  // here. The deliberate tier preference lives in loadClassData, in code.
+  // here. VEG-528 deleted the tier preference loadClassData used to apply: an
+  // ambiguous name now resolves to nothing on both sides rather than to a
+  // guessed tier, so a character's stored `classId` is the only thing that
+  // picks between duplicate names.
   async findAllClasses(userId?: string) {
     return this.prisma.srdClass.findMany({
       where: { ...this.contentAccess.visibleTo(userId) },

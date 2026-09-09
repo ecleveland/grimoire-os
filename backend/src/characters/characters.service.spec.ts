@@ -27,42 +27,42 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 // visibleTo keeps this suite green; the service is already a provider below and
 // has no constructor dependencies.
 const visibleToOwner = new ContentAccessService().visibleTo(USER_ID);
-// Every visible row with the name is fetched and the ambiguity judged in code, so
-// resolution never depends on a column sort (VEG-505). `id` joined the select in
-// VEG-524 so a stored classId can be matched against the candidates. VEG-528
-// dropped `contentSource`: the tier preference it fed is gone, and nothing else
-// reads it.
+// The projection both class lookups use. `name` joined it in VEG-528 so
+// `resolveCatalogRef` can apply the deciding case-folded comparison itself
+// instead of trusting the SQL predicate; `contentSource` left it, because the
+// tier preference it fed is gone.
 const classSelect = {
   id: true,
+  name: true,
   spellcasting: true,
   weaponProficiencies: true,
 };
 
 // Case-insensitive since VEG-528, so this resolver and the frontend's
-// `resolveByIdThenUniqueName` fold case identically. Postgres compares `=`
-// case-sensitively, which is what made a free-typed "fighter" resolve on the
-// sheet and match nothing here.
-const classNameWhere = (name: string) => ({ name: { equals: name, mode: 'insensitive' } });
+// `resolveByIdThenUniqueName` fold case identically. The value is LIKE-escaped
+// because Prisma compiles `mode: 'insensitive'` to ILIKE and binds it as a
+// pattern — unescaped, a class named "Fighte_" matched the SRD Fighter.
+const classNameWhere = (name: string) => ({
+  name: { equals: name, mode: 'insensitive' },
+});
 
-// The catalog row the default `srdClass.findMany` mock stands for, and therefore
-// the id every write path derives for the fixture's "Fighter" (VEG-528).
+// The catalog row the default mocks stand for, and therefore the id every write
+// path derives for the fixture's "Fighter" (VEG-528).
 const SRD_FIGHTER_ID = 'cls-srd-fighter';
 
-// The write-boundary lookup: same name rule and same visibility scoping as the
-// read path, but it only needs to know none/one/many, hence `take: 2`.
-const deriveWhere = (name: string) => ({
+// A name lookup: the escaped-ILIKE predicate ANDed with the visibility fragment.
+// Shared by loadClassData's fallback and by deriveClassId, so they cannot fetch
+// different candidate sets.
+const classWhere = (name: string) => ({
   AND: [classNameWhere(name), visibleToOwner as Record<string, unknown>],
 });
 
-// The id-or-name disjunction sits under an explicit AND with the visibility
-// fragment (VEG-524): visibleTo() is itself a bare `{ OR: [...] }`, so spreading
-// the two side by side would have one key overwrite the other and drop the
-// scoping entirely.
-const classWhere = (name: string, classId?: string) => ({
-  AND: [
-    { OR: [...(classId ? [{ id: classId }] : []), classNameWhere(name)] },
-    visibleToOwner as Record<string, unknown>,
-  ],
+// The id lookup, which VEG-528 split out of the old single `OR` query. Keeping
+// the two apart is what lets Postgres serve the common case from the primary
+// key: it cannot combine an index scan with a non-indexable ILIKE branch, so the
+// merged form degraded the whole disjunction to a sequential scan.
+const classIdWhere = (classId: string) => ({
+  AND: [{ id: classId }, visibleToOwner as Record<string, unknown>],
 });
 
 describe('CharactersService', () => {
@@ -92,9 +92,15 @@ describe('CharactersService', () => {
 
     // Default: the character's class exists in the catalog as a non-caster
     // (mockCharacter is a Fighter). Specific tests override for spellcasters.
-    // Carries an `id` because the same mock now answers the write-path lookup
+    // `name` is present because `resolveCatalogRef` compares on it rather than
+    // trusting the SQL predicate, and the same mock answers the write-path lookup
     // that derives `classId` from an unambiguous name (VEG-528).
-    prisma.srdClass.findMany.mockResolvedValue([{ id: SRD_FIGHTER_ID, spellcasting: null }]);
+    prisma.srdClass.findMany.mockResolvedValue([
+      { id: SRD_FIGHTER_ID, name: 'Fighter', spellcasting: null },
+    ]);
+    // The id lookup is its own query since VEG-528. Defaulting it to "no such
+    // row" keeps every name-path test exercising the name path.
+    prisma.srdClass.findFirst.mockResolvedValue(null);
   });
 
   describe('create', () => {
@@ -197,14 +203,19 @@ describe('CharactersService', () => {
         await service.create(USER_ID, createCharacterDto);
 
         expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
-          where: deriveWhere('Fighter'),
-          select: { id: true },
-          take: 2,
+          where: classWhere('Fighter'),
+          // `name` is selected because resolveCatalogRef, not the SQL predicate,
+          // decides; and there is no `take`, because a count taken over an ILIKE
+          // result is a count of pattern matches, not of the name.
+          select: { id: true, name: true },
         });
       });
 
       it('leaves the id null when the name matches more than one visible row', async () => {
-        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-srd' }, { id: 'cls-hb' }]);
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-srd', name: 'Fighter' },
+          { id: 'cls-hb', name: 'Fighter' },
+        ]);
         prisma.character.create.mockResolvedValue(mockCharacter);
 
         await service.create(USER_ID, createCharacterDto);
@@ -520,7 +531,8 @@ describe('CharactersService', () => {
       });
       prisma.srdClass.findMany.mockResolvedValue([
         {
-          contentSource: 'srd',
+          id: 'cls-wizard',
+          name: 'Wizard',
           spellcasting: {
             ability: 'Intelligence',
             spellSlotProgression: {
@@ -607,7 +619,8 @@ describe('CharactersService', () => {
       });
       prisma.srdClass.findMany.mockResolvedValue([
         {
-          contentSource: 'srd',
+          id: SRD_FIGHTER_ID,
+          name: 'Fighter',
           spellcasting: null,
           weaponProficiencies: ['Simple weapons', 'Martial weapons'],
         },
@@ -630,11 +643,7 @@ describe('CharactersService', () => {
     it("resolves the class against the character owner's visible content only (VEG-505)", async () => {
       prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, class: 'Fighter' });
       prisma.srdClass.findMany.mockResolvedValue([
-        {
-          contentSource: 'srd',
-          spellcasting: null,
-          weaponProficiencies: [],
-        },
+        { id: SRD_FIGHTER_ID, name: 'Fighter', spellcasting: null, weaponProficiencies: [] },
       ]);
 
       await service.findOne(CHARACTER_ID);
@@ -642,7 +651,7 @@ describe('CharactersService', () => {
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: {
           AND: [
-            { OR: [classNameWhere('Fighter')] },
+            classNameWhere('Fighter'),
             {
               OR: [
                 { contentSource: { in: ['srd', 'shared'] } },
@@ -670,7 +679,7 @@ describe('CharactersService', () => {
     describe('refusing an ambiguous class name (VEG-528)', () => {
       const candidate = (contentSource: string, weaponProficiencies: string[]) => ({
         id: `cls-${contentSource}`,
-        contentSource,
+        name: 'Fighter',
         spellcasting: null,
         weaponProficiencies,
       });
@@ -684,6 +693,7 @@ describe('CharactersService', () => {
           proficiencies: [],
           inventory: [tieredLongsword],
         });
+        // No stored id in this block, so only the name query runs.
         prisma.srdClass.findMany.mockResolvedValue(candidates);
         const result = await service.findOne(CHARACTER_ID);
         return result.computed.weapons[0].attackBonus;
@@ -735,6 +745,7 @@ describe('CharactersService', () => {
       it('omits spell slots for an ambiguous name instead of guessing a progression', async () => {
         const caster = {
           id: 'cls-srd',
+          name: 'Wizard',
           spellcasting: {
             ability: 'Intelligence',
             spellSlotProgression: { 5: { 1: 4, 2: 3, 3: 2 } },
@@ -790,7 +801,12 @@ describe('CharactersService', () => {
           inventory: [tieredLongsword],
         });
         prisma.srdClass.findMany.mockResolvedValue([
-          { id: 'cls-srd', spellcasting: null, weaponProficiencies: ['Martial weapons'] },
+          {
+            id: 'cls-srd',
+            name: 'fighter',
+            spellcasting: null,
+            weaponProficiencies: ['Martial weapons'],
+          },
         ]);
 
         const result = await service.findOne(CHARACTER_ID);
@@ -811,6 +827,66 @@ describe('CharactersService', () => {
         expect(args.where).toEqual(classWhere('fighter'));
       });
 
+      // The escaping half of the same rule (VEG-528 review). Prisma compiles
+      // `mode: 'insensitive'` to `name ILIKE $1` and binds the value as a
+      // PATTERN, so before the escape a character whose class was "Fighte_" or
+      // "%" matched rows its name does not name — verified against the dev
+      // database, where `equals: '%'` returned every class. That made the backend
+      // a pattern matcher while the frontend resolver and the backfill migration
+      // stayed on plain case-folded equality: the exact divergence this ticket
+      // exists to delete, reintroduced by its own fix. Worse on the write path,
+      // where deriveClassId would persist the matched id permanently.
+      it('escapes LIKE metacharacters so a name is matched literally', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighte_',
+          classId: null,
+        });
+
+        await service.findOne(CHARACTER_ID);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where).toEqual(classWhere('Fighte\\_'));
+      });
+
+      it('escapes the percent wildcard too', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: '%',
+          classId: null,
+        });
+
+        await service.findOne(CHARACTER_ID);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where).toEqual(classWhere('\\%'));
+      });
+
+      // Belt and braces: even if the SQL widened, the resolver decides on
+      // case-folded equality, so a pattern that matched extra rows still resolves
+      // to nothing rather than to whichever row it happened to catch.
+      it('refuses a wildcard name even when the query returns rows', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighte_',
+          classId: null,
+          proficiencies: [],
+          inventory: [tieredLongsword],
+        });
+        prisma.srdClass.findMany.mockResolvedValue([
+          {
+            id: 'cls-srd',
+            name: 'Fighter',
+            spellcasting: null,
+            weaponProficiencies: ['Martial weapons'],
+          },
+        ]);
+
+        const result = await service.findOne(CHARACTER_ID);
+
+        expect(result.computed.weapons[0].attackBonus).toBe('+3');
+      });
+
       // Case-folding widens what counts as a collision, and it has to: the
       // partial unique indexes are case-sensitive, so "Fighter" and "fighter"
       // can both be legitimate rows. Matching both and then picking one would
@@ -824,8 +900,13 @@ describe('CharactersService', () => {
           inventory: [tieredLongsword],
         });
         prisma.srdClass.findMany.mockResolvedValue([
-          { id: 'cls-srd', spellcasting: null, weaponProficiencies: ['Martial weapons'] },
-          { id: 'cls-hb', spellcasting: null, weaponProficiencies: [] },
+          {
+            id: 'cls-srd',
+            name: 'Fighter',
+            spellcasting: null,
+            weaponProficiencies: ['Martial weapons'],
+          },
+          { id: 'cls-hb', name: 'fighter', spellcasting: null, weaponProficiencies: [] },
         ]);
 
         const result = await service.findOne(CHARACTER_ID);
@@ -845,6 +926,7 @@ describe('CharactersService', () => {
 
       const row = (id: string, contentSource: string, weaponProficiencies: string[]) => ({
         id,
+        name: 'Fighter',
         contentSource,
         spellcasting: null,
         weaponProficiencies,
@@ -861,6 +943,11 @@ describe('CharactersService', () => {
           proficiencies: [],
           inventory: [tieredLongsword],
         });
+        // Two queries since VEG-528: the id is looked up on its own so Postgres
+        // can serve it from the primary key, and the name query runs only when
+        // that misses. Mocking them separately is what makes the split visible.
+        const byId = classId ? (candidates as { id: string }[]).find(c => c.id === classId) : null;
+        prisma.srdClass.findFirst.mockResolvedValue(byId ?? null);
         prisma.srdClass.findMany.mockResolvedValue(candidates);
         const result = await service.findOne(CHARACTER_ID);
         return result.computed.weapons[0].attackBonus;
@@ -924,42 +1011,57 @@ describe('CharactersService', () => {
       });
 
       // The id is a soft ref with no FK, so it is attacker-controlled input on
-      // the write path. Scoping has to wrap the id lookup as well as the name
+      // the read path too. Scoping has to wrap the id lookup as well as the name
       // one, or a guessed id would read a stranger's homebrew class.
       it('scopes the id lookup to the owner’s visible content', async () => {
         await attackBonusFor(HOMEBREW_ID, [row(HOMEBREW_ID, 'homebrew', ['Martial weapons'])]);
 
-        const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual({
-          AND: [
-            { OR: [{ id: HOMEBREW_ID }, classNameWhere('Fighter')] },
-            { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }] },
-          ],
+        expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+          where: classIdWhere(HOMEBREW_ID),
+          select: classSelect,
         });
-        // Still judged in code, never by a column sort (VEG-505).
-        expect(args.orderBy).toBeUndefined();
       });
 
-      // visibleTo() returns a bare { OR: [...] }. Spreading it next to the
-      // id-or-name OR would have one key silently overwrite the other and drop
-      // the scoping — hence the AND nesting asserted above.
-      it('does not let the id-or-name OR collide with the visibility OR', async () => {
+      // visibleTo() returns a bare { OR: [...] }. Spreading it beside another key
+      // would have one silently overwrite the other and drop the scoping, so both
+      // queries nest under an explicit AND.
+      it('nests the visibility fragment under AND rather than spreading it', async () => {
         await attackBonusFor(HOMEBREW_ID, [row(HOMEBREW_ID, 'homebrew', ['Martial weapons'])]);
 
-        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        const [args] = prisma.srdClass.findFirst.mock.calls[0];
         expect(args.where.OR).toBeUndefined();
         expect(args.where.AND).toHaveLength(2);
+      });
+
+      // The point of splitting the two queries (VEG-528). Postgres cannot combine
+      // an index scan with a non-indexable ILIKE branch, so the old single
+      // `(id = $1 OR name ILIKE $2)` form degraded the whole disjunction to a
+      // sequential scan and never touched the primary key. A resolved id must
+      // therefore cost exactly one indexed query and no name lookup at all.
+      it('does not run the name query at all when the stored id resolves', async () => {
+        await attackBonusFor(HOMEBREW_ID, [row(HOMEBREW_ID, 'homebrew', ['Martial weapons'])]);
+
+        expect(prisma.srdClass.findFirst).toHaveBeenCalledTimes(1);
+        expect(prisma.srdClass.findMany).not.toHaveBeenCalled();
+      });
+
+      it('falls back to the name query only once the id misses', async () => {
+        await attackBonusFor('cls-deleted', [row(SRD_ID, 'srd', ['Martial weapons'])]);
+
+        expect(prisma.srdClass.findFirst).toHaveBeenCalledTimes(1);
+        expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
+          where: classWhere('Fighter'),
+          select: classSelect,
+        });
       });
 
       it('queries by name alone when no id is stored', async () => {
         await attackBonusFor(null, [row(SRD_ID, 'srd', ['Martial weapons'])]);
 
-        const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual({
-          AND: [
-            { OR: [classNameWhere('Fighter')] },
-            { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }] },
-          ],
+        expect(prisma.srdClass.findFirst).not.toHaveBeenCalled();
+        expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
+          where: classWhere('Fighter'),
+          select: classSelect,
         });
       });
     });
@@ -1051,7 +1153,7 @@ describe('CharactersService', () => {
       // Ownership is a lightweight userId-only read (no full DTO / class lookup).
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
-        select: { userId: true, class: true },
+        select: { userId: true, class: true, classId: true },
       });
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
@@ -1118,7 +1220,9 @@ describe('CharactersService', () => {
           class: 'Fighter',
           classId: 'cls-fighter',
         });
-        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-wizard', spellcasting: null }]);
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-wizard', name: 'Wizard', spellcasting: null },
+        ]);
         prisma.character.update.mockResolvedValue({ ...mockCharacter, class: 'Wizard' });
 
         const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard' });
@@ -1136,7 +1240,10 @@ describe('CharactersService', () => {
           class: 'Fighter',
           classId: 'cls-fighter',
         });
-        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-srd' }, { id: 'cls-hb' }]);
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-srd', name: 'Wizard' },
+          { id: 'cls-hb', name: 'Wizard' },
+        ]);
         prisma.character.update.mockResolvedValue({ ...mockCharacter, class: 'Wizard' });
 
         const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard' });
@@ -1158,7 +1265,9 @@ describe('CharactersService', () => {
           class: 'Fighter',
           classId: null,
         });
-        prisma.srdClass.findMany.mockResolvedValue([{ id: SRD_FIGHTER_ID, spellcasting: null }]);
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: SRD_FIGHTER_ID, name: 'Fighter', spellcasting: null },
+        ]);
         prisma.character.update.mockResolvedValue(mockCharacter);
 
         const dto = plainToInstance(UpdateCharacterDto, { class: 'Fighter', classId: null });
@@ -1193,6 +1302,88 @@ describe('CharactersService', () => {
         expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
           expect.objectContaining({ take: 2 })
         );
+      });
+
+      // A wildcard name must not derive a key on the write path either. This is
+      // the one that persists: `classId` is written permanently, so a "Wizar_"
+      // pinned to the SRD Wizard's id would render Wizard's hit die, features and
+      // spell slots for a class that does not exist, and the frontend would agree
+      // because it resolves the stored id first.
+      it('does not derive a key for a name containing LIKE wildcards', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        // The row a naive ILIKE would have matched.
+        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-wizard', name: 'Wizard' }]);
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizar_' });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.update.mock.calls[0];
+        expect(args.data).toMatchObject({ class: 'Wizar_', classId: null });
+      });
+
+      // The editor sends `classId: null` on every save, so it healed by accident;
+      // an API client re-sending the same name never did, and that is the
+      // population the ticket exists for. Gated on the STORED key being empty,
+      // because re-deriving over a good key would erase it whenever the name is
+      // ambiguous — which is exactly the homebrew owner's situation.
+      it('heals a null key on a re-save of the same name', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: null,
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Fighter', level: 6 });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.update.mock.calls[0];
+        expect(args.data).toMatchObject({ classId: SRD_FIGHTER_ID });
+      });
+
+      // The destructive case the gate above prevents. This owner's homebrew
+      // "Fighter" collides with the SRD row, so derivation returns null; without
+      // the stored-key check a plain re-save would erase the id pinning them to
+      // the right row, which is worse than the state the ticket set out to fix.
+      it('never re-derives over a key the character already has', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-hb-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Fighter', level: 6 });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.update.mock.calls[0];
+        expect(args.data.classId).toBeUndefined();
+        expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ select: { id: true, name: true } })
+        );
+      });
+
+      // `''` is legal under @IsOptional() @IsString(), and is neither undefined
+      // nor null. Stored, it fails every id lookup while looking like a key, and
+      // the backfill's `classId IS NULL` skips it, so nothing can ever repair it.
+      it('treats an empty-string key as cleared, not as a key', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Fighter', classId: '' });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.update.mock.calls[0];
+        expect(args.data).toMatchObject({ classId: SRD_FIGHTER_ID });
       });
 
       // Clearing the class is not an invitation to guess one.
@@ -1281,7 +1472,9 @@ describe('CharactersService', () => {
           class: 'Fighter',
           classId: 'cls-fighter',
         });
-        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-wizard', spellcasting: null }]);
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-wizard', name: 'Wizard', spellcasting: null },
+        ]);
         prisma.character.updateMany.mockResolvedValue({ count: 1 });
 
         const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard', expectedVersion: 1 });
@@ -1439,7 +1632,7 @@ describe('CharactersService', () => {
         where: { id: CHARACTER_ID },
         // `class` rides along for update()'s class/classId invariant; remove()
         // ignores it (VEG-524 follow-up).
-        select: { userId: true, class: true },
+        select: { userId: true, class: true, classId: true },
       });
       expect(prisma.character.delete).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },

@@ -14,51 +14,19 @@
 // data migration, and this spec runs that migration's real SQL against real rows.
 // The mocked unit suite can't model it: the defect is the interaction between a
 // value that is already persisted and a boundary that no longer accepts it.
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { ValidationPipe } from '@nestjs/common';
 import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../../src/bootstrap-config';
 import { UpdateCharacterDto } from '../../src/characters/dto/update-character.dto';
 import { UpdateBackgroundDto } from '../../src/srd/dto/update-background.dto';
 import {
+  applyMigration,
   createSeedContext,
   teardownSeedContext,
   truncateAll,
   type SeedContext,
 } from './db-harness';
 
-const MIGRATION_SQL = readFileSync(
-  join(
-    __dirname,
-    '../../prisma/migrations/20260808120000_normalize_legacy_proficiencies/migration.sql'
-  ),
-  'utf8'
-);
-
-/**
- * Split the migration into individual statements.
- *
- * `$executeRawUnsafe` sends one prepared statement per call and Postgres refuses
- * multiple commands in one ("cannot insert multiple commands into a prepared
- * statement"), so the file has to be replayed statement by statement. Comment
- * lines are stripped first: they contain apostrophes ("Thieves' Tools") that
- * would otherwise look like string delimiters to the split.
- */
-function migrationStatements(sql: string): string[] {
-  return sql
-    .split('\n')
-    .filter(line => !line.trimStart().startsWith('--'))
-    .join('\n')
-    .split(';')
-    .map(statement => statement.trim())
-    .filter(statement => statement.length > 0);
-}
-
-async function applyMigration(ctx: SeedContext): Promise<void> {
-  for (const statement of migrationStatements(MIGRATION_SQL)) {
-    await ctx.prisma.$executeRawUnsafe(statement);
-  }
-}
+const MIGRATION_DIR = '20260808120000_normalize_legacy_proficiencies';
 
 const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
 const characterMeta = { type: 'body' as const, metatype: UpdateCharacterDto };
@@ -127,7 +95,7 @@ describe('pre-VEG-493 proficiency values — real DB', () => {
     expect(stored.skills).toEqual(LEGACY_SKILLS);
     expect(stored.savingThrows).toEqual(LEGACY_SAVES);
 
-    await applyMigration(ctx);
+    await applyMigration(ctx.prisma, MIGRATION_DIR);
   }, 300_000);
 
   afterAll(async () => {
@@ -192,7 +160,7 @@ describe('pre-VEG-493 proficiency values — real DB', () => {
   // Applied twice, the migration must not corrupt what it already fixed —
   // migrations get replayed against restored snapshots and stale environments.
   it('is idempotent', async () => {
-    await applyMigration(ctx);
+    await applyMigration(ctx.prisma, MIGRATION_DIR);
     const row = await ctx.prisma.character.findUniqueOrThrow({ where: { id: characterId } });
     expect(row.skills).toEqual(['Perception']);
     expect(row.savingThrows).toEqual(['Constitution']);

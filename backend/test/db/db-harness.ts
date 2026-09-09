@@ -3,6 +3,8 @@
 // optionally resets the schema with truncateAll(), then asserts. The default unit
 // suite never touches these files: they live outside `src/` (jest rootDir) and use
 // the `.db-spec.ts` suffix, which the default `.*\.spec\.ts$` regex does not match.
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplicationContext } from '@nestjs/common';
 import { SeedModule } from '../../src/seed/seed.module';
@@ -45,4 +47,40 @@ export async function truncateAll(prisma: PrismaService): Promise<void> {
 // so refuse to run against anything but a clearly-named test database.
 function guardTestDatabase(): void {
   assertTestDatabaseUrl(process.env.DATABASE_URL ?? '');
+}
+
+/**
+ * Replay a migration's real SQL against the test database.
+ *
+ * Migration-shaped fixes cannot be proved through the mocked unit suite: the
+ * defect is always a property of rows that are already persisted. Two specs
+ * (VEG-493's proficiency normalisation, VEG-528's classId backfill) each carried
+ * a verbatim copy of this, which put a known-fragile SQL splitter in two places
+ * at once, so it lives here with the other seams instead.
+ *
+ * `$executeRawUnsafe` sends one prepared statement per call and Postgres refuses
+ * multiple commands in one, so the file is replayed statement by statement.
+ * Comment lines are stripped first because they contain apostrophes ("Thieves'
+ * Tools") that would otherwise look like string delimiters to the split.
+ *
+ * Known limits, and why they are tolerable here: the split is naive on `;`, so a
+ * semicolon inside a string literal or a `$$`-quoted body would break it, and
+ * only whole-line `--` comments are stripped. Every migration replayed so far is
+ * plain DML. Harden this, in one place, when one is not.
+ */
+export async function applyMigration(prisma: PrismaService, migrationDir: string): Promise<void> {
+  const sql = readFileSync(
+    join(__dirname, '../../prisma/migrations', migrationDir, 'migration.sql'),
+    'utf8'
+  );
+  const statements = sql
+    .split('\n')
+    .filter(line => !line.trimStart().startsWith('--'))
+    .join('\n')
+    .split(';')
+    .map(statement => statement.trim())
+    .filter(statement => statement.length > 0);
+  for (const statement of statements) {
+    await prisma.$executeRawUnsafe(statement);
+  }
 }

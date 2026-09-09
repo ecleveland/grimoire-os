@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Character, DieType, SrdClass } from '@/lib/types';
-import { asDieType } from '@/lib/types';
+import { asDieType, HIT_DIE_TYPES } from '@/lib/types';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
 import { resolveClass } from '@/lib/class-selection';
@@ -26,13 +26,6 @@ interface LevelUpDialogProps {
   onPatch: (fields: CharacterPatch) => void;
   isSaving: boolean;
 }
-
-// 5e hit dice run d4–d12. `DIE_TYPES` is the general die vocabulary — it also
-// carries d20 and d100 for rolls — and offering those here would let one
-// mis-click write +51 to a permanent HP maximum and seed a d100 hit-dice pool
-// the dialog gives no way back from. Spelled as a closed list rather than a
-// filter so a future addition to DIE_TYPES cannot leak in.
-const HIT_DIE_OPTIONS: readonly DieType[] = ['d4', 'd6', 'd8', 'd10', 'd12'];
 
 const sectionTitleClass = 'text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase';
 const noteClass =
@@ -193,10 +186,21 @@ export default function LevelUpDialog({
                 Hit die
                 <select
                   value={pickedDie}
-                  onChange={e => setPickedDie(e.target.value as DieType)}
+                  // Discard any roll taken on the previous die. `roll` is a bare
+                  // number carrying no record of what it was rolled on, and
+                  // before this selector existed `die` could only change when the
+                  // class catalog settled, which canConfirm already gates on.
+                  // Without this, rolling 11 on a d12 and then switching to d4
+                  // keeps the 11: the button reads "Roll d4" beside "Rolled 11",
+                  // and confirming writes 11 + CON into a permanent maximum
+                  // beside a d4 pool.
+                  onChange={e => {
+                    setPickedDie(e.target.value as DieType);
+                    setRoll(null);
+                  }}
                   className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
                 >
-                  {HIT_DIE_OPTIONS.map(d => (
+                  {HIT_DIE_TYPES.map(d => (
                     <option key={d} value={d}>
                       {d}
                     </option>
@@ -209,9 +213,18 @@ export default function LevelUpDialog({
                   the character is simply classless, claiming the class "couldn't be
                   identified" would be false. Either way the fact that matters here
                   is the same: no die is recorded, so this one is a guess. */}
+              {/* Says nothing about the class. When the class is set but
+                  unresolvable the advisory above already covers that, and this
+                  would stack a second amber box on the same fact; when the
+                  character is simply classless, blaming the class would be false.
+                  It also has to stop promising an HP change for a sheet with no
+                  hit points — applyLevelUp skips hitPoints there, and the note
+                  below already says so, so the two would contradict each other.
+                  What is always true is that the die is a guess seeding the pool. */}
               <p role="status" className={noteClass}>
-                No hit dice are recorded on this sheet, so HP is computed from {die}. Confirming
-                writes a permanent maximum — pick the die your class uses if it differs.
+                {hasHitPoints
+                  ? `No hit dice are recorded on this sheet, so HP is computed from ${die}. Confirming writes a permanent maximum, so pick the die your class uses if it differs.`
+                  : `No hit dice are recorded on this sheet, so the new pool is seeded with ${die}. Pick the die your class uses if it differs.`}
               </p>
             </div>
           )}
