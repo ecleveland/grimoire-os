@@ -45,14 +45,18 @@ export class CharactersService {
     private contentAccess: ContentAccessService
   ) {}
 
-  // Lightweight ownership/existence guard for write paths (VEG-346). Selects
-  // only `userId` so update/remove don't pay for a full computed DTO + class
-  // lookup just to authorize — the detail read path (findOneForUser) still
-  // returns the computed block.
-  private async assertOwnership(id: string, userId: string): Promise<void> {
+  // Lightweight ownership/existence guard for write paths (VEG-346). Deliberately
+  // still a narrow projection — update/remove don't pay for a full computed DTO +
+  // class lookup just to authorize; the detail read path (findOneForUser) returns
+  // the computed block. `class` rides along because `update` needs the stored name
+  // to tell a real class change from a re-save of the same one.
+  private async assertOwnership(
+    id: string,
+    userId: string
+  ): Promise<{ userId: string; class: string | null }> {
     const character = await this.prisma.character.findUnique({
       where: { id },
-      select: { userId: true },
+      select: { userId: true, class: true },
     });
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
@@ -60,6 +64,7 @@ export class CharactersService {
     if (character.userId !== userId) {
       throw new ForbiddenException('You do not own this character');
     }
+    return character;
   }
 
   // Spell-slot maxima need the class's progression table (VEG-346) and weapon
@@ -277,8 +282,33 @@ export class CharactersService {
   }
 
   async update(id: string, userId: string, dto: UpdateCharacterDto) {
-    await this.assertOwnership(id, userId);
+    const existing = await this.assertOwnership(id, userId);
     const { expectedVersion, ...changes } = dto;
+
+    // `class` and `classId` are a pair — the id is the resolution key FOR that
+    // name (VEG-524), not an independent pointer. Both are optional fields on the
+    // DTO, so a PATCH can legally move one and not the other, and this is the
+    // only place they can drift apart.
+    //
+    // It has to be fixed here rather than on read, because once they disagree the
+    // read path has no way to tell which side went stale: a class renamed out from
+    // under a character produces exactly the same disagreement as a name PATCHed
+    // without a new id, and preferring either one silently corrupts the other
+    // case. Preferring the id made a character PATCHed to "Wizard" keep computing
+    // as a Fighter; preferring the name made a renamed homebrew class resolve to
+    // the SRD row that still carries its old name. Neither warned.
+    //
+    // So: changing the name without supplying a new key drops the key. The class
+    // then resolves by name — ambiguously if it collides, which the resolvers
+    // handle — instead of confidently resolving to the wrong row. A re-save of the
+    // same name is not a change and keeps its key.
+    if (
+      changes.class !== undefined &&
+      changes.classId === undefined &&
+      changes.class !== existing.class
+    ) {
+      changes.classId = null;
+    }
     // Cast needed for JSON field compatibility (see create method comment).
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
     const data = changes as unknown as Prisma.CharacterUncheckedUpdateInput;

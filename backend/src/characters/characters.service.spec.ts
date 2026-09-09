@@ -833,7 +833,7 @@ describe('CharactersService', () => {
       // Ownership is a lightweight userId-only read (no full DTO / class lookup).
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
-        select: { userId: true },
+        select: { userId: true, class: true },
       });
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
@@ -878,6 +878,110 @@ describe('CharactersService', () => {
       expect(result.conditions).toEqual(['Frightened']);
       expect(result.concentration).toEqual({});
       expect(result.exhaustion).toBe(1);
+    });
+
+    // `class` and `classId` are a pair: the id is the resolution key FOR that
+    // name, not an independent pointer. They can only drift apart here — a PATCH
+    // that moves one and not the other — and once they disagree the read path
+    // cannot tell which side went stale. A stale id looks exactly like a stale
+    // name: a class renamed out from under a character produces the same
+    // disagreement as a class name PATCHed without a new id, and preferring
+    // either one silently corrupts the other case. So the invariant is kept
+    // here, where the information to keep it still exists.
+    describe('keeping class and classId consistent (VEG-524 follow-up)', () => {
+      it('clears classId when the class name changes without a new id', async () => {
+        // Stored: Fighter + the Fighter row's id. Caller renames the class only.
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue({ ...mockCharacter, class: 'Wizard' });
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard' });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        expect(prisma.character.update).toHaveBeenCalledWith({
+          where: { id: CHARACTER_ID },
+          data: { class: 'Wizard', classId: null },
+        });
+      });
+
+      // The caller supplied both, so they have said what they mean. Nothing to
+      // infer, and overriding them would break picking a duplicate-named class.
+      it('leaves an explicitly supplied classId alone', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, {
+          class: 'Fighter',
+          classId: 'cls-hb-fighter',
+        });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        expect(prisma.character.update).toHaveBeenCalledWith({
+          where: { id: CHARACTER_ID },
+          data: { class: 'Fighter', classId: 'cls-hb-fighter' },
+        });
+      });
+
+      // A save that re-sends the same name is not a change, and must not cost the
+      // character its resolution key — that is how an incidental edit would
+      // silently make a duplicate-named class ambiguous again.
+      it('preserves classId when the class name is unchanged', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Fighter', level: 6 });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        expect(prisma.character.update).toHaveBeenCalledWith({
+          where: { id: CHARACTER_ID },
+          data: { class: 'Fighter', level: 6 },
+        });
+      });
+
+      it('does not touch classId when the payload does not mention class', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { level: 6 });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        expect(prisma.character.update).toHaveBeenCalledWith({
+          where: { id: CHARACTER_ID },
+          data: { level: 6 },
+        });
+      });
+
+      // The optimistic-locking path is a different Prisma call; the invariant
+      // has to hold on both or the guarded save becomes the way around it.
+      it('clears classId on the version-guarded path too', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.updateMany.mockResolvedValue({ count: 1 });
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard', expectedVersion: 1 });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.updateMany.mock.calls[0];
+        expect(args.data).toMatchObject({ class: 'Wizard', classId: null });
+      });
     });
 
     it('clears a stale backgroundId when the payload sends null (VEG-476)', async () => {
@@ -1025,7 +1129,9 @@ describe('CharactersService', () => {
 
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
-        select: { userId: true },
+        // `class` rides along for update()'s class/classId invariant; remove()
+        // ignores it (VEG-524 follow-up).
+        select: { userId: true, class: true },
       });
       expect(prisma.character.delete).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
