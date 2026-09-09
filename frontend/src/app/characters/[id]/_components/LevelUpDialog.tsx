@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Character, SrdClass } from '@/lib/types';
+import type { Character, DieType, SrdClass } from '@/lib/types';
 import { asDieType } from '@/lib/types';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
@@ -26,6 +26,13 @@ interface LevelUpDialogProps {
   onPatch: (fields: CharacterPatch) => void;
   isSaving: boolean;
 }
+
+// 5e hit dice run d4–d12. `DIE_TYPES` is the general die vocabulary — it also
+// carries d20 and d100 for rolls — and offering those here would let one
+// mis-click write +51 to a permanent HP maximum and seed a d100 hit-dice pool
+// the dialog gives no way back from. Spelled as a closed list rather than a
+// filter so a future addition to DIE_TYPES cannot leak in.
+const HIT_DIE_OPTIONS: readonly DieType[] = ['d4', 'd6', 'd8', 'd10', 'd12'];
 
 const sectionTitleClass = 'text-sm font-semibold text-gray-900 dark:text-gray-100 uppercase';
 const noteClass =
@@ -91,9 +98,22 @@ export default function LevelUpDialog({
     !!character.class && !classesQuery.isPending && (!!classesQuery.isError || !srdClass);
 
   // The character's own stored die wins (a DM may have granted a nonstandard
-  // one); the class die covers a sheet without hit dice; d8 is the last resort.
+  // one); the class die covers a sheet without hit dice.
+  //
+  // When neither exists this used to fall to a hardcoded d8, silently (VEG-528).
+  // A sheet with hitPoints but no hitDice — API-created, or predating the
+  // builder — whose class won't resolve then offered 4 + CON where a Fighter
+  // gives 5 and a Barbarian 6, and confirming wrote that into `hitPoints.max`
+  // permanently. So ask instead: the player knows their class's die even when
+  // the catalog doesn't. Still no blocking — the existing decision above stands,
+  // since blocking would make leveling impossible offline or for a custom class.
+  const storedDie = character.hitDice?.dieType ?? null;
   const classHitDie = asDieType(srdClass?.hitDie);
-  const die = character.hitDice?.dieType ?? classHitDie ?? 'd8';
+  const [pickedDie, setPickedDie] = useState<DieType>('d8');
+  // Gated on the catalog having settled, so the selector doesn't flash in during
+  // the fetch and then vanish once the class resolves.
+  const needsDiePick = !storedDie && !classHitDie && !classDataPending;
+  const die = storedDie ?? classHitDie ?? pickedDie;
   const conMod = character.computed.abilityModifiers.constitution;
 
   const hasHitPoints = character.hitPoints !== null;
@@ -128,7 +148,11 @@ export default function LevelUpDialog({
   const canConfirm = !isSaving && !classDataPending && (!hasHitPoints || gain !== null);
 
   const confirm = () => {
-    onPatch(applyLevelUp(character, { hpGain: gain, newFeatures: chosenFeatures, classHitDie }));
+    // `die`, not `classHitDie`: the seeded hit-dice pool has to match the die the
+    // HP gain was computed from, including when the player picked it themselves.
+    onPatch(
+      applyLevelUp(character, { hpGain: gain, newFeatures: chosenFeatures, classHitDie: die })
+    );
     setTargetLevel(newLevel);
   };
 
@@ -163,6 +187,34 @@ export default function LevelUpDialog({
         {/* Hit points */}
         <div className="space-y-2">
           <h3 className={sectionTitleClass}>Hit Points</h3>
+          {needsDiePick && (
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                Hit die
+                <select
+                  value={pickedDie}
+                  onChange={e => setPickedDie(e.target.value as DieType)}
+                  className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                >
+                  {HIT_DIE_OPTIONS.map(d => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {/* Deliberately says nothing about the class. When the class is set
+                  but unresolvable the advisory above already covers that, and this
+                  note would stack a second amber box saying the same thing; when
+                  the character is simply classless, claiming the class "couldn't be
+                  identified" would be false. Either way the fact that matters here
+                  is the same: no die is recorded, so this one is a guess. */}
+              <p role="status" className={noteClass}>
+                No hit dice are recorded on this sheet, so HP is computed from {die}. Confirming
+                writes a permanent maximum — pick the die your class uses if it differs.
+              </p>
+            </div>
+          )}
           {hasHitPoints ? (
             <>
               <div className="flex flex-wrap gap-4">

@@ -157,21 +157,35 @@ model Character {
   // level-up dialog's hit die and feature grants. Not a FK — homebrew rows are
   // deletable — so a stale or unknown id degrades rather than erroring.
   //
-  // Kept consistent with `class` on write, not reconciled on read:
-  // CharactersService.update clears this when the name changes without a new id.
-  // Once the two disagree the read path cannot tell which side went stale — a
-  // renamed class row and a name-only PATCH produce the identical disagreement —
-  // so the invariant is maintained where the information to maintain it exists.
+  // Kept consistent with `class` on write, not reconciled on read. Once the two
+  // disagree the read path cannot tell which side went stale — a renamed class
+  // row and a name-only PATCH produce the identical disagreement — so the
+  // invariant is maintained where the information to maintain it exists.
   //
-  // The two resolvers degrade DIFFERENTLY, and the difference is not yet a
-  // decision anyone made (VEG-528). `loadClassData` falls back to a tier
-  // preference (homebrew > shared > srd) so computed stats always produce
-  // something; the frontend resolver refuses to resolve an ambiguous name at
-  // all, because the values it feeds — the offered features, and the hit die
-  // that becomes a permanent HP maximum — are worse wrong than absent. So one
-  // sheet can have its computed block driven by a class its level-up dialog
-  // declines to name. An earlier version of this comment claimed both degrade
-  // "to the unambiguous-name path"; that was only ever true of the frontend.
+  // DERIVED WHEN DERIVABLE, not populate-on-pick (VEG-528). VEG-524 wrote this
+  // column from exactly one place — a user clicking a row in the class picker —
+  // so every character predating it and every character created through the API
+  // stayed on the name fallback indefinitely. Now CharactersService.create and
+  // .update resolve the name to an id whenever it names exactly one visible row,
+  // and the backfill_character_class_id migration did the same for the existing
+  // population. A name change with no new key re-derives rather than merely
+  // clearing, so an edit heals the column instead of decaying it.
+  //
+  // BOTH RESOLVERS DEGRADE IDENTICALLY, which took deciding (VEG-528). The rule,
+  // in `loadClassData` and the frontend's `resolveByIdThenUniqueName` alike: a
+  // stored id wins; a stale or unknown id falls through to the name; the name
+  // resolves only when it matches exactly one visible row, compared
+  // case-insensitively. Zero or many matches resolve to NOTHING.
+  //
+  // VEG-524 shipped two different answers here without noticing. This resolver
+  // preferred a tier (homebrew > shared > srd) so computed stats always produced
+  // something, which meant authoring a homebrew "Wizard" silently repointed every
+  // id-less Wizard's spell slots at it; the frontend refused, because the values
+  // it feeds — the offered features, and the hit die that becomes a permanent HP
+  // maximum — are worse wrong than absent. One sheet could have its computed
+  // block driven by a class its level-up dialog declined to name. Refusal won on
+  // both sides: absent-and-logged beats confidently wrong, and the backfill
+  // pinned an id on everyone the change would otherwise have cost slots.
   //
   // `class` (the display string) stays authoritative for free-typed names.
   classId             String?

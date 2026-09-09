@@ -27,15 +27,32 @@ import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto
 // visibleTo keeps this suite green; the service is already a provider below and
 // has no constructor dependencies.
 const visibleToOwner = new ContentAccessService().visibleTo(USER_ID);
-// Every visible row with the name is fetched and the tier picked in code, so
+// Every visible row with the name is fetched and the ambiguity judged in code, so
 // resolution never depends on a column sort (VEG-505). `id` joined the select in
-// VEG-524 so a stored classId can be matched against the candidates.
+// VEG-524 so a stored classId can be matched against the candidates. VEG-528
+// dropped `contentSource`: the tier preference it fed is gone, and nothing else
+// reads it.
 const classSelect = {
   id: true,
-  contentSource: true,
   spellcasting: true,
   weaponProficiencies: true,
 };
+
+// Case-insensitive since VEG-528, so this resolver and the frontend's
+// `resolveByIdThenUniqueName` fold case identically. Postgres compares `=`
+// case-sensitively, which is what made a free-typed "fighter" resolve on the
+// sheet and match nothing here.
+const classNameWhere = (name: string) => ({ name: { equals: name, mode: 'insensitive' } });
+
+// The catalog row the default `srdClass.findMany` mock stands for, and therefore
+// the id every write path derives for the fixture's "Fighter" (VEG-528).
+const SRD_FIGHTER_ID = 'cls-srd-fighter';
+
+// The write-boundary lookup: same name rule and same visibility scoping as the
+// read path, but it only needs to know none/one/many, hence `take: 2`.
+const deriveWhere = (name: string) => ({
+  AND: [classNameWhere(name), visibleToOwner as Record<string, unknown>],
+});
 
 // The id-or-name disjunction sits under an explicit AND with the visibility
 // fragment (VEG-524): visibleTo() is itself a bare `{ OR: [...] }`, so spreading
@@ -43,7 +60,7 @@ const classSelect = {
 // scoping entirely.
 const classWhere = (name: string, classId?: string) => ({
   AND: [
-    { OR: [...(classId ? [{ id: classId }] : []), { name }] },
+    { OR: [...(classId ? [{ id: classId }] : []), classNameWhere(name)] },
     visibleToOwner as Record<string, unknown>,
   ],
 });
@@ -75,7 +92,9 @@ describe('CharactersService', () => {
 
     // Default: the character's class exists in the catalog as a non-caster
     // (mockCharacter is a Fighter). Specific tests override for spellcasters.
-    prisma.srdClass.findMany.mockResolvedValue([{ contentSource: 'srd', spellcasting: null }]);
+    // Carries an `id` because the same mock now answers the write-path lookup
+    // that derives `classId` from an unambiguous name (VEG-528).
+    prisma.srdClass.findMany.mockResolvedValue([{ id: SRD_FIGHTER_ID, spellcasting: null }]);
   });
 
   describe('create', () => {
@@ -88,6 +107,10 @@ describe('CharactersService', () => {
         data: {
           ...createCharacterDto,
           userId: USER_ID,
+          // Derived from the unambiguous class name (VEG-528): the fixture sends
+          // no classId, and a create that left the column null would put the
+          // character straight onto the name heuristic it exists to replace.
+          classId: SRD_FIGHTER_ID,
         },
       });
       expect(result).toMatchObject(mockCharacter);
@@ -149,6 +172,84 @@ describe('CharactersService', () => {
         data: expect.objectContaining({ classId }),
       });
       expect(result.classId).toBe(classId);
+    });
+
+    // VEG-524 added the column but populated it from exactly one place: a user
+    // clicking a dropdown row. Every character created through the API, and
+    // every one predating the column, stayed on the name heuristic forever. The
+    // fix is to derive the id wherever the name resolves to exactly one visible
+    // row, at the write boundary, where being wrong is cheap to correct and the
+    // query cost is paid once instead of on every read.
+    describe('deriving classId from an unambiguous class name (VEG-528)', () => {
+      it('derives and persists the id for an API create that sends only a name', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, classId: undefined });
+
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: SRD_FIGHTER_ID }),
+        });
+      });
+
+      it('scopes the derivation to the creator’s visible content', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, createCharacterDto);
+
+        expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
+          where: deriveWhere('Fighter'),
+          select: { id: true },
+          take: 2,
+        });
+      });
+
+      it('leaves the id null when the name matches more than one visible row', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-srd' }, { id: 'cls-hb' }]);
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, createCharacterDto);
+
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: null }),
+        });
+      });
+
+      it('leaves the id null for a class that is not in the catalog at all', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([]);
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, class: 'Bloodbinder' });
+
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: null }),
+        });
+      });
+
+      // The picker already said which row it landed on. Deriving over the top
+      // would break picking a duplicate-named class — the one case the id exists
+      // for.
+      it('never overwrites a client-supplied id', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, classId: 'cls-hb-fighter' });
+
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: 'cls-hb-fighter' }),
+        });
+        expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ take: 2 })
+        );
+      });
+
+      it('does not look up a class for a character created without one', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, class: undefined });
+
+        expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ take: 2 })
+        );
+      });
     });
 
     it('does not check campaign membership when no campaignId is given', async () => {
@@ -541,7 +642,7 @@ describe('CharactersService', () => {
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: {
           AND: [
-            { OR: [{ name: 'Fighter' }] },
+            { OR: [classNameWhere('Fighter')] },
             {
               OR: [
                 { contentSource: { in: ['srd', 'shared'] } },
@@ -554,14 +655,21 @@ describe('CharactersService', () => {
       });
     });
 
-    // A name tie is resolved by tier, in code, never by a column sort. The
-    // first attempt ordered by `createdById` on the theory that only homebrew
-    // rows carry a creator — but shared rows carry one too
-    // (admin-items.service.ts writes contentSource:'shared' alongside
-    // createdById), so that sort collapsed to comparing two uuids and roughly
-    // half of owners would silently get the shared class instead of their own.
-    describe('resolving a name tie between tiers (VEG-505)', () => {
+    // VEG-528 replaced the tier preference (homebrew ?? shared ?? srd) with a
+    // refusal. The preference was a silent guess: authoring a homebrew "Wizard"
+    // retroactively repointed every one of this owner's id-less Wizards at it,
+    // and deleting it flipped them back, with nothing on the sheet saying so. It
+    // also disagreed with the frontend resolver, which has always refused an
+    // ambiguous name — so one sheet could compute spell slots off a class its
+    // level-up dialog declined to name.
+    //
+    // Now both sides answer the same way: a name matching zero or many visible
+    // rows resolves to nothing. Absent-and-logged beats confidently wrong, and
+    // the VEG-528 backfill pins an id on every character whose name resolves
+    // unambiguously today, so almost nothing reaches this path in practice.
+    describe('refusing an ambiguous class name (VEG-528)', () => {
       const candidate = (contentSource: string, weaponProficiencies: string[]) => ({
+        id: `cls-${contentSource}`,
         contentSource,
         spellcasting: null,
         weaponProficiencies,
@@ -581,56 +689,156 @@ describe('CharactersService', () => {
         return result.computed.weapons[0].attackBonus;
       }
 
-      it('never sorts by a column — every visible row is fetched and picked in code', async () => {
-        await attackBonusFrom([candidate('srd', [])]);
+      it('never sorts by a column — every visible row is fetched and judged in code', async () => {
+        await attackBonusFrom([candidate('srd', ['Martial weapons'])]);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.orderBy).toBeUndefined();
         expect(args.select).toEqual(classSelect);
       });
 
-      it('prefers the owner’s homebrew over a shared row that also has a creator', async () => {
-        // Row order is deliberately hostile: shared first, as a uuid sort might
-        // well have returned it.
-        expect(
-          await attackBonusFrom([
-            candidate('shared', []),
-            candidate('homebrew', ['Martial weapons']),
-          ])
-        ).toBe('+6');
-      });
-
-      it('prefers the owner’s homebrew over the SRD row', async () => {
-        expect(
-          await attackBonusFrom([candidate('srd', []), candidate('homebrew', ['Martial weapons'])])
-        ).toBe('+6');
-      });
-
-      it('prefers a shared row over the SRD row when the owner has no homebrew', async () => {
-        expect(
-          await attackBonusFrom([candidate('srd', []), candidate('shared', ['Martial weapons'])])
-        ).toBe('+6');
-      });
-
-      it('falls back to the SRD row when it is the only tier present', async () => {
+      it('resolves a name that matches exactly one visible row', async () => {
         expect(await attackBonusFrom([candidate('srd', ['Martial weapons'])])).toBe('+6');
       });
 
-      it('is stable regardless of the order Postgres returns the rows in', async () => {
+      // The property the whole decision rests on: with the grant present on one
+      // row and absent on the other there is no correct answer, so neither is
+      // used. +3 is the unproficient bonus — the class contributed nothing.
+      it('grants nothing when the owner’s homebrew collides with the SRD row', async () => {
+        expect(
+          await attackBonusFrom([candidate('srd', []), candidate('homebrew', ['Martial weapons'])])
+        ).toBe('+3');
+      });
+
+      it('grants nothing when a shared row collides with the SRD row', async () => {
+        expect(
+          await attackBonusFrom([candidate('srd', ['Martial weapons']), candidate('shared', [])])
+        ).toBe('+3');
+      });
+
+      // Refusal must not depend on which row Postgres happened to return first —
+      // that intermittency is exactly what the old tier preference was added to
+      // remove, and dropping the preference must not bring it back.
+      it('refuses regardless of the order Postgres returns the rows in', async () => {
         const homebrew = candidate('homebrew', ['Martial weapons']);
         const shared = candidate('shared', []);
         const srd = candidate('srd', []);
-        expect(await attackBonusFrom([homebrew, shared, srd])).toBe('+6');
-        expect(await attackBonusFrom([srd, shared, homebrew])).toBe('+6');
-        expect(await attackBonusFrom([shared, srd, homebrew])).toBe('+6');
+        expect(await attackBonusFrom([homebrew, shared, srd])).toBe('+3');
+        expect(await attackBonusFrom([srd, shared, homebrew])).toBe('+3');
+        expect(await attackBonusFrom([shared, srd, homebrew])).toBe('+3');
+      });
+
+      // Slots are the other half of what loadClassData returns, and the half a
+      // player notices first. A caster whose name went ambiguous loses them —
+      // deliberately, and visibly, rather than silently computing a homebrew
+      // class's progression onto an SRD character's sheet.
+      it('omits spell slots for an ambiguous name instead of guessing a progression', async () => {
+        const caster = {
+          id: 'cls-srd',
+          spellcasting: {
+            ability: 'Intelligence',
+            spellSlotProgression: { 5: { 1: 4, 2: 3, 3: 2 } },
+          },
+          weaponProficiencies: [],
+        };
+        const collidingCaster = { ...caster, id: 'cls-hb' };
+        async function spellSlotsFrom(candidates: unknown[]) {
+          prisma.character.findUnique.mockResolvedValue({
+            ...mockCharacter,
+            class: 'Wizard',
+            level: 5,
+            classId: null,
+            spellcastingAbility: 'Intelligence',
+          });
+          prisma.srdClass.findMany.mockResolvedValue(candidates);
+          return (await service.findOne(CHARACTER_ID)).computed.spellSlots;
+        }
+
+        // Asserted against its own contrast: one row grants a full caster's
+        // slots at level 5, two rows grant none. Without the first half a
+        // resolver that never granted slots at all would pass.
+        expect(await spellSlotsFrom([caster])).not.toBeNull();
+        expect(await spellSlotsFrom([caster, collidingCaster])).toBeNull();
+      });
+
+      // A refusal that logged nothing would present as an inexplicably slot-less
+      // caster. The two reasons are distinguishable on purpose: "no such class"
+      // is a typo, "matches N" is a collision the owner can resolve by re-picking.
+      it('logs the collision, naming it as an ambiguity rather than a miss', async () => {
+        const warn = jest.spyOn(
+          (service as unknown as { logger: { warn: jest.Mock } }).logger,
+          'warn'
+        );
+
+        await attackBonusFrom([candidate('srd', []), candidate('homebrew', ['Martial weapons'])]);
+
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('matches 2 visible classes'));
       });
     });
 
-    // VEG-524. The tier preference above is a heuristic for characters that
-    // predate the id: it guesses which "Fighter" the owner meant. A stored
-    // classId says so outright, and must win — otherwise the backend computes
-    // spell slots and weapon grants from one row while the sheet displays
-    // another.
+    // The frontend resolver folds case (`resolveByIdThenUniqueName`); Postgres
+    // does not. Before VEG-528 a character with a free-typed "fighter" got the
+    // SRD Fighter's hit die and features on the sheet and no spellcasting or
+    // weapon grants from here — the same sheet, disagreeing with itself.
+    describe('matching the class name case-insensitively (VEG-528)', () => {
+      it('resolves a free-typed lowercase name against the catalog row', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'fighter',
+          classId: null,
+          proficiencies: [],
+          inventory: [tieredLongsword],
+        });
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-srd', spellcasting: null, weaponProficiencies: ['Martial weapons'] },
+        ]);
+
+        const result = await service.findOne(CHARACTER_ID);
+
+        expect(result.computed.weapons[0].attackBonus).toBe('+6');
+      });
+
+      it('asks Postgres for the insensitive comparison rather than folding in code', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'fighter',
+          classId: null,
+        });
+
+        await service.findOne(CHARACTER_ID);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where).toEqual(classWhere('fighter'));
+      });
+
+      // Case-folding widens what counts as a collision, and it has to: the
+      // partial unique indexes are case-sensitive, so "Fighter" and "fighter"
+      // can both be legitimate rows. Matching both and then picking one would
+      // re-create the arbitrary choice this ticket exists to delete.
+      it('treats case-variant duplicates as ambiguous, not as a wider net', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: null,
+          proficiencies: [],
+          inventory: [tieredLongsword],
+        });
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-srd', spellcasting: null, weaponProficiencies: ['Martial weapons'] },
+          { id: 'cls-hb', spellcasting: null, weaponProficiencies: [] },
+        ]);
+
+        const result = await service.findOne(CHARACTER_ID);
+
+        expect(result.computed.weapons[0].attackBonus).toBe('+3');
+      });
+    });
+
+    // VEG-524. A stored classId names the row the picker actually landed on, so
+    // it wins over any name reasoning — otherwise the backend computes spell
+    // slots and weapon grants from one row while the sheet displays another.
+    // Since VEG-528 the id is also the only thing that resolves a colliding
+    // name at all, which is why the write paths now derive and persist it.
     describe('resolving the class by stored classId (VEG-524)', () => {
       const HOMEBREW_ID = 'cls-homebrew';
       const SRD_ID = 'cls-srd';
@@ -658,8 +866,9 @@ describe('CharactersService', () => {
         return result.computed.weapons[0].attackBonus;
       }
 
-      // The heuristic would take the homebrew row here; the id says SRD.
-      it('prefers the row the stored id names over the homebrew tier preference', async () => {
+      // Without the id these two rows are an unresolvable collision; the id
+      // settles it.
+      it('prefers the row the stored id names over a colliding homebrew row', async () => {
         expect(
           await attackBonusFor(SRD_ID, [
             row(HOMEBREW_ID, 'homebrew', []),
@@ -685,24 +894,33 @@ describe('CharactersService', () => {
       });
 
       // Homebrew rows are deletable, so a stored id can outlive its row. It
-      // degrades to the pre-VEG-524 name heuristic rather than dropping the
-      // class entirely — the character keeps its spell slots.
-      it('falls back to the tier heuristic when the stored id resolves to nothing', async () => {
+      // degrades to the name path rather than dropping the class outright — the
+      // character keeps its grants for as long as the name stays unique.
+      it('degrades a stale id to the unambiguous-name path, not to nothing', async () => {
+        expect(await attackBonusFor('cls-deleted', [row(SRD_ID, 'srd', ['Martial weapons'])])).toBe(
+          '+6'
+        );
+      });
+
+      // The pre-VEG-528 assertion here was '+6': the tier preference took the
+      // homebrew row. A stale id meeting a colliding name has no answer, and
+      // now says so.
+      it('grants nothing when a stale id meets a colliding name', async () => {
         expect(
           await attackBonusFor('cls-deleted', [
             row(SRD_ID, 'srd', []),
             row(HOMEBREW_ID, 'homebrew', ['Martial weapons']),
           ])
-        ).toBe('+6');
+        ).toBe('+3');
       });
 
-      it('uses the tier heuristic unchanged when no id is stored', async () => {
+      it('grants nothing when no id is stored and the name collides', async () => {
         expect(
           await attackBonusFor(null, [
             row(SRD_ID, 'srd', []),
             row(HOMEBREW_ID, 'homebrew', ['Martial weapons']),
           ])
-        ).toBe('+6');
+        ).toBe('+3');
       });
 
       // The id is a soft ref with no FK, so it is attacker-controlled input on
@@ -714,11 +932,11 @@ describe('CharactersService', () => {
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.where).toEqual({
           AND: [
-            { OR: [{ id: HOMEBREW_ID }, { name: 'Fighter' }] },
+            { OR: [{ id: HOMEBREW_ID }, classNameWhere('Fighter')] },
             { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }] },
           ],
         });
-        // Still picked in code, never by a column sort (VEG-505).
+        // Still judged in code, never by a column sort (VEG-505).
         expect(args.orderBy).toBeUndefined();
       });
 
@@ -739,7 +957,7 @@ describe('CharactersService', () => {
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.where).toEqual({
           AND: [
-            { OR: [{ name: 'Fighter' }] },
+            { OR: [classNameWhere('Fighter')] },
             { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID }] },
           ],
         });
@@ -889,13 +1107,36 @@ describe('CharactersService', () => {
     // either one silently corrupts the other case. So the invariant is kept
     // here, where the information to keep it still exists.
     describe('keeping class and classId consistent (VEG-524 follow-up)', () => {
-      it('clears classId when the class name changes without a new id', async () => {
+      // Pre-VEG-528 this asserted `classId: null`. Dropping the key was only ever
+      // half the job: it stopped the id naming the wrong row, but left the
+      // character on the name heuristic. Re-deriving does both — the stale id
+      // goes, and the new name's row is pinned while it is still unambiguous.
+      it('re-derives classId when the class name changes without a new id', async () => {
         // Stored: Fighter + the Fighter row's id. Caller renames the class only.
         prisma.character.findUnique.mockResolvedValue({
           ...mockCharacter,
           class: 'Fighter',
           classId: 'cls-fighter',
         });
+        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-wizard', spellcasting: null }]);
+        prisma.character.update.mockResolvedValue({ ...mockCharacter, class: 'Wizard' });
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard' });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        expect(prisma.character.update).toHaveBeenCalledWith({
+          where: { id: CHARACTER_ID },
+          data: { class: 'Wizard', classId: 'cls-wizard' },
+        });
+      });
+
+      it('clears classId when the new name is ambiguous', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-srd' }, { id: 'cls-hb' }]);
         prisma.character.update.mockResolvedValue({ ...mockCharacter, class: 'Wizard' });
 
         const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard' });
@@ -905,6 +1146,72 @@ describe('CharactersService', () => {
           where: { id: CHARACTER_ID },
           data: { class: 'Wizard', classId: null },
         });
+      });
+
+      // The editor sends `classId: null` for anything the picker did not land
+      // on, which since VEG-527 includes a name the user merely typed. Honouring
+      // the null literally would make every keystroke-then-save decay the column;
+      // deriving heals it instead, and still yields null when the name collides.
+      it('derives an id when the payload explicitly nulls it but the name resolves', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: null,
+        });
+        prisma.srdClass.findMany.mockResolvedValue([{ id: SRD_FIGHTER_ID, spellcasting: null }]);
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: 'Fighter', classId: null });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        expect(prisma.character.update).toHaveBeenCalledWith({
+          where: { id: CHARACTER_ID },
+          data: { class: 'Fighter', classId: SRD_FIGHTER_ID },
+        });
+      });
+
+      // `@IsOptional()` skips validation for null as well as undefined, so
+      // `class: null` reaches the service as a real value. `??` treated it as
+      // "not supplied" and derived from the OLD name, writing class = null
+      // alongside the Fighter row's id — and loadClassData short-circuits on a
+      // present id, so the now-classless character kept computing Fighter's
+      // spell slots and weapon proficiencies indefinitely. Pre-VEG-528 the same
+      // request cleared the id, so this would have been a regression.
+      it('nulls classId when the class name is nulled, without reusing the old name', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: null });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.update.mock.calls[0];
+        expect(args.data).toMatchObject({ class: null, classId: null });
+        expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ take: 2 })
+        );
+      });
+
+      // Clearing the class is not an invitation to guess one.
+      it('nulls classId without a lookup when the class name is cleared', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter',
+          classId: 'cls-fighter',
+        });
+        prisma.character.update.mockResolvedValue(mockCharacter);
+
+        const dto = plainToInstance(UpdateCharacterDto, { class: '' });
+        await service.update(CHARACTER_ID, USER_ID, dto);
+
+        const [args] = prisma.character.update.mock.calls[0];
+        expect(args.data).toMatchObject({ class: '', classId: null });
+        expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ take: 2 })
+        );
       });
 
       // The caller supplied both, so they have said what they mean. Nothing to
@@ -968,19 +1275,20 @@ describe('CharactersService', () => {
 
       // The optimistic-locking path is a different Prisma call; the invariant
       // has to hold on both or the guarded save becomes the way around it.
-      it('clears classId on the version-guarded path too', async () => {
+      it('reconciles classId on the version-guarded path too', async () => {
         prisma.character.findUnique.mockResolvedValue({
           ...mockCharacter,
           class: 'Fighter',
           classId: 'cls-fighter',
         });
+        prisma.srdClass.findMany.mockResolvedValue([{ id: 'cls-wizard', spellcasting: null }]);
         prisma.character.updateMany.mockResolvedValue({ count: 1 });
 
         const dto = plainToInstance(UpdateCharacterDto, { class: 'Wizard', expectedVersion: 1 });
         await service.update(CHARACTER_ID, USER_ID, dto);
 
         const [args] = prisma.character.updateMany.mock.calls[0];
-        expect(args.data).toMatchObject({ class: 'Wizard', classId: null });
+        expect(args.data).toMatchObject({ class: 'Wizard', classId: 'cls-wizard' });
       });
     });
 

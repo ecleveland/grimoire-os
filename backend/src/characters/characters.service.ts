@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { AbilityScores, ClassSpellcasting, ContentSource, Weapon } from '@grimoire-os/shared';
+import type { AbilityScores, ClassSpellcasting, Weapon } from '@grimoire-os/shared';
 import { inventoryFromJson } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -33,6 +33,28 @@ const characterListSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.CharacterSelect;
+
+// The one name-matching rule, shared by the read path (loadClassData) and the
+// write path (deriveClassId) so they cannot drift (VEG-528).
+//
+// Case-insensitive to match the client's `resolveByIdThenUniqueName`, which folds
+// case. Postgres compares `=` case-sensitively, so before this a free-typed
+// "fighter" resolved on the sheet — offering d10 and Fighter's features — and
+// matched nothing here, leaving the same character without spellcasting or
+// weapon grants.
+//
+// Folding widens what counts as a collision, and it has to: the partial unique
+// indexes are case-sensitive (`ON srd_classes(name)`), so "Fighter" and
+// "fighter" can both be legitimate rows. Both callers treat more than one match
+// as unresolvable, so the wider net never turns into an arbitrary pick.
+//
+// Prisma emits ILIKE for this, which cannot use `srd_classes_name_idx`
+// (20260826180000_index_class_lookups). Accepted: srd_classes is a bounded
+// reference table, this fetch is capped at srd + shared + one owner's homebrew,
+// and since the backfill most reads resolve by `classId` on the primary key.
+const classNameWhere = (name: string) => ({
+  name: { equals: name, mode: Prisma.QueryMode.insensitive },
+});
 
 @Injectable()
 export class CharactersService {
@@ -84,6 +106,10 @@ export class CharactersService {
   // an unscoped read would hand a guessed id a stranger's homebrew class.
   // Unknown classes resolve to nothing, in which case slots are omitted and
   // weapon grants fall back to the character's own proficiencies column.
+  //
+  // VEG-528 settled the two questions VEG-524 left answered differently here and
+  // on the client. Both resolvers now fold case, and both refuse a name matching
+  // zero or many visible rows. See `deriveClassId` for the write half.
   private async loadClassData(
     className: string | null,
     classId: string | null,
@@ -103,55 +129,49 @@ export class CharactersService {
           {
             OR: [
               ...(classId ? [{ id: classId }] : []),
-              ...(className ? [{ name: className }] : []),
+              ...(className ? [classNameWhere(className)] : []),
             ],
           },
           this.contentAccess.visibleTo(ownerId),
         ],
       },
-      select: { id: true, contentSource: true, spellcasting: true, weaponProficiencies: true },
+      select: { id: true, spellcasting: true, weaponProficiencies: true },
     });
 
     // A stored id is authoritative — it records which row the picker actually
-    // resolved, so it outranks the name heuristic below (same contract as the
+    // resolved, so it outranks the name reasoning below (same contract as the
     // frontend's resolveClass and VEG-476's resolveBackground).
     const byId = classId ? candidates.find(c => c.id === classId) : undefined;
 
     // Name fallback, for a character with no stored id (pre-VEG-524, or a
     // free-typed name) and for one whose id went stale when its homebrew row was
     // deleted. Scoping narrows the name ambiguity but does not remove it: once
-    // this owner has a homebrew "Fighter", it and the SRD row both match, and an
-    // unordered read lets Postgres return either.
+    // this owner has a homebrew "Fighter", it and the SRD row both match.
     //
-    // Resolved by tier, in code. An earlier attempt sorted by `createdById` on
-    // the theory that only homebrew rows carry a creator; shared rows carry one
-    // too (AdminItemsService.create writes `contentSource: 'shared'` alongside
-    // `createdById`, and this table's SET NULL FK exists precisely so a shared
-    // row survives its author), so that sort collapsed into comparing two uuids.
+    // It resolves only when the name matches exactly one visible row. VEG-524
+    // shipped a tier preference here (homebrew ?? shared ?? srd) instead, which
+    // meant authoring a homebrew "Wizard" retroactively repointed every one of
+    // this owner's id-less Wizards at it and deleting it flipped them back, with
+    // nothing on the sheet saying so — and it disagreed with the client, which
+    // has always refused. VEG-528 chose refusal for both: a wrong spell-slot
+    // progression is worse than an absent one, and the accompanying backfill
+    // pinned an id on every character whose name resolves cleanly today, so few
+    // reach this at all.
     //
-    // The partial unique indexes make this total: at most one srd row and one
-    // shared row per name, and the `where` admits only this owner's homebrew,
-    // of which there is at most one. So the fetch is bounded at three rows and
-    // the preference below picks the same one every time.
-    //
-    // Consequence worth knowing, and the reason VEG-524 added the id: for a
-    // character with no id recorded, creating a homebrew class named "Fighter"
-    // retroactively repoints every one of this owner's existing Fighters at it,
-    // and deleting it flips them back. Preferring the SRD row instead would be
-    // equally surprising in the other direction. This stays a documented
-    // heuristic for id-less characters, not a rule.
-    //
-    // Scanning every candidate is safe rather than sloppy: reaching here means
+    // Counting every candidate is safe rather than sloppy: reaching here means
     // `byId` found nothing, so no fetched row carries `classId` and every row
     // present came from the name clause. Re-filtering on name would be dead.
-    const ofTier = (tier: ContentSource) => candidates.find(c => c.contentSource === tier);
-    const cls = byId ?? ofTier('homebrew') ?? ofTier('shared') ?? ofTier('srd');
+    const cls = byId ?? (candidates.length === 1 ? candidates[0] : undefined);
     if (!cls) {
-      // A non-null class with no matching row (typo or homebrew not in the
-      // catalog) silently drops spell slots — log so it's diagnosable rather
-      // than presenting as an inexplicably slot-less caster.
+      // Either reason drops spell slots, so log which one — an unknown name is a
+      // typo to fix, a collision is a class the owner can re-pick in the editor.
+      // Without this the sheet just presents as an inexplicably slot-less caster.
+      const reason =
+        candidates.length > 1
+          ? `matches ${candidates.length} visible classes`
+          : 'not found in srd_classes';
       this.logger.warn(
-        `Character ${characterId}: class "${className}"${classId ? ` (id ${classId})` : ''} not found in srd_classes; spell slots and class weapon proficiencies omitted`
+        `Character ${characterId}: class "${className}"${classId ? ` (id ${classId})` : ''} ${reason}; spell slots and class weapon proficiencies omitted`
       );
       return none;
     }
@@ -159,6 +179,30 @@ export class CharactersService {
       spellcasting: (cls.spellcasting as ClassSpellcasting | null) ?? null,
       weaponProficiencies: cls.weaponProficiencies ?? [],
     };
+  }
+
+  /**
+   * The write half of VEG-528: resolve a class name to the id of the single
+   * visible row it names, or null when it names none or several.
+   *
+   * VEG-524 added `classId` but populated it from exactly one place — a user
+   * clicking a dropdown row — so every character created through the API, and
+   * every one predating the column, stayed on the name heuristic indefinitely.
+   * Deriving here closes that: the resolution is frozen while the name is still
+   * unambiguous, before a later homebrew class of the same name can make it
+   * unanswerable.
+   *
+   * Same name rule and same visibility scoping as `loadClassData`, so a name
+   * that resolves on read resolves identically on write. `take: 2` because the
+   * only question is none / one / several.
+   */
+  private async deriveClassId(className: string, ownerId: string): Promise<string | null> {
+    const matches = await this.prisma.srdClass.findMany({
+      where: { AND: [classNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
+      select: { id: true },
+      take: 2,
+    });
+    return matches.length === 1 ? matches[0].id : null;
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -233,6 +277,15 @@ export class CharactersService {
       inventory = autoEquipStartingArmor(inventory);
     }
 
+    // Pin the resolution key when the client sent only a display name (VEG-528).
+    // Every API create used to land here with a null classId and never acquire
+    // one. A supplied id is left alone: the picker already said which row it
+    // meant, and overriding it would break picking a duplicate-named class.
+    const classId =
+      !persisted.classId && persisted.class
+        ? await this.deriveClassId(persisted.class, userId)
+        : undefined;
+
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
       // Prisma's InputJsonValue for JSON fields (abilityScores, hitPoints, etc.).
@@ -240,6 +293,7 @@ export class CharactersService {
       data: {
         ...(persisted as unknown as Prisma.CharacterUncheckedCreateInput),
         ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
+        ...(classId !== undefined && { classId }),
         userId,
       },
     });
@@ -302,12 +356,34 @@ export class CharactersService {
     // then resolves by name — ambiguously if it collides, which the resolvers
     // handle — instead of confidently resolving to the wrong row. A re-save of the
     // same name is not a change and keeps its key.
-    if (
+    //
+    // VEG-528 turns the drop into a re-derivation. Dropping alone was half a fix:
+    // it stopped the id naming the wrong row but left the character on the name
+    // heuristic forever. Re-deriving does both, and still yields null when the
+    // new name collides — the case with no answer.
+    //
+    // The explicit-null branch matters more than it looks. The editor sends
+    // `classId: null` for anything the picker did not land on, which since
+    // VEG-527 includes a name the user merely typed, so honouring the null
+    // literally would make every keystroke-then-save decay the column.
+    //
+    // Both branches are gated on the payload actually concerning the class, so a
+    // level-up or hit-point PATCH pays for no extra query — and, critically, a
+    // PATCH that omits `classId` entirely never overwrites a stored id this
+    // method cannot see (assertOwnership does not select it).
+    const renamedWithoutKey =
       changes.class !== undefined &&
       changes.classId === undefined &&
-      changes.class !== existing.class
-    ) {
-      changes.classId = null;
+      changes.class !== existing.class;
+    if (renamedWithoutKey || changes.classId === null) {
+      // `!== undefined`, not `??`. @IsOptional() skips validation for null as
+      // well as undefined, so `class: null` arrives as a real value meaning
+      // "this character has no class" — and `??` would have read straight past
+      // it to the OLD name, pinning that row's id onto a now-classless sheet.
+      // loadClassData short-circuits on a present id, so the character would
+      // have gone on computing its old class's spell slots forever.
+      const name = changes.class !== undefined ? changes.class : existing.class;
+      changes.classId = name ? await this.deriveClassId(name, userId) : null;
     }
     // Cast needed for JSON field compatibility (see create method comment).
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
