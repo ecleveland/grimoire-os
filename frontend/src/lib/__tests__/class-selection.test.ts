@@ -67,6 +67,18 @@ describe('resolveClass', () => {
     expect(resolveClass([srd, variant], { id: '', name: 'Fighter' })).toBeUndefined();
   });
 
+  // The other half of folding case, and since VEG-528 a rule the backend shares:
+  // `loadClassData` compares case-insensitively too. Before that, Postgres's
+  // case-sensitive `=` matched nothing, so this exact character got Fighter's
+  // hit die and features on the sheet and no spellcasting or weapon grants in
+  // its computed block. Locking it here keeps the two resolvers from drifting
+  // apart again.
+  it('resolves a free-typed name that differs only in case', () => {
+    const unique = makeClass({ id: 'wizard', name: 'Wizard', contentSource: 'srd' });
+    expect(resolveClass([unique], { id: '', name: 'wizard' })).toBe(unique);
+    expect(resolveClass([unique], { id: '', name: 'WIZARD' })).toBe(unique);
+  });
+
   it('resolves nothing for an empty name and no id', () => {
     expect(resolveClass(catalog, { id: '', name: '' })).toBeUndefined();
   });

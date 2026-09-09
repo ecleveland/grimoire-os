@@ -16,6 +16,7 @@ import {
   type SeedContext,
 } from './db-harness';
 import { ContentAccessService } from '../../src/srd/content-access.service';
+import { catalogNameWhere } from '../../src/srd/resolve-catalog-ref';
 
 const HOMEBREW_LABEL = 'Homebrew';
 
@@ -25,15 +26,28 @@ const HOMEBREW_LABEL = 'Homebrew';
 const contentAccess = new ContentAccessService();
 const visibleTo = (userId?: string) => contentAccess.visibleTo(userId);
 
-// The exact `where` loadClassData builds since VEG-524 — id OR name, both under
-// an AND with the visibility fragment. Written once here so these specs exercise
-// the real query shape rather than a hand-copied approximation that can drift
-// away from the service (this block modelled the pre-VEG-524 shape until the id
-// landed). The AND nesting is load-bearing: `visibleTo` returns a bare
-// `{ OR: [...] }`, so spreading it beside the id-or-name OR would have one key
-// overwrite the other and silently drop the scoping.
-const candidateWhere = (name: string, userId?: string, classId?: string) => ({
-  AND: [{ OR: [...(classId ? [{ id: classId }] : []), { name }] }, visibleTo(userId)],
+// The NAME lookup's `where`, imported from the service's own builder rather than
+// restated here (VEG-528 review). This block twice became a hand-copied
+// approximation that drifted: it modelled the pre-VEG-524 shape until the id
+// landed, then the pre-VEG-528 case-sensitive `{ name }` until the fold did, and
+// the first fix for the fold copied `escapeLike` in here as well — so the one
+// spec that exists to prove the escaping survives contact with Postgres was
+// asserting against its own copy of it, and would have stayed green if the
+// service's escaping were deleted. Importing is the only version that cannot
+// drift.
+//
+// The AND nesting stays load-bearing: `visibleTo` returns a bare `{ OR: [...] }`,
+// so spreading it beside another key would have one overwrite the other and
+// silently drop the scoping.
+const candidateWhere = (name: string, userId?: string) => ({
+  AND: [catalogNameWhere(name), visibleTo(userId)],
+});
+
+// The id lookup, split out of the old single `OR` in VEG-528: Postgres cannot
+// combine an index scan with a non-indexable ILIKE branch, so merging them
+// degraded the whole predicate to a sequential scan.
+const candidateByIdWhere = (classId: string, userId?: string) => ({
+  AND: [{ id: classId }, visibleTo(userId)],
 });
 
 describe('class content-source tiering — real DB (VEG-505)', () => {
@@ -446,31 +460,38 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
           },
         });
 
-        const candidates = await ctx.prisma.srdClass.findMany({
-          where: candidateWhere(srdClassName, userId, own.id),
+        const byId = await ctx.prisma.srdClass.findFirst({
+          where: candidateByIdWhere(own.id, userId),
           select: { id: true, name: true },
         });
 
-        // Present despite sharing no name with the query.
-        expect(candidates.map(c => c.id)).toContain(own.id);
-        expect(candidates.find(c => c.id === own.id)?.name).not.toBe(srdClassName);
+        // Reachable by id despite sharing no name with the character's class.
+        expect(byId?.id).toBe(own.id);
+        expect(byId?.name).not.toBe(srdClassName);
       });
 
       // The security property. Delete `visibleTo` from candidateWhere's AND and
       // this goes red.
       it('never returns another user’s homebrew class, even when its id is named outright', async () => {
-        const candidates = await ctx.prisma.srdClass.findMany({
-          where: candidateWhere(srdClassName, userId, otherUsersHomebrewId),
+        const byId = await ctx.prisma.srdClass.findFirst({
+          where: candidateByIdWhere(otherUsersHomebrewId, userId),
           select: { id: true, contentSource: true, createdById: true },
         });
 
+        expect(byId).toBeNull();
+
+        // And the name query cannot reach it either. Scoped to homebrew
+        // deliberately: the shared row in this fixture also carries `otherUserId`
+        // as its creator and is *supposed* to come back — shared content is
+        // global, and that authorship is exactly what broke the discarded
+        // createdById sort. Asserting "no row by otherUser" would fail on
+        // legitimate behavior; the property is that no row PRIVATE to another
+        // user is reachable.
+        const candidates = await ctx.prisma.srdClass.findMany({
+          where: candidateWhere(srdClassName, userId),
+          select: { id: true, contentSource: true, createdById: true },
+        });
         expect(candidates.map(c => c.id)).not.toContain(otherUsersHomebrewId);
-        // Scoped to homebrew deliberately. The shared row in this fixture also
-        // carries `otherUserId` as its creator and is *supposed* to come back —
-        // shared content is global, and that authorship is exactly what broke
-        // the discarded createdById sort. Asserting "no row by otherUser" would
-        // fail on legitimate behavior; the property is that no row PRIVATE to
-        // another user is reachable.
         const foreignHomebrew = candidates.filter(
           c => c.contentSource === 'homebrew' && c.createdById === otherUserId
         );
@@ -480,21 +501,34 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
       // Same guarantee for a caller with no identity at all: an anonymous read
       // must not be able to name a private row into visibility either.
       it('never returns a homebrew class to an anonymous caller naming its id', async () => {
-        const candidates = await ctx.prisma.srdClass.findMany({
-          where: candidateWhere(srdClassName, undefined, otherUsersHomebrewId),
+        const byId = await ctx.prisma.srdClass.findFirst({
+          where: candidateByIdWhere(otherUsersHomebrewId, undefined),
           select: { id: true, contentSource: true },
         });
 
+        expect(byId).toBeNull();
+
+        const candidates = await ctx.prisma.srdClass.findMany({
+          where: candidateWhere(srdClassName, undefined),
+          select: { id: true, contentSource: true },
+        });
         expect(candidates.map(c => c.id)).not.toContain(otherUsersHomebrewId);
         expect(candidates.every(c => c.contentSource !== 'homebrew')).toBe(true);
       });
 
       // A stale id (deleted homebrew) must not suppress the name candidates —
-      // that is what lets loadClassData degrade to its tier heuristic rather
-      // than dropping the character's class data entirely.
+      // that is what lets loadClassData degrade to the unambiguous-name path
+      // rather than dropping the character's class data entirely. Since VEG-528
+      // the id query simply returns nothing and the name query runs on its own.
       it('still returns the name candidates when the id matches nothing', async () => {
+        const byId = await ctx.prisma.srdClass.findFirst({
+          where: candidateByIdWhere('00000000-0000-4000-8000-000000000000', userId),
+          select: { id: true },
+        });
+        expect(byId).toBeNull();
+
         const candidates = await ctx.prisma.srdClass.findMany({
-          where: candidateWhere(srdClassName, userId, '00000000-0000-4000-8000-000000000000'),
+          where: candidateWhere(srdClassName, userId),
           select: { contentSource: true },
         });
 

@@ -21,10 +21,19 @@ export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 export const CombatantType = { PC: 'pc', NPC: 'npc' } as const;
 export type CombatantType = (typeof CombatantType)[keyof typeof CombatantType];
 
+// The dice a class can actually have as a hit die. `hitDice.dieType` is only
+// ever a hit die, so this — not DIE_TYPES — is what a hit-die picker offers
+// (VEG-528): d20 and d100 are in the vocabulary for rolls, and one mis-click on
+// d100 writes +51 into a permanent HP maximum. Deriving DIE_TYPES from it keeps
+// the relationship structural instead of asking a future editor to remember it.
+export const HIT_DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12'] as const;
+
 // Hit-die faces — mirrors DIE_TYPES in @grimoire-os/shared (the backend
 // HitDiceDto validates `dieType` with `@IsIn(DIE_TYPES)`). Defined locally as a
 // value because Turbopack can't resolve file:-linked packages for value imports.
-export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
+// Stays the full set: it is also the validation vocabulary for stored values, so
+// narrowing it would reject sheets that already carry a d20 or d100 pool.
+export const DIE_TYPES = [...HIT_DIE_TYPES, 'd20', 'd100'] as const;
 export type DieType = (typeof DIE_TYPES)[number];
 
 /**

@@ -165,4 +165,129 @@ test.describe('character class id round-trip (VEG-524)', () => {
     await expect(dialog.getByRole('checkbox', { name: /arcane surge/i })).toHaveCount(0);
     await expect(dialog.getByText(/class data is unavailable/i)).toHaveCount(0);
   });
+
+  // VEG-528. The two halves this proves together, which no unit test can:
+  // Postgres really does compare `=` case-sensitively (so a free-typed
+  // "fighter" matched nothing server-side while resolving fine on the sheet),
+  // and the server really does persist the id it derives.
+  test('an API create with a lowercase class name derives and persists the catalog id', async ({
+    page,
+  }) => {
+    await registerAndLogin(page, 'class-id-derive', 'E2E Deriver');
+    const headers = await csrfHeaders(page);
+
+    // No classId, and the case deliberately does not match the catalog's
+    // "Fighter". Before VEG-528 this row kept classId null forever.
+    // Level 8, so the level-up targets 9 — the SRD Fighter's Indomitable. The
+    // class has no level-6 grant at all (Extra Attack is at 5), so a 5 → 6
+    // transition would prove nothing about feature resolution either way.
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Lowercase Fighter',
+        class: 'fighter',
+        level: 8,
+        experiencePoints: 48000,
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const character = await res.json();
+
+    // The catalog row it resolved to, fetched independently so the assertion
+    // does not just compare the server's answer with itself.
+    const list = await page.request.get(`${BACKEND}/api/srd/classes`);
+    const srdFighter = ((await list.json()) as { id: string; name: string }[]).find(
+      c => c.name === 'Fighter'
+    );
+    expect(srdFighter, 'SRD Fighter missing from the seeded catalog').toBeTruthy();
+    expect(character.classId).toBe(srdFighter!.id);
+
+    // The display string is untouched — only the resolution key was derived.
+    expect(character.class).toBe('fighter');
+
+    // And the id is load-bearing on the sheet: the SRD Fighter's d10 (average
+    // floor(10/2)+1 = 6, +2 CON = +8 HP) and its level-9 grant. Pre-VEG-528 this
+    // character got no class data from the server at all, and the die fell to
+    // the hardcoded d8 (+7).
+    await page.goto(`/characters/${character.id}`);
+    await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('hp-gain-preview')).toContainText('+8 HP');
+    await expect(dialog.getByRole('checkbox', { name: /indomitable/i })).toBeVisible();
+    // The die came from the class, so the dialog never has to ask for one.
+    await expect(dialog.getByRole('combobox', { name: /hit die/i })).toHaveCount(0);
+  });
+
+  // The refusal half, and the reason the backfill had to ship alongside it: a
+  // character whose id was never derived, whose name later goes ambiguous, gets
+  // no class data rather than a silent guess — and the level-up dialog asks for
+  // the hit die instead of assuming one.
+  test('a colliding name with no id refuses to resolve and asks for the hit die', async ({
+    page,
+  }) => {
+    await registerAndLogin(page, 'class-id-refuse', 'E2E Refuser');
+    const headers = await csrfHeaders(page);
+
+    // Created against a name that is unique at this moment, but with the id
+    // stripped afterwards — standing in for a pre-VEG-524 row. No `hitDice` is
+    // sent, which is the other half of the trap: with the class unresolvable,
+    // nothing on the sheet supplies a die.
+    const res = await page.request.post(`${BACKEND}/api/characters`, {
+      data: {
+        name: 'Ambiguous Barbarian',
+        class: 'Barbarian',
+        classId: null,
+        level: 5,
+        experiencePoints: 14000,
+        abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+      },
+      headers,
+    });
+    expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
+    const character = await res.json();
+    // The create derived it, since "Barbarian" was still unique.
+    expect(character.classId).toBeTruthy();
+
+    // Now author the collision and strip the derived id, reproducing exactly the
+    // pre-VEG-524 population the backfill could not help: a null id plus a name
+    // that now matches two visible rows.
+    const created = await page.request.post(`${BACKEND}/api/srd/classes`, {
+      data: { name: 'Barbarian', hitDie: 'd6', savingThrows: ['Strength'] },
+      headers,
+    });
+    expect(created.status(), await created.text()).toBe(201);
+
+    const cleared = await page.request.patch(`${BACKEND}/api/characters/${character.id}`, {
+      data: { classId: null },
+      headers,
+    });
+    expect(cleared.ok(), `clear failed: ${cleared.status()}`).toBeTruthy();
+    // Re-deriving is impossible now — the name matches two rows — so the null
+    // stands. That is the refusal, observable on the column itself.
+    expect((await cleared.json()).classId).toBeNull();
+
+    await page.goto(`/characters/${character.id}`);
+    await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();
+    const dialog = page.getByRole('dialog');
+
+    // Neither Barbarian's die is assumed. The dialog says so and offers the pick
+    // rather than silently writing a d8-derived maximum. The combobox only ever
+    // renders when nothing supplies a die, so its presence is itself the proof
+    // that the server refused rather than guessing a tier.
+    await expect(dialog.getByRole('combobox', { name: /hit die/i })).toBeVisible();
+    await expect(dialog.getByText(/permanent maximum/i)).toBeVisible();
+
+    // The fallback preview names the discrimination: d8 average 5, +2 CON = +7.
+    // Guessing the SRD Barbarian would read d12 → +9, the homebrew d6 → +6.
+    await expect(dialog.getByTestId('hp-gain-preview')).toContainText('+7 HP');
+
+    // And the pick is honoured: d12 average 7, +2 CON = +9 HP.
+    await dialog.getByRole('combobox', { name: /hit die/i }).selectOption('d12');
+    await expect(dialog.getByTestId('hp-gain-preview')).toContainText('+9 HP');
+  });
 });

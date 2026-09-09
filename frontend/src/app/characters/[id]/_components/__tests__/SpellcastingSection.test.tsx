@@ -144,6 +144,52 @@ describe('SpellcastingSection', () => {
         render(<SpellcastingSection character={{ ...baseCharacter, classId: null }} />);
         expect(screen.queryByTestId('cantrip-summary')).toBeNull();
       });
+
+      // VEG-528 made the backend refuse an ambiguous name too, so this character
+      // now loses its computed spell slots as well as the budget. Omitting both
+      // silently would leave the player with a caster whose spellcasting simply
+      // disappeared and no explanation anywhere on the sheet — the server logs
+      // the reason, and the level-up dialog warns, but neither is visible here.
+      it('explains the omission instead of silently dropping the budget', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(<SpellcastingSection character={{ ...baseCharacter, classId: null }} />);
+        const note = screen.getByTestId('class-unresolved-note');
+        expect(note).toHaveTextContent(/doesn't match exactly one class/i);
+        expect(note).toHaveTextContent('Wizard');
+      });
+
+      it('says nothing when the stored id resolves the collision', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(<SpellcastingSection character={{ ...baseCharacter, classId: 'wizard' }} />);
+        expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
+      });
+
+      // A classless character is legal — `class` is optional on create, and this
+      // PR explicitly supports PATCHing it to null — and CharacterSheet renders
+      // this section unconditionally on the Spells tab. Without the guard the
+      // note reads: "" doesn't match exactly one class in your catalog.
+      it('says nothing for a character with no class at all', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(
+          <SpellcastingSection character={{ ...baseCharacter, class: null, classId: null }} />
+        );
+        expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
+      });
+
+      // A catalog that has not answered yet is not a collision, and neither is a
+      // failed fetch. Warning on either would fire on every slow load.
+      it('says nothing while the catalog is still loading or has failed', () => {
+        mockUseApiQuery.mockReturnValue({ data: undefined, isPending: true });
+        const { unmount } = render(
+          <SpellcastingSection character={{ ...baseCharacter, classId: null }} />
+        );
+        expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
+        unmount();
+
+        mockUseApiQuery.mockReturnValue({ data: undefined, isPending: false, isError: true });
+        render(<SpellcastingSection character={{ ...baseCharacter, classId: null }} />);
+        expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
+      });
     });
 
     it('warns (non-blocking) when the prepared/known count exceeds the allowance', () => {

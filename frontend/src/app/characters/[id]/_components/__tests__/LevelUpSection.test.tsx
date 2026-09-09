@@ -348,6 +348,212 @@ describe('LevelUpSection', () => {
       expect(within(dialog).queryByText(/class data.*unavailable/i)).not.toBeInTheDocument();
     });
 
+    // VEG-528. Two independently-reachable states have to coincide: a sheet with
+    // hitPoints but no hitDice (API-created, or predating the builder) whose
+    // class doesn't resolve. The die then came from a hardcoded `d8` with no
+    // mention of it anywhere in the dialog, and confirming wrote the resulting
+    // gain into `hitPoints.max` permanently — 4 + CON where a Barbarian owes 6.
+    //
+    // VEG-524 made that state far easier to reach: an ambiguous class name now
+    // resolves to nothing, so any character sharing a name with its owner's
+    // homebrew class lands here.
+    describe('picking a hit die when nothing supplies one (VEG-528)', () => {
+      // makeCharacter is CON 14 (+2). d8 → 5 + 2 = +7, d12 → 7 + 2 = +9.
+      const unresolvable = { hitDice: null, class: 'Pumpkin Sage' };
+
+      it('offers a die selector instead of silently assuming d8', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+      });
+
+      // The old copy only said feature suggestions were missing. It said nothing
+      // about the die or the number about to be written.
+      it('names the die in play and warns the HP maximum is permanent', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+        expect(within(dialog).getByText(/computed from d8/i)).toBeInTheDocument();
+        expect(within(dialog).getByText(/permanent maximum/i)).toBeInTheDocument();
+      });
+
+      it('recomputes the HP preview from the picked die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByTestId('hp-gain-preview')).toHaveTextContent('+7 HP');
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd12');
+        expect(within(dialog).getByTestId('hp-gain-preview')).toHaveTextContent('+9 HP');
+      });
+
+      // The point of the whole change: the picked die reaches the write, both as
+      // the HP gain and as the die the new hit-dice pool is seeded with. Those
+      // two disagreeing is how the sheet would end up self-contradictory.
+      it('writes the picked die into both the HP maximum and the seeded pool', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd12');
+        await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+
+        expect(onPatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            level: 6,
+            // 44 + 9, and the pool seeded with the same die.
+            hitPoints: { max: 53, current: 41, temporary: 5 },
+            hitDice: { dieType: 'd12', total: 6, spent: 0 },
+          })
+        );
+      });
+
+      // DIE_TYPES is the general die vocabulary and carries d20 and d100 for
+      // rolls. Neither is a 5e hit die, and this selector feeds a permanent
+      // hitPoints.max — a mis-clicked d100 writes +51 and seeds a d100 pool the
+      // dialog offers no way back from.
+      it('offers only real hit dice, not the d20 and d100 in DIE_TYPES', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        const options = within(dialog)
+          .getAllByRole('option')
+          .map(o => o.textContent);
+        expect(options).toEqual(['d4', 'd6', 'd8', 'd10', 'd12']);
+      });
+
+      // A character with no class at all reaches this the same way, and the
+      // picker is right to appear — but copy blaming an unidentifiable class
+      // would be describing a problem this sheet doesn't have.
+      it('asks a classless sheet for a die without claiming its class failed to resolve', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ hitDice: null, class: null });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+        expect(within(dialog).getByText(/no hit dice are recorded/i)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/class data.*unavailable/i)).not.toBeInTheDocument();
+      });
+
+      // The two amber notes cover different facts — one that features can't be
+      // suggested, one that the die is a guess — so both show, but neither
+      // repeats the other.
+      it('does not repeat the class-data advisory in the die note', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getAllByText(/class data.*unavailable/i)).toHaveLength(1);
+      });
+
+      // The selector made `die` mutable mid-dialog for the first time, and `roll`
+      // is a bare number with no record of which die produced it. Rolling high on
+      // a d12 and then correcting to d4 would otherwise write the d12 result into
+      // a permanent HP maximum beside a d4 pool.
+      it('discards a roll taken on the previous die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        mockRollDie.mockReturnValue(11);
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd12');
+        await user.click(within(dialog).getByRole('radio', { name: /roll/i }));
+        await user.click(within(dialog).getByRole('button', { name: /roll d12/i }));
+        expect(within(dialog).getByTestId('hp-roll-result')).toHaveTextContent('11');
+
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd4');
+
+        expect(within(dialog).queryByTestId('hp-roll-result')).not.toBeInTheDocument();
+        // And with no roll there is no gain, so confirm is blocked rather than
+        // writing the stale number.
+        expect(within(dialog).getByRole('button', { name: /confirm level up/i })).toBeDisabled();
+      });
+
+      // The sheet has no HP block, so applyLevelUp skips hitPoints entirely and
+      // the pre-existing note says so. Promising a permanent maximum here would
+      // contradict it; the die still matters because it seeds the pool.
+      it('does not promise an HP change for a sheet with no hit points', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ ...unresolvable, hitPoints: null });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+        expect(within(dialog).getByText(/pool is seeded with d8/i)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/permanent maximum/i)).not.toBeInTheDocument();
+      });
+
+      it('rolls the picked die rather than a d8', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        mockRollDie.mockReturnValue(11);
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+
+        await user.selectOptions(within(dialog).getByRole('combobox', { name: /hit die/i }), 'd12');
+        await user.click(within(dialog).getByRole('radio', { name: /roll/i }));
+        await user.click(within(dialog).getByRole('button', { name: /roll d12/i }));
+
+        expect(mockRollDie).toHaveBeenCalledWith(12);
+      });
+
+      // Confirm stays enabled. The pre-existing comment rejects blocking because
+      // it would make leveling impossible offline or for a custom class, and
+      // VEG-528 deliberately did not reverse that — it removed the silent wrong
+      // answer instead of removing the ability to level.
+      it('still allows confirm — the die is asked for, not demanded', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+        expect(within(dialog).getByRole('button', { name: /confirm level up/i })).toBeEnabled();
+      });
+
+      it('does not ask when the class resolves and supplies a die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ hitDice: null });
+        const dialog = await openDialog(user);
+        expect(
+          within(dialog).queryByRole('combobox', { name: /hit die/i })
+        ).not.toBeInTheDocument();
+      });
+
+      // The sheet's own die always wins — a DM may have granted a nonstandard
+      // one — so an unresolvable class is not on its own a reason to ask.
+      it('does not ask when the sheet carries its own hit dice', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ class: 'Pumpkin Sage' });
+        const dialog = await openDialog(user);
+        expect(
+          within(dialog).queryByRole('combobox', { name: /hit die/i })
+        ).not.toBeInTheDocument();
+      });
+
+      // Mid-fetch the class is indistinguishable from unresolvable. Asking then
+      // would flash a selector in and pull it back out once the catalog lands.
+      it('does not ask while the class catalog is still loading', async () => {
+        mockUseApiQuery.mockReturnValue({ data: undefined, isPending: true });
+        const user = userEvent.setup();
+        renderSection(unresolvable);
+        const dialog = await openDialog(user);
+        expect(
+          within(dialog).queryByRole('combobox', { name: /hit die/i })
+        ).not.toBeInTheDocument();
+      });
+    });
+
     it('points casters at the Spells tab instead of managing spells inline', async () => {
       const user = userEvent.setup();
       renderSection({ spellcastingAbility: 'Intelligence' });
