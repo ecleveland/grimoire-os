@@ -16,7 +16,7 @@ import {
   RerollField,
   StatBlockAction,
 } from './npc-generator.types';
-import { resolveCatalogRef } from '../../srd/resolve-catalog-ref';
+import { resolveByUniqueName, resolveCatalogRef } from '../../srd/resolve-catalog-ref';
 import { SeededRng } from '../../common/helpers/seeded-rng';
 import { LootRoller } from '../../loot/loot-roller';
 import { normalizeLootOverrides } from '../../loot/loot-overrides';
@@ -295,7 +295,7 @@ export class NpcPipeline {
       // correct even if a same-named tier is added later. A free-typed custom or
       // an ambiguous name resolves to no row → id null, degrading to the
       // unambiguous-name read path (which yields no personality for a collision).
-      const row = resolveCatalogRef(this.data.backgrounds, { name: constraints.background });
+      const row = resolveByUniqueName(this.data.backgrounds, constraints.background);
       return { name: constraints.background, id: row?.id ?? null };
     }
     if (this.data.backgrounds.length === 0) return null;

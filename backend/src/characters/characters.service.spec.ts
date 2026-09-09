@@ -61,6 +61,13 @@ const classWhere = (name: string) => ({
 // the two apart is what lets Postgres serve the common case from the primary
 // key: it cannot combine an index scan with a non-indexable ILIKE branch, so the
 // merged form degraded the whole disjunction to a sequential scan.
+// A derivation lookup is distinguishable from the read path's by its projection:
+// deriveClassId selects only what resolveByUniqueName needs. Asserting on it is
+// falsifiable, unlike the `take: 2` these assertions used to name — `take` was
+// removed from the service in the same round that introduced the escaping, and
+// the leftover `not.toHaveBeenCalledWith({take: 2})` could no longer fail.
+const DERIVE_SELECT = { select: { id: true, name: true } };
+
 const classIdWhere = (classId: string) => ({
   AND: [{ id: classId }, visibleToOwner as Record<string, unknown>],
 });
@@ -248,8 +255,41 @@ describe('CharactersService', () => {
           data: expect.objectContaining({ classId: 'cls-hb-fighter' }),
         });
         expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
-          expect.objectContaining({ take: 2 })
+          expect.objectContaining(DERIVE_SELECT)
         );
+      });
+
+      // `''` is legal under @IsOptional() @IsString() and is neither undefined nor
+      // null, so `??` would persist it: a key that fails every id lookup and that
+      // the backfill's `classId IS NULL` skips, leaving the row unrepairable. The
+      // update path had this test; create did not, though its comment argues the
+      // case explicitly.
+      it('normalises an empty-string key rather than storing it', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, classId: '' });
+
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: SRD_FIGHTER_ID }),
+        });
+      });
+
+      // `classId` is the resolution key FOR `class`, so an id with no name to
+      // resolve is incoherent rather than stricter: loadClassData would grant that
+      // class's spell slots and weapon proficiencies to a sheet showing no class
+      // at all. update() already nulls the id when the name is cleared.
+      it('refuses to keep a key for a character created with no class', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, {
+          ...createCharacterDto,
+          class: undefined,
+          classId: 'cls-srd-fighter',
+        });
+
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: null }),
+        });
       });
 
       it('does not look up a class for a character created without one', async () => {
@@ -258,7 +298,7 @@ describe('CharactersService', () => {
         await service.create(USER_ID, { ...createCharacterDto, class: undefined });
 
         expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
-          expect.objectContaining({ take: 2 })
+          expect.objectContaining(DERIVE_SELECT)
         );
       });
     });
@@ -1300,8 +1340,27 @@ describe('CharactersService', () => {
         const [args] = prisma.character.update.mock.calls[0];
         expect(args.data).toMatchObject({ class: null, classId: null });
         expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
-          expect.objectContaining({ take: 2 })
+          expect.objectContaining(DERIVE_SELECT)
         );
+      });
+
+      // The backslash case, which is worse than the other two metacharacters and
+      // had no test: `%` and `_` merely match the wrong row, but a name ending in
+      // a backslash makes Postgres raise 22025 ("LIKE pattern must not end with
+      // escape character") during the scan. Unescaped that is a 500 on every read
+      // of the sheet AND on the derivation, not a wrong answer. `class` carries
+      // only @IsOptional() @IsString(), so the name is accepted.
+      it('escapes a trailing backslash, which Postgres would otherwise reject', async () => {
+        prisma.character.findUnique.mockResolvedValue({
+          ...mockCharacter,
+          class: 'Fighter\\',
+          classId: null,
+        });
+
+        await service.findOne(CHARACTER_ID);
+
+        const [args] = prisma.srdClass.findMany.mock.calls[0];
+        expect(args.where).toEqual(classWhere('Fighter\\\\'));
       });
 
       // A wildcard name must not derive a key on the write path either. This is
@@ -1401,7 +1460,7 @@ describe('CharactersService', () => {
         const [args] = prisma.character.update.mock.calls[0];
         expect(args.data).toMatchObject({ class: '', classId: null });
         expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
-          expect.objectContaining({ take: 2 })
+          expect.objectContaining(DERIVE_SELECT)
         );
       });
 

@@ -16,6 +16,7 @@ import {
   type SeedContext,
 } from './db-harness';
 import { ContentAccessService } from '../../src/srd/content-access.service';
+import { catalogNameWhere } from '../../src/srd/resolve-catalog-ref';
 
 const HOMEBREW_LABEL = 'Homebrew';
 
@@ -25,29 +26,26 @@ const HOMEBREW_LABEL = 'Homebrew';
 const contentAccess = new ContentAccessService();
 const visibleTo = (userId?: string) => contentAccess.visibleTo(userId);
 
-// The `where` loadClassData builds for its NAME lookup, as of VEG-528. Written
-// once here so these specs exercise the real query shape rather than a
-// hand-copied approximation that drifts away from the service — which is exactly
-// what happened twice: this block modelled the pre-VEG-524 shape until the id
-// landed, and then the pre-VEG-528 case-sensitive `{ name }` until the fold did.
-//
-// Two changes in VEG-528 are load-bearing here. The comparison is
-// case-insensitive, and the value is LIKE-escaped, because Prisma compiles
-// `mode: 'insensitive'` to ILIKE and binds it as a pattern. And the id is no
-// longer part of this disjunction at all: it gets its own query
-// (`candidateByIdWhere`), because Postgres cannot combine an index scan with a
-// non-indexable ILIKE branch, so merging them degraded the whole predicate to a
-// sequential scan.
+// The NAME lookup's `where`, imported from the service's own builder rather than
+// restated here (VEG-528 review). This block twice became a hand-copied
+// approximation that drifted: it modelled the pre-VEG-524 shape until the id
+// landed, then the pre-VEG-528 case-sensitive `{ name }` until the fold did, and
+// the first fix for the fold copied `escapeLike` in here as well — so the one
+// spec that exists to prove the escaping survives contact with Postgres was
+// asserting against its own copy of it, and would have stayed green if the
+// service's escaping were deleted. Importing is the only version that cannot
+// drift.
 //
 // The AND nesting stays load-bearing: `visibleTo` returns a bare `{ OR: [...] }`,
 // so spreading it beside another key would have one overwrite the other and
 // silently drop the scoping.
-const escapeLike = (value: string) => value.replace(/[\\%_]/g, character => `\\${character}`);
-
 const candidateWhere = (name: string, userId?: string) => ({
-  AND: [{ name: { equals: escapeLike(name), mode: 'insensitive' as const } }, visibleTo(userId)],
+  AND: [catalogNameWhere(name), visibleTo(userId)],
 });
 
+// The id lookup, split out of the old single `OR` in VEG-528: Postgres cannot
+// combine an index scan with a non-indexable ILIKE branch, so merging them
+// degraded the whole predicate to a sequential scan.
 const candidateByIdWhere = (classId: string, userId?: string) => ({
   AND: [{ id: classId }, visibleTo(userId)],
 });

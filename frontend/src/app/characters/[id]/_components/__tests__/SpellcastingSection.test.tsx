@@ -164,6 +164,18 @@ describe('SpellcastingSection', () => {
         expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
       });
 
+      // A classless character is legal — `class` is optional on create, and this
+      // PR explicitly supports PATCHing it to null — and CharacterSheet renders
+      // this section unconditionally on the Spells tab. Without the guard the
+      // note reads: "" doesn't match exactly one class in your catalog.
+      it('says nothing for a character with no class at all', () => {
+        mockUseApiQuery.mockReturnValue({ data: catalog });
+        render(
+          <SpellcastingSection character={{ ...baseCharacter, class: null, classId: null }} />
+        );
+        expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
+      });
+
       // A catalog that has not answered yet is not a collision, and neither is a
       // failed fetch. Warning on either would fire on every slow load.
       it('says nothing while the catalog is still loading or has failed', () => {

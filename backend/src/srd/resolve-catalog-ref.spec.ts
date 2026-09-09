@@ -1,4 +1,4 @@
-import { resolveCatalogRef } from './resolve-catalog-ref';
+import { resolveByUniqueName, resolveCatalogRef } from './resolve-catalog-ref';
 
 type Row = { id: string; name: string; tier: string };
 
@@ -15,12 +15,12 @@ describe('resolveCatalogRef', () => {
   });
 
   it('resolves an unambiguous name when no id is supplied', () => {
-    expect(resolveCatalogRef(pool, { name: 'Sage' })?.id).toBe('srd-sage');
+    expect(resolveByUniqueName(pool, 'Sage')?.id).toBe('srd-sage');
     expect(resolveCatalogRef(pool, { id: null, name: 'Sage' })?.id).toBe('srd-sage');
   });
 
   it('returns undefined for a colliding name when no id disambiguates it', () => {
-    expect(resolveCatalogRef(pool, { name: 'Acolyte' })).toBeUndefined();
+    expect(resolveByUniqueName(pool, 'Acolyte')).toBeUndefined();
     expect(resolveCatalogRef(pool, { id: '', name: 'Acolyte' })).toBeUndefined();
   });
 
@@ -31,12 +31,12 @@ describe('resolveCatalogRef', () => {
   });
 
   it('matches names case-insensitively for both resolution and collision detection', () => {
-    expect(resolveCatalogRef(pool, { name: 'sAgE' })?.id).toBe('srd-sage');
+    expect(resolveByUniqueName(pool, 'sAgE')?.id).toBe('srd-sage');
     // Case-variant of a colliding name is still treated as a collision.
-    expect(resolveCatalogRef(pool, { name: 'acolyte' })).toBeUndefined();
+    expect(resolveByUniqueName(pool, 'acolyte')).toBeUndefined();
   });
 
   it('returns undefined for a name that matches no row', () => {
-    expect(resolveCatalogRef(pool, { name: 'Lighthouse Keeper' })).toBeUndefined();
+    expect(resolveByUniqueName(pool, 'Lighthouse Keeper')).toBeUndefined();
   });
 });

@@ -20,7 +20,7 @@ import { computeCharacterStats, isKnownAbilityName } from './compute/compute-sta
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { autoEquipStartingArmor } from './inventory/auto-equip';
 import { ContentAccessService } from '../srd/content-access.service';
-import { resolveCatalogRef } from '../srd/resolve-catalog-ref';
+import { catalogNameWhere, resolveByUniqueName } from '../srd/resolve-catalog-ref';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -34,38 +34,6 @@ const characterListSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.CharacterSelect;
-
-// Escape the LIKE metacharacters Postgres would otherwise honour in the value
-// below. Backslash first, or it would re-escape the escapes it just added.
-const escapeLike = (value: string) => value.replace(/[\\%_]/g, character => `\\${character}`);
-
-// SQL-side narrowing for a class-name lookup. Both the read path (loadClassData)
-// and the write path (deriveClassId) go through it, so they fetch the same
-// candidates, and both then decide with `resolveCatalogRef` (VEG-528).
-//
-// Case-insensitive to match the client's `resolveByIdThenUniqueName`, which folds
-// case. Postgres compares `=` case-sensitively, so before VEG-528 a free-typed
-// "fighter" resolved on the sheet, offering d10 and Fighter's features, and
-// matched nothing here, leaving the same character without spellcasting or
-// weapon grants.
-//
-// THE ESCAPING IS LOAD-BEARING. Prisma compiles `mode: 'insensitive'` to
-// `name ILIKE $1` and binds the value as a *pattern*, not a string. Measured
-// against the dev database on Prisma 6.19.2: `equals: 'Fighte_'` returned the SRD
-// Fighter, `equals: 'Wiz%'` returned Wizard, and `equals: '%'` returned every
-// class. A character free-typed as "Wizar_" would have had the SRD Wizard's id
-// derived and written to `classId` permanently, granting a real class's spell
-// slots to a class that does not exist, while the frontend resolver and the
-// backfill migration, both plain case-folded equality, refused the same name.
-// That is the divergence this ticket exists to remove, reintroduced by its fix.
-//
-// Escaping alone would be enough, but no caller relies on it: they hand the rows
-// to `resolveCatalogRef`, whose case-folded comparison decides. A future change
-// to the emitted SQL therefore cannot silently widen what resolves, only what is
-// fetched.
-const classNameWhere = (name: string) => ({
-  name: { equals: escapeLike(name), mode: Prisma.QueryMode.insensitive },
-});
 
 /** Project a resolved class row onto the two grants loadClassData returns. */
 const classDataFrom = (row: { spellcasting: unknown; weaponProficiencies: string[] | null }) => ({
@@ -176,10 +144,10 @@ export class CharactersService {
     // progression is worse than an absent one, and the accompanying backfill
     // pinned an id on every character whose name resolves cleanly today.
     const candidates = await this.prisma.srdClass.findMany({
-      where: { AND: [classNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
+      where: { AND: [catalogNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
       select,
     });
-    const cls = resolveCatalogRef(candidates, { name: className });
+    const cls = resolveByUniqueName(candidates, className);
     if (!cls) {
       return this.warnUnresolvedClass(characterId, className, classId, candidates.length);
     }
@@ -233,10 +201,10 @@ export class CharactersService {
    */
   private async deriveClassId(className: string, ownerId: string): Promise<string | null> {
     const candidates = await this.prisma.srdClass.findMany({
-      where: { AND: [classNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
+      where: { AND: [catalogNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
       select: { id: true, name: true },
     });
-    return resolveCatalogRef(candidates, { name: className })?.id ?? null;
+    return resolveByUniqueName(candidates, className)?.id ?? null;
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -319,9 +287,14 @@ export class CharactersService {
     // @IsString()` and means "no row", not "this row", so it falls through to
     // derivation and is normalised away instead of being stored as a key that
     // fails every id lookup while looking like one.
-    const classId =
-      persisted.classId ||
-      (persisted.class ? await this.deriveClassId(persisted.class, userId) : null);
+    // A classless character carries no key. `classId` is the resolution key FOR
+    // `class`, so an id with no name to resolve is not a stricter reference, it
+    // is an incoherent one: loadClassData would grant that class's spell slots
+    // and weapon proficiencies to a sheet showing no class at all. update()
+    // already nulls the id when the name is cleared; this is the create half.
+    const classId = persisted.class
+      ? persisted.classId || (await this.deriveClassId(persisted.class, userId))
+      : null;
 
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
