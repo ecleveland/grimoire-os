@@ -1,13 +1,12 @@
 // Real-DB regression tests for the two catalog reads VEG-537 scoped to the
 // global tier. The unit specs mock Prisma, so they can prove each service
 // *asks* for srd + shared but not that Postgres honours it. The tier model
-// lives in the where clause, and a where clause is only tested by a database.
+// lives in the where clause, and only a database tests a where clause.
 //
 // The catalog is hand-built rather than seeded. Five rows are enough to
 // exercise every branch of the suggestion query, and they never reach the
 // per-category cap, so no assertion can pass or fail because of ordering.
-import { BadRequestException } from '@nestjs/common';
-import type { ShopLineItem } from '@grimoire-os/shared';
+import { LOOT_CR_BUCKETS, type ShopLineItem } from '@grimoire-os/shared';
 import {
   createSeedContext,
   teardownSeedContext,
@@ -19,6 +18,9 @@ import { ShopThemeService } from '../../src/shops/shop-theme.service';
 import { AdminNpcDataService } from '../../src/admin/npc-data/admin-npc-data.service';
 
 const POOL_NAME = 'Antitoxin'; // in the alchemist preset's curated pool
+
+// Stateless, so one instance serves the whole file (no hand copy of the fragment).
+const contentAccess = new ContentAccessService();
 const PRIVATE_POTION = 'Aardvark Draught';
 const SHARED_POTION = 'Aardvark Tonic';
 const SRD_POTION = 'Elixir of Health';
@@ -83,9 +85,7 @@ describe('catalog-tier scoping on a real DB (VEG-537)', () => {
     beforeAll(async () => {
       // The real service with the real access helper, no Nest module, no mocks.
       // suggestStock is read-only, so one call serves every assertion.
-      lines = await new ShopThemeService(ctx.prisma, new ContentAccessService()).suggestStock(
-        'alchemist'
-      );
+      lines = await new ShopThemeService(ctx.prisma, contentAccess).suggestStock('alchemist');
     });
 
     it('never surfaces homebrew, whether matched by category or by pool name', () => {
@@ -108,27 +108,31 @@ describe('catalog-tier scoping on a real DB (VEG-537)', () => {
   });
 
   describe('admin loot-template item names', () => {
+    let service: AdminNpcDataService;
+    beforeAll(() => {
+      service = new AdminNpcDataService(ctx.prisma, contentAccess);
+    });
+
     const template = (itemName: string) => ({
       profession: 'merchant',
-      crBucket: '2\u20134',
+      crBucket: LOOT_CR_BUCKETS[2],
       coinage: { gp: [0, 2], sp: [2, 8], cp: [4, 20] },
       items: [{ itemName, weight: 1, qty: [1, 1] }],
     });
 
-    it('rejects a name that resolves only to a homebrew row, even the caller\u2019s own', async () => {
-      const service = new AdminNpcDataService(ctx.prisma, new ContentAccessService());
-
-      const err = await service
-        .create('loot-templates', authorId, template(PRIVATE_POTION))
-        .catch(e => e);
-
-      expect(err).toBeInstanceOf(BadRequestException);
-      expect(JSON.stringify(err.getResponse())).toContain('homebrew items are not eligible');
+    it("rejects a name that resolves only to a homebrew row, even the caller's own", async () => {
+      await expect(
+        service.create('loot-templates', authorId, template(PRIVATE_POTION))
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: expect.arrayContaining([
+            expect.stringContaining('homebrew items are not eligible'),
+          ]),
+        }),
+      });
     });
 
     it('accepts a global name that a homebrew row also uses', async () => {
-      const service = new AdminNpcDataService(ctx.prisma, new ContentAccessService());
-
       const row = await service.create('loot-templates', authorId, template(POOL_NAME));
 
       expect(row).toMatchObject({ category: 'npc', profession: 'merchant' });

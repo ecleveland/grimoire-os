@@ -118,25 +118,19 @@ describe('LootItemsEditor', () => {
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
-  it('does not offer the caller\u2019s homebrew items, which loot templates cannot reference', async () => {
-    // /srd/items returns the caller's own homebrew alongside the catalog, but
-    // the loot roller resolves names against srd + shared only, so offering a
-    // homebrew row here would lead straight to a 400 on save.
-    const moonDust = {
-      id: 'item-3',
-      name: 'Moon Dust',
-      category: 'Potion',
-      isMagic: false,
-      contentSource: 'homebrew',
-    };
-    mockApiFetch.mockResolvedValue(makeResponse([{ ...dagger, contentSource: 'srd' }, moonDust]));
+  it("searches the global tier only, so the caller's homebrew is never offered", async () => {
+    // Requested server-side so a page of the caller's homebrew cannot hide catalog rows.
+    mockApiFetch.mockResolvedValue(makeResponse([dagger]));
     const user = userEvent.setup();
     setup();
 
-    await user.type(screen.getByLabelText(/search items/i), 'o');
+    await user.type(screen.getByLabelText(/search items/i), 'dag');
 
-    expect(await screen.findByRole('button', { name: /add dagger/i })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /add moon dust/i })).toBeNull();
+    await waitFor(() => {
+      const call = mockApiFetch.mock.calls.find(([url]) => String(url).startsWith('/srd/items?'));
+      expect(call).toBeDefined();
+      expect(new URLSearchParams(String(call![0]).split('?')[1]).get('tier')).toBe('global');
+    });
   });
 
   it('shows a no-matches message when the search returns nothing', async () => {

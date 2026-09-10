@@ -48,7 +48,14 @@ export default function BundleContentsEditor({ value, onChange, selfId }: Props)
     setLoading(true);
     // Stale guard: a slow response for an old query must not overwrite newer results.
     let stale = false;
-    const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
+    // Pack components resolve against the SRD and shared catalog only (see
+    // AdminItemsService.setBundleContents), so ask for that tier.
+    const params = new URLSearchParams({
+      q: query,
+      page: '1',
+      limit: String(LIMIT),
+      tier: 'global',
+    });
     apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
       .then(res => {
         if (!stale) setResults(res.data);

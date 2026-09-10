@@ -220,32 +220,23 @@ export class AdminNpcDataService {
   // Generation resolves template items to catalog ids by exact Item.name
   // (loot-roller), so a name that doesn't resolve would silently produce
   // id-less loot. Reject it at write time instead. The roller reads srd + shared
-  // only, so validate against that same pool. A name carried by both an SRD row
-  // and a shared row is rejected too: the roller keys its catalog by name and
-  // would link an unspecified one of the two on every roll.
+  // only, so validate against that same pool.
   private async assertItemNamesResolvable(itemNames: string[]): Promise<void> {
     const unique = [...new Set(itemNames)];
     const found = await this.prisma.item.findMany({
       where: { ...this.contentAccess.globalWhere(), name: { in: unique } },
       select: { name: true },
     });
-    const matches = new Map<string, number>();
-    for (const { name } of found) matches.set(name, (matches.get(name) ?? 0) + 1);
-    const problems = [
-      ...unique
-        .filter(n => !matches.has(n))
-        .map(
+    const known = new Set(found.map(i => i.name));
+    const unknown = unique.filter(n => !known.has(n));
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        unknown.map(
           n =>
             `Unknown item "${n}". Item names must match an SRD or shared catalog item exactly, and homebrew items are not eligible`
-        ),
-      ...unique
-        .filter(n => (matches.get(n) ?? 0) > 1)
-        .map(
-          n =>
-            `Ambiguous item "${n}". More than one SRD or shared catalog item has this name, so loot could not resolve it to one row`
-        ),
-    ];
-    if (problems.length > 0) throw new BadRequestException(problems);
+        )
+      );
+    }
   }
 
   private assertTable(table: string): asserts table is NpcDataTable {

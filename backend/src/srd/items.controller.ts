@@ -48,9 +48,14 @@ export class ItemsController {
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Search items (global catalog + the caller’s homebrew)' })
+  @ApiOperation({
+    summary: 'Search items (global catalog + the caller’s homebrew; tier=global for catalog only)',
+  })
   searchItems(@Query() query: QueryItemsDto, @Req() req: OptionallyAuthenticatedRequest) {
-    return this.srdService.searchItems(query, req.user?.userId);
+    // With no userId the service scopes to the global catalog, which is what
+    // tier=global asks for, so no second code path is needed.
+    const userId = query.tier === 'global' ? undefined : req.user?.userId;
+    return this.srdService.searchItems(query, userId);
   }
 
   @Get(':id')

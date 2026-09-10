@@ -62,7 +62,9 @@ describe('ShopThemeService', () => {
       await service.suggestStock('baker');
 
       const arg = prisma.item.findMany.mock.calls[0][0];
-      expect(arg.where.AND[1].OR).toEqual([{ name: { in: ['Bread (loaf)', 'Rations'] } }]);
+      expect(arg.where).toEqual({
+        AND: [contentAccess.globalWhere(), { OR: [{ name: { in: ['Bread (loaf)', 'Rations'] } }] }],
+      });
     });
 
     it('warns server-side when a known theme matches no catalog items (unseeded/drift)', async () => {
