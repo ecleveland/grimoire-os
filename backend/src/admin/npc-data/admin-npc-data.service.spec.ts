@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminNpcDataService } from './admin-npc-data.service';
+import { ContentAccessService } from '../../srd/content-access.service';
 import { USER_ID } from '../../test/fixtures';
 
 type MockModel = {
@@ -23,6 +24,9 @@ function makeMockModel(): MockModel {
     delete: jest.fn(),
   };
 }
+
+// Stateless, so one real instance builds the expected fragments (no hand copy).
+const contentAccess = new ContentAccessService();
 
 describe('AdminNpcDataService', () => {
   let service: AdminNpcDataService;
@@ -46,7 +50,11 @@ describe('AdminNpcDataService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AdminNpcDataService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AdminNpcDataService,
+        ContentAccessService,
+        { provide: PrismaService, useValue: prisma },
+      ],
     }).compile();
 
     service = module.get<AdminNpcDataService>(AdminNpcDataService);
@@ -178,6 +186,21 @@ describe('AdminNpcDataService', () => {
           }),
         });
         expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
+      });
+
+      it('resolves item names against the global catalog only, the same pool the loot roller reads', async () => {
+        prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }, { name: 'Quarterstaff' }]);
+        prisma.npcLootTemplate.create.mockResolvedValue({ id: 'lt1' });
+
+        await service.create('loot-templates', USER_ID, structured);
+
+        // A name that resolves only to someone's homebrew row must be rejected
+        // here, because the roller pins to srd + shared and would emit id-less loot.
+        expect(prisma.item.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { ...contentAccess.globalWhere(), name: { in: ['Dagger', 'Quarterstaff'] } },
+          })
+        );
       });
 
       it('rejects an invalid payload with messages naming the nested field', async () => {

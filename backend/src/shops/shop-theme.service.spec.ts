@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Logger } from '@nestjs/common';
 import { ShopThemeService, resolveSuggestions, type SuggestionItemRow } from './shop-theme.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import {
   SHOP_SUGGESTION_CAP,
@@ -9,13 +10,16 @@ import {
   type ShopThemePreset,
 } from './data/shop-theme-presets';
 
+// Stateless, so one real instance builds the expected fragments (no hand copy).
+const contentAccess = new ContentAccessService();
+
 describe('ShopThemeService', () => {
   let service: ShopThemeService;
   let prisma: MockPrismaService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ShopThemeService, prismaMockProvider()],
+      providers: [ShopThemeService, ContentAccessService, prismaMockProvider()],
     }).compile();
 
     service = module.get(ShopThemeService);
@@ -40,6 +44,14 @@ describe('ShopThemeService', () => {
         { name: { in: expect.arrayContaining(['Acid', 'Antitoxin']) } },
       ]);
       expect(arg.select).toMatchObject({ id: true, name: true, category: true, cost: true });
+    });
+
+    it('scopes the catalog read to the global tier, so another user\u2019s homebrew never surfaces', async () => {
+      prisma.item.findMany.mockResolvedValue([]);
+      await service.suggestStock('alchemist');
+
+      const arg = prisma.item.findMany.mock.calls[0][0];
+      expect(arg.where).toEqual({ ...contentAccess.globalWhere(), OR: expect.any(Array) });
     });
 
     it('queries names-only themes without a category clause', async () => {

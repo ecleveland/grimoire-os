@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { priceFromCost } from '@grimoire-os/shared';
 import type { ShopLineItem } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import {
   getThemePreset,
   SHOP_SUGGESTION_CAP,
@@ -63,7 +64,10 @@ export function resolveSuggestions(
 export class ShopThemeService {
   private readonly logger = new Logger(ShopThemeService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private contentAccess: ContentAccessService
+  ) {}
 
   async suggestStock(theme: string): Promise<ShopLineItem[]> {
     const preset = getThemePreset(theme);
@@ -74,8 +78,11 @@ export class ShopThemeService {
     if (preset.itemNames.length > 0) or.push({ name: { in: [...preset.itemNames] } });
     if (or.length === 0) return [];
 
+    // Global catalog only (srd + shared), the contract the controller documents
+    // and the same pool the loot engines read. Without this, one user's homebrew
+    // potion would land in every DM's suggestions.
     const rows = await this.prisma.item.findMany({
-      where: { OR: or },
+      where: { ...this.contentAccess.globalWhere(), OR: or },
       select: { id: true, name: true, category: true, cost: true },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
