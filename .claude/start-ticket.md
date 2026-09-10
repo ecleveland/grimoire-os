@@ -9,10 +9,9 @@ Project-specific configuration for the global `start-ticket` skill. The skill re
 
 ## Pre-flight
 
-- Kill stale dev processes on ports 3000/3001:
-  `lsof -ti:3000,3001 | xargs kill -9 2>/dev/null`
 - Confirm Docker is running and the `postgres` container is up: `docker compose ps`
-- Confirm `.env` (repo root) and `backend/.env` exist; copy from `.env.example` if missing.
+- Confirm `.env` exists at the repo root; copy from `.env.example` if missing. Nothing reads `backend/.env`; `dev.sh` exports the root file.
+- No separate kill step for stale dev processes: `dev.sh` reaps leftover `dev.sh` process trees itself before starting.
 
 ## Fast test runners (TDD inner loop)
 
@@ -158,3 +157,21 @@ findings. Claude posts the rest:
 - **Findings anchored to a line** — `gh api repos/<owner>/<repo>/pulls/<pr>/comments -f commit_id=… -f path=… -F line=… -f side=RIGHT -f body=…`. The command **must start with `gh api`** to match the project's `Bash(gh api:*)` allow rule — a compound prefix like `SHA=$(git rev-parse HEAD) && gh api …` falls through to the permission classifier and gets denied. Resolve the commit SHA in a separate `git rev-parse HEAD` call first.
 
 Don't take agent findings at face value before posting or acting on them — verify each against the code first. On VEG-453 a review agent cited a species trait's prose description as a structured data listing, and proposed a one-line drift guard that would have failed on a field the seeded row carries and the shared constant doesn't. Both read as authoritative. Verifying is also what tells you whether a finding is latent or already broken, which changes its priority.
+
+## Follow-up tickets
+
+A review finding becomes a Linear ticket only when one of these holds:
+
+- It names a user-visible defect with a reproduction (input, expected, actual).
+- It belongs to an open milestone and the PR cannot absorb it within its tier's budget.
+
+Everything else is fixed in the current PR if it fits, or recorded in the
+round summary comment and dropped. At most one follow-up ticket per PR.
+A follow-up ticket must carry a milestone or a priority of Medium or above;
+never file a Low with no milestone.
+
+Ticket ids belong in commit messages, PR bodies, and test names. Production
+comments state the current rule in present tense and do not cite tickets.
+
+When picking the next ticket, prefer milestone-attached tickets. A Low with
+no milestone is only picked when the user names it.
