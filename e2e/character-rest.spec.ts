@@ -131,6 +131,11 @@ test.describe('character sheet — Long Rest', () => {
         name: 'Shan Two-Rivers',
         class: 'Monk',
         level: 5,
+        // Pinned null because VEG-530 seeds an omitted pool from the class, and
+        // this is the only end-to-end exercise of the short-rest dialog on a
+        // sheet that has no dice to spend. Without it the Monk arrives with a
+        // five-die d8 block and the case below stops being resource-only.
+        hitDice: null,
         abilityScores: { strength: 12, dexterity: 16, constitution: 14, wisdom: 15 },
         hitPoints: { max: 33, current: 33, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },

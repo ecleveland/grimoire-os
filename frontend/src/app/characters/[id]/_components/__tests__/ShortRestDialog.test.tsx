@@ -347,19 +347,15 @@ describe('ShortRestDialog (VEG-487)', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/no hit dice/i);
   });
 
-  // VEG-530. The die here used to fall back to a hardcoded d8 for a null pool,
-  // one of four places that each invented one. That fallback was only ever
-  // reachable through this state, and the dialog is right to say plainly that
-  // there is nothing to spend rather than imply a pool exists.
-  it('reports an unrecorded pool instead of standing in a d8', () => {
-    renderDialog({ hitDice: null });
-
-    expect(screen.getByRole('status')).toHaveTextContent(/no hit dice on this sheet/i);
-    expect(screen.queryByRole('button', { name: /spend a hit die/i })).toBeNull();
-    expect(screen.queryByText(/d8/)).toBeNull();
-    expect(screen.queryByTestId('dice-available')).toBeNull();
-  });
-
+  // VEG-530 removed a `hitDice?.dieType ?? 'd8'` from this file, but unlike the
+  // other three that fallback was unreachable: every use of it sat inside the
+  // branch that already requires a pool, so no input reached it. A test asserting
+  // "no d8 appears for a null pool" therefore passes with the fallback present
+  // and absent alike, which is why one was written here and then deleted. The
+  // deletion was tidying, not a fix, and has nothing to regression-test.
+  //
+  // This case is different: it feeds `applyShortRest` a null pool, which nothing
+  // else here does.
   it('still allows a resource-only rest when the pool is unrecorded', async () => {
     const user = userEvent.setup();
     const { onPatch } = renderDialog({

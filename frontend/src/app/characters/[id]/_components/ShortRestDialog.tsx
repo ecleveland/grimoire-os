@@ -77,9 +77,11 @@ export default function ShortRestDialog({
   const canConfirm = !isSaving && Object.keys(patch).length > 0;
 
   const spendDie = () => {
-    // `canSpendMore` already implies a pool; naming `hitDice` here is what lets
-    // the die be the pool's own rather than a stand-in for a missing one. This
-    // was one of the four places that each invented a d8 (VEG-530).
+    // `canSpendMore` already implies a pool (`canSpendDice` requires one), so
+    // `!hitDice` is here to narrow the type rather than to catch a case. Reading
+    // the die off the pool replaced a `hitDice?.dieType ?? 'd8'` that VEG-530
+    // removed — dead code rather than a live default, since every use of it sat
+    // behind this same requirement. The other three were reachable.
     if (!canSpendMore || !hitDice) return;
     setRolls([
       ...usableRolls,
