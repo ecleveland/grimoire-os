@@ -80,9 +80,11 @@ export class ShopThemeService {
 
     // Global catalog only (srd + shared), the contract the controller documents
     // and the same pool the loot engines read. Without this, one user's homebrew
-    // potion would land in every DM's suggestions.
+    // potion would land in every DM's suggestions. Nested under AND because the
+    // theme clause is itself an OR. A tier fragment that ever carried its own OR
+    // would be overwritten by a spread, and the types cannot catch that.
     const rows = await this.prisma.item.findMany({
-      where: { ...this.contentAccess.globalWhere(), OR: or },
+      where: { AND: [this.contentAccess.globalWhere(), { OR: or }] },
       select: { id: true, name: true, category: true, cost: true },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });

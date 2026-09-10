@@ -161,6 +161,13 @@ describe('AdminNpcDataService', () => {
 
         await service.create('loot-templates', USER_ID, structured);
 
+        // Names are checked against the same pool the loot roller reads (srd +
+        // shared), so a name that resolves only to someone's homebrew row is
+        // rejected here instead of rolling as id-less loot.
+        expect(prisma.item.findMany).toHaveBeenCalledWith({
+          where: { ...contentAccess.globalWhere(), name: { in: ['Dagger', 'Quarterstaff'] } },
+          select: { name: true },
+        });
         // Stored exactly as the loot engine consumes it (LootTemplate shape).
         expect(prisma.npcLootTemplate.create).toHaveBeenCalledWith({
           data: expect.objectContaining({
@@ -177,30 +184,36 @@ describe('AdminNpcDataService', () => {
         });
       });
 
-      it('rejects item names that do not resolve in the catalog', async () => {
+      it('rejects item names that do not resolve in the global catalog, and says why', async () => {
         prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }]);
 
         await expect(service.create('loot-templates', USER_ID, structured)).rejects.toMatchObject({
           response: expect.objectContaining({
-            message: expect.arrayContaining([expect.stringContaining('Quarterstaff')]),
+            message: expect.arrayContaining([
+              expect.stringContaining('Quarterstaff'),
+              expect.stringContaining('homebrew items are not eligible'),
+            ]),
           }),
         });
         expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
       });
 
-      it('resolves item names against the global catalog only, the same pool the loot roller reads', async () => {
-        prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }, { name: 'Quarterstaff' }]);
-        prisma.npcLootTemplate.create.mockResolvedValue({ id: 'lt1' });
+      it('rejects a name that resolves to more than one global row, since the roller could pick either', async () => {
+        // An SRD row and an admin-published shared row may legally share a
+        // name (the unique indexes are per tier). The roller keys its catalog
+        // by name, so such a template would link an unspecified row per roll.
+        prisma.item.findMany.mockResolvedValue([
+          { name: 'Dagger' },
+          { name: 'Dagger' },
+          { name: 'Quarterstaff' },
+        ]);
 
-        await service.create('loot-templates', USER_ID, structured);
-
-        // A name that resolves only to someone's homebrew row must be rejected
-        // here, because the roller pins to srd + shared and would emit id-less loot.
-        expect(prisma.item.findMany).toHaveBeenCalledWith(
-          expect.objectContaining({
-            where: { ...contentAccess.globalWhere(), name: { in: ['Dagger', 'Quarterstaff'] } },
-          })
-        );
+        await expect(service.create('loot-templates', USER_ID, structured)).rejects.toMatchObject({
+          response: expect.objectContaining({
+            message: expect.arrayContaining([expect.stringMatching(/Ambiguous item "Dagger"/)]),
+          }),
+        });
+        expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();
       });
 
       it('rejects an invalid payload with messages naming the nested field', async () => {

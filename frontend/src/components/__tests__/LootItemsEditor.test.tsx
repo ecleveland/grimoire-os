@@ -118,6 +118,27 @@ describe('LootItemsEditor', () => {
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
+  it('does not offer the caller\u2019s homebrew items, which loot templates cannot reference', async () => {
+    // /srd/items returns the caller's own homebrew alongside the catalog, but
+    // the loot roller resolves names against srd + shared only, so offering a
+    // homebrew row here would lead straight to a 400 on save.
+    const moonDust = {
+      id: 'item-3',
+      name: 'Moon Dust',
+      category: 'Potion',
+      isMagic: false,
+      contentSource: 'homebrew',
+    };
+    mockApiFetch.mockResolvedValue(makeResponse([{ ...dagger, contentSource: 'srd' }, moonDust]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'o');
+
+    expect(await screen.findByRole('button', { name: /add dagger/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add moon dust/i })).toBeNull();
+  });
+
   it('shows a no-matches message when the search returns nothing', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
     const user = userEvent.setup();

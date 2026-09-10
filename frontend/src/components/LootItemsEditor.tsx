@@ -115,7 +115,10 @@ export default function LootItemsEditor({ value, onChange }: Props) {
   };
 
   const inList = new Set(value.map(e => e.itemName));
-  const pickable = results.filter(r => !inList.has(r.name));
+  // /srd/items also returns the caller's own homebrew, but loot templates
+  // resolve names against the SRD and shared catalog only, so a homebrew row
+  // offered here would be refused on save.
+  const pickable = results.filter(r => r.contentSource !== 'homebrew' && !inList.has(r.name));
 
   return (
     <div className="space-y-3">

@@ -39,19 +39,20 @@ describe('ShopThemeService', () => {
 
       expect(prisma.item.findMany).toHaveBeenCalledTimes(1);
       const arg = prisma.item.findMany.mock.calls[0][0];
-      expect(arg.where.OR).toEqual([
-        { category: { in: ['Potion'] } },
-        { name: { in: expect.arrayContaining(['Acid', 'Antitoxin']) } },
-      ]);
+      // The whole where, so an unscoped read (another user's homebrew leaking
+      // in) or an extra clause fails here rather than only on Postgres.
+      expect(arg.where).toEqual({
+        AND: [
+          contentAccess.globalWhere(),
+          {
+            OR: [
+              { category: { in: ['Potion'] } },
+              { name: { in: expect.arrayContaining(['Acid', 'Antitoxin']) } },
+            ],
+          },
+        ],
+      });
       expect(arg.select).toMatchObject({ id: true, name: true, category: true, cost: true });
-    });
-
-    it('scopes the catalog read to the global tier, so another user\u2019s homebrew never surfaces', async () => {
-      prisma.item.findMany.mockResolvedValue([]);
-      await service.suggestStock('alchemist');
-
-      const arg = prisma.item.findMany.mock.calls[0][0];
-      expect(arg.where).toEqual({ ...contentAccess.globalWhere(), OR: expect.any(Array) });
     });
 
     it('queries names-only themes without a category clause', async () => {
@@ -61,7 +62,7 @@ describe('ShopThemeService', () => {
       await service.suggestStock('baker');
 
       const arg = prisma.item.findMany.mock.calls[0][0];
-      expect(arg.where.OR).toEqual([{ name: { in: ['Bread (loaf)', 'Rations'] } }]);
+      expect(arg.where.AND[1].OR).toEqual([{ name: { in: ['Bread (loaf)', 'Rations'] } }]);
     });
 
     it('warns server-side when a known theme matches no catalog items (unseeded/drift)', async () => {
