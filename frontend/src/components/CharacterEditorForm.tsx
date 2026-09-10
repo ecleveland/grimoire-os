@@ -21,8 +21,13 @@ import type {
   SrdSubclass,
   Weapon,
 } from '@/lib/types';
-import { asHitDie, HIT_DIE_TYPES, SIZES } from '@/lib/types';
-import { MAX_ARMOR_CLASS, MAX_INITIATIVE_BONUS, MAX_SPEED } from '@grimoire-os/shared';
+import { asHitDie, HIT_DIE_TYPES, SIZES, type HitDieType } from '@/lib/types';
+import {
+  hitDicePoolFor,
+  MAX_ARMOR_CLASS,
+  MAX_INITIATIVE_BONUS,
+  MAX_SPEED,
+} from '@grimoire-os/shared';
 import { clampIntToRange } from '@/lib/form-helpers';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
 import { recommendedAbilityKeys } from '@/lib/ability-math';
@@ -91,7 +96,7 @@ export interface CharacterFormValues {
    * This used to be non-nullable, filled with a d8 on load and sent on every
    * save, so saving any unrelated field on a character that had no hit dice
    * persisted a pool nobody chose — and that stored die then outranked the
-   * VEG-528 level-up picker, so the one surface that asks which die a character
+   * VEG-528 level-up picker, so the one place that asks which die a character
    * uses never appeared again. Same reasoning as `armorClass: ''` below.
    */
   hitDice: HitDice | null;
@@ -413,13 +418,17 @@ export function applyClassGrants(
   if (armor.added.length) added.push({ label: 'Armor training', values: armor.added });
   if (profs.added.length) added.push({ label: 'Proficiencies', values: profs.added });
 
-  // The class's die wins; a die the sheet cannot use leaves whatever was already
-  // there, including nothing. Folding a class in is one of the two ways a pool
-  // gets recorded here (VEG-530) — the player choosing a die is the other — and
-  // it sizes the pool to the level, the same rule the server seed and the
-  // backfill migration follow.
-  const dieType = asHitDie(c.hitDie) ?? v.hitDice?.dieType ?? null;
-  const hitDice = dieType ? { total: v.level, spent: 0, ...v.hitDice, dieType } : v.hitDice;
+  // Folding a class in is one of the two ways a pool gets recorded here
+  // (VEG-530); the player choosing a die in the Hit Die control is the other. A
+  // die the sheet cannot use records nothing and claims no grant, leaving
+  // whatever was already there — which may be a pool the player owns, spent dice
+  // and all, so it is not ours to clear.
+  const dieType = asHitDie(c.hitDie);
+  const hitDice = dieType
+    ? v.hitDice
+      ? { ...v.hitDice, dieType }
+      : hitDicePoolFor(dieType, v.level)
+    : v.hitDice;
   if (dieType && dieType !== v.hitDice?.dieType) {
     added.push({ label: 'Hit die', values: [dieType] });
   }
@@ -722,10 +731,8 @@ export default function CharacterEditorForm({
   // so a legacy pool stays visible and editable rather than silently re-rendering
   // as a different die.
   const storedDie = values.hitDice?.dieType;
-  const hitDieOptions: readonly string[] =
-    storedDie && !(HIT_DIE_TYPES as readonly string[]).includes(storedDie)
-      ? [...HIT_DIE_TYPES, storedDie]
-      : HIT_DIE_TYPES;
+  const hitDieOptions: readonly DieType[] =
+    storedDie && !asHitDie(storedDie) ? [...HIT_DIE_TYPES, storedDie] : HIT_DIE_TYPES;
 
   const applyGrants = (
     source: string,
@@ -996,18 +1003,15 @@ export default function CharacterEditorForm({
             label="Hit Die"
             value={values.hitDice?.dieType ?? ''}
             onChange={e =>
-              set('hitDice', {
-                // A level-N character owns N unspent dice — the same pool the
-                // server seeds and the backfill writes. Recording a die on a
-                // sheet that had none is the point of this control (VEG-530).
-                // Floored at 1 because the Level field coerces a cleared input to
-                // 0 (`Number('')`) and `min={1}` is only an HTML hint, so sizing
-                // straight off it could record an empty pool.
-                total: Math.max(1, values.level),
-                spent: 0,
-                ...values.hitDice,
-                dieType: e.target.value as DieType,
-              })
+              set(
+                'hitDice',
+                // Changing the die on an existing pool keeps its size and its
+                // spent count; recording one on a sheet that had none builds the
+                // whole pool, which is the point of this control (VEG-530).
+                values.hitDice
+                  ? { ...values.hitDice, dieType: e.target.value as DieType }
+                  : hitDicePoolFor(e.target.value as HitDieType, values.level)
+              )
             }
           >
             {/* Disabled, so it can show an unrecorded pool but not be chosen back

@@ -7,7 +7,7 @@
 -- separate clients each invented their own d8 for it. The classic editor was the
 -- worst of them: it filled the gap on load and sent the field unconditionally on
 -- save, so saving any unrelated field persisted the guess. After that the stored
--- die outranked the VEG-528 level-up picker, and the one surface designed to ASK
+-- die outranked the VEG-528 level-up picker, and the one place designed to ASK
 -- which die a character uses never appeared again.
 --
 -- The resolution goes through "classId", not through the class name:

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Character, DieType, SrdClass } from '@/lib/types';
+import type { Character, DieType, HitDieType, SrdClass } from '@/lib/types';
 import { asHitDie, DEFAULT_HIT_DIE, HIT_DIE_TYPES } from '@/lib/types';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
@@ -107,7 +107,9 @@ export default function LevelUpDialog({
   // mis-pick the picker's own narrowed list exists to prevent. Declining falls
   // through to `needsDiePick`, so the player is asked.
   const classHitDie = asHitDie(srdClass?.hitDie);
-  const [pickedDie, setPickedDie] = useState<DieType>(DEFAULT_HIT_DIE);
+  // As narrow as the list the selector offers, so `setPickedDie('d100')` is a
+  // type error rather than a permanent HP maximum (VEG-530).
+  const [pickedDie, setPickedDie] = useState<HitDieType>(DEFAULT_HIT_DIE);
   // Gated on the catalog having settled, so the selector doesn't flash in during
   // the fetch and then vanish once the class resolves.
   const needsDiePick = !storedDie && !classHitDie && !classDataPending;
@@ -200,7 +202,7 @@ export default function LevelUpDialog({
                   // and confirming writes 11 + CON into a permanent maximum
                   // beside a d4 pool.
                   onChange={e => {
-                    setPickedDie(e.target.value as DieType);
+                    setPickedDie(e.target.value as HitDieType);
                     setRoll(null);
                   }}
                   className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"

@@ -315,7 +315,7 @@ describe('pure helpers', () => {
   // VEG-530. `hitDice` used to be non-nullable here, filled with a d8 on load
   // and sent on every save, so opening the editor on a character that had no hit
   // dice and saving ANY unrelated field persisted a pool nobody chose. That
-  // stored die then outranked the VEG-528 level-up picker, so the one surface
+  // stored die then outranked the VEG-528 level-up picker, so the one place
   // that asks which die a character uses never appeared again — which is how
   // VEG-528's own advice ("re-pick your class in the editor") defeated its fix.
   describe('an unrecorded hit-dice pool stays unrecorded (VEG-530)', () => {
@@ -350,6 +350,32 @@ describe('pure helpers', () => {
       const { values, added } = applyClassGrants(base, srdClasses[0]);
       expect(values.hitDice).toEqual({ dieType: 'd10', total: 4, spent: 0 });
       expect(added.find(a => a.label === 'Hit die')?.values).toEqual(['d10']);
+    });
+
+    // The Level field coerces a cleared input to 0 (`Number('')`) and `min={1}`
+    // is only a browser hint, so this path needs the same floor the Hit Die
+    // control has. It did not have it: clearing Level and clicking "Apply
+    // <Class> traits" recorded a pool of zero dice, which renders 0/0, leaves
+    // nothing to spend on a rest, and — being a truthy pool — suppresses the
+    // level-up picker that exists to repair exactly this.
+    it('applyClassGrants floors the pool at one die when the level field is blank', () => {
+      const base = { ...emptyCharacterFormValues(), level: 0 };
+      const { values } = applyClassGrants(base, srdClasses[0]);
+      expect(values.hitDice).toEqual({ dieType: 'd10', total: 1, spent: 0 });
+    });
+
+    // The pool a character already has is its own record, spent dice included. A
+    // class whose die the sheet cannot use leaves all three fields alone, and
+    // must not report a grant it did not make.
+    it('applyClassGrants leaves an existing pool untouched for an unusable class die', () => {
+      const base = {
+        ...emptyCharacterFormValues(),
+        level: 5,
+        hitDice: { dieType: 'd6' as const, total: 5, spent: 2 },
+      };
+      const { values, added } = applyClassGrants(base, { ...srdClasses[0], hitDie: 'd100' });
+      expect(values.hitDice).toEqual({ dieType: 'd6', total: 5, spent: 2 });
+      expect(added.find(a => a.label === 'Hit die')).toBeUndefined();
     });
 
     // The pool is the player's record, including how many dice they have spent.
@@ -680,6 +706,25 @@ describe('CharacterEditorForm autofill', () => {
       await user.selectOptions(screen.getByLabelText(/^hit die$/i), 'd10');
 
       expect(screen.getByLabelText(/hit dice total/i)).toHaveValue(1);
+    });
+
+    // Changing the die on an existing pool must not resize it or refund spent
+    // dice. Every other selectOptions test here starts from an unrecorded pool,
+    // so nothing pinned this.
+    it('changes only the die on a pool that already exists', async () => {
+      const { onSubmit } = renderForm({
+        initialValues: characterToFormValues(
+          makeCharacter({ level: 7, hitDice: { dieType: 'd8', total: 3, spent: 1 } })
+        ),
+        submitLabel: 'Save Changes',
+      });
+      const user = userEvent.setup();
+
+      await user.selectOptions(screen.getByLabelText(/^hit die$/i), 'd12');
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.hitDice).toEqual({ dieType: 'd12', total: 3, spent: 1 });
     });
 
     // Once a pool exists the placeholder is gone, so the control cannot be used

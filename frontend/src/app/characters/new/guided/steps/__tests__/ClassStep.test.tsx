@@ -162,6 +162,25 @@ describe('ClassStep — SRD class selection', () => {
     await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd10', total: 1, spent: 0 }));
   });
 
+  // Typing over a resolved class drops its grants, and the die is one of them
+  // (VEG-530). Leaving it shipped the old class's die on a draft naming a
+  // different class, and an explicit pool in the payload suppresses the server
+  // seed — so the character lands with a wrong die that then outranks the
+  // level-up picker permanently. The ticket's own failure, via the wizard.
+  it('drops the die when the class stops resolving to a catalog row', async () => {
+    const user = userEvent.setup();
+    renderStep([makeClass()]);
+
+    await pickClass(user, 'Fighter');
+    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd10', total: 1, spent: 0 }));
+
+    const input = screen.getByRole('combobox', { name: /^class/i });
+    await user.clear(input);
+    await user.type(input, 'Bloodbinder');
+
+    await waitFor(() => expect(draftHitDice()).toBeNull());
+  });
+
   // A homebrew class can carry a `hitDie` the sheet cannot use — the content DTO
   // validates against DIE_TYPES, which includes d20 and d100. Folding one in
   // would put a die on the sheet that no picker offers and that the backend

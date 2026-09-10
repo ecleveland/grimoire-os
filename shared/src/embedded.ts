@@ -414,6 +414,20 @@ export interface HitDice {
 }
 
 /**
+ * The hit-dice pool a character of `level` starts with. One unspent die per
+ * level, never fewer than one (VEG-530).
+ *
+ * Single home for a rule that was otherwise spelled out at every write site with
+ * its own level expression, only one of which floored it. That is how the
+ * character editor came to record a pool of zero dice when the level field was
+ * cleared: `Number('')` is 0, and the input's `min={1}` is only a hint to the
+ * browser.
+ */
+export function hitDicePoolFor(dieType: HitDieType, level: number | undefined): HitDice {
+  return { dieType, total: Math.max(1, level ?? 1), spent: 0 };
+}
+
+/**
  * When a limited-use class/race resource recharges (VEG-409): a short rest
  * restores `'short'` resources; a long rest restores both kinds.
  */

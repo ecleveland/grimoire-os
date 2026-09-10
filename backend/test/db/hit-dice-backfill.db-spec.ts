@@ -70,6 +70,24 @@ describe('VEG-530 hitDice backfill — real DB', () => {
       data: classRow('Wizard', { contentSource: 'homebrew', createdById: owner.id, hitDie: 'd12' }),
     });
 
+    // The other two arms of the visibility predicate. Without a character pinned
+    // to each, deleting `OR sc."createdById" = c."userId"` or dropping 'shared'
+    // from the IN leaves every test in this file green.
+    const ownerHomebrew = await ctx.prisma.srdClass.create({
+      data: classRow('Runeblade', {
+        contentSource: 'homebrew',
+        createdById: owner.id,
+        hitDie: 'd12',
+      }),
+    });
+    const sharedRanger = await ctx.prisma.srdClass.create({
+      data: classRow('Ranger', {
+        contentSource: 'shared',
+        createdById: stranger.id,
+        hitDie: 'd10',
+      }),
+    });
+
     // A stranger's homebrew, invisible to the owner. A character carrying its id
     // (a client can supply one; nothing validates it) must not seed from it.
     const strangerHomebrew = await ctx.prisma.srdClass.create({
@@ -118,6 +136,16 @@ describe('VEG-530 hitDice backfill — real DB', () => {
       class: 'Bloodbinder',
       classId: strangerHomebrew.id,
       level: 7,
+    });
+    ids.ownHomebrew = await character(owner.id, 'Own Homebrew', {
+      class: 'Runeblade',
+      classId: ownerHomebrew.id,
+      level: 4,
+    });
+    ids.sharedTier = await character(owner.id, 'Shared Tier', {
+      class: 'Ranger',
+      classId: sharedRanger.id,
+      level: 6,
     });
     ids.oddDie = await character(owner.id, 'Odd Die', {
       class: 'Dicemancer',
@@ -185,6 +213,17 @@ describe('VEG-530 hitDice backfill — real DB', () => {
   // have spent. Overwriting it would refund dice mid-adventuring-day.
   it('never overwrites a pool the character already has', async () => {
     expect(await hitDiceOf('hasPool')).toEqual({ dieType: 'd6', total: 4, spent: 3 });
+  });
+
+  // The owner-homebrew arm. Their own class is visible to them, so it seeds:
+  // the mirror image of the stranger's homebrew below.
+  it('seeds from the owner’s own homebrew class', async () => {
+    expect(await hitDiceOf('ownHomebrew')).toEqual({ dieType: 'd12', total: 4, spent: 0 });
+  });
+
+  // The shared-tier arm. Owned by someone else, visible to everyone.
+  it('seeds from a shared-tier class owned by another user', async () => {
+    expect(await hitDiceOf('sharedTier')).toEqual({ dieType: 'd10', total: 6, spent: 0 });
   });
 
   // `classId` is a soft ref with no FK behind it, so a client can supply an id

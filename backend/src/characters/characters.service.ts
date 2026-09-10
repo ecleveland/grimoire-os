@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AbilityScores, ClassSpellcasting, HitDice, Weapon } from '@grimoire-os/shared';
-import { inventoryFromJson, isHitDie } from '@grimoire-os/shared';
+import { hitDicePoolFor, inventoryFromJson, isHitDie } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -235,25 +235,24 @@ export class CharactersService {
    * handled state: the level-up picker asks the player.
    */
   private async seedHitDice(
-    resolved: { id: string; hitDie: string } | null,
+    resolved: { hitDie: string } | null,
     classId: string | null,
     ownerId: string,
     level: number | undefined
   ): Promise<HitDice | undefined> {
-    // `resolved` already carries the row whenever the id was derived from the
-    // name. A client-supplied id skipped derivation, so its die has to be read —
-    // scoped, because the id has no FK behind it and an unscoped read would seed
-    // this character from a stranger's homebrew class.
+    // `resolved` is the row already in hand, which `create` has whenever the id
+    // was derived from the name. A client-supplied id skipped derivation, so its
+    // die has to be read — scoped, because the id has no FK behind it and an
+    // unscoped read would seed this character from a stranger's homebrew class.
     const row =
-      resolved?.id === classId
-        ? resolved
-        : classId &&
-          (await this.prisma.srdClass.findFirst({
+      resolved ??
+      (classId
+        ? await this.prisma.srdClass.findFirst({
             where: { AND: [{ id: classId }, this.contentAccess.visibleTo(ownerId)] },
             select: { hitDie: true },
-          }));
-    if (!row || !isHitDie(row.hitDie)) return undefined;
-    return { dieType: row.hitDie, total: level ?? 1, spent: 0 };
+          })
+        : null);
+    return row && isHitDie(row.hitDie) ? hitDicePoolFor(row.hitDie, level) : undefined;
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -351,8 +350,11 @@ export class CharactersService {
     // *omitting* the field rather than on it being falsy: an explicit null means
     // "this sheet has no hit dice", and seeding over it would be the same silent
     // invention this ticket removes, just from the other direction. Gating here
-    // also keeps the extra read off the hot path — both UI create paths send a
-    // pool, so neither pays for a lookup whose only product is a die they have.
+    // also keeps the read off creates that already carry a pool, which is the
+    // guided builder and any classic-editor save where the player clicked
+    // "Apply <Class> traits". A classic-editor create that only picked a class
+    // from the combobox sends `classId` with no pool, so it does pay for the
+    // lookup by id below.
     const hitDice =
       persisted.hitDice === undefined
         ? await this.seedHitDice(resolvedClass, classId, userId, persisted.level)
