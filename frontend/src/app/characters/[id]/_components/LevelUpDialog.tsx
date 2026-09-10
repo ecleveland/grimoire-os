@@ -100,7 +100,13 @@ export default function LevelUpDialog({
   // permanently. So ask instead: the player knows their class's die even when
   // the catalog doesn't. Still no blocking — the existing decision above stands,
   // since blocking would make leveling impossible offline or for a custom class.
-  const storedDie = character.hitDice?.dieType ?? null;
+  // Narrowed like the class die below (VEG-530). Every other guard this ticket
+  // added sits on a WRITE path, and `HitDiceDto` still validates `dieType`
+  // against DIE_TYPES, so a pool carrying d100 reached here intact, skipped the
+  // picker, and fed `averageHpForDie('d100')` = 51 into a permanent HP maximum
+  // once per level. A d4-d12 pool still wins outright, including a nonstandard
+  // one a DM granted; only a die that is not a hit die falls through and asks.
+  const storedDie = asHitDie(character.hitDice?.dieType);
   // Narrowed to real hit dice (VEG-530). A homebrew class may declare d20 or
   // d100 — legal for the content DTO, not a hit die — and accepting one skipped
   // the picker and fed +51 a level straight into a permanent maximum, the same
