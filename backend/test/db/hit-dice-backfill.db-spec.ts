@@ -147,6 +147,14 @@ describe('VEG-530 hitDice backfill — real DB', () => {
       classId: sharedRanger.id,
       level: 6,
     });
+    // `level Int @default(1)` carries no check constraint, and the DTO's
+    // `@Min(1)` only arrived with VEG-411. A row written before that can hold 0,
+    // and this migration exists to touch rows exactly that old.
+    ids.zeroLevel = await character(owner.id, 'Zero Level', {
+      class: 'Fighter',
+      classId: srdFighter.id,
+      level: 0,
+    });
     ids.oddDie = await character(owner.id, 'Odd Die', {
       class: 'Dicemancer',
       classId: d100Class.id,
@@ -207,6 +215,13 @@ describe('VEG-530 hitDice backfill — real DB', () => {
 
   it('leaves a classless character alone', async () => {
     expect(await hitDiceOf('classless')).toBeNull();
+  });
+
+  // A pool of zero dice is not a pool: it renders 0/0, leaves nothing to spend,
+  // and, being non-null, suppresses the level-up picker that would repair it.
+  // The TS helper floors at 1, so the SQL has to agree.
+  it('floors the pool at one die for a legacy row stored below level 1', async () => {
+    expect(await hitDiceOf('zeroLevel')).toEqual({ dieType: 'd10', total: 1, spent: 0 });
   });
 
   // The pool on the sheet is the player's record, including how much of it they

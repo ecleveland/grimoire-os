@@ -33,12 +33,19 @@
 -- A level-N character owns N unspent hit dice. Unlike hit points, where the roll
 -- belongs to the player, that total is fully derivable.
 --
+-- GREATEST(..., 1) mirrors `hitDicePoolFor` in @grimoire-os/shared, and is not
+-- theoretical here. `level` carries no check constraint and the DTO's @Min(1)
+-- only arrived with VEG-411, so a row written before that can hold 0, and this
+-- migration exists precisely to touch rows that old. A pool of zero dice renders
+-- 0/0, leaves nothing to spend on a rest, and is non-null, so it would suppress
+-- the level-up picker that would otherwise repair it.
+--
 -- Idempotent and re-runnable: it only ever writes rows that are currently null,
 -- so an existing pool keeps its die and its spent count.
 UPDATE "characters" c
 SET "hitDice" = jsonb_build_object(
   'dieType', sc."hitDie",
-  'total', c."level",
+  'total', GREATEST(c."level", 1),
   'spent', 0
 )
 FROM "srd_classes" sc
