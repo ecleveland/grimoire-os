@@ -384,13 +384,47 @@ export interface Combatant {
   initiativeMod?: number;
 }
 
-export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
+/**
+ * The dice a class can actually have as a hit die. Narrower than `DIE_TYPES`:
+ * d20 and d100 belong to the roll vocabulary, and one of them landing in a hit
+ * dice pool writes tens of points into a permanent HP maximum (VEG-528).
+ * `DIE_TYPES` derives from this so the relationship stays structural.
+ */
+export const HIT_DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12'] as const;
+export type HitDieType = (typeof HIT_DIE_TYPES)[number];
+
+export const DIE_TYPES = [...HIT_DIE_TYPES, 'd20', 'd100'] as const;
 export type DieType = (typeof DIE_TYPES)[number];
+
+/**
+ * Whether a free-form die string is usable as a hit die. `SrdClass.hitDie` is a
+ * plain `String` column validated with `@IsIn(DIE_TYPES)`, so a homebrew class
+ * can legally carry `d100` and a seed or direct write can carry anything at all.
+ * Callers that turn that column into a stored pool have to check first
+ * (VEG-530).
+ */
+export function isHitDie(value: string): value is HitDieType {
+  return (HIT_DIE_TYPES as readonly string[]).includes(value);
+}
 
 export interface HitDice {
   dieType: DieType;
   total: number;
   spent: number;
+}
+
+/**
+ * The hit-dice pool a character of `level` starts with. One unspent die per
+ * level, never fewer than one (VEG-530).
+ *
+ * Single home for a rule that was otherwise spelled out at every write site with
+ * its own level expression, only one of which floored it. That is how the
+ * character editor came to record a pool of zero dice when the level field was
+ * cleared: `Number('')` is 0, and the input's `min={1}` is only a hint to the
+ * browser.
+ */
+export function hitDicePoolFor(dieType: HitDieType, level: number | undefined): HitDice {
+  return { dieType, total: Math.max(1, level ?? 1), spent: 0 };
 }
 
 /**

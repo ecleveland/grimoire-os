@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Character, DieType, SrdClass } from '@/lib/types';
-import { asDieType, HIT_DIE_TYPES } from '@/lib/types';
+import type { Character, DieType, HitDieType, SrdClass } from '@/lib/types';
+import { asHitDie, DEFAULT_HIT_DIE, HIT_DIE_TYPES } from '@/lib/types';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
 import { resolveClass } from '@/lib/class-selection';
@@ -100,9 +100,22 @@ export default function LevelUpDialog({
   // permanently. So ask instead: the player knows their class's die even when
   // the catalog doesn't. Still no blocking — the existing decision above stands,
   // since blocking would make leveling impossible offline or for a custom class.
-  const storedDie = character.hitDice?.dieType ?? null;
-  const classHitDie = asDieType(srdClass?.hitDie);
-  const [pickedDie, setPickedDie] = useState<DieType>('d8');
+  // Narrowed like the class die below (VEG-530). Every other guard this ticket
+  // added sits on a WRITE path, and `HitDiceDto` still validates `dieType`
+  // against DIE_TYPES, so a pool carrying d100 reached here intact, skipped the
+  // picker, and fed `averageHpForDie('d100')` = 51 into a permanent HP maximum
+  // once per level. A d4-d12 pool still wins outright, including a nonstandard
+  // one a DM granted; only a die that is not a hit die falls through and asks.
+  const storedDie = asHitDie(character.hitDice?.dieType);
+  // Narrowed to real hit dice (VEG-530). A homebrew class may declare d20 or
+  // d100 — legal for the content DTO, not a hit die — and accepting one skipped
+  // the picker and fed +51 a level straight into a permanent maximum, the same
+  // mis-pick the picker's own narrowed list exists to prevent. Declining falls
+  // through to `needsDiePick`, so the player is asked.
+  const classHitDie = asHitDie(srdClass?.hitDie);
+  // As narrow as the list the selector offers, so `setPickedDie('d100')` is a
+  // type error rather than a permanent HP maximum (VEG-530).
+  const [pickedDie, setPickedDie] = useState<HitDieType>(DEFAULT_HIT_DIE);
   // Gated on the catalog having settled, so the selector doesn't flash in during
   // the fetch and then vanish once the class resolves.
   const needsDiePick = !storedDie && !classHitDie && !classDataPending;
@@ -195,7 +208,7 @@ export default function LevelUpDialog({
                   // and confirming writes 11 + CON into a permanent maximum
                   // beside a d4 pool.
                   onChange={e => {
-                    setPickedDie(e.target.value as DieType);
+                    setPickedDie(e.target.value as HitDieType);
                     setRoll(null);
                   }}
                   className="px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
@@ -207,12 +220,6 @@ export default function LevelUpDialog({
                   ))}
                 </select>
               </label>
-              {/* Deliberately says nothing about the class. When the class is set
-                  but unresolvable the advisory above already covers that, and this
-                  note would stack a second amber box saying the same thing; when
-                  the character is simply classless, claiming the class "couldn't be
-                  identified" would be false. Either way the fact that matters here
-                  is the same: no die is recorded, so this one is a guess. */}
               {/* Says nothing about the class. When the class is set but
                   unresolvable the advisory above already covers that, and this
                   would stack a second amber box on the same fact; when the

@@ -369,6 +369,53 @@ describe('LevelUpSection', () => {
         expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
       });
 
+      // The read side of the same rule. Every guard VEG-530 added sits on a
+      // write path, so a pool carrying d100 — legal through `HitDiceDto`, which
+      // still validates against DIE_TYPES — skipped the picker entirely and
+      // computed `averageHpForDie('d100')` = 51 into a permanent HP maximum,
+      // once per level. A d4-d12 pool a DM granted still wins, as before; only a
+      // die that is not a hit die falls through to the question.
+      it('asks for a die when the stored pool carries one that is not a hit die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ hitDice: { dieType: 'd100', total: 5, spent: 0 }, class: 'Pumpkin Sage' });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+        // d8 average 5, +2 CON = +7. Trusting the d100 would read +53.
+        expect(within(dialog).getByTestId('hp-gain-preview')).toHaveTextContent('+7 HP');
+      });
+
+      // The counterpart: a nonstandard but real hit die is the player's record
+      // and still outranks everything, so the picker stays away.
+      it('still trusts a stored d12 without asking', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
+        const user = userEvent.setup();
+        renderSection({ hitDice: { dieType: 'd12', total: 5, spent: 0 }, class: 'Pumpkin Sage' });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).queryByRole('combobox', { name: /hit die/i })).toBeNull();
+        // d12 average 7, +2 CON = +9.
+        expect(within(dialog).getByTestId('hp-gain-preview')).toHaveTextContent('+9 HP');
+      });
+
+      // VEG-530 narrowed the class-die read to real hit dice. A class that
+      // declares d100 used to satisfy `classHitDie`, so the picker never
+      // appeared and confirming wrote roughly +51 into a permanent maximum
+      // beside a d100 pool the dialog offers no way back from. The class still
+      // resolves — its feature suggestions are fine — only the die is declined.
+      it('asks for a die when the class declares one that is not a hit die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [{ ...fighterClass, hitDie: 'd100' }] });
+        const user = userEvent.setup();
+        renderSection({ hitDice: null, class: fighterClass.name });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+        // The picker's own default, not the class's d100.
+        expect(within(dialog).getByText(/computed from d8/i)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/d100/)).toBeNull();
+      });
+
       // The old copy only said feature suggestions were missing. It said nothing
       // about the die or the number about to be written.
       it('names the die in play and warns the HP maximum is permanent', async () => {

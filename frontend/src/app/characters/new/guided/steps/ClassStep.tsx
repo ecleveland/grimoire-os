@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/query';
-import { asDieType, type SrdClass, type SrdSubclass } from '@/lib/types';
+import { asHitDie, type SrdClass, type SrdSubclass } from '@/lib/types';
+import { hitDicePoolFor } from '@grimoire-os/shared';
 import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
@@ -55,18 +56,37 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
         skills: [],
       });
       if (changed) {
-        const dieType = asDieType(selectedClass.hitDie) ?? value.hitDice.dieType;
+        // The draft starts with no die and this is where one gets recorded
+        // (VEG-530). A class whose `hitDie` is not a real hit die leaves the
+        // draft's pool alone rather than folding in a value the sheet can't use.
+        const dieType = asHitDie(selectedClass.hitDie);
         onChange({
           level: 1,
           savingThrows: [...selectedClass.savingThrows],
           armorTraining: normalizeArmorProficiencies(selectedClass.armorProficiencies),
-          hitDice: { ...value.hitDice, dieType },
+          hitDice: dieType
+            ? value.hitDice
+              ? { ...value.hitDice, dieType }
+              : hitDicePoolFor(dieType, 1)
+            : value.hitDice,
           spellcastingAbility: selectedClass.spellcasting?.ability ?? '',
           subclass: '',
         });
       }
     } else if (reconcileSource('class', '', {})) {
-      onChange({ savingThrows: [], armorTraining: [], spellcastingAbility: '', subclass: '' });
+      // `hitDice` goes with the rest of the class's grants (VEG-530). In this
+      // builder the pool can only have come from a previously picked class, so
+      // leaving it behind shipped the old class's die on a draft that no longer
+      // names that class — and because the payload then carries an explicit
+      // pool, the server's seed is suppressed and the level-up picker never
+      // appears. That is the ticket's own failure, reachable through the wizard.
+      onChange({
+        savingThrows: [],
+        armorTraining: [],
+        spellcastingAbility: '',
+        subclass: '',
+        hitDice: null,
+      });
     }
     // Keyed on the resolved class identity only; reading value.* here is
     // intentional (it is current when the effect runs on an identity change).
@@ -117,7 +137,7 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
             className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-gray-200 p-3 text-sm dark:border-gray-700"
           >
             <span className="text-gray-500 dark:text-gray-400">Hit die</span>
-            <span className="text-gray-900 dark:text-white">{value.hitDice.dieType}</span>
+            <span className="text-gray-900 dark:text-white">{value.hitDice?.dieType ?? '—'}</span>
             <span className="text-gray-500 dark:text-gray-400">Saving throws</span>
             <span className="text-gray-900 dark:text-white">
               {value.savingThrows.join(', ') || '—'}

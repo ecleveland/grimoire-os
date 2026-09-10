@@ -94,8 +94,14 @@ export function applyLevelUp(
     /** Resolved HP gain, or null when HP was skipped (no stored HP block). */
     hpGain: number | null;
     newFeatures: Feature[];
-    /** Class hit die used to seed `hitDice` when the character has none. */
-    classHitDie?: DieType | null;
+    /**
+     * The die to seed `hitDice` with when the character has none. Required, and
+     * not nullable, since VEG-530: this used to fall back to a hardcoded d8, so
+     * a caller that could not resolve a die got one silently written into a
+     * permanent pool. `LevelUpDialog` is the only caller and always has a
+     * concrete die — the character's own, its class's, or one the player picked.
+     */
+    classHitDie: DieType;
   }
 ): LevelUpPatch {
   const newLevel = character.level + 1;
@@ -113,7 +119,7 @@ export function applyLevelUp(
   // missing one — unlike HP, the correct total is fully derivable.
   patch.hitDice = character.hitDice
     ? { ...character.hitDice, total: character.hitDice.total + 1 }
-    : { dieType: changes.classHitDie ?? 'd8', total: newLevel, spent: 0 };
+    : { dieType: changes.classHitDie, total: newLevel, spent: 0 };
 
   if (changes.newFeatures.length > 0) {
     patch.features = [...(character.features ?? []), ...changes.newFeatures];

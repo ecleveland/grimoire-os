@@ -14,7 +14,7 @@ import {
  * returned whichever row the query plan happened to put first. Two things read
  * off the result and both are silently wrong when it picks the other row:
  * `classFeaturesAtLevel` offers the wrong per-level features, and
- * `asDieType(hitDie)` seeds the hit die that `hpGain` writes into a *permanent*
+ * `asHitDie(hitDie)` seeds the hit die that `hpGain` writes into a *permanent*
  * HP maximum. Nothing errors, and the resolution can differ between two loads of
  * the same sheet.
  *

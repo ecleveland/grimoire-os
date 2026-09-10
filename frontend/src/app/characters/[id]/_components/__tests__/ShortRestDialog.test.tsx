@@ -347,6 +347,29 @@ describe('ShortRestDialog (VEG-487)', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/no hit dice/i);
   });
 
+  // VEG-530 removed a `hitDice?.dieType ?? 'd8'` from this file, but unlike the
+  // other three that fallback was unreachable: every use of it sat inside the
+  // branch that already requires a pool, so no input reached it. A test asserting
+  // "no d8 appears for a null pool" therefore passes with the fallback present
+  // and absent alike, which is why one was written here and then deleted. The
+  // deletion was tidying, not a fix, and has nothing to regression-test.
+  //
+  // This case is different: it feeds `applyShortRest` a null pool, which nothing
+  // else here does.
+  it('still allows a resource-only rest when the pool is unrecorded', async () => {
+    const user = userEvent.setup();
+    const { onPatch } = renderDialog({
+      hitDice: null,
+      resources: [{ name: 'Ki Points', max: 5, used: 3, recharge: 'short' }],
+    });
+
+    await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+    const [fields] = onPatch.mock.calls[0];
+    expect(fields.resources).toEqual([{ name: 'Ki Points', max: 5, used: 0, recharge: 'short' }]);
+    expect('hitDice' in fields).toBe(false);
+  });
+
   it('does not offer dice spending on a sheet with no hit points recorded', () => {
     renderDialog({ hitPoints: null });
 

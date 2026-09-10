@@ -62,11 +62,16 @@ const classWhere = (name: string) => ({
 // key: it cannot combine an index scan with a non-indexable ILIKE branch, so the
 // merged form degraded the whole disjunction to a sequential scan.
 // A derivation lookup is distinguishable from the read path's by its projection:
-// deriveClassId selects only what resolveByUniqueName needs. Asserting on it is
-// falsifiable, unlike the `take: 2` these assertions used to name — `take` was
-// removed from the service in the same round that introduced the escaping, and
-// the leftover `not.toHaveBeenCalledWith({take: 2})` could no longer fail.
-const DERIVE_SELECT = { select: { id: true, name: true } };
+// deriveClass selects only what resolveByUniqueName needs, plus the hit die.
+// Asserting on it is falsifiable, unlike the `take: 2` these assertions used to
+// name — `take` was removed from the service in the same round that introduced
+// the escaping, and the leftover `not.toHaveBeenCalledWith({take: 2})` could no
+// longer fail.
+//
+// `hitDie` joined the projection in VEG-530: the row is already being fetched to
+// pin `classId`, and the die is the field that stops four clients each inventing
+// their own d8.
+const DERIVE_SELECT = { select: { id: true, name: true, hitDie: true } };
 
 const classIdWhere = (classId: string) => ({
   AND: [{ id: classId }, visibleToOwner as Record<string, unknown>],
@@ -102,8 +107,11 @@ describe('CharactersService', () => {
     // `name` is present because `resolveCatalogRef` compares on it rather than
     // trusting the SQL predicate, and the same mock answers the write-path lookup
     // that derives `classId` from an unambiguous name (VEG-528).
+    // `hitDie` is present because the column is NOT NULL in the schema and
+    // VEG-530 seeds the character's hit-dice pool from it. A mock without it
+    // would let every create test pass while the seed silently did nothing.
     prisma.srdClass.findMany.mockResolvedValue([
-      { id: SRD_FIGHTER_ID, name: 'Fighter', spellcasting: null },
+      { id: SRD_FIGHTER_ID, name: 'Fighter', hitDie: 'd10', spellcasting: null },
     ]);
     // The id lookup is its own query since VEG-528. Defaulting it to "no such
     // row" keeps every name-path test exercising the name path.
@@ -124,6 +132,10 @@ describe('CharactersService', () => {
           // no classId, and a create that left the column null would put the
           // character straight onto the name heuristic it exists to replace.
           classId: SRD_FIGHTER_ID,
+          // Seeded from the same row (VEG-530). The fixture sends no hitDice, and
+          // a create that left the column null handed the sheet to four clients
+          // that each invented a d8 for a level-5 Fighter.
+          hitDice: { dieType: 'd10', total: 5, spent: 0 },
         },
       });
       expect(result).toMatchObject(mockCharacter);
@@ -214,7 +226,7 @@ describe('CharactersService', () => {
           // `name` is selected because resolveCatalogRef, not the SQL predicate,
           // decides; and there is no `take`, because a count taken over an ILIKE
           // result is a count of pattern matches, not of the name.
-          select: { id: true, name: true },
+          select: { id: true, name: true, hitDie: true },
         });
       });
 
@@ -299,6 +311,155 @@ describe('CharactersService', () => {
 
         expect(prisma.srdClass.findMany).not.toHaveBeenCalledWith(
           expect.objectContaining(DERIVE_SELECT)
+        );
+      });
+    });
+
+    // Nothing populated `hitDice` server-side, so every API-created character
+    // reached the sheet with a null pool and four separate clients each invented
+    // their own d8 for it. The class row is already being fetched to pin
+    // `classId`; the die is one column away in a query that already runs.
+    describe('seeding hitDice from the resolved class (VEG-530)', () => {
+      const hitDiceOf = () =>
+        (prisma.character.create.mock.calls[0][0] as { data: Record<string, unknown> }).data
+          .hitDice;
+
+      it('seeds a full pool at the character’s level when the DTO omits one', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, createCharacterDto);
+
+        expect(hitDiceOf()).toEqual({ dieType: 'd10', total: 5, spent: 0 });
+      });
+
+      // Prisma defaults the column to 1, so the seeded pool has to agree with it
+      // rather than with whatever the DTO happened to omit.
+      it('seeds a single die when the DTO omits the level too', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, level: undefined });
+
+        expect(hitDiceOf()).toEqual({ dieType: 'd10', total: 1, spent: 0 });
+      });
+
+      it('leaves a client-supplied pool exactly as sent', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+        const supplied = { dieType: 'd6', total: 3, spent: 2 };
+
+        await service.create(USER_ID, { ...createCharacterDto, hitDice: supplied });
+
+        expect(hitDiceOf()).toEqual(supplied);
+      });
+
+      // The distinction the seed turns on is `undefined`, not falsiness. A client
+      // that deliberately sends null is saying "this sheet has no hit dice", and
+      // overwriting that would be the same silent invention from the other side.
+      it('honours an explicit null instead of seeding over it', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, {
+          ...createCharacterDto,
+          hitDice: null as unknown as undefined,
+        });
+
+        expect(hitDiceOf()).toBeNull();
+      });
+
+      // The whole premise of VEG-528: a name matching two visible rows has no
+      // correct answer. Guessing a die here writes a permanent HP maximum from
+      // the wrong class.
+      it('seeds nothing when the class name matches more than one visible row', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: 'cls-srd', name: 'Fighter', hitDie: 'd10' },
+          { id: 'cls-hb', name: 'Fighter', hitDie: 'd6' },
+        ]);
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, createCharacterDto);
+
+        expect(hitDiceOf()).toBeUndefined();
+      });
+
+      it('seeds nothing for a class that is not in the catalog', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([]);
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, class: 'Bloodbinder' });
+
+        expect(hitDiceOf()).toBeUndefined();
+      });
+
+      it('seeds nothing for a character created with no class', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, class: undefined });
+
+        expect(hitDiceOf()).toBeUndefined();
+      });
+
+      // `SrdClass.hitDie` is validated with @IsIn(DIE_TYPES), which carries d20
+      // and d100 for the roll vocabulary. Seeding a d100 pool would write +51 a
+      // level into a permanent maximum — the exact mis-pick HIT_DIE_TYPES was
+      // introduced to prevent. The level-up picker asks instead.
+      it('refuses to seed a die that is not a real hit die', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([
+          { id: SRD_FIGHTER_ID, name: 'Fighter', hitDie: 'd100' },
+        ]);
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, createCharacterDto);
+
+        expect(hitDiceOf()).toBeUndefined();
+        // Still pinned: an odd die says nothing about which row was meant.
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: SRD_FIGHTER_ID }),
+        });
+      });
+
+      // A client that supplied the id skips derivation entirely, so the die has
+      // to be read by that id — and scoped, because the id is client-supplied
+      // with no FK behind it and an unscoped read would seed from a stranger's
+      // homebrew class.
+      it('seeds from a client-supplied classId, scoped to the creator’s content', async () => {
+        prisma.srdClass.findFirst.mockResolvedValue({ hitDie: 'd12' });
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, classId: 'cls-hb-barbarian' });
+
+        expect(prisma.srdClass.findFirst).toHaveBeenCalledWith({
+          where: classIdWhere('cls-hb-barbarian'),
+          select: { hitDie: true },
+        });
+        expect(hitDiceOf()).toEqual({ dieType: 'd12', total: 5, spent: 0 });
+      });
+
+      // The id is stored verbatim either way (VEG-528), so a row this owner
+      // cannot see costs them the pool, not the key.
+      it('seeds nothing when a client-supplied classId names no visible row', async () => {
+        prisma.srdClass.findFirst.mockResolvedValue(null);
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, { ...createCharacterDto, classId: 'cls-stranger' });
+
+        expect(hitDiceOf()).toBeUndefined();
+        expect(prisma.character.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ classId: 'cls-stranger' }),
+        });
+      });
+
+      // Both UI create paths send a pool. Reading a row whose only use is a die
+      // the caller already supplied would put a wasted query on the hot path.
+      it('does not read the class row at all when the DTO already carries a pool', async () => {
+        prisma.character.create.mockResolvedValue(mockCharacter);
+
+        await service.create(USER_ID, {
+          ...createCharacterDto,
+          classId: 'cls-hb-fighter',
+          hitDice: { dieType: 'd10', total: 5, spent: 0 },
+        });
+
+        expect(prisma.srdClass.findFirst).not.toHaveBeenCalledWith(
+          expect.objectContaining({ select: { hitDie: true } })
         );
       });
     });

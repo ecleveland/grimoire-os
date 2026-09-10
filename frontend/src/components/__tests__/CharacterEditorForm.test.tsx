@@ -192,7 +192,8 @@ describe('pure helpers', () => {
   it('emptyCharacterFormValues returns SRD defaults incl. empty grant lists', () => {
     const v = emptyCharacterFormValues();
     expect(v.size).toBe('Medium');
-    expect(v.hitDice).toEqual({ dieType: 'd8', total: 1, spent: 0 });
+    // No die yet (VEG-530) — see the dedicated block below.
+    expect(v.hitDice).toBeNull();
     expect(v.savingThrows).toEqual([]);
     expect(v.proficiencies).toEqual([]);
     expect(v.spellcastingAbility).toBe('');
@@ -311,6 +312,98 @@ describe('pure helpers', () => {
     expect(payload.armorClass).toBe(18);
   });
 
+  // VEG-530. `hitDice` used to be non-nullable here, filled with a d8 on load
+  // and sent on every save, so opening the editor on a character that had no hit
+  // dice and saving ANY unrelated field persisted a pool nobody chose. That
+  // stored die then outranked the VEG-528 level-up picker, so the one place
+  // that asks which die a character uses never appeared again — which is how
+  // VEG-528's own advice ("re-pick your class in the editor") defeated its fix.
+  describe('an unrecorded hit-dice pool stays unrecorded (VEG-530)', () => {
+    it('characterToFormValues keeps a null hitDice null instead of inventing a d8', () => {
+      expect(characterToFormValues(makeCharacter({ hitDice: null })).hitDice).toBeNull();
+    });
+
+    // The acceptance regression. `toBeUndefined` would also pass if the key were
+    // present-and-undefined, which JSON.stringify drops anyway — but asserting on
+    // the key itself is what pins the server-seed contract: a create that sends
+    // `hitDice: null` explicitly tells the backend "no pool", and it obeys.
+    it('characterFormPayload omits the key entirely rather than sending null', () => {
+      const payload = characterFormPayload(characterToFormValues(makeCharacter({ hitDice: null })));
+      expect(payload.hitDice).toBeUndefined();
+      expect(JSON.parse(JSON.stringify(payload))).not.toHaveProperty('hitDice');
+    });
+
+    it('characterFormPayload still round-trips a pool the character has', () => {
+      const hitDice = { dieType: 'd10' as const, total: 7, spent: 2 };
+      const payload = characterFormPayload(characterToFormValues(makeCharacter({ hitDice })));
+      expect(payload.hitDice).toEqual(hitDice);
+    });
+
+    it('a blank create form starts with no die rather than a d8', () => {
+      expect(emptyCharacterFormValues().hitDice).toBeNull();
+    });
+
+    // Folding a class in is one of the two ways a die gets recorded here, and it
+    // has to build the whole pool, not just stamp a dieType onto nothing.
+    it('applyClassGrants records a full pool sized to the level when there is none', () => {
+      const base = { ...emptyCharacterFormValues(), level: 4 };
+      const { values, added } = applyClassGrants(base, srdClasses[0]);
+      expect(values.hitDice).toEqual({ dieType: 'd10', total: 4, spent: 0 });
+      expect(added.find(a => a.label === 'Hit die')?.values).toEqual(['d10']);
+    });
+
+    // The Level field coerces a cleared input to 0 (`Number('')`) and `min={1}`
+    // is only a browser hint, so this path needs the same floor the Hit Die
+    // control has. It did not have it: clearing Level and clicking "Apply
+    // <Class> traits" recorded a pool of zero dice, which renders 0/0, leaves
+    // nothing to spend on a rest, and — being a truthy pool — suppresses the
+    // level-up picker that exists to repair exactly this.
+    it('applyClassGrants floors the pool at one die when the level field is blank', () => {
+      const base = { ...emptyCharacterFormValues(), level: 0 };
+      const { values } = applyClassGrants(base, srdClasses[0]);
+      expect(values.hitDice).toEqual({ dieType: 'd10', total: 1, spent: 0 });
+    });
+
+    // The pool a character already has is its own record, spent dice included. A
+    // class whose die the sheet cannot use leaves all three fields alone, and
+    // must not report a grant it did not make.
+    it('applyClassGrants leaves an existing pool untouched for an unusable class die', () => {
+      const base = {
+        ...emptyCharacterFormValues(),
+        level: 5,
+        hitDice: { dieType: 'd6' as const, total: 5, spent: 2 },
+      };
+      const { values, added } = applyClassGrants(base, { ...srdClasses[0], hitDie: 'd100' });
+      expect(values.hitDice).toEqual({ dieType: 'd6', total: 5, spent: 2 });
+      expect(added.find(a => a.label === 'Hit die')).toBeUndefined();
+    });
+
+    // The pool is the player's record, including how many dice they have spent.
+    it('applyClassGrants changes only the die on a pool that already exists', () => {
+      const base = {
+        ...emptyCharacterFormValues(),
+        level: 4,
+        hitDice: { dieType: 'd6' as const, total: 9, spent: 5 },
+      };
+      const { values } = applyClassGrants(base, srdClasses[0]);
+      expect(values.hitDice).toEqual({ dieType: 'd10', total: 9, spent: 5 });
+    });
+
+    // A class die the sheet cannot use must not become a pool, and must not be
+    // reported as a grant that was made.
+    it.each([
+      // Legal for the content DTO (@IsIn(DIE_TYPES)) but not a hit die: a d100
+      // pool would offer +51 a level and no picker can express it.
+      ['d100'],
+      ['not-a-die'],
+    ])('applyClassGrants declines a %s class die', hitDie => {
+      const junk = { ...srdClasses[0], hitDie };
+      const { values, added } = applyClassGrants(emptyCharacterFormValues(), junk);
+      expect(values.hitDice).toBeNull();
+      expect(added.find(a => a.label === 'Hit die')).toBeUndefined();
+    });
+  });
+
   it('characterFormPayload drops weapon/feature rows with no name', () => {
     const v = emptyCharacterFormValues();
     v.weapons = [
@@ -396,7 +489,7 @@ describe('autofill helpers', () => {
     expect(values.savingThrows).toEqual(['Strength', 'Constitution']);
     expect(values.armorTraining).toEqual(['Light', 'Medium', 'Heavy', 'Shields']);
     expect(values.proficiencies).toEqual(['Simple', 'Martial']);
-    expect(values.hitDice.dieType).toBe('d10');
+    expect(values.hitDice?.dieType).toBe('d10');
     // Constitution was the only new save; Strength already present.
     expect(added.find(a => a.label === 'Saving throws')?.values).toEqual(['Constitution']);
   });
@@ -404,7 +497,7 @@ describe('autofill helpers', () => {
   it('applyClassGrants copies spellcasting ability when the class casts', () => {
     const { values } = applyClassGrants(emptyCharacterFormValues(), srdClasses[1]);
     expect(values.spellcastingAbility).toBe('Intelligence');
-    expect(values.hitDice.dieType).toBe('d6');
+    expect(values.hitDice?.dieType).toBe('d6');
   });
 
   it('applyClassGrants is idempotent — re-applying adds nothing', () => {
@@ -506,7 +599,148 @@ describe('CharacterEditorForm autofill', () => {
     const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
     expect(submitted.savingThrows).toEqual(['Strength', 'Constitution']);
     expect(submitted.armorTraining).toEqual(['Light', 'Medium', 'Heavy', 'Shields']);
-    expect(submitted.hitDice.dieType).toBe('d10');
+    expect(submitted.hitDice?.dieType).toBe('d10');
+  });
+
+  // The rendered half of VEG-530. The helper tests above pin the data shape; these
+  // pin what a player actually sees and does on a sheet with no hit dice.
+  describe('the Hit Die control on a sheet with no pool (VEG-530)', () => {
+    const noDice = () =>
+      characterToFormValues(makeCharacter({ hitDice: null, level: 3, class: 'Ranger' }));
+
+    it('shows the pool as unrecorded rather than as a d8', async () => {
+      renderForm({ initialValues: noDice(), submitLabel: 'Save Changes' });
+
+      const select = screen.getByLabelText(/^hit die$/i) as HTMLSelectElement;
+      expect(select.value).toBe('');
+      expect(within(select).getByRole('option', { name: /not recorded/i })).toBeDisabled();
+      // A total with no die is not a pool, and a 0 would read as "none left".
+      expect(screen.getByLabelText(/hit dice total/i)).toHaveValue(null);
+      expect(screen.getByLabelText(/hit dice total/i)).toBeDisabled();
+      expect(screen.getByLabelText(/hit dice spent/i)).toBeDisabled();
+    });
+
+    // The whole point of the ticket: this is the save that used to write a d8.
+    it('saves an unrelated edit without inventing a pool', async () => {
+      const { onSubmit } = renderForm({
+        initialValues: noDice(),
+        submitLabel: 'Save Changes',
+      });
+      const user = userEvent.setup();
+
+      await user.clear(screen.getByLabelText(/^name/i));
+      await user.type(screen.getByLabelText(/^name/i), 'Renamed');
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.name).toBe('Renamed');
+      expect(submitted.hitDice).toBeNull();
+      expect(characterFormPayload(submitted).hitDice).toBeUndefined();
+    });
+
+    // Recording one is a deliberate act, and it builds the pool the character's
+    // level implies rather than an empty shell the player has to fill in.
+    it('records a full pool at the character’s level when a die is picked', async () => {
+      const { onSubmit } = renderForm({
+        initialValues: noDice(),
+        submitLabel: 'Save Changes',
+      });
+      const user = userEvent.setup();
+
+      await user.selectOptions(screen.getByLabelText(/^hit die$/i), 'd10');
+
+      expect(screen.getByLabelText(/hit dice total/i)).toHaveValue(3);
+      expect(screen.getByLabelText(/hit dice total/i)).toBeEnabled();
+
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.hitDice).toEqual({ dieType: 'd10', total: 3, spent: 0 });
+    });
+
+    // The last un-narrowed recording path (found by the pre-commit review). Every
+    // other write refuses a non-hit die — `isHitDie` on the server, `asHitDie` in
+    // the grant helpers, `hitDie IN (…)` in the migration — and this control now
+    // builds a whole pool, so leaving it on DIE_TYPES let one d100 pick persist
+    // `{dieType:'d100'}`. `LevelUpDialog` reads a stored die without narrowing,
+    // so that pool then skips the picker and offers +51 a level into a permanent
+    // maximum, which is the exact failure the other guards exist to stop.
+    it('offers only real hit dice, not the d20 and d100 in DIE_TYPES', () => {
+      renderForm({ initialValues: noDice(), submitLabel: 'Save Changes' });
+
+      const select = screen.getByLabelText(/^hit die$/i) as HTMLSelectElement;
+      const dice = within(select)
+        .getAllByRole('option')
+        .map(o => (o as HTMLOptionElement).value)
+        .filter(v => v !== '');
+      expect(dice).toEqual(['d4', 'd6', 'd8', 'd10', 'd12']);
+    });
+
+    // Narrowing the list must not strand a sheet that already carries an odd die
+    // — a pre-VEG-530 pool, or one a DM set by hand. It stays selectable, so the
+    // editor renders it truthfully rather than silently showing a different die.
+    it('keeps a stored die that is outside the offered list selectable', () => {
+      renderForm({
+        initialValues: characterToFormValues(
+          makeCharacter({ hitDice: { dieType: 'd100', total: 5, spent: 0 } })
+        ),
+        submitLabel: 'Save Changes',
+      });
+
+      const select = screen.getByLabelText(/^hit die$/i) as HTMLSelectElement;
+      expect(select.value).toBe('d100');
+      expect(
+        within(select)
+          .getAllByRole('option')
+          .map(o => (o as HTMLOptionElement).value)
+      ).toEqual(['d4', 'd6', 'd8', 'd10', 'd12', 'd100']);
+    });
+
+    // The Level field coerces a cleared input to 0 (`Number('')`), and `min={1}`
+    // is only an HTML hint. Sizing the new pool straight off it recorded
+    // `{total: 0}`, which renders as 0/0 and leaves nothing to spend on a rest.
+    it('records at least one die when the level field is blank', async () => {
+      renderForm({ initialValues: noDice(), submitLabel: 'Save Changes' });
+      const user = userEvent.setup();
+
+      await user.clear(screen.getByLabelText(/^level$/i));
+      await user.selectOptions(screen.getByLabelText(/^hit die$/i), 'd10');
+
+      expect(screen.getByLabelText(/hit dice total/i)).toHaveValue(1);
+    });
+
+    // Changing the die on an existing pool must not resize it or refund spent
+    // dice. Every other selectOptions test here starts from an unrecorded pool,
+    // so nothing pinned this.
+    it('changes only the die on a pool that already exists', async () => {
+      const { onSubmit } = renderForm({
+        initialValues: characterToFormValues(
+          makeCharacter({ level: 7, hitDice: { dieType: 'd8', total: 3, spent: 1 } })
+        ),
+        submitLabel: 'Save Changes',
+      });
+      const user = userEvent.setup();
+
+      await user.selectOptions(screen.getByLabelText(/^hit die$/i), 'd12');
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.hitDice).toEqual({ dieType: 'd12', total: 3, spent: 1 });
+    });
+
+    // Once a pool exists the placeholder is gone, so the control cannot be used
+    // to un-record one — which the payload could not persist anyway.
+    it('drops the unrecorded option once a die is on the sheet', async () => {
+      renderForm({
+        initialValues: characterToFormValues(
+          makeCharacter({ hitDice: { dieType: 'd8', total: 3, spent: 1 } })
+        ),
+        submitLabel: 'Save Changes',
+      });
+
+      const select = screen.getByLabelText(/^hit die$/i) as HTMLSelectElement;
+      expect(select.value).toBe('d8');
+      expect(within(select).queryByRole('option', { name: /not recorded/i })).toBeNull();
+    });
   });
 
   it('keeps a free-text (homebrew) class with no Apply button', async () => {
@@ -625,7 +859,7 @@ describe('CharacterEditorForm autofill', () => {
       expect(submitted.classId).toBe('cls-fighter-hb');
       expect(submitted.class).toBe('Fighter');
       expect(submitted.savingThrows).toEqual(['Dexterity', 'Charisma']);
-      expect(submitted.hitDice.dieType).toBe('d12');
+      expect(submitted.hitDice?.dieType).toBe('d12');
     } finally {
       srdClasses.pop();
     }
@@ -656,7 +890,7 @@ describe('CharacterEditorForm autofill', () => {
       const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
       expect(submitted.classId).toBe('cls-fighter');
       expect(submitted.savingThrows).toEqual(['Strength', 'Constitution']);
-      expect(submitted.hitDice.dieType).toBe('d10');
+      expect(submitted.hitDice?.dieType).toBe('d10');
     } finally {
       srdClasses.shift();
     }
