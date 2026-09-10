@@ -347,6 +347,33 @@ describe('ShortRestDialog (VEG-487)', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/no hit dice/i);
   });
 
+  // VEG-530. The die here used to fall back to a hardcoded d8 for a null pool,
+  // one of four places that each invented one. That fallback was only ever
+  // reachable through this state, and the dialog is right to say plainly that
+  // there is nothing to spend rather than imply a pool exists.
+  it('reports an unrecorded pool instead of standing in a d8', () => {
+    renderDialog({ hitDice: null });
+
+    expect(screen.getByRole('status')).toHaveTextContent(/no hit dice on this sheet/i);
+    expect(screen.queryByRole('button', { name: /spend a hit die/i })).toBeNull();
+    expect(screen.queryByText(/d8/)).toBeNull();
+    expect(screen.queryByTestId('dice-available')).toBeNull();
+  });
+
+  it('still allows a resource-only rest when the pool is unrecorded', async () => {
+    const user = userEvent.setup();
+    const { onPatch } = renderDialog({
+      hitDice: null,
+      resources: [{ name: 'Ki Points', max: 5, used: 3, recharge: 'short' }],
+    });
+
+    await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+    const [fields] = onPatch.mock.calls[0];
+    expect(fields.resources).toEqual([{ name: 'Ki Points', max: 5, used: 0, recharge: 'short' }]);
+    expect('hitDice' in fields).toBe(false);
+  });
+
   it('does not offer dice spending on a sheet with no hit points recorded', () => {
     renderDialog({ hitPoints: null });
 

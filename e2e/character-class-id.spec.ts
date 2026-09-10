@@ -12,6 +12,16 @@ import { BACKEND, csrfHeaders, registerAndLogin } from './helpers';
 // which is the only state where the bug appears.
 //
 // The name here is deliberately NOT uniquified. That is the point.
+//
+// Every create below sends `hitDice: null` explicitly. Since VEG-530 an omitted
+// pool is seeded from the class the create resolves, and a character's own
+// stored die outranks its class's on the sheet — deliberately, since a DM may
+// have granted a nonstandard one. These tests read the resolved class *off the
+// hit die*, so a seeded pool would answer every HP assertion from the character
+// row and stop discriminating which class row won. Pinning the column null keeps
+// the class die the observable signal, and models the pre-VEG-524 rows this
+// suite is about besides. VEG-530's own seeding is covered in
+// character-hit-dice.spec.ts.
 test.describe('character class id round-trip (VEG-524)', () => {
   test('a loaded character levels up on the class its id names, not a duplicate', async ({
     page,
@@ -54,6 +64,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 44, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        hitDice: null,
       },
       headers,
     });
@@ -127,6 +138,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 44, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        hitDice: null,
       },
       headers,
     });
@@ -190,6 +202,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 44, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        hitDice: null,
       },
       headers,
     });
@@ -232,9 +245,9 @@ test.describe('character class id round-trip (VEG-524)', () => {
     const headers = await csrfHeaders(page);
 
     // Created against a name that is unique at this moment, but with the id
-    // stripped afterwards — standing in for a pre-VEG-524 row. No `hitDice` is
-    // sent, which is the other half of the trap: with the class unresolvable,
-    // nothing on the sheet supplies a die.
+    // stripped afterwards — standing in for a pre-VEG-524 row. With the class
+    // unresolvable and no pool on the sheet, nothing supplies a die at all,
+    // which is the trap the picker exists for.
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Ambiguous Barbarian',
@@ -245,6 +258,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 44, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
+        hitDice: null,
       },
       headers,
     });

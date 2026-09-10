@@ -384,8 +384,28 @@ export interface Combatant {
   initiativeMod?: number;
 }
 
-export const DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'] as const;
+/**
+ * The dice a class can actually have as a hit die. Narrower than `DIE_TYPES`:
+ * d20 and d100 belong to the roll vocabulary, and one of them landing in a hit
+ * dice pool writes tens of points into a permanent HP maximum (VEG-528).
+ * `DIE_TYPES` derives from this so the relationship stays structural.
+ */
+export const HIT_DIE_TYPES = ['d4', 'd6', 'd8', 'd10', 'd12'] as const;
+export type HitDieType = (typeof HIT_DIE_TYPES)[number];
+
+export const DIE_TYPES = [...HIT_DIE_TYPES, 'd20', 'd100'] as const;
 export type DieType = (typeof DIE_TYPES)[number];
+
+/**
+ * Whether a free-form die string is usable as a hit die. `SrdClass.hitDie` is a
+ * plain `String` column validated with `@IsIn(DIE_TYPES)`, so a homebrew class
+ * can legally carry `d100` and a seed or direct write can carry anything at all.
+ * Callers that turn that column into a stored pool have to check first
+ * (VEG-530).
+ */
+export function isHitDie(value: string): value is HitDieType {
+  return (HIT_DIE_TYPES as readonly string[]).includes(value);
+}
 
 export interface HitDice {
   dieType: DieType;

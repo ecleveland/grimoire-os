@@ -21,7 +21,7 @@ import type {
   SrdSubclass,
   Weapon,
 } from '@/lib/types';
-import { asDieType, DIE_TYPES, SIZES } from '@/lib/types';
+import { asHitDie, HIT_DIE_TYPES, SIZES } from '@/lib/types';
 import { MAX_ARMOR_CLASS, MAX_INITIATIVE_BONUS, MAX_SPEED } from '@grimoire-os/shared';
 import { clampIntToRange } from '@/lib/form-helpers';
 import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
@@ -86,7 +86,15 @@ export interface CharacterFormValues {
   initiative: number | '';
   speed: number;
   hitPoints: HitPoints;
-  hitDice: HitDice;
+  /**
+   * Null means "no die recorded", the same thing it means on the wire (VEG-530).
+   * This used to be non-nullable, filled with a d8 on load and sent on every
+   * save, so saving any unrelated field on a character that had no hit dice
+   * persisted a pool nobody chose — and that stored die then outranked the
+   * VEG-528 level-up picker, so the one surface that asks which die a character
+   * uses never appeared again. Same reasoning as `armorClass: ''` below.
+   */
+  hitDice: HitDice | null;
   // Proficiencies & training — editable via ProficienciesSection (slice 3) and
   // also written by the SRD autofill helpers (slice 2).
   savingThrows: string[];
@@ -147,7 +155,7 @@ const abilityLabels: Record<keyof AbilityScores, string> = {
   charisma: 'CHA',
 };
 
-/** Blank form for the create flow — SRD-default ability scores and d8 hit die. */
+/** Blank form for the create flow — SRD-default ability scores, no hit die yet. */
 export function emptyCharacterFormValues(): CharacterFormValues {
   return {
     name: '',
@@ -167,7 +175,11 @@ export function emptyCharacterFormValues(): CharacterFormValues {
     initiative: 0,
     speed: DEFAULT_SPEED,
     hitPoints: { ...DEFAULT_EDITOR_HIT_POINTS },
-    hitDice: { dieType: 'd8', total: 1, spent: 0 },
+    // No die until something knows which one (VEG-530): picking a class folds
+    // its die in, the server seeds from the resolved class on create, and the
+    // editor's own picker records one directly. A blank d8 here was a guess
+    // that survived to become a permanent pool.
+    hitDice: null,
     savingThrows: [],
     skills: [],
     proficiencies: [],
@@ -222,7 +234,11 @@ export function characterToFormValues(c: Character): CharacterFormValues {
     initiative: c.initiative ?? 0,
     speed: c.speed ?? DEFAULT_SPEED,
     hitPoints: c.hitPoints ?? { ...DEFAULT_EDITOR_HIT_POINTS },
-    hitDice: c.hitDice ?? { dieType: 'd8', total: c.level, spent: 0 },
+    // Straight through, null and all — see the field's comment on
+    // CharacterFormValues. `?? null` only collapses the optional key's
+    // `undefined` (a payload from a backend predating the column) onto the same
+    // "not recorded" the column's own null means.
+    hitDice: c.hitDice ?? null,
     savingThrows: c.savingThrows ?? [],
     skills: c.skills ?? [],
     proficiencies: c.proficiencies ?? [],
@@ -317,7 +333,12 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
     initiative: v.initiative === '' ? 0 : v.initiative,
     speed: v.speed,
     hitPoints: v.hitPoints,
-    hitDice: v.hitDice,
+    // `undefined`, which JSON.stringify drops, so an unrecorded pool sends no
+    // `hitDice` key at all rather than an explicit null (VEG-530). On update
+    // that leaves the column alone; on create it is what lets the server seed
+    // the pool from the resolved class, which matters because this editor only
+    // folds in class grants when the player clicks "Apply <Class> traits".
+    hitDice: v.hitDice ?? undefined,
     savingThrows: v.savingThrows,
     skills: v.skills,
     proficiencies: v.proficiencies,
@@ -392,8 +413,16 @@ export function applyClassGrants(
   if (armor.added.length) added.push({ label: 'Armor training', values: armor.added });
   if (profs.added.length) added.push({ label: 'Proficiencies', values: profs.added });
 
-  const dieType = asDieType(c.hitDie) ?? v.hitDice.dieType;
-  if (dieType !== v.hitDice.dieType) added.push({ label: 'Hit die', values: [dieType] });
+  // The class's die wins; a die the sheet cannot use leaves whatever was already
+  // there, including nothing. Folding a class in is one of the two ways a pool
+  // gets recorded here (VEG-530) — the player choosing a die is the other — and
+  // it sizes the pool to the level, the same rule the server seed and the
+  // backfill migration follow.
+  const dieType = asHitDie(c.hitDie) ?? v.hitDice?.dieType ?? null;
+  const hitDice = dieType ? { total: v.level, spent: 0, ...v.hitDice, dieType } : v.hitDice;
+  if (dieType && dieType !== v.hitDice?.dieType) {
+    added.push({ label: 'Hit die', values: [dieType] });
+  }
 
   const spellcastingAbility = c.spellcasting?.ability ?? v.spellcastingAbility;
   if (spellcastingAbility !== v.spellcastingAbility) {
@@ -406,7 +435,7 @@ export function applyClassGrants(
       savingThrows: saves.merged,
       armorTraining: armor.merged,
       proficiencies: profs.merged,
-      hitDice: { ...v.hitDice, dieType },
+      hitDice,
       spellcastingAbility,
     },
     added,
@@ -685,6 +714,19 @@ export default function CharacterEditorForm({
   const set = <K extends keyof CharacterFormValues>(key: K, value: CharacterFormValues[K]) =>
     setValues(prev => ({ ...prev, [key]: value }));
 
+  // Hit dice only, not the full `DIE_TYPES` (VEG-530). This control records a
+  // pool, and every other write path — the server seed, the backfill migration,
+  // the class-grant helpers — refuses a d20 or d100; leaving them selectable here
+  // let one pick persist a die `LevelUpDialog` then reads back unnarrowed, worth
+  // +51 a level in a permanent HP maximum. A die already on the sheet is appended
+  // so a legacy pool stays visible and editable rather than silently re-rendering
+  // as a different die.
+  const storedDie = values.hitDice?.dieType;
+  const hitDieOptions: readonly string[] =
+    storedDie && !(HIT_DIE_TYPES as readonly string[]).includes(storedDie)
+      ? [...HIT_DIE_TYPES, storedDie]
+      : HIT_DIE_TYPES;
+
   const applyGrants = (
     source: string,
     apply: (v: CharacterFormValues) => { values: CharacterFormValues; added: GrantSummary[] }
@@ -952,12 +994,32 @@ export default function CharacterEditorForm({
           <FormField
             as="select"
             label="Hit Die"
-            value={values.hitDice.dieType}
+            value={values.hitDice?.dieType ?? ''}
             onChange={e =>
-              set('hitDice', { ...values.hitDice, dieType: e.target.value as DieType })
+              set('hitDice', {
+                // A level-N character owns N unspent dice — the same pool the
+                // server seeds and the backfill writes. Recording a die on a
+                // sheet that had none is the point of this control (VEG-530).
+                // Floored at 1 because the Level field coerces a cleared input to
+                // 0 (`Number('')`) and `min={1}` is only an HTML hint, so sizing
+                // straight off it could record an empty pool.
+                total: Math.max(1, values.level),
+                spent: 0,
+                ...values.hitDice,
+                dieType: e.target.value as DieType,
+              })
             }
           >
-            {DIE_TYPES.map(d => (
+            {/* Disabled, so it can show an unrecorded pool but not be chosen back
+                into one. The payload omits `hitDice` when it is null, so picking
+                this would silently fail to persist — and un-recording was never
+                possible here anyway. */}
+            {!values.hitDice && (
+              <option value="" disabled>
+                Not recorded
+              </option>
+            )}
+            {hitDieOptions.map(d => (
               <option key={d} value={d}>
                 {d}
               </option>
@@ -967,15 +1029,23 @@ export default function CharacterEditorForm({
             label="Hit Dice Total"
             type="number"
             min={0}
-            value={values.hitDice.total}
-            onChange={e => set('hitDice', { ...values.hitDice, total: Number(e.target.value) })}
+            // Blank and inert until a die is recorded: a total without a die is
+            // not a pool, and showing 0 would read as "no dice left".
+            value={values.hitDice?.total ?? ''}
+            disabled={!values.hitDice}
+            onChange={e =>
+              values.hitDice && set('hitDice', { ...values.hitDice, total: Number(e.target.value) })
+            }
           />
           <FormField
             label="Hit Dice Spent"
             type="number"
             min={0}
-            value={values.hitDice.spent}
-            onChange={e => set('hitDice', { ...values.hitDice, spent: Number(e.target.value) })}
+            value={values.hitDice?.spent ?? ''}
+            disabled={!values.hitDice}
+            onChange={e =>
+              values.hitDice && set('hitDice', { ...values.hitDice, spent: Number(e.target.value) })
+            }
           />
         </div>
       </div>

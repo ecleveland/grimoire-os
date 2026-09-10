@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DIE_TYPES, SIZES } from '@/lib/types';
+import { DIE_TYPES, HIT_DIE_TYPES, SIZES } from '@/lib/types';
 import { MONSTER_SIZES } from '@/lib/monster-constants';
 import { DEFAULT_SPEED } from '@/lib/character-defaults';
 // Value import from the shared package is fine in Vitest (it resolves the
@@ -7,6 +7,7 @@ import { DEFAULT_SPEED } from '@/lib/character-defaults';
 // `DIE_TYPES` is mirrored locally in lib/types.ts. This guards that mirror.
 import {
   DIE_TYPES as SHARED_DIE_TYPES,
+  HIT_DIE_TYPES as SHARED_HIT_DIE_TYPES,
   DEFAULT_SPEED as SHARED_DEFAULT_SPEED,
 } from '@grimoire-os/shared';
 
@@ -16,6 +17,14 @@ describe('frontend constant mirrors stay in sync', () => {
     // shared list; a drift here would let the editor offer faces the API rejects
     // (or omit valid ones).
     expect([...DIE_TYPES]).toEqual([...SHARED_DIE_TYPES]);
+  });
+
+  it('local HIT_DIE_TYPES matches the shared source of truth', () => {
+    // Both sides narrow to real hit dice, and they have to agree on which: the
+    // level-up picker offers this list, and the backend seed and the VEG-530
+    // backfill both refuse to write a pool for anything outside it. A drift would
+    // let the picker offer a die the server declines to seed, or the reverse.
+    expect([...HIT_DIE_TYPES]).toEqual([...SHARED_HIT_DIE_TYPES]);
   });
 
   it('local DEFAULT_SPEED matches the shared source of truth', () => {

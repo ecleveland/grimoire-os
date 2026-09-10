@@ -90,6 +90,7 @@ function Harness({ onValid, seed }: { onValid: (valid: boolean) => void; seed?: 
       <div data-testid="draft-subclass">{api.draft.subclass}</div>
       <div data-testid="draft-spell">{api.draft.spellcastingAbility}</div>
       <div data-testid="draft-classId">{api.draft.classId}</div>
+      <div data-testid="draft-hitDice">{JSON.stringify(api.draft.hitDice)}</div>
     </DraftProvider>
   );
 }
@@ -116,6 +117,11 @@ async function pickClass(user: ReturnType<typeof userEvent.setup>, name: string)
   await user.click(await screen.findByRole('option', { name }));
 }
 
+/** The draft's hit-dice pool, parsed — key order is not part of the contract. */
+function draftHitDice() {
+  return JSON.parse(screen.getByTestId('draft-hitDice').textContent || 'null');
+}
+
 async function pickSubclass(user: ReturnType<typeof userEvent.setup>, name: string) {
   const input = screen.getByRole('combobox', { name: /subclass/i });
   await user.clear(input);
@@ -139,6 +145,36 @@ describe('ClassStep — SRD class selection', () => {
     // Armor phrases normalize to the canonical toggles.
     expect(within(summary).getByText(/Heavy/)).toBeInTheDocument();
     expect(within(summary).getByText(/Martial weapons/)).toBeInTheDocument();
+  });
+
+  // VEG-530: the draft starts with no die, so ClassStep is where one gets
+  // recorded for the guided flow. It has to build the whole pool — a bare
+  // `dieType` stamped onto nothing is not a pool, and the sheet reads all three
+  // fields.
+  it('records a full unspent pool when a class is selected', async () => {
+    const user = userEvent.setup();
+    renderStep([makeClass()]);
+
+    expect(draftHitDice()).toBeNull();
+
+    await pickClass(user, 'Fighter');
+
+    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd10', total: 1, spent: 0 }));
+  });
+
+  // A homebrew class can carry a `hitDie` the sheet cannot use — the content DTO
+  // validates against DIE_TYPES, which includes d20 and d100. Folding one in
+  // would put a die on the sheet that no picker offers and that the backend
+  // refuses to seed.
+  it('leaves the pool unrecorded for a class whose die is not a hit die', async () => {
+    const user = userEvent.setup();
+    renderStep([makeClass({ hitDie: 'd100' })]);
+
+    await pickClass(user, 'Fighter');
+
+    // The class still resolves — only the die is declined.
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toHaveTextContent('fighter'));
+    expect(draftHitDice()).toBeNull();
   });
 
   it('requires exactly numSkillChoices skill picks before the step is valid', async () => {

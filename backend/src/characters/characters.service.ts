@@ -6,8 +6,8 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import type { AbilityScores, ClassSpellcasting, Weapon } from '@grimoire-os/shared';
-import { inventoryFromJson } from '@grimoire-os/shared';
+import type { AbilityScores, ClassSpellcasting, HitDice, Weapon } from '@grimoire-os/shared';
+import { inventoryFromJson, isHitDie } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -198,13 +198,62 @@ export class CharactersService {
    * path uses. An earlier version trusted `take: 2` plus the ILIKE predicate,
    * which is what let a class named "Wizar_" derive and permanently persist the
    * SRD Wizard's id. The fetch is bounded by the visibility scope anyway.
+   *
+   * Returns the row rather than the bare id since VEG-530: `create` seeds the
+   * hit-dice pool from `hitDie`, and that column is free in a query that was
+   * already running and already discarding everything but the id.
    */
-  private async deriveClassId(className: string, ownerId: string): Promise<string | null> {
+  private async deriveClass(
+    className: string,
+    ownerId: string
+  ): Promise<{ id: string; hitDie: string } | null> {
     const candidates = await this.prisma.srdClass.findMany({
       where: { AND: [catalogNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
-      select: { id: true, name: true },
+      select: { id: true, name: true, hitDie: true },
     });
-    return resolveByUniqueName(candidates, className)?.id ?? null;
+    return resolveByUniqueName(candidates, className) ?? null;
+  }
+
+  /**
+   * The hit-dice pool a newly created character starts with, or undefined when
+   * there is no class to take a die from (VEG-530).
+   *
+   * Nothing wrote this column server-side before, so every character created
+   * through the API arrived on the sheet with a null pool, and four separate
+   * clients each invented their own d8 for it — including the classic editor,
+   * which then persisted that guess the next time the player saved any unrelated
+   * field. That silently outranked the VEG-528 level-up picker, so the one place
+   * designed to *ask* which die a character uses stopped appearing.
+   *
+   * A level-N character owns N hit dice, all unspent, which is fully derivable —
+   * unlike hit points, where the roll is the player's.
+   *
+   * The die is checked against `HIT_DIE_TYPES` rather than trusted. `hitDie` is
+   * validated with `@IsIn(DIE_TYPES)`, which carries d20 and d100 for the roll
+   * vocabulary, and a d100 pool seeded here would feed +51 a level into a
+   * permanent HP maximum. An unusable die leaves the column null, which is a
+   * handled state: the level-up picker asks the player.
+   */
+  private async seedHitDice(
+    resolved: { id: string; hitDie: string } | null,
+    classId: string | null,
+    ownerId: string,
+    level: number | undefined
+  ): Promise<HitDice | undefined> {
+    // `resolved` already carries the row whenever the id was derived from the
+    // name. A client-supplied id skipped derivation, so its die has to be read —
+    // scoped, because the id has no FK behind it and an unscoped read would seed
+    // this character from a stranger's homebrew class.
+    const row =
+      resolved?.id === classId
+        ? resolved
+        : classId &&
+          (await this.prisma.srdClass.findFirst({
+            where: { AND: [{ id: classId }, this.contentAccess.visibleTo(ownerId)] },
+            select: { hitDie: true },
+          }));
+    if (!row || !isHitDie(row.hitDie)) return undefined;
+    return { dieType: row.hitDie, total: level ?? 1, spent: 0 };
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -292,9 +341,22 @@ export class CharactersService {
     // is an incoherent one: loadClassData would grant that class's spell slots
     // and weapon proficiencies to a sheet showing no class at all. update()
     // already nulls the id when the name is cleared; this is the create half.
-    const classId = persisted.class
-      ? persisted.classId || (await this.deriveClassId(persisted.class, userId))
-      : null;
+    const resolvedClass =
+      persisted.class && !persisted.classId
+        ? await this.deriveClass(persisted.class, userId)
+        : null;
+    const classId = persisted.class ? persisted.classId || resolvedClass?.id || null : null;
+
+    // Seed the hit-dice pool from that same class (VEG-530). Gated on the DTO
+    // *omitting* the field rather than on it being falsy: an explicit null means
+    // "this sheet has no hit dice", and seeding over it would be the same silent
+    // invention this ticket removes, just from the other direction. Gating here
+    // also keeps the extra read off the hot path — both UI create paths send a
+    // pool, so neither pays for a lookup whose only product is a die they have.
+    const hitDice =
+      persisted.hitDice === undefined
+        ? await this.seedHitDice(resolvedClass, classId, userId, persisted.level)
+        : undefined;
 
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
@@ -303,6 +365,7 @@ export class CharactersService {
       data: {
         ...(persisted as unknown as Prisma.CharacterUncheckedCreateInput),
         ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
+        ...(hitDice && { hitDice: hitDice as unknown as Prisma.InputJsonValue }),
         classId,
         userId,
       },
@@ -411,7 +474,7 @@ export class CharactersService {
       // loadClassData resolves a present id first, so the character would have
       // gone on computing its old class's spell slots forever.
       const name = changes.class !== undefined ? changes.class : existing.class;
-      changes.classId = name ? await this.deriveClassId(name, userId) : null;
+      changes.classId = name ? ((await this.deriveClass(name, userId))?.id ?? null) : null;
     }
     // Cast needed for JSON field compatibility (see create method comment).
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.

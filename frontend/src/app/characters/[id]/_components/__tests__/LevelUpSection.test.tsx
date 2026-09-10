@@ -369,6 +369,23 @@ describe('LevelUpSection', () => {
         expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
       });
 
+      // VEG-530 narrowed the class-die read to real hit dice. A class that
+      // declares d100 used to satisfy `classHitDie`, so the picker never
+      // appeared and confirming wrote roughly +51 into a permanent maximum
+      // beside a d100 pool the dialog offers no way back from. The class still
+      // resolves — its feature suggestions are fine — only the die is declined.
+      it('asks for a die when the class declares one that is not a hit die', async () => {
+        mockUseApiQuery.mockReturnValue({ data: [{ ...fighterClass, hitDie: 'd100' }] });
+        const user = userEvent.setup();
+        renderSection({ hitDice: null, class: fighterClass.name });
+        const dialog = await openDialog(user);
+
+        expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
+        // The picker's own default, not the class's d100.
+        expect(within(dialog).getByText(/computed from d8/i)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/d100/)).toBeNull();
+      });
+
       // The old copy only said feature suggestions were missing. It said nothing
       // about the die or the number about to be written.
       it('names the die in play and warns the HP maximum is permanent', async () => {

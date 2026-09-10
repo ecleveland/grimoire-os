@@ -52,7 +52,6 @@ export default function ShortRestDialog({
   const { hitDice } = character;
   const hasHitPoints = character.hitPoints !== null;
   const conMod = character.computed.abilityModifiers.constitution;
-  const die = hitDice?.dieType ?? 'd8';
   const available = hitDice ? hitDice.total - hitDice.spent : 0;
 
   // `rolls` is dialog-local while `available` tracks the character prop, and a
@@ -78,10 +77,15 @@ export default function ShortRestDialog({
   const canConfirm = !isSaving && Object.keys(patch).length > 0;
 
   const spendDie = () => {
-    if (!canSpendMore) return;
+    // `canSpendMore` already implies a pool; naming `hitDice` here is what lets
+    // the die be the pool's own rather than a stand-in for a missing one. This
+    // was one of the four places that each invented a d8 (VEG-530).
+    if (!canSpendMore || !hitDice) return;
     setRolls([
       ...usableRolls,
-      mode === 'average' ? averageHpForDie(die) : rollDie(dieFaces(die), rng),
+      mode === 'average'
+        ? averageHpForDie(hitDice.dieType)
+        : rollDie(dieFaces(hitDice.dieType), rng),
     ]);
   };
 
@@ -142,7 +146,7 @@ export default function ShortRestDialog({
                 <span data-testid="dice-available" className="font-bold">
                   {available - usableRolls.length}
                 </span>{' '}
-                of {hitDice.total} {die} available
+                of {hitDice.total} {hitDice.dieType} available
               </span>
             </div>
 
@@ -155,7 +159,7 @@ export default function ShortRestDialog({
                   onChange={() => setMode('average')}
                   disabled={isSaving}
                 />
-                Average ({averageHpForDie(die)})
+                Average ({averageHpForDie(hitDice.dieType)})
               </label>
               <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                 <input
@@ -177,7 +181,7 @@ export default function ShortRestDialog({
                     data-testid={`die-row-${i}`}
                     className="text-sm text-gray-700 dark:text-gray-300"
                   >
-                    {die} → {roll} {formatModifier(conMod)} CON ={' '}
+                    {hitDice.dieType} → {roll} {formatModifier(conMod)} CON ={' '}
                     <span className="font-bold">{heals[i]}</span> HP
                   </li>
                 ))}
