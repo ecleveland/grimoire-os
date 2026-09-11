@@ -22,7 +22,7 @@ const moveButton =
  * every edit of an existing class while create-from-blank kept working — which
  * reads as intermittent rather than as a contract error.
  *
- * The contract, for VEG-508: the caller maps API features into this shape on
+ * The contract: the caller maps API features into this shape on
  * load. The editor guarantees the other half — every row it emits carries
  * exactly these three fields, whatever it was handed.
  */
@@ -85,9 +85,6 @@ interface ClassFeaturesEditorProps {
  * shared form controls pulled out of all three; that is the right place to merge
  * them, not here.
  *
- * Not mounted anywhere yet. `ClassForm` and the class create/edit routes are
- * VEG-508; this is the piece those pages drop in.
- *
  * **Row order is a drafting aid, not stored state.** Every read path returns
  * features ordered by `(level, name)`, so the up/down buttons only help while
  * writing a long list — grouping a new level-3 feature beside its neighbours to
@@ -108,7 +105,7 @@ export default function ClassFeaturesEditor({ value, onChange }: ClassFeaturesEd
   // below. State rather than a ref because a ref may not be read during render;
   // the counter is a ref because it is only ever bumped inside a handler. Like
   // ShopStockEditor, this assumes the editor mounts with its final initial value
-  // — VEG-508's form renders only once the class has loaded — so there is no
+  // — the class form renders only once the class has loaded — so there is no
   // render-time reconcile.
   const keyCounter = useRef(value.length);
   const [keys, setKeys] = useState<string[]>(() => value.map((_, i) => `feature-${i}`));

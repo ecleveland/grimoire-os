@@ -360,6 +360,40 @@ describe('ClassStep — SRD class selection', () => {
   });
 });
 
+// The API accepts a class whose numSkillChoices exceeds its skill pool. A bare
+// `{ name, hitDie }` stores the default count of 2 over an empty pool. The
+// exact-count rule and pick cap for a normal class are covered by the
+// 'requires exactly numSkillChoices skill picks' case above.
+describe('ClassStep skill count larger than the pool', () => {
+  it('reports the step valid with no picks when the class has an empty pool', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([makeClass({ skillChoices: [], numSkillChoices: 2 })]);
+
+    await pickClass(user, 'Fighter');
+
+    // The grants summary proves the class resolved, so this is not the
+    // unrecognized-name path that skips the skill rule.
+    await screen.findByRole('group', { name: /class grants/i });
+    expect(onValid).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByRole('group', { name: /skills/i })).toBeNull();
+  });
+
+  it('asks for one pick when the pool holds one skill', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([
+      makeClass({ skillChoices: ['Athletics'], numSkillChoices: 2 }),
+    ]);
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(onValid).toHaveBeenLastCalledWith(false);
+
+    await user.click(within(skills).getByRole('button', { name: /athletics/i }));
+    expect(onValid).toHaveBeenLastCalledWith(true);
+    expect(within(skills).getByText('Choose 1: 1 of 1 chosen')).toBeInTheDocument();
+  });
+});
+
 // VEG-524. VEG-506 made a class name non-unique, so the picker has to record
 // *which* row was chosen. These mirror the background picker's VEG-473 suite.
 describe('ClassStep — duplicate class names (VEG-524)', () => {

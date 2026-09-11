@@ -1,19 +1,59 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { toast } from 'sonner';
+import { apiFetch } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+import { useQueryClient } from '@tanstack/react-query';
+import { useApiQuery, invalidateApiPath } from '@/lib/query';
 import Collapsible from '@/components/Collapsible';
-import PrintToggle from '@/components/PrintToggle';
-import { fetchSrdList } from '@/lib/srd-server';
+import ClassDetail from '@/components/ClassDetail';
+import CreateEntityLink from '@/components/CreateEntityLink';
+import ConfirmDialog from '@/components/ConfirmDialog';
+import Badge from '@/components/Badge';
 import type { SrdClass } from '@/lib/types';
 
-// Public reference content, server-rendered for SEO and a content-first first
-// paint (VEG-320). Rendered per request (the build runs without a backend) while
-// the upstream fetch is revalidate-cached — see src/lib/srd-server.ts.
-export const dynamic = 'force-dynamic';
+/** Client-side, because only the credentialed fetch returns the caller's homebrew classes. */
+export default function ClassListPage() {
+  const { isAdmin, user } = useAuth();
+  const queryClient = useQueryClient();
+  const classesQuery = useApiQuery<SrdClass[]>('/srd/classes', {
+    errorToast: { message: 'Failed to load classes', id: 'load-classes' },
+  });
+  const [pendingDelete, setPendingDelete] = useState<SrdClass | null>(null);
 
-export default async function ClassListPage() {
-  let classes: SrdClass[];
-  try {
-    classes = await fetchSrdList<SrdClass[]>('/srd/classes');
-  } catch (err) {
-    console.error('Failed to load classes:', err);
+  // Every feature the API returns carries a row id, so an id-less one means the
+  // backend contract regressed and its print toggle has quietly become an inert
+  // chip. Logged per payload, because the page re-renders whenever the delete
+  // dialog opens or closes.
+  useEffect(() => {
+    const idless = (classesQuery.data ?? []).flatMap(cls => cls.features).filter(f => !f.id);
+    if (idless.length > 0) {
+      console.error(
+        'srd/classes: class features rendered without an id, print toggle unavailable (backend contract regression):',
+        idless.map(f => f.name)
+      );
+    }
+  }, [classesQuery.data]);
+
+  // The owner may edit/delete their homebrew; admins curate shared content.
+  const canManage = (cls: SrdClass) =>
+    (cls.contentSource === 'homebrew' && cls.createdById === user?.userId) ||
+    (cls.contentSource === 'shared' && isAdmin);
+
+  async function handleDelete() {
+    if (!pendingDelete) return;
+    try {
+      await apiFetch(`/srd/classes/${pendingDelete.id}`, { method: 'DELETE' });
+      toast.success(`Deleted ${pendingDelete.name}`);
+      await invalidateApiPath(queryClient, '/srd/classes');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete class');
+    }
+  }
+
+  if (classesQuery.isError) {
     return (
       <div className="text-red-600 dark:text-red-400">
         Failed to load classes. Please try again later.
@@ -21,107 +61,83 @@ export default async function ClassListPage() {
     );
   }
 
-  // Invariant: every feature from the API carries a row id (the classes endpoint
-  // includes feature rows), so each renders as a print toggle below. An id-less
-  // feature silently degrades to an inert chip — surface it loudly, since a
-  // backend contract regression here would otherwise drop toggles unnoticed.
-  const idless = classes.flatMap(cls => cls.features).filter(f => !f.id);
-  if (idless.length > 0) {
-    console.error(
-      'srd/classes: class features rendered without an id — print toggle unavailable (backend contract regression):',
-      idless.map(f => f.name)
-    );
-  }
+  const classes = classesQuery.data ?? [];
 
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Classes</h1>
-      <div className="space-y-4">
-        {classes.map(cls => (
-          <Collapsible
-            key={cls.id}
-            summary={
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{cls.name}</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Hit Die: {cls.hitDie} &middot; {cls.primaryAbilities.join(', ')}
-                </p>
-              </div>
-            }
-          >
-            {cls.description && (
-              <p className="text-gray-600 dark:text-gray-400 text-sm">{cls.description}</p>
-            )}
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Saving Throws
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {cls.savingThrows.join(', ')}
-              </p>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Armor Proficiencies
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {cls.armorProficiencies.length > 0 ? cls.armorProficiencies.join(', ') : 'None'}
-              </p>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Weapon Proficiencies
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {cls.weaponProficiencies.length > 0 ? cls.weaponProficiencies.join(', ') : 'None'}
-              </p>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Skill Choices
-              </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {cls.skillChoices.join(', ')}
-              </p>
-            </div>
-            {cls.features.length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {/* Keyed per row, not by name: VEG-507 widened the
-                      class_features unique key to [classId, name, level], so one
-                      name recurring at several levels — Ability Score Improvement
-                      at 4, 8 and 12 — is now a legal class. React does still
-                      render every duplicate-keyed sibling on a first mount; what
-                      it does is warn, and then attach state to the wrong sibling
-                      on re-render. So the spec asserts the absence of that
-                      warning rather than counting chips, which passes either way.
-                      Not reachable while this page fetches anonymously, but
-                      VEG-508 makes the list owner-aware. */}
-                  {cls.features.map(f =>
-                    f.id ? (
-                      <PrintToggle
-                        key={f.id}
-                        type="feature"
-                        id={f.id}
-                        name={f.name}
-                        variant="chip"
-                      />
-                    ) : (
-                      <span
-                        key={`${f.level}-${f.name}`}
-                        className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-                      >
-                        {f.name}
-                      </span>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-          </Collapsible>
-        ))}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Classes</h1>
+        <CreateEntityLink href="/srd/classes/new" label="Create class" />
       </div>
+      {classesQuery.isLoading ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading classes…</p>
+      ) : (
+        <div className="space-y-4">
+          {classes.map(cls => (
+            <Collapsible
+              key={cls.id}
+              summary={
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {cls.name}
+                    {cls.contentSource === 'homebrew' && (
+                      <Badge variant="homebrew" className="ml-2 inline-block align-middle">
+                        Homebrew
+                      </Badge>
+                    )}
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Hit Die: {cls.hitDie}
+                    {cls.primaryAbilities.length > 0 && (
+                      <> &middot; {cls.primaryAbilities.join(', ')}</>
+                    )}
+                  </p>
+                </div>
+              }
+            >
+              <ClassDetail cls={cls} />
+              {/* The summary is a button, so the page link lives in the card body. */}
+              <div className="flex items-center gap-2 pt-2">
+                <Link
+                  href={`/srd/classes/${cls.id}`}
+                  className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+                >
+                  Open class page
+                </Link>
+                {canManage(cls) && (
+                  <div className="ml-auto flex items-center gap-2">
+                    <Link
+                      href={`/srd/classes/${cls.id}/edit`}
+                      className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Edit
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setPendingDelete(cls)}
+                      className="px-3 py-1.5 text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            </Collapsible>
+          ))}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={open => {
+          if (!open) setPendingDelete(null);
+        }}
+        title="Delete class?"
+        description={`"${pendingDelete?.name ?? 'This class'}" will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete class"
+        variant="danger"
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
