@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clampIntToRange, parseIntInRange } from '../form-helpers';
+import { clampIntToRange, cleanList, parseIntInRange } from '../form-helpers';
 
 describe('clampIntToRange', () => {
   it('passes a value already inside the range through untouched', () => {
@@ -55,5 +55,31 @@ describe('parseIntInRange (contrast)', () => {
 
   it('returns null for a fractional value instead of flooring it', () => {
     expect(parseIntInRange('30.9', 0, 999)).toBeNull();
+  });
+});
+
+describe('cleanList', () => {
+  it('trims each value', () => {
+    expect(cleanList(['  Insight ', 'Religion\t'])).toEqual(['Insight', 'Religion']);
+  });
+
+  it('drops empty and whitespace-only values', () => {
+    expect(cleanList(['', 'Insight', '   '])).toEqual(['Insight']);
+  });
+
+  it('drops exact duplicates, compared after trimming', () => {
+    expect(cleanList(['Insight', ' Insight ', 'Insight'])).toEqual(['Insight']);
+  });
+
+  it('keeps the first-seen order', () => {
+    expect(cleanList(['Religion', 'Insight', 'Religion', 'Arcana'])).toEqual([
+      'Religion',
+      'Insight',
+      'Arcana',
+    ]);
+  });
+
+  it('treats values that differ only by case as different', () => {
+    expect(cleanList(['Shields', 'shields'])).toEqual(['Shields', 'shields']);
   });
 });

@@ -27,6 +27,25 @@ export function parseCommaList(input: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Trimmed values with blanks and exact duplicates dropped, in first-seen order.
+ * Comparison is case-sensitive. The chip controls keep a live list clean; this
+ * catches stored lists that predate them, so a re-save doesn't write the junk
+ * straight back.
+ */
+export function cleanList(values: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const token = value.trim();
+    if (token && !seen.has(token)) {
+      seen.add(token);
+      out.push(token);
+    }
+  }
+  return out;
+}
+
 /** Integer within [min, max] (max defaults to unbounded); null when not. */
 export function parseIntInRange(
   input: string,

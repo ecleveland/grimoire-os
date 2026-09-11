@@ -2,8 +2,7 @@ import { expect, test } from '@playwright/test';
 import { BACKEND, csrfHeaders, registerAndLogin } from './helpers';
 
 // Golden path for homebrew classes (VEG-506, extended by VEG-507), driven
-// through the API rather than the UI: the class pages arrive in VEG-508, so
-// there is no form to fill yet.
+// through the API. The UI golden path lives in `homebrew-class.spec.ts`.
 //
 // What this covers that the unit suites cannot. The partial unique indexes are
 // proved against a real database in `class-content-source.db-spec.ts` (VEG-505),
