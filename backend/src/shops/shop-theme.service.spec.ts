@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Logger } from '@nestjs/common';
 import { ShopThemeService, resolveSuggestions, type SuggestionItemRow } from './shop-theme.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import {
   SHOP_SUGGESTION_CAP,
@@ -9,13 +10,15 @@ import {
   type ShopThemePreset,
 } from './data/shop-theme-presets';
 
+const contentAccess = new ContentAccessService();
+
 describe('ShopThemeService', () => {
   let service: ShopThemeService;
   let prisma: MockPrismaService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [ShopThemeService, prismaMockProvider()],
+      providers: [ShopThemeService, ContentAccessService, prismaMockProvider()],
     }).compile();
 
     service = module.get(ShopThemeService);
@@ -35,10 +38,19 @@ describe('ShopThemeService', () => {
 
       expect(prisma.item.findMany).toHaveBeenCalledTimes(1);
       const arg = prisma.item.findMany.mock.calls[0][0];
-      expect(arg.where.OR).toEqual([
-        { category: { in: ['Potion'] } },
-        { name: { in: expect.arrayContaining(['Acid', 'Antitoxin']) } },
-      ]);
+      // The whole where, so an unscoped read (another user's homebrew leaking
+      // in) or an extra clause fails here rather than only on Postgres.
+      expect(arg.where).toEqual({
+        AND: [
+          contentAccess.globalWhere(),
+          {
+            OR: [
+              { category: { in: ['Potion'] } },
+              { name: { in: expect.arrayContaining(['Acid', 'Antitoxin']) } },
+            ],
+          },
+        ],
+      });
       expect(arg.select).toMatchObject({ id: true, name: true, category: true, cost: true });
     });
 
@@ -49,7 +61,9 @@ describe('ShopThemeService', () => {
       await service.suggestStock('baker');
 
       const arg = prisma.item.findMany.mock.calls[0][0];
-      expect(arg.where.OR).toEqual([{ name: { in: ['Bread (loaf)', 'Rations'] } }]);
+      expect(arg.where).toEqual({
+        AND: [contentAccess.globalWhere(), { OR: [{ name: { in: ['Bread (loaf)', 'Rations'] } }] }],
+      });
     });
 
     it('warns server-side when a known theme matches no catalog items (unseeded/drift)', async () => {

@@ -118,6 +118,21 @@ describe('LootItemsEditor', () => {
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
+  it("searches the global tier only, so the caller's homebrew is never offered", async () => {
+    // Requested server-side so a page of the caller's homebrew cannot hide catalog rows.
+    mockApiFetch.mockResolvedValue(makeResponse([dagger]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'dag');
+
+    await waitFor(() => {
+      const call = mockApiFetch.mock.calls.find(([url]) => String(url).startsWith('/srd/items?'));
+      expect(call).toBeDefined();
+      expect(new URLSearchParams(String(call![0]).split('?')[1]).get('tier')).toBe('global');
+    });
+  });
+
   it('shows a no-matches message when the search returns nothing', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
     const user = userEvent.setup();

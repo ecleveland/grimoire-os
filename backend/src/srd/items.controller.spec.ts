@@ -43,6 +43,14 @@ describe('ItemsController', () => {
       expect(srdService.searchItems).toHaveBeenCalledWith({ q: 'cloak' }, 'u1');
     });
 
+    it("passes tier=global through with the caller's userId; the service applies the scope", async () => {
+      srdService.searchItems.mockResolvedValue({ data: [] });
+
+      await controller.searchItems({ q: 'potion', tier: 'global' }, authedReq());
+
+      expect(srdService.searchItems).toHaveBeenCalledWith({ q: 'potion', tier: 'global' }, 'u1');
+    });
+
     it('passes undefined userId for anonymous callers', async () => {
       srdService.searchItems.mockResolvedValue({ data: [] });
 

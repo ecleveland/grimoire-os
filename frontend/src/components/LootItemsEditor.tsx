@@ -80,7 +80,14 @@ export default function LootItemsEditor({ value, onChange }: Props) {
     // Stale guard: a slow response for an old query must not overwrite the
     // newer query's results or end its loading state.
     let stale = false;
-    const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
+    // Loot templates resolve names against the SRD and shared catalog only, so
+    // ask for that tier rather than filtering after the page has been cut.
+    const params = new URLSearchParams({
+      q: query,
+      page: '1',
+      limit: String(LIMIT),
+      tier: 'global',
+    });
     apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
       .then(res => {
         if (!stale) setResults(res.data);

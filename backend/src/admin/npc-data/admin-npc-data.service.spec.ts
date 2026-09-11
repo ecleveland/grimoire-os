@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdminNpcDataService } from './admin-npc-data.service';
+import { ContentAccessService } from '../../srd/content-access.service';
 import { USER_ID } from '../../test/fixtures';
 
 type MockModel = {
@@ -23,6 +24,8 @@ function makeMockModel(): MockModel {
     delete: jest.fn(),
   };
 }
+
+const contentAccess = new ContentAccessService();
 
 describe('AdminNpcDataService', () => {
   let service: AdminNpcDataService;
@@ -46,7 +49,11 @@ describe('AdminNpcDataService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AdminNpcDataService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        AdminNpcDataService,
+        ContentAccessService,
+        { provide: PrismaService, useValue: prisma },
+      ],
     }).compile();
 
     service = module.get<AdminNpcDataService>(AdminNpcDataService);
@@ -153,6 +160,11 @@ describe('AdminNpcDataService', () => {
 
         await service.create('loot-templates', USER_ID, structured);
 
+        // Checked against the pool the loot roller reads (srd + shared).
+        expect(prisma.item.findMany).toHaveBeenCalledWith({
+          where: { ...contentAccess.globalWhere(), name: { in: ['Dagger', 'Quarterstaff'] } },
+          select: { name: true },
+        });
         // Stored exactly as the loot engine consumes it (LootTemplate shape).
         expect(prisma.npcLootTemplate.create).toHaveBeenCalledWith({
           data: expect.objectContaining({
@@ -169,12 +181,15 @@ describe('AdminNpcDataService', () => {
         });
       });
 
-      it('rejects item names that do not resolve in the catalog', async () => {
+      it('rejects item names that do not resolve in the global catalog, and says why', async () => {
         prisma.item.findMany.mockResolvedValue([{ name: 'Dagger' }]);
 
         await expect(service.create('loot-templates', USER_ID, structured)).rejects.toMatchObject({
           response: expect.objectContaining({
-            message: expect.arrayContaining([expect.stringContaining('Quarterstaff')]),
+            message: expect.arrayContaining([
+              expect.stringContaining('Quarterstaff'),
+              expect.stringContaining('homebrew items are not eligible'),
+            ]),
           }),
         });
         expect(prisma.npcLootTemplate.create).not.toHaveBeenCalled();

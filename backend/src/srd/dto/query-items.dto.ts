@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 
@@ -22,4 +22,16 @@ export class QueryItemsDto extends PaginationDto {
   @IsOptional()
   @IsString()
   isMagic?: string;
+}
+
+/** Query for the public item search, which is the only route that scopes by caller. */
+export class SearchItemsDto extends QueryItemsDto {
+  @ApiPropertyOptional({
+    enum: ['global'],
+    description:
+      "Search the SRD and shared catalog only, leaving out the caller's homebrew. Pickers that feed a write validated against the global tier request this.",
+  })
+  @IsOptional()
+  @IsIn(['global'])
+  tier?: 'global';
 }

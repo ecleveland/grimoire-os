@@ -48,6 +48,8 @@ describe('BundleContentsEditor', () => {
         ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
       );
       expect(call).toBeDefined();
+      // Global tier only, since the save resolves components against srd + shared.
+      expect(call![0]).toContain('tier=global');
       expect(call![0]).toContain('q=can');
     });
     expect(

@@ -18,7 +18,7 @@ import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
 import { HomebrewItemsService } from './homebrew-items.service';
 import { toActor } from './homebrew-write.helpers';
-import { QueryItemsDto } from './dto/query-items.dto';
+import { SearchItemsDto } from './dto/query-items.dto';
 import { CreateItemDto } from './dto/create-item.dto';
 import { UpdateItemDto } from './dto/update-item.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -48,8 +48,10 @@ export class ItemsController {
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Search items (global catalog + the caller’s homebrew)' })
-  searchItems(@Query() query: QueryItemsDto, @Req() req: OptionallyAuthenticatedRequest) {
+  @ApiOperation({
+    summary: 'Search items (global catalog + the caller’s homebrew; tier=global for catalog only)',
+  })
+  searchItems(@Query() query: SearchItemsDto, @Req() req: OptionallyAuthenticatedRequest) {
     return this.srdService.searchItems(query, req.user?.userId);
   }
 

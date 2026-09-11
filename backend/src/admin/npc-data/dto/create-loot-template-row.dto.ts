@@ -60,7 +60,8 @@ export class LootCoinageDto {
 export class LootTemplateItemDto {
   @ApiProperty({
     example: 'Dagger',
-    description: 'Exact catalog Item.name — generation resolves the id by name',
+    description:
+      'Exact Item.name from the SRD or shared catalog. Generation resolves the id by name, so homebrew items are not eligible',
   })
   @IsNonBlankString()
   itemName!: string;

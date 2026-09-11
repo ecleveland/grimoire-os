@@ -8,6 +8,7 @@ import { plainToInstance } from 'class-transformer';
 import { ValidationError, validateSync } from 'class-validator';
 import { VALIDATOR_STRICTNESS } from '../../bootstrap-config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ContentAccessService } from '../../srd/content-access.service';
 import { isNpcDataTable, NpcDataTable } from './admin-npc-data.types';
 import { CreateNameRowDto } from './dto/create-name-row.dto';
 import { CreateAppearanceRowDto } from './dto/create-appearance-row.dto';
@@ -20,7 +21,10 @@ type CreateRowInput = Record<string, unknown>;
 
 @Injectable()
 export class AdminNpcDataService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly contentAccess: ContentAccessService
+  ) {}
 
   async list(table: string) {
     this.assertTable(table);
@@ -215,19 +219,21 @@ export class AdminNpcDataService {
 
   // Generation resolves template items to catalog ids by exact Item.name
   // (loot-roller), so a name that doesn't resolve would silently produce
-  // id-less loot. Reject it at write time instead.
+  // id-less loot. Reject it at write time instead. The roller reads srd + shared
+  // only, so validate against that same pool.
   private async assertItemNamesResolvable(itemNames: string[]): Promise<void> {
     const unique = [...new Set(itemNames)];
     const found = await this.prisma.item.findMany({
-      where: { name: { in: unique } },
+      where: { ...this.contentAccess.globalWhere(), name: { in: unique } },
       select: { name: true },
     });
     const known = new Set(found.map(i => i.name));
     const unknown = unique.filter(n => !known.has(n));
     if (unknown.length > 0) {
-      throw new BadRequestException(
-        unknown.map(n => `Unknown item "${n}" — item names must match the items catalog exactly`)
-      );
+      throw new BadRequestException([
+        ...unknown.map(n => `Unknown item "${n}"`),
+        'Item names must match an SRD or shared catalog item exactly, and homebrew items are not eligible',
+      ]);
     }
   }
 
