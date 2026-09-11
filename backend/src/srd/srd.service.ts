@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
 import { QueryMonstersDto } from './dto/query-monsters.dto';
-import { QueryItemsDto } from './dto/query-items.dto';
+import { QueryItemsDto, SearchItemsDto } from './dto/query-items.dto';
 import { QueryFeatsDto } from './dto/query-feats.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
@@ -399,15 +399,20 @@ export class SrdService {
   // the global catalog plus their own homebrew; anonymous callers see only the
   // catalog. The visibility fragment can itself be an OR, so a free-text query
   // joins it under AND instead of clobbering it.
-  async searchItems(dto: QueryItemsDto, userId?: string) {
+  async searchItems(dto: SearchItemsDto, userId?: string) {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
+    // tier=global narrows an authenticated read to the srd + shared catalog,
+    // the same scope an anonymous caller gets. Pickers that feed a write
+    // validated against that tier ask for it so they never offer a row the
+    // save would refuse.
+    const scopeUserId = dto.tier === 'global' ? undefined : userId;
 
     if (shouldUseFuzzy(dto.q)) {
-      return this.fuzzySearchItems(dto, dto.q, page, limit, userId);
+      return this.fuzzySearchItems(dto, dto.q, page, limit, scopeUserId);
     }
 
-    const visible = this.contentAccess.visibleTo(userId);
+    const visible = this.contentAccess.visibleTo(scopeUserId);
     const where: Record<string, unknown> = dto.q
       ? {
           AND: [

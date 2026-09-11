@@ -496,6 +496,26 @@ describe('SrdService', () => {
       });
     });
 
+    it('tier=global narrows an authenticated substring read to the global catalog', async () => {
+      prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
+
+      await service.searchItems({ q: 'a', tier: 'global' }, 'u1');
+
+      const arg = prisma.item.findMany.mock.calls[0][0];
+      expect(arg.where.AND[0]).toEqual({ ...GLOBAL_WHERE });
+    });
+
+    it('tier=global narrows an authenticated fuzzy read to the global catalog', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchItems({ q: 'ptn', tier: 'global' }, 'u1');
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.values).toContain('srd');
+      expect(dataQuery?.values).not.toContain('u1');
+    });
+
     // ── Owner-aware reads (VEG-296): authenticated callers also see their own homebrew ──
 
     it('widens the where to the caller’s own homebrew when a userId is passed', async () => {

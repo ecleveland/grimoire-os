@@ -25,7 +25,6 @@ function makeMockModel(): MockModel {
   };
 }
 
-// Stateless, so one real instance builds the expected fragments (no hand copy).
 const contentAccess = new ContentAccessService();
 
 describe('AdminNpcDataService', () => {

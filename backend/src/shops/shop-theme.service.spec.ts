@@ -10,7 +10,6 @@ import {
   type ShopThemePreset,
 } from './data/shop-theme-presets';
 
-// Stateless, so one real instance builds the expected fragments (no hand copy).
 const contentAccess = new ContentAccessService();
 
 describe('ShopThemeService', () => {

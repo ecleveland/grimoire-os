@@ -47,10 +47,9 @@ describe('BundleContentsEditor', () => {
       const call = mockApiFetch.mock.calls.find(
         ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
       );
-      // Global tier only: the save resolves components against srd + shared,
-      // so the picker must not offer the caller's homebrew.
-      expect(new URLSearchParams(String(call![0]).split('?')[1]).get('tier')).toBe('global');
       expect(call).toBeDefined();
+      // Global tier only, since the save resolves components against srd + shared.
+      expect(call![0]).toContain('tier=global');
       expect(call![0]).toContain('q=can');
     });
     expect(

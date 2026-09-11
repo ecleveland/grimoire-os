@@ -15,11 +15,11 @@ import {
 } from './db-harness';
 import { ContentAccessService } from '../../src/srd/content-access.service';
 import { ShopThemeService } from '../../src/shops/shop-theme.service';
+import { HOMEBREW_SOURCE_LABEL } from '../../src/srd/homebrew-write.helpers';
 import { AdminNpcDataService } from '../../src/admin/npc-data/admin-npc-data.service';
 
 const POOL_NAME = 'Antitoxin'; // in the alchemist preset's curated pool
 
-// Stateless, so one instance serves the whole file (no hand copy of the fragment).
 const contentAccess = new ContentAccessService();
 const PRIVATE_POTION = 'Aardvark Draught';
 const SHARED_POTION = 'Aardvark Tonic';
@@ -47,7 +47,7 @@ describe('catalog-tier scoping on a real DB (VEG-537)', () => {
     const homebrew = {
       contentSource: 'homebrew',
       createdById: authorId,
-      source: 'Homebrew',
+      source: HOMEBREW_SOURCE_LABEL,
     } as const;
     const [srdAntitoxin, srdPotion, sharedPotion, privatePotion, privateAntitoxin] =
       await Promise.all([

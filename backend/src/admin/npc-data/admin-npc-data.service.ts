@@ -230,12 +230,10 @@ export class AdminNpcDataService {
     const known = new Set(found.map(i => i.name));
     const unknown = unique.filter(n => !known.has(n));
     if (unknown.length > 0) {
-      throw new BadRequestException(
-        unknown.map(
-          n =>
-            `Unknown item "${n}". Item names must match an SRD or shared catalog item exactly, and homebrew items are not eligible`
-        )
-      );
+      throw new BadRequestException([
+        ...unknown.map(n => `Unknown item "${n}"`),
+        'Item names must match an SRD or shared catalog item exactly, and homebrew items are not eligible',
+      ]);
     }
   }
 
