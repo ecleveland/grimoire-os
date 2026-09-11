@@ -37,6 +37,10 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
 
   const skillPool = selectedClass?.skillChoices ?? [];
   const numSkillChoices = selectedClass?.numSkillChoices ?? 0;
+  // The API accepts a numSkillChoices larger than the class's skill pool, and
+  // demanding more picks than the pool holds strands the wizard on this step.
+  // So the required count is capped at the pool size.
+  const requiredPicks = Math.min(numSkillChoices, skillPool.length);
   // The class owns the choose-N skill picks as its own grant slice, so they
   // survive a background switch and don't double-count a background-granted skill
   // that happens to be in the pool.
@@ -95,16 +99,16 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
 
   // The class-name gate lives in the step def's isValid; this reports the extra
   // SRD-derived rule: an unrecognized class has no pool (count trivially met),
-  // a recognized one needs exactly numSkillChoices picks.
-  const skillsComplete = numSkillChoices === 0 || chosenPoolSkills.length === numSkillChoices;
+  // a recognized one needs exactly requiredPicks picks.
+  const skillsComplete = requiredPicks === 0 || chosenPoolSkills.length === requiredPicks;
   useEffect(() => {
     onValidChange?.(skillsComplete);
   }, [skillsComplete, onValidChange]);
 
   const toggleSkill = (next: string[]) => {
     const picks = next.filter(s => skillPool.includes(s));
-    // Cap at the allowed count: ignore a pick that would exceed numSkillChoices.
-    if (picks.length > numSkillChoices) return;
+    // Cap at the allowed count: ignore a pick that would exceed requiredPicks.
+    if (picks.length > requiredPicks) return;
     setSourceField('class', 'skills', picks);
   };
 
@@ -167,7 +171,7 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
               value={classSkills}
               onChange={toggleSkill}
               highlight={skillPool}
-              helperText={`Choose ${numSkillChoices}: ${chosenPoolSkills.length} of ${numSkillChoices} chosen`}
+              helperText={`Choose ${requiredPicks}: ${chosenPoolSkills.length} of ${requiredPicks} chosen`}
             />
           )}
 
