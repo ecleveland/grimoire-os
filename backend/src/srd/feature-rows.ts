@@ -51,7 +51,7 @@ export function takeFeatures(data: ColumnData): FeatureRow[] | undefined {
  *
  * `level` is the discriminator because none of the parent-name indexes carry it:
  * the partial uniques on `srd_classes` and `subclasses` key on `name`,
- * `createdById` and (for a subclass) `classId` (VEG-505), while the feature
+ * `createdById` and (for a subclass) `classId`, while the feature
  * tables key on `[parentId, name, level]`. Prisma reports the field names rather
  * than the index name — verified against a live Postgres, where the duplicate
  * raises `meta.target = ['classId','name','level']` — so this reads the same list

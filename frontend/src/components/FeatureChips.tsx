@@ -11,7 +11,7 @@ interface FeatureChipsProps {
 /**
  * A chip per class or subclass feature, each adding it to the print set. Rows
  * the API hasn't given an id fall back to a plain chip, because a card can only
- * be addressed by id (VEG-265).
+ * be addressed by id.
  */
 export default function FeatureChips({ features, className }: FeatureChipsProps) {
   if (features.length === 0) return null;

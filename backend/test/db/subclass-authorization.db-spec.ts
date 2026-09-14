@@ -14,8 +14,8 @@
 // subclasses before classes because `Subclass.classId` is ON DELETE RESTRICT, and
 // that ordering is only sufficient while every subclass's parent is either its
 // own author's class or a global-tier one. The cross-owner fixture (A's shared
-// class, B's subclass under it) is the case that would break it, replayed through
-// the same transaction the service runs.
+// class, B's subclass under it) is the case that would break it, driven through
+// the real `UsersService.remove` so a change to its ordering fails here.
 import {
   createSeedContext,
   teardownSeedContext,
@@ -28,6 +28,8 @@ import { SrdService } from '../../src/srd/srd.service';
 import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { HomebrewSubclassesService } from '../../src/srd/homebrew-subclasses.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
+import { UsersService } from '../../src/users/users.service';
+import type { RefreshTokenService } from '../../src/auth/refresh-token.service';
 
 const HOMEBREW_LABEL = 'Homebrew';
 const SHARED_LABEL = 'Shared';
@@ -36,6 +38,10 @@ const RUN = Date.now();
 // SrdService only touches the cache from invalidateCache, which nothing here
 // calls, but the constructor demands one.
 const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
+
+// `UsersService.remove` never touches refresh tokens; the constructor demands the
+// dependency for the password and role paths, which nothing here calls.
+const unusedRefreshTokens = {} as RefreshTokenService;
 
 describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   let ctx: SeedContext;
@@ -179,9 +185,10 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       );
     });
 
-    // Proves the check is load-bearing rather than redundant: the database
-    // itself is perfectly happy to store the row the service refuses, so
-    // deleting the guard would silently make the refusal above pass.
+    // Deleting the service guard makes the refusal test above fail loudly. What
+    // this one pins is the other half: the database alone accepts the row the
+    // service refuses, so the service check is the only line of defense, and
+    // no one should remove it on the belief that a constraint backs it up.
     it('has no database constraint behind it, so the service check is the only guard', async () => {
       const row = await ctx.prisma.subclass.create({
         data: {
@@ -271,13 +278,11 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
    * row, and deleting B must not be blocked by A's class.
    */
   describe('deleting a user whose class another user has subclassed', () => {
-    const removeUser = (prisma: SeedContext['prisma'], id: string) =>
-      prisma.$transaction(async tx => {
-        const homebrewByUser = { where: { createdById: id, contentSource: 'homebrew' as const } };
-        await tx.subclass.deleteMany(homebrewByUser);
-        await tx.srdClass.deleteMany(homebrewByUser);
-        await tx.user.delete({ where: { id } });
-      });
+    let users: UsersService;
+
+    beforeAll(() => {
+      users = new UsersService(ctx.prisma, unusedRefreshTokens);
+    });
 
     it('keeps the shared class and the other user’s subclass, then clears them with their author', async () => {
       const [authorA, authorB] = await Promise.all([
@@ -302,7 +307,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
         { userId: authorB.id, isAdmin: false }
       );
 
-      await removeUser(ctx.prisma, authorA.id);
+      await users.remove(authorA.id);
 
       // The shared class survives its author via the SET NULL FK, so B's
       // subclass still has a parent to point at.
@@ -312,7 +317,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       expect(survivor.createdById).toBeNull();
       expect(await ctx.prisma.subclass.count({ where: { id: sub.id } })).toBe(1);
 
-      await removeUser(ctx.prisma, authorB.id);
+      await users.remove(authorB.id);
 
       expect(await ctx.prisma.subclass.count({ where: { id: sub.id } })).toBe(0);
     });

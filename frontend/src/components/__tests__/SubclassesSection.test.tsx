@@ -93,12 +93,42 @@ function authAs(userId: string, isAdmin = false) {
   });
 }
 
-function renderSection(subclasses: SrdSubclass[], cls: SrdClass = makeClass()) {
-  return render(
+function hydrating(likelyAuthenticated: boolean) {
+  mockUseAuth.mockReturnValue({
+    isAuthenticated: false,
+    isLoading: true,
+    likelyAuthenticated,
+    isAdmin: false,
+    user: null,
+  });
+}
+
+function sectionElement(subclasses: SrdSubclass[], cls: SrdClass = makeClass()) {
+  return (
     <PrintTrayProvider>
       <SubclassesSection cls={cls} subclasses={subclasses} />
     </PrintTrayProvider>
   );
+}
+
+function renderSection(subclasses: SrdSubclass[], cls: SrdClass = makeClass()) {
+  return render(sectionElement(subclasses, cls));
+}
+
+/** Two rows the owner may manage. */
+function twoRows(): SrdSubclass[] {
+  return [makeSubclass(), makeSubclass({ id: 'sc-sharp', name: 'Sharpshooter' })];
+}
+
+/** A promise the test settles by hand, to hold a request in flight. */
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 /**
@@ -160,6 +190,24 @@ describe('SubclassesSection', () => {
 
       expect(screen.getByRole('heading', { level: 2, name: 'Subclasses' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Add subclass' })).toBeInTheDocument();
+    });
+
+    it('holds a place for Add while a likely signed-in session hydrates', () => {
+      hydrating(true);
+
+      renderSection([]);
+
+      expect(screen.getByRole('heading', { level: 2, name: 'Subclasses' })).toBeInTheDocument();
+      expect(screen.getByTestId('skeleton')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add subclass' })).not.toBeInTheDocument();
+    });
+
+    it('renders nothing while a session with no sign-in hint hydrates on a class with none', () => {
+      hydrating(false);
+
+      const { container } = renderSection([]);
+
+      expect(container).toBeEmptyDOMElement();
     });
 
     it('shows the level line only when the class sets one', () => {
@@ -358,8 +406,6 @@ describe('SubclassesSection', () => {
   // that would unmount it is withdrawn while it is open. Save and Cancel are the
   // only ways out.
   describe('guarding an open form', () => {
-    const twoRows = () => [makeSubclass(), makeSubclass({ id: 'sc-sharp', name: 'Sharpshooter' })];
-
     function expectNoRowControls() {
       expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
@@ -417,32 +463,128 @@ describe('SubclassesSection', () => {
       expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(2);
     });
 
-    // The one way a delete and an open form overlap: the confirm dialog closes as
-    // soon as it is confirmed, so the row controls are live again while the
-    // request is still in flight. A delete must never close a form it didn't open.
-    it('keeps an edit opened during an in-flight delete mounted when the delete lands', async () => {
+    it('gives the controls back when the row being edited disappears', async () => {
       authAs('u1');
-      let settleDelete = () => {};
-      mockApiFetch.mockReturnValue(
-        new Promise<void>(resolve => {
-          settleDelete = resolve;
-        })
-      );
+      const user = userEvent.setup();
+
+      const { rerender } = renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
+      // Another tab deletes Deadeye, and the refetch drops it from the list.
+      rerender(sectionElement([makeSubclass({ id: 'sc-sharp', name: 'Sharpshooter' })]));
+
+      expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add subclass' })).toBeInTheDocument();
+      expect(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Edit' })).toBeVisible();
+    });
+  });
+
+  // Requests stay in flight while the author keeps working, so each write must
+  // touch only the form or row it started from.
+  describe('overlapping writes', () => {
+    it('withdraws Edit and Delete on a row while its DELETE is pending, and restores them if it fails', async () => {
+      authAs('u1');
+      const del = deferred();
+      mockApiFetch.mockReturnValueOnce(del.promise);
       const user = userEvent.setup();
 
       renderSection(twoRows());
       await user.click(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Delete' }));
       await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
 
+      const sharp = cardFor('Sharpshooter');
+      expect(within(sharp).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+      expect(within(sharp).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(within(cardFor('Deadeye')).getByRole('button', { name: 'Delete' })).toBeVisible();
+
+      del.reject(new Error('Network down'));
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Network down'));
+      expect(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Delete' })).toBeVisible();
+    });
+
+    it('keeps an edit opened during an in-flight delete saveable, and mounted when the delete lands', async () => {
+      authAs('u1');
+      const del = deferred();
+      mockApiFetch.mockReturnValueOnce(del.promise);
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
       fireEvent.change(screen.getByLabelText('Description'), {
         target: { value: 'Half written.' },
       });
 
-      settleDelete();
+      // Nothing of this form's own is pending.
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+
+      del.resolve();
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Deleted Sharpshooter'));
       expect(screen.getByLabelText('Description')).toHaveValue('Half written.');
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+    });
+
+    it('keeps a second create form open when a cancelled create lands', async () => {
+      authAs('u1');
+      const create = deferred<unknown>();
+      mockApiFetch.mockReturnValueOnce(create.promise);
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await startCreate(user, 'Gunner');
+      await user.click(screen.getByRole('button', { name: 'Create subclass' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await startCreate(user, 'Second draft');
+
+      // The reopened form is a different form, so the first write's pending state isn't its.
+      expect(screen.getByRole('button', { name: 'Create subclass' })).toBeEnabled();
+
+      create.resolve({});
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Created Gunner'));
+      expect(screen.getByLabelText(/^Name/)).toHaveValue('Second draft');
+    });
+
+    it('keeps the edit of another row open when a cancelled edit lands', async () => {
+      authAs('u1');
+      const patch = deferred<unknown>();
+      mockApiFetch.mockReturnValueOnce(patch.promise);
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      await user.click(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), {
+        target: { value: 'Half written.' },
+      });
+
+      patch.resolve({});
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
+      expect(screen.getByLabelText('Description')).toHaveValue('Half written.');
+    });
+
+    it('does not disable a form opened while the last write is still refreshing', async () => {
+      authAs('u1');
+      const refetch = deferred();
+      mockInvalidateApiPath.mockReturnValueOnce(refetch.promise);
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await startCreate(user, 'Gunner');
+      await user.click(screen.getByRole('button', { name: 'Create subclass' }));
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Created Gunner'));
+
+      // The write has landed and its refetch is still out.
+      await user.click(screen.getByRole('button', { name: 'Add subclass' }));
+      expect(screen.getByRole('button', { name: 'Create subclass' })).toBeEnabled();
+
+      refetch.resolve();
     });
   });
 

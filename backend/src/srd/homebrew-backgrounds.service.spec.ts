@@ -8,6 +8,9 @@ import { CreateBackgroundDto } from './dto/create-background.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
+/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
+const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
+
 const SRD_FEAT = { id: 'feat-srd', contentSource: 'srd', createdById: null };
 const OWN_HOMEBREW_FEAT = { id: 'feat-own', contentSource: 'homebrew', createdById: 'owner-1' };
 
@@ -35,7 +38,7 @@ describe('HomebrewBackgroundsService', () => {
 
   describe('create', () => {
     it('creates a homebrew background owned by the actor with source "Homebrew"', async () => {
-      const created = { id: 'bg1', name: 'Gravedigger' };
+      const created = { id: 'bg1', name: 'Gravedigger', ...STAMPED };
       prisma.background.create.mockResolvedValue(created);
 
       const result = await service.create(makeCreateDto(), OWNER);
@@ -53,7 +56,7 @@ describe('HomebrewBackgroundsService', () => {
 
     it('accepts an SRD origin feat', async () => {
       prisma.feat.findFirst.mockResolvedValue(SRD_FEAT);
-      prisma.background.create.mockResolvedValue({ id: 'bg1' });
+      prisma.background.create.mockResolvedValue({ id: 'bg1', ...STAMPED });
 
       await service.create(makeCreateDto({ originFeatId: 'feat-srd' }), OWNER);
 
@@ -67,7 +70,7 @@ describe('HomebrewBackgroundsService', () => {
 
     it("accepts the actor's own homebrew origin feat", async () => {
       prisma.feat.findFirst.mockResolvedValue(OWN_HOMEBREW_FEAT);
-      prisma.background.create.mockResolvedValue({ id: 'bg1' });
+      prisma.background.create.mockResolvedValue({ id: 'bg1', ...STAMPED });
 
       await service.create(makeCreateDto({ originFeatId: 'feat-own' }), OWNER);
 
@@ -99,7 +102,7 @@ describe('HomebrewBackgroundsService', () => {
     });
 
     it('drops an originFeatOption supplied without an originFeatId', async () => {
-      prisma.background.create.mockResolvedValue({ id: 'bg1' });
+      prisma.background.create.mockResolvedValue({ id: 'bg1', ...STAMPED });
 
       await service.create(makeCreateDto({ originFeatOption: 'Cleric' }), OWNER);
 

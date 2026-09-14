@@ -721,13 +721,15 @@ export default function CharacterEditorForm({
   // informational; resolves to none for a free-typed/homebrew class.
   const recommendedAbilities = recommendedAbilityKeys(selectedClass?.primaryAbilities);
 
-  const subclasses =
-    useApiQuery<SrdSubclass[]>(`/srd/subclasses?classId=${selectedClass?.id ?? ''}`, {
-      enabled: !!selectedClass,
-    }).data ?? [];
+  const subclasses = useApiQuery<SrdSubclass[]>(
+    `/srd/subclasses?classId=${selectedClass?.id ?? ''}`,
+    { enabled: !!selectedClass }
+  ).data;
   // Source-labelled like the class picker: a homebrew subclass may reuse an SRD
   // one's name under the same class, and the bare names would be indistinguishable.
-  const subclassOptions = useMemo(() => sourceLabelledOptions(subclasses), [subclasses]);
+  // Keyed on the query data itself, since `?? []` outside would be a new array
+  // every render and the memo would never hold.
+  const subclassOptions = useMemo(() => sourceLabelledOptions(subclasses ?? []), [subclasses]);
 
   const set = <K extends keyof CharacterFormValues>(key: K, value: CharacterFormValues[K]) =>
     setValues(prev => ({ ...prev, [key]: value }));

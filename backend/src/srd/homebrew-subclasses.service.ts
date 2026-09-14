@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { Subclass } from '@prisma/client';
+import { Prisma, Subclass } from '@prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { ContentActor } from './content-access.service';
 import {
@@ -12,8 +12,11 @@ import {
 import { CreateSubclassDto } from './dto/create-subclass.dto';
 import { UpdateSubclassDto } from './dto/update-subclass.dto';
 
+/** Refusal for a parent the author cannot use, whether it is hidden, missing or gone. */
+const PARENT_NOT_VISIBLE_MESSAGE = 'Parent class not found or not accessible';
+
 /**
- * CRUD for user-authored (homebrew) subclasses (VEG-509). The authorization
+ * CRUD for user-authored (homebrew) subclasses. The authorization
  * skeleton lives in {@link ContentCrudService}; this class supplies the column
  * mapping, the feature replacement it shares with
  * {@link HomebrewClassesService}, and the one rule a subclass adds.
@@ -55,13 +58,34 @@ export class HomebrewSubclassesService extends ContentCrudService<
     data: ColumnData,
     actor: ContentActor
   ): Promise<ColumnData> {
-    await this.assertParentClassVisible(data.classId as string, actor);
+    await this.assertParentClassVisible(data.classId, actor);
     const features = takeFeatures(data);
     if (features) {
       assertNoDuplicateFeatures(features);
       data.features = { create: features };
     }
     return data;
+  }
+
+  /**
+   * Translate the FK refusal for a parent deleted after the visibility check.
+   *
+   * The check and the insert are two statements, so a concurrent delete of the
+   * parent class can land between them; `subclasses_classId_fkey` then refuses
+   * the insert with P2003. `mapWriteError` does not translate that code, so the
+   * client would get the engine's message, constraint name included. From the
+   * author's side the parent is simply not there any more, which is the answer
+   * the visibility check gives, so this gives it too, byte for byte.
+   */
+  protected override async performCreate(data: ColumnData): Promise<Subclass> {
+    try {
+      return await this.delegate.create({ data });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
+        throw new BadRequestException(PARENT_NOT_VISIBLE_MESSAGE);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -142,7 +166,7 @@ export class HomebrewSubclassesService extends ContentCrudService<
     const data: ColumnData = { ...dto };
 
     // `name` is required and non-nullable; a null clear (valid for optional
-    // fields per VEG-316) would otherwise reach Prisma and 500.
+    // fields) would otherwise reach Prisma and 500.
     if ('name' in data && data.name === null) {
       throw new BadRequestException('Name cannot be cleared');
     }
@@ -169,20 +193,22 @@ export class HomebrewSubclassesService extends ContentCrudService<
    * owner's homebrew class and an id that never existed are indistinguishable:
    * both 400 with the same copy, so nothing here confirms a class exists.
    */
-  private async assertParentClassVisible(classId: string, actor: ContentActor): Promise<void> {
-    // Refused before the query, not by it: Prisma drops an undefined `id` from
+  private async assertParentClassVisible(classId: unknown, actor: ContentActor): Promise<void> {
+    // Refused before the query, not by it. Prisma drops an undefined `id` from
     // the where clause, so a create with no parent would match the first class
-    // the actor can see and be authorized against a class nobody named. Same
-    // copy as a parent that does not resolve, so the two are still one answer.
-    if (!classId) {
-      throw new BadRequestException('Parent class not found or not accessible');
+    // the actor can see, and a non-string reaches the query as a filter object
+    // rather than an id. Same copy as a parent that does not resolve, so the
+    // cases stay one answer.
+    if (typeof classId !== 'string' || !classId) {
+      throw new BadRequestException(PARENT_NOT_VISIBLE_MESSAGE);
     }
 
     const parent = await this.prisma.srdClass.findFirst({
       where: { id: classId, ...this.contentAccess.visibleTo(actor.userId) },
+      select: { id: true },
     });
     if (!parent) {
-      throw new BadRequestException('Parent class not found or not accessible');
+      throw new BadRequestException(PARENT_NOT_VISIBLE_MESSAGE);
     }
   }
 }

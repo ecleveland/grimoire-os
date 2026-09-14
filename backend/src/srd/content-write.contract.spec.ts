@@ -90,6 +90,9 @@ interface ContractCase {
   prime?: (prisma: MockPrismaService) => void;
 }
 
+/** A parent every subclass case hangs off; the `prime` below makes it resolve. */
+const PARENT_CLASS_ID = '11111111-1111-4111-8111-111111111111';
+
 // A service whose create hook must read the database declares a `prime` that
 // arranges the lookup; see HomebrewSubclassesService below.
 //
@@ -101,9 +104,6 @@ interface ContractCase {
 // it. Do not reach for the other fix and drop the service from CASES: an
 // unenrolled service is exactly the drift `contract enrollment` below exists to
 // catch, and it will fail that test instead.
-/** A parent every subclass case hangs off; the `prime` below makes it resolve. */
-const PARENT_CLASS_ID = '11111111-1111-4111-8111-111111111111';
-
 const CASES: ContractCase[] = [
   {
     title: 'HomebrewMonstersService',
@@ -231,6 +231,17 @@ describe.each(CASES)(
       ...rowExtras,
     });
 
+    /**
+     * The row an insert by `actor` produces. The skeleton re-checks the written
+     * row's tier and owner against the stamp, so a mock row without them would
+     * be refused, exactly as a real override that dropped the stamp would be.
+     */
+    const createdRow = (actor: ContentActor) => ({
+      id: 'row-1',
+      contentSource: tier,
+      createdById: actor.userId,
+    });
+
     /** The actor who owns `ownRow()` at this tier and may edit it. */
     const editor = tier === 'shared' ? ADMIN : OWNER;
     const editableRow = tier === 'shared' ? sharedRow : ownRow;
@@ -248,7 +259,7 @@ describe.each(CASES)(
 
     describe('create', () => {
       it(`stamps contentSource "${tier}", the owner, and source "${sourceLabel}"`, async () => {
-        delegate.create.mockResolvedValue({ id: 'row-1' });
+        delegate.create.mockResolvedValue(createdRow(creator));
 
         await service.create(makeCreateDto() as never, creator);
 
@@ -262,7 +273,7 @@ describe.each(CASES)(
       });
 
       it('overrides client-supplied ownership and tier fields with the server stamp', async () => {
-        delegate.create.mockResolvedValue({ id: 'row-1' });
+        delegate.create.mockResolvedValue(createdRow(creator));
 
         await service.create(
           {
@@ -303,7 +314,7 @@ describe.each(CASES)(
       });
 
       it('leaves the caller\u2019s DTO untouched', async () => {
-        delegate.create.mockResolvedValue({ id: 'row-1' });
+        delegate.create.mockResolvedValue(createdRow(creator));
         const dto = { ...makeCreateDto(), contentSource: 'srd', id: 'forced-id' };
         const before = JSON.parse(JSON.stringify(dto)) as Record<string, unknown>;
 
@@ -332,7 +343,7 @@ describe.each(CASES)(
         });
       } else {
         it('lets any authenticated user create their own homebrew', async () => {
-          delegate.create.mockResolvedValue({ id: 'row-1' });
+          delegate.create.mockResolvedValue(createdRow(STRANGER));
 
           await expect(service.create(makeCreateDto() as never, STRANGER)).resolves.toBeDefined();
           expect(delegate.create).toHaveBeenCalled();
@@ -893,6 +904,88 @@ describe('update extension points', () => {
       await expect(
         new StealingProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
       ).rejects.toThrow(InternalServerErrorException);
+    });
+  });
+
+  describe('performCreate', () => {
+    it('defaults to a plain delegate create', async () => {
+      const { prisma, delegate } = makeProbeEnv();
+
+      await new Probe(prisma).create({ name: 'X' } as never, OWNER);
+
+      expect(delegate.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ name: 'X' }),
+      });
+    });
+
+    it('lets an override replace the write, handing it the already-stamped data', async () => {
+      const { prisma, delegate } = makeProbeEnv();
+      const created: ProbeRow = { ...homebrewRow(), name: 'from the override' };
+      let received: ColumnData | undefined;
+      class CreateProbe extends Probe {
+        protected override performCreate(data: ColumnData): Promise<ProbeRow> {
+          received = data;
+          return Promise.resolve(created);
+        }
+      }
+
+      await expect(
+        new CreateProbe(prisma).create(
+          { name: 'X', contentSource: 'srd', createdById: 'evil' } as never,
+          OWNER
+        )
+      ).resolves.toBe(created);
+      expect(delegate.create).not.toHaveBeenCalled();
+      // The stamp is applied before the hand-off, so an override cannot receive
+      // a row the client got to label.
+      expect(received).toEqual({
+        name: 'X',
+        source: 'Homebrew',
+        contentSource: 'homebrew',
+        createdById: OWNER.userId,
+      });
+    });
+
+    it('maps a failure inside the override with the service tier', async () => {
+      const { prisma } = makeProbeEnv();
+      class FailingProbe extends Probe {
+        protected override performCreate(): Promise<ProbeRow> {
+          return Promise.reject(p2002());
+        }
+      }
+
+      await expect(new FailingProbe(prisma).create({ name: 'X' } as never, OWNER)).rejects.toThrow(
+        'You already have a probe with this name'
+      );
+    });
+
+    // The create-side twin of the update re-check. An override owns the insert,
+    // so it can write a payload of its own rather than the stamped one it was
+    // handed, and nothing before the write can see that.
+    it('refuses a returned row whose tier is not the stamped one', async () => {
+      const { prisma } = makeProbeEnv();
+      class EscalatingProbe extends Probe {
+        protected override performCreate(): Promise<ProbeRow> {
+          return Promise.resolve({ ...homebrewRow(), contentSource: 'srd' });
+        }
+      }
+
+      await expect(
+        new EscalatingProbe(prisma).create({ name: 'X' } as never, OWNER)
+      ).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('refuses a returned row whose owner is not the stamped one', async () => {
+      const { prisma } = makeProbeEnv();
+      class StealingProbe extends Probe {
+        protected override performCreate(): Promise<ProbeRow> {
+          return Promise.resolve({ ...homebrewRow(), createdById: 'someone-else' });
+        }
+      }
+
+      await expect(new StealingProbe(prisma).create({ name: 'X' } as never, OWNER)).rejects.toThrow(
+        'Refusing to return a probe whose ownership changed during the write'
+      );
     });
   });
 

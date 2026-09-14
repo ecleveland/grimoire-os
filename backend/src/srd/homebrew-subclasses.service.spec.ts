@@ -16,11 +16,23 @@ import { CreateSubclassDto } from './dto/create-subclass.dto';
  */
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
+
+/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
+const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
 const CLASS_ID = 'c1';
 const VISIBLE_CLASS = { id: CLASS_ID, contentSource: 'srd', createdById: null };
 
 function makeCreateDto(over: Partial<CreateSubclassDto> = {}): CreateSubclassDto {
   return { name: 'Path of Ash', classId: CLASS_ID, ...over } as CreateSubclassDto;
+}
+
+function p2003(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', {
+    code: 'P2003',
+    clientVersion: 'test',
+    // The shape a live Postgres raises for this insert, measured rather than assumed.
+    meta: { modelName: 'Subclass', constraint: 'subclasses_classId_fkey' },
+  });
 }
 
 function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
@@ -53,7 +65,7 @@ describe('HomebrewSubclassesService', () => {
 
   describe('the parent class', () => {
     it('passes the subclass columns through once the parent resolves', async () => {
-      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1', ...STAMPED });
 
       await service.create(makeCreateDto({ description: 'Ash and cinders.' }), OWNER);
 
@@ -67,7 +79,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('looks the parent up scoped to what the author may see', async () => {
-      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1', ...STAMPED });
 
       await service.create(makeCreateDto(), OWNER);
 
@@ -76,6 +88,9 @@ describe('HomebrewSubclassesService', () => {
           id: CLASS_ID,
           OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: 'owner-1' }],
         },
+        // The check only asks whether a row exists. Without the select it would
+        // pull the parent's three Json blobs to throw them away.
+        select: { id: true },
       });
     });
 
@@ -103,6 +118,39 @@ describe('HomebrewSubclassesService', () => {
       );
       expect(prisma.srdClass.findFirst).not.toHaveBeenCalled();
       expect(prisma.subclass.create).not.toHaveBeenCalled();
+    });
+
+    // A value that is present but not a string passes a falsy check and reaches
+    // Prisma as a filter object (`{ id: {} }`) or a type error, neither of which
+    // is the refusal a missing parent gets.
+    it.each([{}, 42, ['c1']])(
+      'refuses a non-string classId %p without querying for it',
+      async classId => {
+        await expect(
+          service.create({ name: 'Path of Ash', classId } as never, OWNER)
+        ).rejects.toThrow(BadRequestException);
+        expect(prisma.srdClass.findFirst).not.toHaveBeenCalled();
+      }
+    );
+
+    // The visibility check and the insert are two statements, so the parent can
+    // be deleted between them. The FK then refuses the insert with P2003, and
+    // unmapped, that reached the client as a 400 carrying the engine's message
+    // and the constraint name. It has to be the same answer as a parent that
+    // was never visible, because from the author's side it is one.
+    it('refuses a parent deleted after the check with the visibility copy', async () => {
+      prisma.subclass.create.mockRejectedValue(p2003());
+
+      const err = await service.create(makeCreateDto(), OWNER).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect((err as BadRequestException).message).toBe('Parent class not found or not accessible');
+    });
+
+    it('passes a failure that is not an FK violation through untouched', async () => {
+      prisma.subclass.create.mockRejectedValue(new Error('connection reset'));
+
+      await expect(service.create(makeCreateDto(), OWNER)).rejects.toThrow('connection reset');
     });
 
     it('never lets an update move a subclass to another class', async () => {
@@ -143,7 +191,7 @@ describe('HomebrewSubclassesService', () => {
 
   describe('features on create', () => {
     beforeEach(() => {
-      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1', ...STAMPED });
     });
 
     it('writes them as a nested create alongside the subclass columns', async () => {
@@ -289,6 +337,20 @@ describe('HomebrewSubclassesService', () => {
       expect(prisma.subclassFeature.createMany).toHaveBeenCalledWith({
         data: [{ subclassId: 'sc1', name: 'Ashen Step', level: 3, description: '' }],
       });
+    });
+
+    // Asserted on what the caller receives, not on the mock's arguments: the
+    // write skeleton hands this value straight back as the response body, and
+    // POST cannot include features, so PATCH must not either.
+    it('resolves to the subclass row without its features', async () => {
+      const result = await service.update(
+        'sc1',
+        { features: [{ name: 'Ashen Step', level: 3 }] } as never,
+        OWNER
+      );
+
+      expect(result).toEqual(homebrewRow);
+      expect(result).not.toHaveProperty('features');
     });
 
     it('keeps features out of the parent column data', async () => {

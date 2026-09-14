@@ -20,6 +20,9 @@ import { UpdateClassDto } from './dto/update-class.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
+/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
+const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
+
 function makeCreateDto(over: Partial<CreateClassDto> = {}): CreateClassDto {
   return { name: 'Warden', hitDie: 'd10', ...over } as CreateClassDto;
 }
@@ -54,7 +57,7 @@ describe('HomebrewClassesService', () => {
   });
 
   it('passes class columns through to the create', async () => {
-    prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+    prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
     await service.create(makeCreateDto({ subclassLevel: 3 }), OWNER);
 
@@ -200,7 +203,7 @@ describe('HomebrewClassesService', () => {
       pipe.transform(body, { type: 'body' as const, metatype: metatype as never });
 
     it('writes no features relation when the create body never mentioned them', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
       const dto = await transform({ name: 'Warden', hitDie: 'd10' }, CreateClassDto);
 
       // Guard the premise rather than assume it: if this stops holding, the
@@ -230,7 +233,7 @@ describe('HomebrewClassesService', () => {
 
   describe('features on create', () => {
     it('writes them as a nested create alongside the class columns', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
       await service.create(
         makeCreateDto({
@@ -256,7 +259,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('defaults a missing description to the empty string — the column is NOT NULL', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
       await service.create(makeCreateDto({ features: [{ name: 'Rage', level: 1 }] }), OWNER);
 
@@ -267,7 +270,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('sends no features key at all when the body omits it', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
       await service.create(makeCreateDto(), OWNER);
 
@@ -280,7 +283,7 @@ describe('HomebrewClassesService', () => {
     // check runs before the write. Without it a seed or import caller passing
     // two features at one level is told it has a duplicate CLASS name.
     it('refuses a repeated (name, level) with feature copy, not class copy', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
       await expect(
         service.create(
@@ -298,7 +301,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('allows the same name at different levels, which is the point', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
       await service.create(
         makeCreateDto({
@@ -314,7 +317,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('sends an empty nested create for an explicitly empty list', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
 
       await service.create(makeCreateDto({ features: [] }), OWNER);
 
@@ -433,6 +436,20 @@ describe('HomebrewClassesService', () => {
         prisma.classFeature.createMany.mock.invocationCallOrder[0],
       ];
       expect(order).toEqual([...order].sort((a, b) => a - b));
+    });
+
+    // Asserted on what the caller receives, not on the mock's arguments: the
+    // write skeleton hands this value straight back as the response body, and
+    // POST cannot include features, so PATCH must not either.
+    it('resolves to the class row without its features', async () => {
+      const result = await service.update(
+        'c1',
+        { features: [{ name: 'Rage', level: 1 }] } as never,
+        OWNER
+      );
+
+      expect(result).toEqual(homebrewRow);
+      expect(result).not.toHaveProperty('features');
     });
 
     it('returns the row the update produced, not the row it authorized', async () => {

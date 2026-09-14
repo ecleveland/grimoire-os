@@ -1,5 +1,5 @@
 import type { ClassFeatureDraft } from '@/components/ClassFeaturesEditor';
-import { sameFeatures, toFeatureRows, validateFeatures } from '@/lib/feature-rows';
+import { sameFeatures, toFeatureRows, validateFeatures, type FeatureRow } from '@/lib/feature-rows';
 import { optionalText } from '@/lib/form-helpers';
 import type { SrdSubclass } from '@/lib/types';
 
@@ -29,7 +29,7 @@ export interface SubclassPayload {
    * Sent only when the list changed. The API replaces every stored row and gives
    * each a new id, which orphans print-tray entries that still hold the old ones.
    */
-  features?: ClassFeatureDraft[];
+  features?: FeatureRow[];
 }
 
 export type SubclassFormResult = { payload: SubclassPayload } | { error: string };

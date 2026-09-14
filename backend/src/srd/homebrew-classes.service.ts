@@ -37,7 +37,7 @@ const JSON_COLUMNS = ['spellcasting', 'equipmentChoices', 'multiclassing'] as co
  *
  * Features are child `ClassFeature` rows written in the same request (VEG-507),
  * which makes this the first consumer of the skeleton's `performUpdate` seam.
- * {@link HomebrewSubclassesService} (VEG-509) shares that feature handling
+ * {@link HomebrewSubclassesService} shares that feature handling
  * through `feature-rows.ts`.
  */
 @Injectable()
