@@ -60,8 +60,8 @@ describe('ClassForm', () => {
     vi.clearAllMocks();
   });
 
-  function renderForm(props: Partial<ComponentProps<typeof ClassForm>> = {}) {
-    return render(
+  function formElement(props: Partial<ComponentProps<typeof ClassForm>> = {}) {
+    return (
       <ClassForm
         submitting={false}
         submitLabel="Create class"
@@ -70,6 +70,10 @@ describe('ClassForm', () => {
         {...props}
       />
     );
+  }
+
+  function renderForm(props: Partial<ComponentProps<typeof ClassForm>> = {}) {
+    return render(formElement(props));
   }
 
   it('offers exactly the five hit dice on a new class, starting on d8, with no rules note (VEG-508)', () => {
@@ -132,6 +136,36 @@ describe('ClassForm', () => {
 
     expect(screen.getByLabelText('Hit die')).toHaveValue('d10');
     expect(hitDieOptions()).toEqual(['d4', 'd6', 'd8', 'd10', 'd12', 'd20']);
+  });
+
+  it('keeps the hit die it loaded on offer when a refetch changes the class (VEG-508)', () => {
+    const { rerender } = renderForm({
+      initial: makeClass({ hitDie: 'd20' }),
+      submitLabel: 'Save changes',
+    });
+    expect(screen.getByLabelText('Hit die')).toHaveValue('d20');
+
+    // The edit page keeps its query mounted, so a background refetch hands the
+    // form a new `initial` while the author is still editing the old one.
+    rerender(formElement({ initial: makeClass({ hitDie: 'd10' }), submitLabel: 'Save changes' }));
+
+    expect(hitDieOptions()).toContain('d20');
+    expect(screen.getByLabelText('Hit die')).toHaveValue('d20');
+  });
+
+  it('keeps the note it showed at mount when a refetch changes the class (VEG-508)', () => {
+    const mountedNote = `This class also has multiclassing rules. ${NOTE_TAIL}`;
+    const { rerender } = renderForm({ initial: makeClass(), submitLabel: 'Save changes' });
+    expect(screen.getByText(mountedNote)).toBeInTheDocument();
+
+    rerender(
+      formElement({
+        initial: makeClass({ spellcasting: { ability: 'Wisdom' } }),
+        submitLabel: 'Save changes',
+      })
+    );
+
+    expect(screen.getByText(mountedNote)).toBeInTheDocument();
   });
 
   describe('note about rules the form does not edit', () => {

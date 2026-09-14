@@ -8,6 +8,17 @@ import type { SrdClass } from '@/lib/types';
  * to the print set.
  */
 export default function ClassDetail({ cls }: { cls: SrdClass }) {
+  // A row can reach here without its features array when the API breaks its
+  // contract, and losing the whole card over that hides the rest of the class.
+  const features = cls.features ?? [];
+  const skills = cls.skillChoices.join(', ');
+  const skillLine =
+    cls.skillChoices.length === 0
+      ? 'None'
+      : cls.numSkillChoices > 0
+        ? `Choose ${cls.numSkillChoices} from: ${skills}`
+        : skills;
+
   return (
     <div className="space-y-3">
       {cls.description && (
@@ -36,19 +47,23 @@ export default function ClassDetail({ cls }: { cls: SrdClass }) {
         </p>
       </div>
       <div>
-        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Skill Choices</h3>
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Tool Proficiencies</h3>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          {cls.skillChoices.length > 0 ? cls.skillChoices.join(', ') : 'None'}
+          {cls.toolProficiencies.length > 0 ? cls.toolProficiencies.join(', ') : 'None'}
         </p>
       </div>
-      {cls.features.length > 0 && (
+      <div>
+        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Skill Choices</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400">{skillLine}</p>
+      </div>
+      {features.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
           <div className="flex flex-wrap gap-1 mt-1">
             {/* Keyed per row rather than by name, because a class can legally list
                 one feature name at several levels, as Ability Score Improvement
                 does at 4, 8 and 12. */}
-            {cls.features.map(f =>
+            {features.map(f =>
               f.id ? (
                 <PrintToggle key={f.id} type="feature" id={f.id} name={f.name} variant="chip" />
               ) : (

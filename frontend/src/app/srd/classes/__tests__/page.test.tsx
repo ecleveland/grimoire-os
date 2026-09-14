@@ -425,6 +425,38 @@ describe('ClassListPage', () => {
       errorSpy.mockRestore();
     });
 
+    // A row without a features array is a worse contract break than an id-less
+    // feature, so the guard that reports the second must survive the first.
+    it('still reports id-less features when another row arrives without features', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mockUseApiQuery.mockReturnValue(
+        queryResult({
+          data: [
+            makeClass({
+              id: 'class-broken',
+              name: 'Broken',
+              features: undefined as unknown as SrdClass['features'],
+            }),
+            makeClass({
+              id: 'class-2',
+              name: 'Wanderer',
+              features: [{ name: 'Legacy Feature', level: 1 }],
+            }),
+          ],
+        })
+      );
+
+      renderPage();
+
+      expect(screen.getByText('Broken')).toBeInTheDocument();
+      expect(screen.getByText('Wanderer')).toBeInTheDocument();
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('class features rendered without an id'),
+        ['Legacy Feature']
+      );
+      errorSpy.mockRestore();
+    });
+
     it('does not log the invariant when every feature carries an id', () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 

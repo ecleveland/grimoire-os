@@ -165,7 +165,7 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
             )}
           </fieldset>
 
-          {skillPool.length > 0 && (
+          {requiredPicks > 0 && (
             <ToggleChips
               label="Skills"
               options={skillPool}

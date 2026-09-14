@@ -394,6 +394,26 @@ describe('ClassStep skill count larger than the pool', () => {
   });
 });
 
+// A count of 0 over a populated pool passes the write boundary, and the class
+// form re-saves such a class untouched. The exact-count case for a class that
+// does offer picks is covered by 'requires exactly numSkillChoices skill picks
+// before the step is valid' above.
+describe('ClassStep class that offers no skill picks', () => {
+  it('renders no skills group and reports the step valid', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([
+      makeClass({ skillChoices: ['Athletics'], numSkillChoices: 0 }),
+    ]);
+
+    await pickClass(user, 'Fighter');
+    await screen.findByRole('group', { name: /class grants/i });
+
+    // Chips here would be dead controls, since the toggle refuses every pick.
+    expect(screen.queryByRole('group', { name: /skills/i })).toBeNull();
+    expect(onValid).toHaveBeenLastCalledWith(true);
+  });
+});
+
 // The class DTO checks each pool entry against the catalog but not for
 // uniqueness, so the API accepts a pool that repeats a skill.
 describe('ClassStep skill pool that repeats a skill', () => {

@@ -28,7 +28,7 @@ export default function ClassListPage() {
   // chip. Logged per payload, because the page re-renders whenever the delete
   // dialog opens or closes.
   useEffect(() => {
-    const idless = (classesQuery.data ?? []).flatMap(cls => cls.features).filter(f => !f.id);
+    const idless = (classesQuery.data ?? []).flatMap(cls => cls.features ?? []).filter(f => !f.id);
     if (idless.length > 0) {
       console.error(
         'srd/classes: class features rendered without an id, print toggle unavailable (backend contract regression):',

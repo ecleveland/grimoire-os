@@ -55,10 +55,15 @@ export default function ClassForm({
   onSubmit,
   onCancel,
 }: ClassFormProps) {
-  // The class as it loaded, so a save can tell what the author changed. A new
+  // The class as it loaded, frozen on mount. Everything below reads this instead
+  // of the live prop, because the form edits a snapshot and the edit page keeps
+  // its query mounted, so a background refetch must not change the options the
+  // form offers or the note it shows while the author is part way through.
+  const [initialClass] = useState(() => initial);
+  // The loaded form state, so a save can tell what the author changed. A new
   // class has none.
   const [baseline] = useState<ClassFormState | undefined>(() =>
-    initial ? classToFormState(initial) : undefined
+    initialClass ? classToFormState(initialClass) : undefined
   );
   // Seeded once from the loaded state. The features editor keys its rows on
   // mount, so handing it a different list later would pair those keys with the
@@ -67,14 +72,15 @@ export default function ClassForm({
   const [form, setForm] = useState<ClassFormState>(() => baseline ?? emptyClassFormState());
 
   // The API accepts d20 and d100 as a class hit die, and a select can't show a
-  // value it has no option for. The extra comes from `initial`, not live state,
-  // so it stays on offer after the author switches away from it.
+  // value it has no option for. Taken from the loaded class rather than the
+  // current state, so the option stays on offer after the author switches away.
   const hitDieOptions: string[] = [...HIT_DIE_TYPES];
-  if (initial?.hitDie && !hitDieOptions.includes(initial.hitDie)) {
-    hitDieOptions.push(initial.hitDie);
+  if (initialClass?.hitDie && !hitDieOptions.includes(initialClass.hitDie)) {
+    hitDieOptions.push(initialClass.hitDie);
   }
 
-  const uneditedRules = UNEDITED_RULES.filter(rule => initial?.[rule.key] != null).map(
+  // Read off the class, not the form state, since the JSON columns aren't in it.
+  const uneditedRules = UNEDITED_RULES.filter(rule => initialClass?.[rule.key] != null).map(
     rule => rule.label
   );
 

@@ -17,7 +17,7 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
     armorProficiencies: ['All armor'],
     weaponProficiencies: ['Simple', 'Martial'],
     skillChoices: ['Athletics', 'Intimidation'],
-    toolProficiencies: [],
+    toolProficiencies: ["Smith's Tools"],
     numSkillChoices: 2,
     description: 'A master of martial combat.',
     features: [
@@ -54,7 +54,8 @@ describe('ClassDetail', () => {
     expect(section('Saving Throws')).toHaveTextContent('STR, CON');
     expect(section('Armor Proficiencies')).toHaveTextContent('All armor');
     expect(section('Weapon Proficiencies')).toHaveTextContent('Simple, Martial');
-    expect(section('Skill Choices')).toHaveTextContent('Athletics, Intimidation');
+    expect(section('Tool Proficiencies')).toHaveTextContent("Smith's Tools");
+    expect(section('Skill Choices')).toHaveTextContent('Choose 2 from: Athletics, Intimidation');
     expect(section('Features')).toHaveTextContent('Second Wind');
   });
 
@@ -63,6 +64,12 @@ describe('ClassDetail', () => {
 
     expect(section('Armor Proficiencies')).toHaveTextContent('None');
     expect(section('Weapon Proficiencies')).toHaveTextContent('None');
+  });
+
+  it('shows None for an empty tool proficiency list', () => {
+    renderDetail(makeClass({ toolProficiencies: [] }));
+
+    expect(section('Tool Proficiencies')).toHaveTextContent('None');
   });
 
   it('shows None for an empty saving throw list', () => {
@@ -75,12 +82,35 @@ describe('ClassDetail', () => {
     renderDetail(makeClass({ skillChoices: [] }));
 
     expect(section('Skill Choices')).toHaveTextContent('None');
+    expect(section('Skill Choices')).not.toHaveTextContent('Choose');
+  });
+
+  it('shows the pick count with the skill pool', () => {
+    renderDetail(makeClass());
+
+    expect(section('Skill Choices')).toHaveTextContent('Choose 2 from: Athletics, Intimidation');
+  });
+
+  it('lists the skills without a Choose prefix when the class picks none', () => {
+    renderDetail(makeClass({ numSkillChoices: 0 }));
+
+    expect(section('Skill Choices')).toHaveTextContent('Athletics, Intimidation');
+    expect(section('Skill Choices')).not.toHaveTextContent('Choose');
   });
 
   it('omits the description and the Features section when the class has neither', () => {
     renderDetail(makeClass({ description: undefined, features: [] }));
 
     expect(screen.queryByText('A master of martial combat.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Features' })).not.toBeInTheDocument();
+  });
+
+  // A row without a features array breaks the API contract. The card still has to
+  // render, because dropping the whole page loses the rest of the class as well.
+  it('renders the rest of the card when the payload has no features array', () => {
+    renderDetail(makeClass({ features: undefined as unknown as SrdClass['features'] }));
+
+    expect(section('Saving Throws')).toHaveTextContent('STR, CON');
     expect(screen.queryByRole('heading', { name: 'Features' })).not.toBeInTheDocument();
   });
 

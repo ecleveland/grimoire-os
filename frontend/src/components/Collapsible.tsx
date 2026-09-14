@@ -9,8 +9,9 @@ import { useState, type ReactNode } from 'react';
  * pages.
  *
  * The detail panel is toggled with the `hidden` attribute instead of mounting on
- * open, so its content is always in the DOM. On the races page that content ships
- * in the server HTML, and on every page crawlers can find it while it is collapsed.
+ * open, so it is never remounted. On the races page its content ships in the
+ * server HTML, and on the client-rendered pages it is in the DOM once hydration
+ * finishes.
  */
 export default function Collapsible({
   summary,

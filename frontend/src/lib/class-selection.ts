@@ -5,6 +5,7 @@ import {
   sourceLabelledOptions,
   type CatalogSelection,
 } from '@/lib/content-selection';
+import { cleanList } from '@/lib/form-helpers';
 
 /**
  * Resolve the selected class from the merged `/srd/classes` catalog.
@@ -38,14 +39,19 @@ export function classOptions(classes: SrdClass[]): SrdComboboxOption[] {
   return sourceLabelledOptions(classes);
 }
 
+/**
+ * The class's skill pool, cleaned the way `ClassForm` writes it. A stored pool
+ * can hold blanks, padded entries, and repeats, so every reader has to clean it
+ * the same way or they disagree about how many skills it offers.
+ */
 export function uniqueSkillPool(cls: Pick<SrdClass, 'skillChoices'> | undefined): string[] {
-  return [...new Set(cls?.skillChoices ?? [])];
+  return cleanList(cls?.skillChoices ?? []);
 }
 
 /**
  * How many class skills a character picks. The API accepts a `numSkillChoices`
- * above the pool size and a pool that repeats a skill, so the count is capped at
- * the distinct skills in the pool.
+ * above the pool size and a pool with blank or repeated entries, so the count is
+ * capped at the cleaned pool's length.
  */
 export function requiredSkillPicks(
   cls: Pick<SrdClass, 'skillChoices' | 'numSkillChoices'> | undefined

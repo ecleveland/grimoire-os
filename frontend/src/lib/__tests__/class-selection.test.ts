@@ -167,6 +167,14 @@ describe('requiredSkillPicks', () => {
   it('returns 0 for an undefined class', () => {
     expect(requiredSkillPicks(undefined)).toBe(0);
   });
+
+  it('counts a padded repeat once, capping a stored count of 2 to 1', () => {
+    expect(
+      requiredSkillPicks(
+        makeClass({ skillChoices: ['Athletics', 'Athletics '], numSkillChoices: 2 })
+      )
+    ).toBe(1);
+  });
 });
 
 describe('uniqueSkillPool', () => {
@@ -176,5 +184,20 @@ describe('uniqueSkillPool', () => {
         makeClass({ skillChoices: ['Stealth', 'Athletics', 'Stealth', 'Acrobatics', 'Athletics'] })
       )
     ).toEqual(['Stealth', 'Athletics', 'Acrobatics']);
+  });
+
+  // ClassForm writes the pool through cleanList, so a stored pool that predates
+  // that form has to clean the same way here. Otherwise the builder and the form
+  // disagree about how many picks the class offers.
+  it('trims and treats a padded repeat as one skill', () => {
+    expect(uniqueSkillPool(makeClass({ skillChoices: ['Athletics', 'Athletics '] }))).toEqual([
+      'Athletics',
+    ]);
+  });
+
+  it('drops blank entries', () => {
+    expect(uniqueSkillPool(makeClass({ skillChoices: ['', '   ', 'Athletics'] }))).toEqual([
+      'Athletics',
+    ]);
   });
 });
