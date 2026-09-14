@@ -25,6 +25,7 @@ import { HomebrewItemsService } from './homebrew-items.service';
 import { HomebrewBackgroundsService } from './homebrew-backgrounds.service';
 import { AdminItemsService } from '../admin/items/admin-items.service';
 import { HomebrewClassesService } from './homebrew-classes.service';
+import { HomebrewSubclassesService } from './homebrew-subclasses.service';
 
 /**
  * The tiered-content write contract (VEG-336), asserted identically against
@@ -60,7 +61,7 @@ interface TieredWriteService {
 }
 
 /** Prisma model keys the mock factory exposes, narrowed to the tiered entities. */
-type TieredModel = 'monster' | 'spell' | 'feat' | 'item' | 'background' | 'srdClass';
+type TieredModel = 'monster' | 'spell' | 'feat' | 'item' | 'background' | 'srdClass' | 'subclass';
 
 interface ContractCase {
   /** Display name for the describe block. */
@@ -80,8 +81,18 @@ interface ContractCase {
    * their no-op path (backgrounds reads `originFeatId` off the row).
    */
   rowExtras?: Record<string, unknown>;
+  /**
+   * Arrange the mock for a service whose create hook reads the database before
+   * writing (subclasses look their parent class up). Runs once per case, before
+   * the case's own arrangement, so a create left unprimed would fail the guard
+   * rather than the contract.
+   */
+  prime?: (prisma: MockPrismaService) => void;
 }
 
+// A service whose create hook must read the database declares a `prime` that
+// arranges the lookup; see HomebrewSubclassesService below.
+//
 // NOTE for the first service that overrides `performUpdate` (VEG-507's class
 // features are the expected one). The `update` cases below assert against
 // `delegate.update`, which a transactional override may not call at all, so that
@@ -90,6 +101,9 @@ interface ContractCase {
 // it. Do not reach for the other fix and drop the service from CASES: an
 // unenrolled service is exactly the drift `contract enrollment` below exists to
 // catch, and it will fail that test instead.
+/** A parent every subclass case hangs off; the `prime` below makes it resolve. */
+const PARENT_CLASS_ID = '11111111-1111-4111-8111-111111111111';
+
 const CASES: ContractCase[] = [
   {
     title: 'HomebrewMonstersService',
@@ -147,6 +161,21 @@ const CASES: ContractCase[] = [
     makeCreateDto: () => ({ name: 'Warden', hitDie: 'd10' }),
   },
   {
+    title: 'HomebrewSubclassesService',
+    Service: HomebrewSubclassesService,
+    model: 'subclass',
+    noun: 'subclass',
+    tier: 'homebrew',
+    sourceLabel: 'Homebrew',
+    makeCreateDto: () => ({ name: 'Path of Ash', classId: PARENT_CLASS_ID }),
+    prime: prisma =>
+      prisma.srdClass.findFirst.mockResolvedValue({
+        id: PARENT_CLASS_ID,
+        contentSource: 'srd',
+        createdById: null,
+      }),
+  },
+  {
     title: 'AdminItemsService (shared tier)',
     Service: AdminItemsService,
     model: 'item',
@@ -173,7 +202,7 @@ function p2025(): Prisma.PrismaClientKnownRequestError {
 
 describe.each(CASES)(
   'tiered write contract: $title',
-  ({ Service, model, noun, tier, sourceLabel, makeCreateDto, rowExtras }) => {
+  ({ Service, model, noun, tier, sourceLabel, makeCreateDto, rowExtras, prime }) => {
     let service: TieredWriteService;
     let prisma: MockPrismaService;
     let delegate: MockPrismaService[TieredModel];
@@ -213,6 +242,7 @@ describe.each(CASES)(
 
       service = module.get<TieredWriteService>(Service as Type<TieredWriteService>);
       prisma = module.get<MockPrismaService>(PrismaService as never);
+      prime?.(prisma);
       delegate = prisma[model];
     });
 

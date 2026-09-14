@@ -5,6 +5,7 @@ import { hitDicePoolFor } from '@grimoire-os/shared';
 import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
+import { sourceLabelledOptions } from '@/lib/content-selection';
 import { useDraftGrants } from '../useCharacterDraft';
 import {
   classOptions,
@@ -182,7 +183,9 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
               value={value.subclass}
               onChange={v => onChange({ subclass: v })}
               onSelect={opt => onChange({ subclass: opt.name })}
-              options={subclasses.map(s => ({ id: s.id, name: s.name }))}
+              // Source-labelled like the class picker above: a homebrew subclass
+              // may reuse an SRD one's name under the same class.
+              options={sourceLabelledOptions(subclasses)}
               loading={subclassesQuery.isLoading}
               placeholder="Search subclasses…"
               helperText="Your class chooses a subclass at level 1."

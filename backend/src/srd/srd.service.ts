@@ -123,6 +123,16 @@ export type UnifiedSearchHit =
 const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
 const SUBCLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
 const NAME_ORDER = { name: 'asc' as const };
+// Total, for the reason findAllClasses's sort is: two subclasses under one class
+// may now share a name (an SRD "Life Domain" beside a homebrew one), and a tie
+// has no defined order, so the same list can come back shuffled between loads.
+// Stability is the only property claimed here; `contentSource` is not a tier
+// preference, since Postgres sorts an enum by its internal order.
+const SUBCLASS_ORDER = [
+  { name: 'asc' as const },
+  { contentSource: 'asc' as const },
+  { id: 'asc' as const },
+];
 
 type FeatureSearchHit = {
   kind: FeatureParentType;
@@ -547,6 +557,10 @@ export class SrdService {
         // already scoped by the `where` above.
         subclasses: {
           where: { ...this.contentAccess.visibleTo(userId) },
+          // The class page renders this list, and each card can carry its
+          // owner's Edit and Delete. A name-only sort leaves two same-named
+          // subclasses tied, so those controls could move between loads.
+          orderBy: SUBCLASS_ORDER,
           include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
         },
         features: { orderBy: CLASS_FEATURE_ORDER },
@@ -595,7 +609,7 @@ export class SrdService {
     if (classId) where.classId = classId;
     return this.prisma.subclass.findMany({
       where,
-      orderBy: { name: 'asc' },
+      orderBy: SUBCLASS_ORDER,
       include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
     });
   }

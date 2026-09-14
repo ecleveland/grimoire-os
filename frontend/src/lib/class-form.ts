@@ -1,6 +1,6 @@
-import { classFeatureIdentity } from '@grimoire-os/shared';
 import type { ClassFeatureDraft } from '@/components/ClassFeaturesEditor';
 import { MAX_LEVEL } from '@/lib/character-level';
+import { sameFeatures, toFeatureRows, validateFeatures } from '@/lib/feature-rows';
 import { cleanList, optionalText, parseIntInRange } from '@/lib/form-helpers';
 import { DEFAULT_HIT_DIE, type SrdClass } from '@/lib/types';
 
@@ -52,12 +52,6 @@ export interface ClassPayload {
 
 export type ClassFormResult = { payload: ClassPayload } | { error: string };
 
-interface FeatureRow {
-  name: string;
-  level: number;
-  description: string;
-}
-
 export function emptyClassFormState(): ClassFormState {
   return {
     name: '',
@@ -107,30 +101,6 @@ function sameMembers(a: string[], b: string[]): boolean {
   return a.every(value => members.has(value));
 }
 
-/** Feature rows as the payload sends them, trimmed. */
-function toFeatureRows(features: ClassFeatureDraft[]): FeatureRow[] {
-  return features.map(f => ({
-    name: f.name.trim(),
-    level: f.level,
-    description: (f.description ?? '').trim(),
-  }));
-}
-
-/** Whether two feature lists hold the same rows, in any order. Row order is a drafting aid. */
-function sameFeatures(a: FeatureRow[], b: FeatureRow[]): boolean {
-  if (a.length !== b.length) return false;
-  // JSON keeps the identity and the description apart, whatever characters either holds.
-  const key = (f: FeatureRow) => JSON.stringify([classFeatureIdentity(f), f.description]);
-  const counts = new Map<string, number>();
-  for (const f of a) counts.set(key(f), (counts.get(key(f)) ?? 0) + 1);
-  for (const f of b) {
-    const left = counts.get(key(f)) ?? 0;
-    if (left === 0) return false;
-    counts.set(key(f), left - 1);
-  }
-  return true;
-}
-
 export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState): ClassFormResult {
   const name = s.name.trim();
   if (!name) return { error: 'Name is required' };
@@ -172,27 +142,11 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
 
   const features = toFeatureRows(s.features);
   const featuresChanged = !baseline || !sameFeatures(features, toFeatureRows(baseline.features));
-  // Checked only when the list is being sent. The API stores rows this form
-  // would reject, because the write boundary compares raw names where this trims
-  // them, and such a row must not block an edit that leaves the list alone.
+  // Validated only when the list is being sent, so a stored row this form would
+  // reject can't block an edit that leaves the list alone.
   if (featuresChanged) {
-    if (features.some(f => !f.name)) return { error: 'Every feature needs a name' };
-    // The editor holds NaN while a level box is cleared, until the box loses focus.
-    if (features.some(f => !Number.isInteger(f.level) || f.level < 1 || f.level > MAX_LEVEL)) {
-      return { error: `Every feature needs a level from 1 to ${MAX_LEVEL}` };
-    }
-    // Compared on the trimmed names, since those are what gets sent. The editor's
-    // live warning sees "Rage" and "Rage " as two rows; the server sees one.
-    const seen = new Set<string>();
-    for (const feature of features) {
-      const identity = classFeatureIdentity(feature);
-      if (seen.has(identity)) {
-        return {
-          error: 'Two features share a name at the same level; each pairing must be unique',
-        };
-      }
-      seen.add(identity);
-    }
+    const featureError = validateFeatures(features);
+    if (featureError) return { error: featureError };
   }
 
   const payload: ClassPayload = {

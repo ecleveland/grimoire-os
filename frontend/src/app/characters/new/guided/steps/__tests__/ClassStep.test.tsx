@@ -64,8 +64,8 @@ const CLERIC = makeClass({
 });
 
 const SUBCLASSES: SrdSubclass[] = [
-  { id: 'life', name: 'Life Domain', classId: 'cleric', source: 'SRD' },
-  { id: 'light', name: 'Light Domain', classId: 'cleric', source: 'SRD' },
+  { id: 'life', name: 'Life Domain', classId: 'cleric', source: 'SRD', contentSource: 'srd' },
+  { id: 'light', name: 'Light Domain', classId: 'cleric', source: 'SRD', contentSource: 'srd' },
 ];
 
 function routeApiFetch(classes: SrdClass[], subclasses: SrdSubclass[] = []) {
@@ -529,5 +529,71 @@ describe('ClassStep — duplicate class names (VEG-524)', () => {
     await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
     // No grants summary at all — the name is ambiguous, so nothing resolved.
     expect(screen.queryByRole('group', { name: /class grants/i })).toBeNull();
+  });
+});
+
+// VEG-509. A homebrew class can carry its own subclasses, and one of those may
+// reuse an SRD subclass name under the same class.
+describe('ClassStep — homebrew subclasses (VEG-509)', () => {
+  const homebrewCleric = makeClass({
+    id: 'cls-hb-cleric',
+    name: 'Hearthkeeper',
+    contentSource: 'homebrew',
+    createdById: 'u1',
+    subclassLevel: 1,
+  });
+
+  const seedPicked = { base: { class: 'Hearthkeeper', classId: 'cls-hb-cleric' } };
+
+  it('offers the picker and lists a homebrew subclass for a homebrew class', async () => {
+    const user = userEvent.setup();
+    renderStep(
+      [homebrewCleric],
+      [
+        {
+          id: 'hearth',
+          name: 'Hearth Domain',
+          classId: 'cls-hb-cleric',
+          source: 'Homebrew',
+          contentSource: 'homebrew',
+        },
+      ],
+      seedPicked
+    );
+
+    // The picker appears once the class query resolves the seeded id.
+    await screen.findByRole('combobox', { name: /subclass/i });
+    await pickSubclass(user, 'Hearth Domain');
+
+    expect(screen.getByTestId('draft-subclass')).toHaveTextContent('Hearth Domain');
+  });
+
+  it('source-labels two subclasses sharing a name under that class', async () => {
+    const user = userEvent.setup();
+    renderStep(
+      [homebrewCleric],
+      [
+        {
+          id: 'life-srd',
+          name: 'Life Domain',
+          classId: 'cls-hb-cleric',
+          source: 'SRD',
+          contentSource: 'srd',
+        },
+        {
+          id: 'life-hb',
+          name: 'Life Domain',
+          classId: 'cls-hb-cleric',
+          source: 'Homebrew',
+          contentSource: 'homebrew',
+        },
+      ],
+      seedPicked
+    );
+
+    await user.click(await screen.findByRole('combobox', { name: /subclass/i }));
+
+    expect(await screen.findByRole('option', { name: 'Life Domain (SRD)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Life Domain (Homebrew)' })).toBeInTheDocument();
   });
 });

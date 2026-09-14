@@ -173,7 +173,11 @@ export class UsersService {
         await tx.background.deleteMany(homebrewByUser);
         // Subclasses before classes (VEG-505): Subclass.classId has no cascade,
         // so removing a homebrew class while its subclasses still reference it
-        // raises an FK violation and aborts the whole user delete.
+        // raises an FK violation and aborts the whole user delete. The ordering
+        // is enough because a subclass's parent is always either its own
+        // author's class or a global-tier one, which HomebrewSubclassesService
+        // enforces at create; `test/db/subclass-authorization.db-spec.ts` proves
+        // the cross-owner case survives.
         await tx.subclass.deleteMany(homebrewByUser);
         await tx.srdClass.deleteMany(homebrewByUser);
         await tx.user.delete({ where: { id } });

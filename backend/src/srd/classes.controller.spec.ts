@@ -5,6 +5,7 @@ import { SrdController } from './srd.controller';
 import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
 import { HomebrewClassesService } from './homebrew-classes.service';
+import { HomebrewSubclassesService } from './homebrew-subclasses.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type {
@@ -33,6 +34,7 @@ describe('ClassesController', () => {
     findSubclass: jest.Mock;
   };
   let homebrewClasses: { create: jest.Mock; update: jest.Mock; remove: jest.Mock };
+  let homebrewSubclasses: { create: jest.Mock; update: jest.Mock; remove: jest.Mock };
 
   beforeEach(async () => {
     srdService = {
@@ -48,12 +50,19 @@ describe('ClassesController', () => {
       remove: jest.fn().mockResolvedValue(undefined),
     };
 
+    homebrewSubclasses = {
+      create: jest.fn().mockResolvedValue({ id: 'sub-1' }),
+      update: jest.fn().mockResolvedValue({ id: 'sub-1' }),
+      remove: jest.fn().mockResolvedValue(undefined),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ClassesController, SubclassesController],
       imports: [CacheModule.register()],
       providers: [
         { provide: SrdService, useValue: srdService },
         { provide: HomebrewClassesService, useValue: homebrewClasses },
+        { provide: HomebrewSubclassesService, useValue: homebrewSubclasses },
       ],
     }).compile();
 
@@ -111,6 +120,28 @@ describe('ClassesController', () => {
       await controller.removeClass('cls-1', writeReq);
 
       expect(homebrewClasses.remove).toHaveBeenCalledWith('cls-1', ACTOR);
+    });
+
+    it('creates a subclass with the caller as the actor', async () => {
+      const dto = { name: 'Path of Ash', classId: 'cls-1' };
+
+      await subclasses.createSubclass(dto as never, writeReq);
+
+      expect(homebrewSubclasses.create).toHaveBeenCalledWith(dto, ACTOR);
+    });
+
+    it('updates a subclass with the caller as the actor', async () => {
+      const dto = { description: 'Rewritten.' };
+
+      await subclasses.updateSubclass('sub-1', dto as never, writeReq);
+
+      expect(homebrewSubclasses.update).toHaveBeenCalledWith('sub-1', dto, ACTOR);
+    });
+
+    it('deletes a subclass with the caller as the actor', async () => {
+      await subclasses.removeSubclass('sub-1', writeReq);
+
+      expect(homebrewSubclasses.remove).toHaveBeenCalledWith('sub-1', ACTOR);
     });
 
     it('marks an admin caller as one, since shared-tier writes turn on it', async () => {
@@ -171,18 +202,23 @@ describe('class routes are off the shared URL-keyed cache (VEG-505)', () => {
   // the only thing standing between that and a 500 (or worse, an unowned write),
   // and nothing else here would notice the swap.
   it('guards every write route with the strict JwtAuthGuard, never the optional one', () => {
-    for (const handler of ['createClass', 'updateClass', 'removeClass']) {
-      const fn = (ClassesController.prototype as unknown as Record<string, unknown>)[
-        handler
-      ] as object;
-      const guards = Reflect.getMetadata('__guards__', fn) ?? [];
-      const names = guards.map((g: unknown) =>
-        typeof g === 'function'
-          ? g.name
-          : (g as { constructor: { name: string } })?.constructor?.name
-      );
-      expect(names).toContain(JwtAuthGuard.name);
-      expect(names).not.toContain(OptionalJwtAuthGuard.name);
+    const cases: [object, string[]][] = [
+      [ClassesController.prototype, ['createClass', 'updateClass', 'removeClass']],
+      [SubclassesController.prototype, ['createSubclass', 'updateSubclass', 'removeSubclass']],
+    ];
+
+    for (const [proto, handlers] of cases) {
+      for (const handler of handlers) {
+        const fn = (proto as unknown as Record<string, unknown>)[handler] as object;
+        const guards = Reflect.getMetadata('__guards__', fn) ?? [];
+        const names = guards.map((g: unknown) =>
+          typeof g === 'function'
+            ? g.name
+            : (g as { constructor: { name: string } })?.constructor?.name
+        );
+        expect(names).toContain(JwtAuthGuard.name);
+        expect(names).not.toContain(OptionalJwtAuthGuard.name);
+      }
     }
   });
 

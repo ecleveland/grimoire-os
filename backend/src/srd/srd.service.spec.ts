@@ -1019,6 +1019,7 @@ describe('SrdService', () => {
         include: {
           subclasses: {
             where: { contentSource: { in: ['srd', 'shared'] } },
+            orderBy: [{ name: 'asc' }, { contentSource: 'asc' }, { id: 'asc' }],
             include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
           },
           features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] },
@@ -1078,7 +1079,7 @@ describe('SrdService', () => {
           ...{ contentSource: { in: ['srd', 'shared'] } },
           srdClass: { is: { contentSource: { in: ['srd', 'shared'] } } },
         },
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }, { contentSource: 'asc' }, { id: 'asc' }],
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
     });
@@ -1094,7 +1095,7 @@ describe('SrdService', () => {
           srdClass: { is: { contentSource: { in: ['srd', 'shared'] } } },
           classId: 'class-1',
         },
-        orderBy: { name: 'asc' },
+        orderBy: [{ name: 'asc' }, { contentSource: 'asc' }, { id: 'asc' }],
         include: { features: { orderBy: [{ level: 'asc' }, { name: 'asc' }] } },
       });
     });

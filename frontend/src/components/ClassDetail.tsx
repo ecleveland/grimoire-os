@@ -1,5 +1,4 @@
-import { classFeatureIdentity } from '@grimoire-os/shared';
-import PrintToggle from '@/components/PrintToggle';
+import FeatureChips from '@/components/FeatureChips';
 import type { SrdClass } from '@/lib/types';
 
 /**
@@ -59,23 +58,7 @@ export default function ClassDetail({ cls }: { cls: SrdClass }) {
       {features.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {/* Keyed per row rather than by name, because a class can legally list
-                one feature name at several levels, as Ability Score Improvement
-                does at 4, 8 and 12. */}
-            {features.map(f =>
-              f.id ? (
-                <PrintToggle key={f.id} type="feature" id={f.id} name={f.name} variant="chip" />
-              ) : (
-                <span
-                  key={classFeatureIdentity(f)}
-                  className="text-xs px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded"
-                >
-                  {f.name}
-                </span>
-              )
-            )}
-          </div>
+          <FeatureChips features={features} className="mt-1" />
         </div>
       )}
     </div>

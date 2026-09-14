@@ -15,7 +15,13 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { ABILITY_NAMES, CASTER_TYPES, DIE_TYPES, SKILL_NAMES } from '@grimoire-os/shared';
+import {
+  ABILITY_NAMES,
+  CASTER_TYPES,
+  DIE_TYPES,
+  SKILL_NAMES,
+  classFeatureIdentity,
+} from '@grimoire-os/shared';
 import { IsEachInCatalog } from '../../common/validators/is-each-in-catalog.decorator';
 import { IsOptionalNotNull } from '../../common/validators/is-optional-not-null.decorator';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
@@ -168,24 +174,9 @@ export class ClassMulticlassingDto {
 
 /** Ceiling on a class's feature list. A 20-level SRD class carries 5 to 18 rows;
  * this leaves generous room for a densely-written homebrew class while keeping
- * one request from writing an unbounded number of child rows. */
-const MAX_CLASS_FEATURES = 100;
-
-/**
- * Identity a feature row is unique by, matching the
- * `[classId, name, level]` unique index VEG-507 widened the table to.
- *
- * Case-sensitive on purpose. The index is a plain btree over text, so "Rage" and
- * "rage" are two rows to Postgres; folding case here would make the DTO reject a
- * body the database would happily store, which is a rule nobody could find by
- * reading the schema. The two must refuse the same set and nothing more.
- *
- * The separator is a character `level` cannot contain, so ("a|1", 1) and
- * ("a", "1|1") cannot collide the way a bare concatenation would.
- */
-function featureIdentity(f: ClassFeatureDto): string {
-  return `${f.level}|${f.name}`;
-}
+ * one request from writing an unbounded number of child rows. Shared with the
+ * subclass DTO, whose feature rows are the same table in a different name. */
+export const MAX_CLASS_FEATURES = 100;
 
 /**
  * One per-level entry in a class's feature list (VEG-507).
@@ -247,8 +238,6 @@ export class ClassFeatureDto {
  * skeleton's delegate takes no `include` and its `create` is final, so returning
  * them on one path and not the other was the only alternative, and an asymmetry
  * between the two verbs is worse than a uniform absence.
- *
- * Subclasses are still absent; they arrive with VEG-509.
  */
 export class CreateClassDto {
   @ApiProperty({ example: 'Warden' })
@@ -374,7 +363,7 @@ export class CreateClassDto {
   // write, so the author gets a 400 naming the field rather than a 409 or —
   // before this ran — a duplicate-*class*-name conflict from the shared error
   // mapper, which keys everything to the parent noun.
-  @ArrayUnique(featureIdentity)
+  @ArrayUnique(classFeatureIdentity)
   @ValidateNested({ each: true })
   @Type(() => ClassFeatureDto)
   // `| null` because null is a real, tested input here, not a stray: it is how

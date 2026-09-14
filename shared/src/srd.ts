@@ -282,7 +282,7 @@ export interface SrdRace {
   source: string;
 }
 
-export interface SrdSubclass {
+export interface SrdSubclass extends ContentOwnership {
   id: string;
   name: string;
   classId: string;
