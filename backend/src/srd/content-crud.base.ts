@@ -115,29 +115,27 @@ function stripReservedColumns(data: ColumnData): ColumnData {
 }
 
 /**
- * Re-check the ownership columns on the row a write produced against the
- * ownership the skeleton expected it to have: the authorized row's on update,
- * the stamp's on create.
+ * Re-check the ownership columns on the row a write produced.
  *
- * `performCreate` and `performUpdate` hand a subclass the whole write, so neither
- * the reserved-column strip nor the stamp sees every payload that reaches Prisma:
- * an override composing its own can set `contentSource` or `createdById`, or drop
- * the stamp, and put a row in a tier or under an owner nobody authorized. This is
- * the skeleton's last look at the result and it costs two comparisons.
+ * `performUpdate` hands a subclass the whole write, so the reserved-column strip
+ * no longer sees every payload that reaches Prisma: an override composing its own
+ * can set `contentSource` or `createdById` and escalate a homebrew row into the
+ * immutable catalog. This is the skeleton's last look at the result and it costs
+ * two comparisons.
  *
- * It does NOT catch an update override that returns the row it read rather than
- * the row it wrote. A stale row carries the same tier and owner by definition, so
- * nothing compared here can distinguish it; that one stays a documented trap on
+ * It does NOT catch an override that returns the row it read rather than the row
+ * it wrote. A stale row carries the same tier and owner by definition, so nothing
+ * compared here can distinguish it; that one stays a documented trap on
  * {@link ContentCrudService.performUpdate}.
  */
 function assertOwnershipUnchanged<Row extends OwnedContentRow>(
   written: Row,
-  expected: OwnedContentRow,
+  authorized: Row,
   noun: string
 ): Row {
   if (
-    written.contentSource !== expected.contentSource ||
-    written.createdById !== expected.createdById
+    written.contentSource !== authorized.contentSource ||
+    written.createdById !== authorized.createdById
   ) {
     throw new InternalServerErrorException(
       `Refusing to return a ${noun} whose ownership changed during the write`
@@ -160,10 +158,8 @@ function assertOwnershipUnchanged<Row extends OwnedContentRow>(
  * a hook rather than the skeleton, so the authorization order can never be
  * reordered or skipped by a subclass:
  *
- * - `create`  authorize the tier, map columns, run `beforeCreate`, stamp,
- *             `performCreate`, re-check ownership.
- * - `update`  load-and-authorize, map columns, run `beforeUpdate`, `performUpdate`,
- *             re-check ownership.
+ * - `create`  authorize the tier, map columns, run `beforeCreate`, stamp, write.
+ * - `update`  load-and-authorize, map columns, run `beforeUpdate`, `performUpdate`.
  * - `remove`  load-and-authorize, then `performDelete`.
  *
  * Two invariants worth stating because they are easy to break by hand and were
@@ -229,17 +225,12 @@ export abstract class ContentCrudService<
       createdById: actor.userId,
     };
 
-    let written: Row;
     try {
-      // The ownership stamp is spread last so no hook or DTO field can displace
-      // it, and before the hand-off so an override only ever sees stamped data.
-      written = await this.performCreate({ ...data, ...stamp });
+      // The ownership stamp is spread last so no hook or DTO field can displace it.
+      return await this.delegate.create({ data: { ...data, ...stamp } });
     } catch (err) {
       mapWriteError(err, this.tier, this.noun);
     }
-    // Outside the try, so the refusal is not handed to `mapWriteError`.
-    // `mapWriteError` returns `never`, so `written` is assigned by here.
-    return assertOwnershipUnchanged(written, stamp, this.noun);
   }
 
   async update(id: string, dto: UpdateDto, actor: ContentActor): Promise<Row> {
@@ -315,27 +306,6 @@ export abstract class ContentCrudService<
     _actor: ContentActor
   ): ColumnData | Promise<ColumnData> {
     return data;
-  }
-
-  /**
-   * How this entity's create reaches the database. Override when an insert can
-   * fail in a way the shared mapping does not translate, and translate it: a
-   * child row's FK racing a concurrent delete of its parent raises P2003, which
-   * `mapWriteError` rethrows untouched, so the client would get the engine's
-   * message instead of an answer.
-   *
-   * Receives the column data with the ownership stamp already applied. Takes no
-   * tier or noun, so an override cannot hand-roll the tier-keyed copy; `create`
-   * maps the failure with this service's tier. Anything already an
-   * HttpException passes through `mapWriteError` untouched.
-   *
-   * Return the row the insert produced. `create` compares its `contentSource`
-   * and `createdById` against the stamp and refuses the response on a mismatch,
-   * so an override that writes a payload other than the one it was handed, or
-   * returns a row without those columns, fails loudly instead of landing.
-   */
-  protected async performCreate(data: ColumnData): Promise<Row> {
-    return this.delegate.create({ data });
   }
 
   /**

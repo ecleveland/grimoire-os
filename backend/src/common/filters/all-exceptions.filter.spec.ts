@@ -91,21 +91,77 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
-  it('returns 400 for Prisma P2003 foreign key constraint on writes', () => {
-    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+  // The raw engine message is what a non-DELETE P2003 used to echo. Outside
+  // production it carries the absolute server path, a source frame and the
+  // constraint name, so this fixture carries all three to prove none survive.
+  const RAW_FK_MESSAGE =
+    'Invalid `prisma.subclass.create()` invocation in\n' +
+    '/app/backend/src/srd/homebrew-subclasses.service.ts:58:31\n\n' +
+    '  55   const created = await this.delegate.create({\n' +
+    'Foreign key constraint violated on the constraint: `subclasses_classId_fkey`';
+
+  function fkViolation(): Prisma.PrismaClientKnownRequestError {
+    return new Prisma.PrismaClientKnownRequestError(RAW_FK_MESSAGE, {
       code: 'P2003',
       clientVersion: '1.0.0',
+      meta: { modelName: 'Subclass', constraint: 'subclasses_classId_fkey' },
     });
-    filter.catch(error, createHost());
+  }
+
+  it('returns a fixed 400 for Prisma P2003 on writes', () => {
+    filter.catch(fkViolation(), createHost());
 
     expect(mockStatus).toHaveBeenCalledWith(400);
     expect(mockJson).toHaveBeenCalledWith({
       statusCode: 400,
-      message: 'Foreign key constraint failed',
+      message: 'A record this request refers to no longer exists; refresh and try again',
       error: 'Bad Request',
       timestamp: expect.any(String),
       path: '/api/test',
     });
+  });
+
+  it('leaks neither the constraint name nor the raw engine message on a write P2003', () => {
+    jest
+      .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    filter.catch(fkViolation(), createHost());
+
+    const body = JSON.stringify(mockJson.mock.calls[0][0]);
+    expect(body).not.toContain('subclasses_classId_fkey');
+    expect(body).not.toContain('homebrew-subclasses.service.ts');
+    expect(body).not.toContain('Invalid `prisma');
+  });
+
+  it('logs the constraint server-side when P2003 rejects a write', () => {
+    const logSpy = jest
+      .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
+      .mockImplementation(() => undefined);
+
+    filter.catch(fkViolation(), createHost());
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('subclasses_classId_fkey'));
+  });
+
+  // P2006 shared the echoing branch. Its message names the model, the field and
+  // the offending value, none of which the client needs to be told back.
+  it('returns a fixed 400 for Prisma P2006 without echoing the value or field', () => {
+    jest
+      .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
+      .mockImplementation(() => undefined);
+    const error = new Prisma.PrismaClientKnownRequestError(
+      'The provided value `s3cr3t` for User field `passwordHash` is not valid',
+      { code: 'P2006', clientVersion: '1.0.0', meta: { field_name: 'passwordHash' } }
+    );
+
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(400);
+    const body = JSON.stringify(mockJson.mock.calls[0][0]);
+    expect(body).not.toContain('s3cr3t');
+    expect(body).not.toContain('passwordHash');
+    expect(mockJson.mock.calls[0][0]).toMatchObject({ statusCode: 400, error: 'Bad Request' });
   });
 
   // VEG-312: every relation now carries an explicit onDelete policy, so a

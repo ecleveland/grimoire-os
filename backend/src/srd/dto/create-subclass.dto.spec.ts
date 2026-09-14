@@ -105,6 +105,23 @@ describe('CreateSubclassDto (through the production ValidationPipe)', () => {
     );
   });
 
+  // The only bound on how many child rows one request writes; the service has
+  // no count check of its own.
+  it('caps the feature list at 100', async () => {
+    const features = (length: number) =>
+      Array.from({ length }, (_, i) => ({ name: `Feature ${i}`, level: 3 }));
+
+    await reject(validBody({ features: features(101) }));
+    await accept(validBody({ features: features(100) }));
+  });
+
+  it('rejects anything that is not an array of feature objects', async () => {
+    await reject(validBody({ features: 'Ashen Step' }));
+    await reject(validBody({ features: { name: 'Ashen Step', level: 3 } }));
+    await reject(validBody({ features: [null] }));
+    await reject(validBody({ features: [1] }));
+  });
+
   it('accepts a null features list, the null-clear convention', async () => {
     await accept(validBody({ features: null }));
   });

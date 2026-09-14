@@ -20,9 +20,6 @@ import { UpdateClassDto } from './dto/update-class.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
-/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
-const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
-
 function makeCreateDto(over: Partial<CreateClassDto> = {}): CreateClassDto {
   return { name: 'Warden', hitDie: 'd10', ...over } as CreateClassDto;
 }
@@ -57,7 +54,7 @@ describe('HomebrewClassesService', () => {
   });
 
   it('passes class columns through to the create', async () => {
-    prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+    prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
     await service.create(makeCreateDto({ subclassLevel: 3 }), OWNER);
 
@@ -203,7 +200,7 @@ describe('HomebrewClassesService', () => {
       pipe.transform(body, { type: 'body' as const, metatype: metatype as never });
 
     it('writes no features relation when the create body never mentioned them', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
       const dto = await transform({ name: 'Warden', hitDie: 'd10' }, CreateClassDto);
 
       // Guard the premise rather than assume it: if this stops holding, the
@@ -233,7 +230,7 @@ describe('HomebrewClassesService', () => {
 
   describe('features on create', () => {
     it('writes them as a nested create alongside the class columns', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
       await service.create(
         makeCreateDto({
@@ -259,7 +256,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('defaults a missing description to the empty string — the column is NOT NULL', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
       await service.create(makeCreateDto({ features: [{ name: 'Rage', level: 1 }] }), OWNER);
 
@@ -270,7 +267,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('sends no features key at all when the body omits it', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
       await service.create(makeCreateDto(), OWNER);
 
@@ -283,7 +280,7 @@ describe('HomebrewClassesService', () => {
     // check runs before the write. Without it a seed or import caller passing
     // two features at one level is told it has a duplicate CLASS name.
     it('refuses a repeated (name, level) with feature copy, not class copy', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
       await expect(
         service.create(
@@ -301,7 +298,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('allows the same name at different levels, which is the point', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
       await service.create(
         makeCreateDto({
@@ -317,7 +314,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('sends an empty nested create for an explicitly empty list', async () => {
-      prisma.srdClass.create.mockResolvedValue({ id: 'c1', ...STAMPED });
+      prisma.srdClass.create.mockResolvedValue({ id: 'c1' });
 
       await service.create(makeCreateDto({ features: [] }), OWNER);
 
@@ -422,6 +419,32 @@ describe('HomebrewClassesService', () => {
       await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
 
       expect(prisma.srdClass.update).toHaveBeenCalledWith({ where: { id: 'c1' }, data: {} });
+    });
+
+    // A features-only PATCH leaves the parent update with no columns, which Prisma
+    // runs as a SELECT that locks nothing. Without the row lock first, two
+    // overlapping replacements merge their lists instead of one replacing the other.
+    it('locks the parent row inside the transaction before touching it', async () => {
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const [query] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
+      expect(query.sql).toBe('SELECT 1 FROM "srd_classes" WHERE "id" = ? FOR UPDATE');
+      expect(query.values).toEqual(['c1']);
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.srdClass.update.mock.invocationCallOrder[0]
+      );
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.classFeature.deleteMany.mock.invocationCallOrder[0]
+      );
+    });
+
+    // The lock belongs to the replacement. A scalar-only PATCH runs a real UPDATE,
+    // which locks the row itself, and opens no transaction to hold another one.
+    it('takes no lock when the body omits features', async () => {
+      await service.update('c1', { description: 'New prose.' } as never, OWNER);
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('runs the parent update and both child writes inside one transaction', async () => {

@@ -1,3 +1,4 @@
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -174,9 +175,8 @@ export class ClassMulticlassingDto {
 
 /** Ceiling on a class's feature list. A 20-level SRD class carries 5 to 18 rows;
  * this leaves generous room for a densely-written homebrew class while keeping
- * one request from writing an unbounded number of child rows. Shared with the
- * subclass DTO, whose feature rows are the same table in a different name. */
-export const MAX_CLASS_FEATURES = 100;
+ * one request from writing an unbounded number of child rows. */
+const MAX_CLASS_FEATURES = 100;
 
 /**
  * One per-level entry in a class's feature list (VEG-507).
@@ -210,6 +210,39 @@ export class ClassFeatureDto {
   // so this leaves roughly five times the longest real one.
   @MaxLength(2_000)
   description?: string;
+}
+
+/**
+ * The validation for a per-level feature list, shared by the class and subclass
+ * DTOs. `ClassFeature` and `SubclassFeature` are the same table shape, so the two
+ * lists must refuse exactly the same payloads, and a rule held once cannot be
+ * dropped from one of them while the other's spec stays green. That matters most
+ * for the size cap: nothing after the DTO counts the rows one request writes.
+ *
+ * `@IsObject({ each: true })` is there because `@ValidateNested({ each: true })`
+ * does not reject an element that is itself an array. It treats one as a nested
+ * collection and validates its members, so `features: [[]]` passed every
+ * constraint with nothing to check, reached the service as `{ name: undefined,
+ * level: undefined }` and became a 500 at the insert. `@IsObject` excludes
+ * arrays, the same pairing the class's three Json columns use.
+ *
+ * `@ArrayUnique(classFeatureIdentity)` rejects here what the
+ * `[parentId, name, level]` index would reject at the write, so the author gets a
+ * 400 naming the field instead of a duplicate-parent-name conflict from the
+ * shared error mapper, which keys everything to the parent noun.
+ *
+ * Swagger metadata stays on each field, since the description names the parent.
+ */
+export function IsFeatureList(): PropertyDecorator {
+  return applyDecorators(
+    IsOptional(),
+    IsArray(),
+    ArrayMaxSize(MAX_CLASS_FEATURES),
+    IsObject({ each: true }),
+    ArrayUnique(classFeatureIdentity),
+    ValidateNested({ each: true }),
+    Type(() => ClassFeatureDto)
+  );
 }
 
 /**
@@ -349,23 +382,7 @@ export class CreateClassDto {
       'Per-level features. Replaces the class’s existing features outright; ' +
       'omit to leave them alone, send [] or null to clear them.',
   })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(MAX_CLASS_FEATURES)
-  // `@ValidateNested({ each: true })` does not reject an element that is itself
-  // an array: it treats one as a nested collection and validates its members, so
-  // `features: [[]]` passes every constraint below with nothing to check. That
-  // reached the service as `{ name: undefined, level: undefined }` and became a
-  // 500 at the insert. `@IsObject` excludes arrays, which closes it — the same
-  // pairing the three Json columns above already use.
-  @IsObject({ each: true })
-  // Rejects here what the [classId, name, level] index would reject at the
-  // write, so the author gets a 400 naming the field rather than a 409 or —
-  // before this ran — a duplicate-*class*-name conflict from the shared error
-  // mapper, which keys everything to the parent noun.
-  @ArrayUnique(classFeatureIdentity)
-  @ValidateNested({ each: true })
-  @Type(() => ClassFeatureDto)
+  @IsFeatureList()
   // `| null` because null is a real, tested input here, not a stray: it is how
   // the client clears the list (VEG-316), the same as the String[] columns
   // above. Declaring it `ClassFeatureDto[] | undefined` would be the type

@@ -1,38 +1,36 @@
-// Real-DB regression test for homebrew subclass authorization (VEG-509). Runs
-// via `npm run test:db` against the disposable test DB.
+// Real-DB regression test for homebrew subclass writes (VEG-509). Runs via
+// `npm run test:db` against the disposable test DB.
 //
-// The rule under test is the one VEG-509 adds: a subclass's parent class must be
-// visible to its author. Nothing in the schema enforces it, and no constraint
-// could, since "visible" depends on who is asking. The service check is the
-// entire guard, and the mocked unit suite can only assert
-// that a `findFirst` was issued with a particular where clause. Here the rows are
-// real: a stranger's homebrew class is inserted, the service is asked to hang a
-// subclass off it, and the refusal is compared byte for byte with the refusal for
-// an id that never existed.
+// What it drives, against real rows:
 //
-// The second half is the user-delete ordering. `UsersService.remove` clears
-// subclasses before classes because `Subclass.classId` is ON DELETE RESTRICT, and
-// that ordering is only sufficient while every subclass's parent is either its
-// own author's class or a global-tier one. The cross-owner fixture (A's shared
-// class, B's subclass under it) is the case that would break it, driven through
-// the real `UsersService.remove` so a change to its ordering fails here.
-import {
-  createSeedContext,
-  teardownSeedContext,
-  truncateAll,
-  type SeedContext,
-} from './db-harness';
+// 1. The parent-visibility rule, through HomebrewSubclassesService. An author may
+//    hang a subclass off an SRD class, a shared class, or their own homebrew
+//    class. Another user's homebrew class is refused with the same status and
+//    message as an id that never existed. A direct insert under that same class
+//    succeeds, which pins that no database constraint backs the service check.
+// 2. The row's own visibility: a stranger reads nothing and gets 404 on update
+//    and delete, and the owner's delete takes the feature rows with it.
+// 3. The RESTRICT FK from the other side: HomebrewClassesService refuses to delete
+//    a class while a subclass hangs off it, and allows it once the subclass is gone.
+// 4. The real `UsersService.remove` across two authors. A owns a homebrew class
+//    with a homebrew subclass under it, which fails if the service deletes classes
+//    before subclasses, and a shared class that B has subclassed, which must
+//    survive A with a nulled creator and then go with B.
+// 5. Two overlapping features-only updates on one subclass, interleaved on
+//    purpose, which must end with one list or the other and never both.
+import { createSeedContext, teardownSeedContext, type SeedContext } from './db-harness';
 import type { Cache } from 'cache-manager';
+import type { Prisma } from '@prisma/client';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SrdService } from '../../src/srd/srd.service';
 import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { HomebrewSubclassesService } from '../../src/srd/homebrew-subclasses.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
 import { UsersService } from '../../src/users/users.service';
+import { HOMEBREW_SOURCE_LABEL, SHARED_SOURCE_LABEL } from '../../src/srd/homebrew-write.helpers';
 import type { RefreshTokenService } from '../../src/auth/refresh-token.service';
+import type { PrismaService } from '../../src/prisma/prisma.service';
 
-const HOMEBREW_LABEL = 'Homebrew';
-const SHARED_LABEL = 'Shared';
 const RUN = Date.now();
 
 // SrdService only touches the cache from invalidateCache, which nothing here
@@ -42,6 +40,67 @@ const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 // `UsersService.remove` never touches refresh tokens; the constructor demands the
 // dependency for the password and role paths, which nothing here calls.
 const unusedRefreshTokens = {} as RefreshTokenService;
+
+/**
+ * The real client, except that inside a transaction the subclass feature insert
+ * calls `pause` after it runs and before the transaction can commit. That is the
+ * point where the first of two overlapping replacements holds its row locks and
+ * has written rows nobody else can see yet, which is the state the race needs.
+ * Everything else, the parent lookup and the row lock included, goes straight to
+ * the real client.
+ */
+function pauseAfterFeatureInsert(real: PrismaService, pause: () => Promise<void>): PrismaService {
+  const forward = <T extends object>(target: T, prop: string | symbol): unknown => {
+    const value: unknown = Reflect.get(target, prop);
+    return typeof value === 'function'
+      ? (value as (...a: unknown[]) => unknown).bind(target)
+      : value;
+  };
+
+  return new Proxy(real, {
+    get(target, prop) {
+      if (prop !== '$transaction') return forward(target, prop);
+      return (fn: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+        target.$transaction(tx =>
+          fn(
+            new Proxy(tx, {
+              get(txTarget, txProp) {
+                if (txProp !== 'subclassFeature') return forward(txTarget, txProp);
+                const features = txTarget.subclassFeature;
+                return {
+                  deleteMany: (args: Prisma.SubclassFeatureDeleteManyArgs) =>
+                    features.deleteMany(args),
+                  createMany: async (args: Prisma.SubclassFeatureCreateManyArgs) => {
+                    const written = await features.createMany(args);
+                    await pause();
+                    return written;
+                  },
+                };
+              },
+            })
+          )
+        );
+    },
+  });
+}
+
+/**
+ * Wait until some session on the test database is blocked on a lock. Polling
+ * `pg_stat_activity` makes the interleave deterministic: the second update is
+ * released only once Postgres itself reports it waiting, rather than after a
+ * sleep that is either too short on a slow machine or wasted on a fast one.
+ */
+async function waitForBlockedSession(prisma: PrismaService): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const [{ blocked }] = await prisma.$queryRaw<{ blocked: number }[]>`
+      SELECT count(*)::int AS blocked FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock'`;
+    if (blocked > 0) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error('The second update never blocked behind the first');
+}
 
 describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   let ctx: SeedContext;
@@ -60,9 +119,9 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   let strangerClassId: string;
 
   beforeAll(async () => {
+    // No truncate and no seed: every row this file reads it inserts, under a
+    // RUN-stamped name, and nothing here counts rows it did not write.
     ctx = await createSeedContext();
-    await truncateAll(ctx.prisma);
-    await ctx.seed.seed();
 
     const access = new ContentAccessService();
     srd = new SrdService(ctx.prisma, access, noopCache);
@@ -82,17 +141,19 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     owner = { userId: ownerId, isAdmin: false };
     stranger = { userId: strangerId, isAdmin: false };
 
-    srdClassId = (await ctx.prisma.srdClass.findFirstOrThrow({ where: { contentSource: 'srd' } }))
-      .id;
-
-    const [own, shared, foreign] = await Promise.all([
+    const [srdClass, own, shared, foreign] = await Promise.all([
+      // Stands in for a seeded class: SRD tier, no owner, which is all the
+      // visibility rule reads.
+      ctx.prisma.srdClass.create({
+        data: { name: `Veg509 Srd Fighter ${RUN}`, hitDie: 'd10', contentSource: 'srd' },
+      }),
       ctx.prisma.srdClass.create({
         data: {
           name: `Veg509 Own Warden ${RUN}`,
           hitDie: 'd10',
           contentSource: 'homebrew',
           createdById: ownerId,
-          source: HOMEBREW_LABEL,
+          source: HOMEBREW_SOURCE_LABEL,
         },
       }),
       // Inserted directly: the shared tier is admin-published and this spec has
@@ -103,7 +164,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           hitDie: 'd8',
           contentSource: 'shared',
           createdById: ownerId,
-          source: SHARED_LABEL,
+          source: SHARED_SOURCE_LABEL,
         },
       }),
       ctx.prisma.srdClass.create({
@@ -112,10 +173,11 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           hitDie: 'd12',
           contentSource: 'homebrew',
           createdById: strangerId,
-          source: HOMEBREW_LABEL,
+          source: HOMEBREW_SOURCE_LABEL,
         },
       }),
     ]);
+    srdClassId = srdClass.id;
     ownClassId = own.id;
     sharedClassId = shared.id;
     strangerClassId = foreign.id;
@@ -139,7 +201,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       });
     });
 
-    it('accepts the author’s own homebrew class', async () => {
+    it("accepts the author's own homebrew class", async () => {
       const created = await service.create(
         { name: `Veg509 Path of Loam ${RUN}`, classId: ownClassId } as never,
         owner
@@ -161,7 +223,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     // findFirst rather than a findUnique plus a tier test: the stranger's class
     // and a class that never existed have to be the same answer, or the endpoint
     // is an oracle for whether a given id belongs to somebody.
-    it('refuses another user’s homebrew class exactly as it refuses a nonexistent one', async () => {
+    it("refuses another user's homebrew class exactly as it refuses a nonexistent one", async () => {
       const foreign = await service
         .create({ name: `Veg509 Stolen ${RUN}`, classId: strangerClassId } as never, owner)
         .catch((err: BadRequestException) => err);
@@ -196,7 +258,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           classId: strangerClassId,
           contentSource: 'homebrew',
           createdById: ownerId,
-          source: HOMEBREW_LABEL,
+          source: HOMEBREW_SOURCE_LABEL,
         },
       });
 
@@ -228,7 +290,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       expect(await srd.findSubclass(subclassId, ownerId)).toMatchObject({ id: subclassId });
     });
 
-    it('refuses the stranger’s update and delete as not found, never as forbidden', async () => {
+    it("refuses the stranger's update and delete as not found, never as forbidden", async () => {
       await expect(
         service.update(subclassId, { description: 'x' } as never, stranger)
       ).rejects.toThrow(NotFoundException);
@@ -257,7 +319,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           hitDie: 'd6',
           contentSource: 'homebrew',
           createdById: ownerId,
-          source: HOMEBREW_LABEL,
+          source: HOMEBREW_SOURCE_LABEL,
         },
       });
       const sub = await service.create(
@@ -273,18 +335,19 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   });
 
   /**
-   * The cross-owner case the user-delete ordering has to survive: A's shared
-   * class with B's homebrew subclass under it. Deleting A must not touch B's
-   * row, and deleting B must not be blocked by A's class.
+   * Two things `UsersService.remove` has to get right about subclasses. A's own
+   * homebrew subclass under A's own homebrew class only deletes if subclasses go
+   * before classes, since the FK is RESTRICT. B's subclass under A's shared class
+   * must not go with A at all, because the shared class survives its author.
    */
-  describe('deleting a user whose class another user has subclassed', () => {
+  describe('deleting a user who owns classes with subclasses under them', () => {
     let users: UsersService;
 
     beforeAll(() => {
       users = new UsersService(ctx.prisma, unusedRefreshTokens);
     });
 
-    it('keeps the shared class and the other user’s subclass, then clears them with their author', async () => {
+    it("removes the user's own class and subclass, keeps the shared class and the other user's subclass, then clears that with its author", async () => {
       const [authorA, authorB] = await Promise.all([
         ctx.prisma.user.create({
           data: { username: `veg509-a-${RUN}`, passwordHash: 'x', displayName: 'A' },
@@ -293,33 +356,110 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           data: { username: `veg509-b-${RUN}`, passwordHash: 'x', displayName: 'B' },
         }),
       ]);
-      const sharedClass = await ctx.prisma.srdClass.create({
-        data: {
-          name: `Veg509 Shared By A ${RUN}`,
-          hitDie: 'd10',
-          contentSource: 'shared',
-          createdById: authorA.id,
-          source: SHARED_LABEL,
-        },
-      });
-      const sub = await service.create(
-        { name: `Veg509 B Path ${RUN}`, classId: sharedClass.id } as never,
-        { userId: authorB.id, isAdmin: false }
-      );
+      const actorA = { userId: authorA.id, isAdmin: false };
+      const [ownClassOfA, sharedClass] = await Promise.all([
+        ctx.prisma.srdClass.create({
+          data: {
+            name: `Veg509 A Own Class ${RUN}`,
+            hitDie: 'd8',
+            contentSource: 'homebrew',
+            createdById: authorA.id,
+            source: HOMEBREW_SOURCE_LABEL,
+          },
+        }),
+        ctx.prisma.srdClass.create({
+          data: {
+            name: `Veg509 Shared By A ${RUN}`,
+            hitDie: 'd10',
+            contentSource: 'shared',
+            createdById: authorA.id,
+            source: SHARED_SOURCE_LABEL,
+          },
+        }),
+      ]);
+      const [ownSubOfA, subOfB] = await Promise.all([
+        service.create(
+          { name: `Veg509 A Own Path ${RUN}`, classId: ownClassOfA.id } as never,
+          actorA
+        ),
+        service.create({ name: `Veg509 B Path ${RUN}`, classId: sharedClass.id } as never, {
+          userId: authorB.id,
+          isAdmin: false,
+        }),
+      ]);
 
       await users.remove(authorA.id);
 
+      expect(await ctx.prisma.subclass.count({ where: { id: ownSubOfA.id } })).toBe(0);
+      expect(await ctx.prisma.srdClass.count({ where: { id: ownClassOfA.id } })).toBe(0);
       // The shared class survives its author via the SET NULL FK, so B's
       // subclass still has a parent to point at.
       const survivor = await ctx.prisma.srdClass.findUniqueOrThrow({
         where: { id: sharedClass.id },
       });
       expect(survivor.createdById).toBeNull();
-      expect(await ctx.prisma.subclass.count({ where: { id: sub.id } })).toBe(1);
+      expect(await ctx.prisma.subclass.count({ where: { id: subOfB.id } })).toBe(1);
 
       await users.remove(authorB.id);
 
-      expect(await ctx.prisma.subclass.count({ where: { id: sub.id } })).toBe(0);
+      expect(await ctx.prisma.subclass.count({ where: { id: subOfB.id } })).toBe(0);
+    });
+  });
+
+  /**
+   * Two features-only PATCHes on one subclass, overlapping. The parent update in
+   * each carries no columns, which Prisma runs as a SELECT that locks nothing, so
+   * without the parent row lock the second transaction's delete waits on the
+   * first one's deleted rows, cannot see the first one's insert once it commits,
+   * deletes nothing, and adds its own list beside the first. The lock makes the
+   * second wait at the parent instead, and its delete then sees the first list.
+   */
+  describe('two overlapping features-only updates', () => {
+    it('end with exactly one of the two lists, never both, and neither conflicts', async () => {
+      const sub = await service.create(
+        {
+          name: `Veg509 Contended Path ${RUN}`,
+          classId: srdClassId,
+          features: [{ name: 'Veg509 Original', level: 3 }],
+        } as never,
+        owner
+      );
+      const listA = [
+        { name: 'Veg509 First A', level: 3 },
+        { name: 'Veg509 First B', level: 6 },
+      ];
+      const listB = [{ name: 'Veg509 Second A', level: 3 }];
+
+      let signalWritten!: () => void;
+      const firstHasWritten = new Promise<void>(resolve => (signalWritten = resolve));
+      let releaseFirst!: () => void;
+      const firstReleased = new Promise<void>(resolve => (releaseFirst = resolve));
+      const pausing = pauseAfterFeatureInsert(ctx.prisma, async () => {
+        signalWritten();
+        await firstReleased;
+      });
+      const first = new HomebrewSubclassesService(pausing, new ContentAccessService());
+
+      const t1 = first.update(sub.id, { features: listA } as never, owner);
+      // Surface a T1 failure instead of waiting forever for a pause it never reached.
+      await Promise.race([
+        firstHasWritten,
+        t1.then(() => Promise.reject(new Error('The first update finished without pausing'))),
+      ]);
+
+      const t2 = service.update(sub.id, { features: listB } as never, owner);
+      await waitForBlockedSession(ctx.prisma);
+      releaseFirst();
+
+      await expect(Promise.all([t1, t2])).resolves.toHaveLength(2);
+
+      const names = (
+        await ctx.prisma.subclassFeature.findMany({
+          where: { subclassId: sub.id },
+          orderBy: [{ level: 'asc' }, { name: 'asc' }],
+        })
+      ).map(f => f.name);
+      expect([listA.map(f => f.name), listB.map(f => f.name)]).toContainEqual(names);
     });
   });
 });

@@ -2,9 +2,9 @@ import { BadRequestException, ConflictException, Injectable } from '@nestjs/comm
 import { Prisma, SrdClass } from '@prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import {
-  DUPLICATE_FEATURE_MESSAGE,
-  assertNoDuplicateFeatures,
-  isFeatureConflict,
+  lockFeatureParent,
+  nestFeaturesForCreate,
+  replaceFeatures,
   takeFeatures,
   toFeatureRows,
 } from './feature-rows';
@@ -54,31 +54,12 @@ export class HomebrewClassesService extends ContentCrudService<
   }
 
   /**
-   * Turn the normalized feature list into Prisma's nested-create form.
-   *
-   * Not done in {@link toColumnData}, which is handed a `CreateClassDto |
-   * UpdateClassDto` and cannot tell which: the update path needs the same rows
-   * as a plain array so {@link performUpdate} can delete-then-insert them, and
-   * a nested `create` there would append to the existing rows instead of
-   * replacing them.
-   *
-   * An absent `features` key stays absent, so a create that says nothing about
-   * features writes no child rows rather than an empty relation.
+   * Turn the normalized feature list into Prisma's nested-create form, refusing a
+   * duplicate (name, level) before the write. {@link nestFeaturesForCreate} says
+   * why both happen here rather than in {@link toColumnData} or after the insert.
    */
   protected override beforeCreate(data: ColumnData, _actor: ContentActor): ColumnData {
-    const features = takeFeatures(data);
-    if (features) {
-      // Same reasoning as the catch in performUpdate, applied to the path that
-      // cannot catch. `create` is final, and the skeleton maps every failure
-      // from it with the parent noun, so a P2002 from the nested feature insert
-      // would reach the client as "you already have a class with this name" — a
-      // message about the wrong entity. There is no seam to translate it after
-      // the fact, so the check happens before the write instead. The DTO's
-      // @ArrayUnique makes it unreachable over HTTP; the write skeleton names
-      // seed and import callers as sitting outside that pipe.
-      assertNoDuplicateFeatures(features);
-      data.features = { create: features };
-    }
+    nestFeaturesForCreate(data);
     return data;
   }
 
@@ -105,7 +86,9 @@ export class HomebrewClassesService extends ContentCrudService<
    *
    * The transaction is what makes the replacement safe: without it a failure
    * between the delete and the insert would leave the class with no features at
-   * all, having been asked to change two of them.
+   * all, having been asked to change two of them. The row lock taken first is
+   * what keeps two overlapping replacements from merging; see
+   * {@link lockFeatureParent}.
    *
    * Returns the row the parent update produced, per the hook's contract — not a
    * re-read, and not the row `update` authorized, either of which would serve
@@ -118,35 +101,9 @@ export class HomebrewClassesService extends ContentCrudService<
     if (!features) return this.delegate.update({ where: { id }, data });
 
     return this.prisma.$transaction(async tx => {
+      await lockFeatureParent(tx, 'srd_classes', id);
       const updated = await tx.srdClass.update({ where: { id }, data });
-      await tx.classFeature.deleteMany({ where: { classId: id } });
-      if (features.length > 0) {
-        try {
-          await tx.classFeature.createMany({
-            // `classId` last so a row cannot override the parent id. This is
-            // the second of two guards and no test distinguishes it, because
-            // the first one already holds: `toFeatureRows` builds each row from
-            // three named fields, so a stray `classId` never reaches here. Kept
-            // because it is free and it makes the question local — under the
-            // other order, whether a feature can reparent itself depends on a
-            // whitelist two functions away.
-            data: features.map(f => ({ ...f, classId: id })),
-          });
-        } catch (err) {
-          // Unreachable through the HTTP boundary today: the DTO's @ArrayUnique
-          // rejects a payload that repeats a (name, level) pair, and the
-          // deleteMany above clears the only other rows the index could collide
-          // with. Kept because `update` maps every failure with the parent's
-          // noun, so without this a duplicate *feature* would reach the client
-          // as "you already have a class with this name" — a message about the
-          // wrong entity is worse than no message. Anything already an
-          // HttpException passes through mapWriteError untouched.
-          if (isFeatureConflict(err)) {
-            throw new ConflictException(DUPLICATE_FEATURE_MESSAGE);
-          }
-          throw err;
-        }
-      }
+      await replaceFeatures(tx.classFeature, 'classId', id, features);
       return updated;
     });
   }

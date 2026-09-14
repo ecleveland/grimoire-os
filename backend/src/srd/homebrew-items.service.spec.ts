@@ -13,9 +13,6 @@ import { CreateItemDto } from './dto/create-item.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
-/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
-const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
-
 function makeCreateDto(over: Partial<CreateItemDto> = {}): CreateItemDto {
   return { name: 'Sunblade', category: 'Weapon', ...over } as CreateItemDto;
 }
@@ -35,7 +32,7 @@ describe('HomebrewItemsService', () => {
   });
 
   it('passes item columns through to the create', async () => {
-    prisma.item.create.mockResolvedValue({ id: 'i1', ...STAMPED });
+    prisma.item.create.mockResolvedValue({ id: 'i1' });
 
     await service.create(makeCreateDto({ rarity: 'Rare' }), OWNER);
 

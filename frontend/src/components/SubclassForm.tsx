@@ -34,13 +34,12 @@ export default function SubclassForm({
   onSubmit,
   onCancel,
 }: SubclassFormProps) {
-  // The subclass as it loaded, frozen on mount. The class page keeps its query
-  // mounted, so a background refetch must not swap what the author is editing.
-  const [initialSubclass] = useState(() => initial);
   // The loaded form state, so a save can tell what the author changed. A new
-  // subclass has none.
+  // subclass has none. Frozen on mount: the class page keeps its query mounted,
+  // so a background refetch hands over a new `initial`, and neither the edit nor
+  // what a save compares against may swap under the author.
   const [baseline] = useState<SubclassFormState | undefined>(() =>
-    initialSubclass ? subclassToFormState(initialSubclass) : undefined
+    initial ? subclassToFormState(initial) : undefined
   );
   // Seeded once from the loaded state. The features editor keys its rows on
   // mount, so handing it a different list later would pair those keys with the

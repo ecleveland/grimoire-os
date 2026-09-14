@@ -123,12 +123,20 @@ export type UnifiedSearchHit =
 const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
 const SUBCLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
 const NAME_ORDER = { name: 'asc' as const };
-// Total, for the reason findAllClasses's sort is: two subclasses under one class
-// may now share a name (an SRD "Life Domain" beside a homebrew one), and a tie
-// has no defined order, so the same list can come back shuffled between loads.
-// Stability is the only property claimed here; `contentSource` is not a tier
-// preference, since Postgres sorts an enum by its internal order.
-const SUBCLASS_ORDER = [
+// The sort for every tiered list whose names can repeat. A user's homebrew row
+// may share its name with an SRD or shared row (a homebrew "Fighter", a second
+// "Life Domain"), and a tie has no defined order: Postgres returns whatever the
+// plan produces, so the same list can come back shuffled between loads.
+// `contentSource` then `id` makes it total, since `id` is unique.
+//
+// Do not read a tier preference into the `contentSource` key. Postgres sorts an
+// enum by its internal sort order, not alphabetically or by the order in
+// schema.prisma: `shared` was appended by a later ALTER TYPE ADD VALUE, so the
+// real order is srd, homebrew, shared. Stability is the only property claimed.
+//
+// One constant for classes and subclasses, so duplicate names in either list
+// sort by the same rule.
+const TIERED_NAME_ORDER = [
   { name: 'asc' as const },
   { contentSource: 'asc' as const },
   { id: 'asc' as const },
@@ -520,23 +528,19 @@ export class SrdService {
   // own a homebrew "Fighter" beside the SRD one, a name-only sort left the two
   // tied, and a tie has no defined order — Postgres returns whatever the plan
   // produces, so a client picking the first match could resolve the same
-  // character differently between loads. `contentSource` then `id` makes that
-  // stable; `id` is unique, so no tie survives it. This does not make the name
+  // character differently between loads. TIERED_NAME_ORDER, which explains its
+  // keys, makes that stable. This does not make the name
   // unambiguous — only the character's stored `classId` does that — it just
   // stops the ambiguity being intermittent.
   //
-  // Do not read a tier preference into the `contentSource` key. Postgres sorts
-  // an enum by its internal sort order, not alphabetically or by the order in
-  // schema.prisma: `shared` was appended by a later ALTER TYPE ADD VALUE, so the
-  // real order is srd, homebrew, shared. Stability is the only property claimed
-  // here. VEG-528 deleted the tier preference loadClassData used to apply: an
+  // VEG-528 deleted the tier preference loadClassData used to apply: an
   // ambiguous name now resolves to nothing on both sides rather than to a
   // guessed tier, so a character's stored `classId` is the only thing that
   // picks between duplicate names.
   async findAllClasses(userId?: string) {
     return this.prisma.srdClass.findMany({
       where: { ...this.contentAccess.visibleTo(userId) },
-      orderBy: [{ name: 'asc' }, { contentSource: 'asc' }, { id: 'asc' }],
+      orderBy: TIERED_NAME_ORDER,
       include: { features: { orderBy: CLASS_FEATURE_ORDER } },
     });
   }
@@ -560,7 +564,7 @@ export class SrdService {
           // The class page renders this list, and each card can carry its
           // owner's Edit and Delete. A name-only sort leaves two same-named
           // subclasses tied, so those controls could move between loads.
-          orderBy: SUBCLASS_ORDER,
+          orderBy: TIERED_NAME_ORDER,
           include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
         },
         features: { orderBy: CLASS_FEATURE_ORDER },
@@ -609,7 +613,7 @@ export class SrdService {
     if (classId) where.classId = classId;
     return this.prisma.subclass.findMany({
       where,
-      orderBy: SUBCLASS_ORDER,
+      orderBy: TIERED_NAME_ORDER,
       include: { features: { orderBy: SUBCLASS_FEATURE_ORDER } },
     });
   }

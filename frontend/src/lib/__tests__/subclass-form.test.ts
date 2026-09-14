@@ -5,7 +5,6 @@ import {
   subclassToFormState,
   type SubclassFormState,
 } from '@/lib/subclass-form';
-import { MAX_LEVEL } from '@/lib/character-level';
 import type { SrdSubclass } from '@/lib/types';
 
 function makeSubclass(over: Partial<SrdSubclass> = {}): SrdSubclass {
@@ -80,100 +79,64 @@ describe('formStateToPayload', () => {
     expect(formStateToPayload(makeState({ name: '   ' }))).toEqual({ error: 'Name is required' });
   });
 
-  it('sends every feature on a create, trimmed and without ids', () => {
-    const payload = payloadOf(
-      makeState({ features: [{ name: '  Steady Aim  ', level: 3, description: '  Hold.  ' }] })
-    );
-
-    expect(payload.features).toEqual([{ name: 'Steady Aim', level: 3, description: 'Hold.' }]);
+  it('sends both name and description on a create', () => {
+    expect(payloadOf(makeState({ description: 'A patient marksman.' }))).toStrictEqual({
+      name: 'Deadeye',
+      description: 'A patient marksman.',
+      features: [],
+    });
   });
 
-  describe('features against a baseline', () => {
+  // An edit sends only what the author changed. The card an edit opens from can
+  // be stale (a refetch after the last save failed), and resending its untouched
+  // fields would quietly revert that save.
+  describe('on an edit', () => {
     const loaded = () => subclassToFormState(makeSubclass());
 
-    it('omits the key when the list is untouched', () => {
-      const baseline = loaded();
-
-      expect('features' in payloadOf({ ...baseline }, baseline)).toBe(false);
+    it('sends only the name when only the name changed', () => {
+      expect(payloadOf({ ...loaded(), name: 'Dead Eye' }, loaded())).toStrictEqual({
+        name: 'Dead Eye',
+      });
     });
 
-    it('omits the key when only the row order changed', () => {
-      const baseline = loaded();
-      const reordered = { ...baseline, features: [...baseline.features].reverse() };
-
-      expect('features' in payloadOf(reordered, baseline)).toBe(false);
+    it('sends only the description when only the description changed', () => {
+      expect(payloadOf({ ...loaded(), description: 'Reworded.' }, loaded())).toStrictEqual({
+        description: 'Reworded.',
+      });
     });
 
-    it('sends the whole list when a description changed', () => {
-      const baseline = loaded();
-      const [aim, watch] = baseline.features;
-      const edited = { ...baseline, features: [aim, { ...watch, description: 'Never blink.' }] };
-
-      expect(payloadOf(edited, baseline).features).toEqual([
-        { name: 'Steady Aim', level: 3, description: 'Hold the shot.' },
-        { name: 'Long Watch', level: 7, description: 'Never blink.' },
-      ]);
+    it('sends a cleared description as null', () => {
+      expect(payloadOf({ ...loaded(), description: '   ' }, loaded())).toStrictEqual({
+        description: null,
+      });
     });
 
-    it('sends the whole list when a row is added or removed', () => {
-      const baseline = loaded();
-      const added = {
-        ...baseline,
-        features: [...baseline.features, { name: 'Killing Shot', level: 15 }],
-      };
-      const removed = { ...baseline, features: [baseline.features[0]] };
+    it('sends nothing when the only differences are whitespace the trim removes', () => {
+      const padded = { ...loaded(), name: ' Deadeye ', description: 'A patient marksman.  ' };
 
-      expect(payloadOf(added, baseline).features).toHaveLength(3);
-      expect(payloadOf(removed, baseline).features).toHaveLength(1);
+      expect(payloadOf(padded, loaded())).toStrictEqual({});
     });
 
-    it('sends the list on a create, where there is no baseline at all', () => {
-      expect(payloadOf(makeState()).features).toEqual([]);
+    it('still requires a name', () => {
+      expect(formStateToPayload({ ...loaded(), name: '  ' }, loaded())).toEqual({
+        error: 'Name is required',
+      });
     });
   });
 
-  describe('feature validation', () => {
-    it('reports a blank feature name', () => {
-      expect(formStateToPayload(makeState({ features: [{ name: '  ', level: 3 }] }))).toEqual({
-        error: 'Every feature needs a name',
-      });
-    });
+  // The send rules are tested once, in feature-rows.test.ts. This proves the
+  // subclass form hands its lists to them and keeps what they return.
+  it('sends features only when they changed against the loaded subclass, and surfaces their errors', () => {
+    const baseline = subclassToFormState(makeSubclass());
 
-    it('reports an out-of-range level', () => {
-      expect(
-        formStateToPayload(makeState({ features: [{ name: 'Steady Aim', level: 0 }] }))
-      ).toEqual({ error: `Every feature needs a level from 1 to ${MAX_LEVEL}` });
-    });
-
-    it('reports two rows sharing a name at the same level', () => {
-      const features = [
-        { name: 'Steady Aim', level: 3 },
-        { name: 'Steady Aim', level: 3 },
-      ];
-
-      expect(formStateToPayload(makeState({ features }))).toEqual({
-        error: 'Two features share a name at the same level; each pairing must be unique',
-      });
-    });
-
-    it('lets a name at two different levels through', () => {
-      const features = [
-        { name: 'Steady Aim', level: 3 },
-        { name: 'Steady Aim', level: 7 },
-      ];
-
-      expect(payloadOf(makeState({ features })).features).toHaveLength(2);
-    });
-
-    it('leaves a stored row this form would reject alone when the list is untouched', () => {
-      const baseline = subclassToFormState(
-        makeSubclass({ features: [{ id: 'cf-1', name: '', level: 3 }] })
-      );
-      const edited = { ...baseline, description: 'Reworded.' };
-
-      const payload = payloadOf(edited, baseline);
-      expect('features' in payload).toBe(false);
-      expect(payload.description).toBe('Reworded.');
-    });
+    expect('features' in payloadOf({ ...baseline, description: 'Reworded.' }, baseline)).toBe(
+      false
+    );
+    expect(
+      payloadOf({ ...baseline, features: [{ name: 'Killing Shot', level: 15 }] }, baseline).features
+    ).toEqual([{ name: 'Killing Shot', level: 15, description: '' }]);
+    expect(
+      formStateToPayload({ ...baseline, features: [{ name: '', level: 3 }] }, baseline)
+    ).toEqual({ error: 'Every feature needs a name' });
   });
 });

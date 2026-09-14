@@ -371,6 +371,52 @@ describe('UsersService', () => {
       await expect(service.remove(USER_ID)).rejects.toBe(fkError);
     });
 
+    // The user being deleted can add a subclass under their own class between
+    // the subclass and class deletes. The class delete then trips the RESTRICT
+    // FK. That is a race a retry clears, not the missing onDelete policy the
+    // filter would otherwise log for an unmapped P2003 on a DELETE.
+    describe('a subclass added while the user is being deleted', () => {
+      // The meta a live Postgres raises for this delete, measured rather than assumed.
+      const raceError = () =>
+        new PrismaClientKnownRequestError('Foreign key constraint violated', {
+          code: 'P2003',
+          clientVersion: '6.0.0',
+          meta: { modelName: 'SrdClass', constraint: 'subclasses_classId_fkey' },
+        });
+
+      it('answers the class-delete FK violation with a retryable conflict', async () => {
+        prisma.srdClass.deleteMany.mockRejectedValue(raceError());
+
+        const err = await service.remove(USER_ID).catch((e: unknown) => e);
+
+        expect(err).toBeInstanceOf(ConflictException);
+        expect((err as ConflictException).message).toBe(
+          'Content was added while this user was being deleted; try again'
+        );
+      });
+
+      // Mapped by constraint, not by statement: any other FK a class delete
+      // trips is a relation without an onDelete policy, and that must still
+      // reach the filter's diagnostic.
+      it('leaves a P2003 on any other constraint untouched', async () => {
+        const other = new PrismaClientKnownRequestError('Foreign key constraint violated', {
+          code: 'P2003',
+          clientVersion: '6.0.0',
+          meta: { modelName: 'SrdClass', constraint: 'widgets_classId_fkey' },
+        });
+        prisma.srdClass.deleteMany.mockRejectedValue(other);
+
+        await expect(service.remove(USER_ID)).rejects.toBe(other);
+      });
+
+      it('rethrows an error that is not a Prisma known error untouched', async () => {
+        const failure = new Error('connection reset');
+        prisma.srdClass.deleteMany.mockRejectedValue(failure);
+
+        await expect(service.remove(USER_ID)).rejects.toBe(failure);
+      });
+    });
+
     it("deletes the user's homebrew content with the user in one transaction", async () => {
       prisma.spell.deleteMany.mockResolvedValue({ count: 1 });
       prisma.monster.deleteMany.mockResolvedValue({ count: 0 });

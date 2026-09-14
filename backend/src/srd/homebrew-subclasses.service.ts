@@ -1,18 +1,18 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { Prisma, Subclass } from '@prisma/client';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { Subclass } from '@prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { ContentActor } from './content-access.service';
 import {
-  DUPLICATE_FEATURE_MESSAGE,
-  assertNoDuplicateFeatures,
-  isFeatureConflict,
+  lockFeatureParent,
+  nestFeaturesForCreate,
+  replaceFeatures,
   takeFeatures,
   toFeatureRows,
 } from './feature-rows';
 import { CreateSubclassDto } from './dto/create-subclass.dto';
 import { UpdateSubclassDto } from './dto/update-subclass.dto';
 
-/** Refusal for a parent the author cannot use, whether it is hidden, missing or gone. */
+/** Refusal for a parent the author cannot use, whether it is hidden or missing. */
 const PARENT_NOT_VISIBLE_MESSAGE = 'Parent class not found or not accessible';
 
 /**
@@ -48,48 +48,22 @@ export class HomebrewSubclassesService extends ContentCrudService<
 
   /**
    * Authorize the parent, then reshape the features for Prisma's nested-create
-   * form. Both for the reasons {@link HomebrewClassesService.beforeCreate} gives:
-   * the update path needs the rows as a plain array so it can delete-then-insert
-   * them, and a duplicate (name, level) has to be refused before the write
-   * because `create` is final and the skeleton maps its failures with the parent
-   * noun.
+   * form; {@link nestFeaturesForCreate} says why the reshaping happens here.
    */
   protected override async beforeCreate(
     data: ColumnData,
     actor: ContentActor
   ): Promise<ColumnData> {
     await this.assertParentClassVisible(data.classId, actor);
-    const features = takeFeatures(data);
-    if (features) {
-      assertNoDuplicateFeatures(features);
-      data.features = { create: features };
-    }
+    nestFeaturesForCreate(data);
     return data;
   }
 
   /**
-   * Translate the FK refusal for a parent deleted after the visibility check.
-   *
-   * The check and the insert are two statements, so a concurrent delete of the
-   * parent class can land between them; `subclasses_classId_fkey` then refuses
-   * the insert with P2003. `mapWriteError` does not translate that code, so the
-   * client would get the engine's message, constraint name included. From the
-   * author's side the parent is simply not there any more, which is the answer
-   * the visibility check gives, so this gives it too, byte for byte.
-   */
-  protected override async performCreate(data: ColumnData): Promise<Subclass> {
-    try {
-      return await this.delegate.create({ data });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
-        throw new BadRequestException(PARENT_NOT_VISIBLE_MESSAGE);
-      }
-      throw err;
-    }
-  }
-
-  /**
-   * Drop any `classId` the payload carries. The DTO omits the field and the
+   * Drop both ways a payload can name a new parent: the `classId` scalar and the
+   * `srdClass` relation form (`srdClass: { connect: { id } }`), which sets the
+   * same column without the string `classId` appearing anywhere, the reason the
+   * base strips `createdBy` alongside `createdById`. The DTO omits both and the
    * global pipe has `forbidNonWhitelisted`, so an HTTP caller gets a 400 before
    * reaching here; this is the copy of that rule for the seed and import callers
    * the write skeleton documents as sitting outside the pipe. Without it a
@@ -97,6 +71,7 @@ export class HomebrewSubclassesService extends ContentCrudService<
    */
   protected override beforeUpdate(data: ColumnData): ColumnData {
     delete data.classId;
+    delete data.srdClass;
     return data;
   }
 
@@ -110,7 +85,9 @@ export class HomebrewSubclassesService extends ContentCrudService<
    *
    * The transaction is what makes the replacement safe: without it a failure
    * between the delete and the insert would leave the subclass with no features
-   * at all, having been asked to change two of them.
+   * at all, having been asked to change two of them. The row lock taken first is
+   * what keeps two overlapping replacements from merging; see
+   * {@link lockFeatureParent}.
    *
    * Returns the row the parent update produced, per the hook's contract, and
    * without its features: the delegate's `create` cannot include them, so
@@ -122,29 +99,9 @@ export class HomebrewSubclassesService extends ContentCrudService<
     if (!features) return this.delegate.update({ where: { id }, data });
 
     return this.prisma.$transaction(async tx => {
+      await lockFeatureParent(tx, 'subclasses', id);
       const updated = await tx.subclass.update({ where: { id }, data });
-      await tx.subclassFeature.deleteMany({ where: { subclassId: id } });
-      if (features.length > 0) {
-        try {
-          await tx.subclassFeature.createMany({
-            // `subclassId` last so a row cannot override the parent id. The
-            // named-field mapping in `toFeatureRows` already holds that line;
-            // this keeps the question local rather than two functions away.
-            data: features.map(f => ({ ...f, subclassId: id })),
-          });
-        } catch (err) {
-          // Unreachable through the HTTP boundary today: the DTO's @ArrayUnique
-          // rejects a repeated (name, level), and the deleteMany above clears
-          // the only other rows the index could collide with. Kept because
-          // `update` maps every failure with the parent's noun, so without this
-          // a duplicate *feature* would reach the client as "you already have a
-          // subclass with this name".
-          if (isFeatureConflict(err)) {
-            throw new ConflictException(DUPLICATE_FEATURE_MESSAGE);
-          }
-          throw err;
-        }
-      }
+      await replaceFeatures(tx.subclassFeature, 'subclassId', id, features);
       return updated;
     });
   }

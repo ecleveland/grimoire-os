@@ -15,9 +15,6 @@ import { CreateSpellDto } from './dto/create-spell.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
-/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
-const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
-
 function makeCreateDto(over: Partial<CreateSpellDto> = {}): CreateSpellDto {
   return {
     name: 'Mending Word',
@@ -41,7 +38,7 @@ describe('HomebrewSpellsService', () => {
   });
 
   it('passes spell columns through to the create', async () => {
-    prisma.spell.create.mockResolvedValue({ id: 'sp1', ...STAMPED });
+    prisma.spell.create.mockResolvedValue({ id: 'sp1' });
 
     await service.create(makeCreateDto({ castingTime: '1 action' }), OWNER);
 

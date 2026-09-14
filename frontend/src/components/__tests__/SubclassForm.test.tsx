@@ -97,18 +97,15 @@ describe('SubclassForm', () => {
     ]);
   });
 
-  it('leaves features out of a description-only edit', async () => {
+  it('sends only the description on a description-only edit', async () => {
     const user = userEvent.setup();
     renderForm({ initial: makeSubclass(), submitLabel: 'Save changes' });
 
     fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Fixed a typo.' } });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    // Strict, so a `features` key fails it whatever its value.
-    expect(onSubmit.mock.calls[0][0]).toStrictEqual({
-      name: 'Deadeye',
-      description: 'Fixed a typo.',
-    });
+    // Strict, so a `name` or `features` key fails it whatever its value.
+    expect(onSubmit.mock.calls[0][0]).toStrictEqual({ description: 'Fixed a typo.' });
   });
 
   // The Name field is `required`, so an empty box never reaches the handler.
@@ -152,21 +149,30 @@ describe('SubclassForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('keeps editing the subclass it loaded when a refetch replaces the prop', () => {
+  it('keeps the subclass it loaded, and its baseline, when a refetch replaces the prop', async () => {
+    const user = userEvent.setup();
     const { rerender } = renderForm({ initial: makeSubclass(), submitLabel: 'Save changes' });
 
     // The class page keeps its query mounted, so a background refetch hands the
     // form a new `initial` while the author is still editing the old one.
     rerender(
       <SubclassForm
-        initial={makeSubclass({ name: 'Sharpshooter' })}
+        initial={makeSubclass({
+          name: 'Sharpshooter',
+          features: [{ id: 'cf-9', name: 'Long Watch', level: 7 }],
+        })}
         submitting={false}
         submitLabel="Save changes"
         onSubmit={onSubmit}
         onCancel={onCancel}
       />
     );
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
+    // Compared against the subclass that loaded, the untouched form is unchanged,
+    // so nothing is sent. A baseline taken from the refetched prop would see the
+    // name and the features differ, and send both.
+    expect(onSubmit.mock.calls[0][0]).toStrictEqual({});
   });
 });

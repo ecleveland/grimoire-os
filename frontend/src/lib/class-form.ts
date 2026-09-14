@@ -1,6 +1,6 @@
 import type { ClassFeatureDraft } from '@/components/ClassFeaturesEditor';
 import { MAX_LEVEL } from '@/lib/character-level';
-import { sameFeatures, toFeatureRows, validateFeatures, type FeatureRow } from '@/lib/feature-rows';
+import { featureDraftsFrom, featuresToSend, type FeatureRow } from '@/lib/feature-rows';
 import { cleanList, optionalText, parseIntInRange } from '@/lib/form-helpers';
 import { DEFAULT_HIT_DIE, type SrdClass } from '@/lib/types';
 
@@ -43,10 +43,7 @@ export interface ClassPayload {
   weaponProficiencies: string[];
   toolProficiencies: string[];
   subclassLevel: number | null;
-  /**
-   * Sent only when the list changed. The API replaces every stored row and gives
-   * each a new id, which orphans print-tray entries that still hold the old ones.
-   */
+  /** Present only when `featuresToSend` says the list must go; see there for why. */
   features?: FeatureRow[];
 }
 
@@ -83,14 +80,7 @@ export function classToFormState(cls: SrdClass): ClassFormState {
     toolProficiencies: cls.toolProficiencies ?? [],
     // The API sends null for a class without one, which the shared type doesn't admit.
     subclassLevel: cls.subclassLevel == null ? '' : String(cls.subclassLevel),
-    // Named fields, not a spread. The draft type refuses an `id`, so tsc catches
-    // that key, but a spread would still carry any other key an API row has and
-    // the type doesn't declare, and the write DTO 400s a save that sends one.
-    features: (cls.features ?? []).map(f => ({
-      name: f.name,
-      level: f.level,
-      description: f.description ?? '',
-    })),
+    features: featureDraftsFrom(cls.features),
   };
 }
 
@@ -140,14 +130,8 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
     return { error: `Subclass level must be a whole number from 1 to ${MAX_LEVEL}` };
   }
 
-  const features = toFeatureRows(s.features);
-  const featuresChanged = !baseline || !sameFeatures(features, toFeatureRows(baseline.features));
-  // Validated only when the list is being sent, so a stored row this form would
-  // reject can't block an edit that leaves the list alone.
-  if (featuresChanged) {
-    const featureError = validateFeatures(features);
-    if (featureError) return { error: featureError };
-  }
+  const sent = featuresToSend(s.features, baseline?.features);
+  if ('error' in sent) return { error: sent.error };
 
   const payload: ClassPayload = {
     name,
@@ -162,6 +146,6 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
     toolProficiencies: cleanList(s.toolProficiencies),
     subclassLevel,
   };
-  if (featuresChanged) payload.features = features;
+  if (sent.features) payload.features = sent.features;
   return { payload };
 }

@@ -13,9 +13,6 @@ import { CreateMonsterDto } from './dto/create-monster.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
-/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
-const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
-
 function makeCreateDto(over: Partial<CreateMonsterDto> = {}): CreateMonsterDto {
   return {
     name: 'Dire Badger',
@@ -41,7 +38,7 @@ describe('HomebrewMonstersService', () => {
 
   describe('the non-null actions guarantee (the read-side type requires an array)', () => {
     it('defaults actions to an empty array when omitted', async () => {
-      prisma.monster.create.mockResolvedValue({ id: 'm1', ...STAMPED });
+      prisma.monster.create.mockResolvedValue({ id: 'm1' });
 
       await service.create(makeCreateDto(), OWNER);
 
@@ -49,7 +46,7 @@ describe('HomebrewMonstersService', () => {
     });
 
     it('passes through actions when provided', async () => {
-      prisma.monster.create.mockResolvedValue({ id: 'm1', ...STAMPED });
+      prisma.monster.create.mockResolvedValue({ id: 'm1' });
       const actions = [{ name: 'Bite', description: 'Gnaw.' }];
 
       await service.create(makeCreateDto({ actions } as Partial<CreateMonsterDto>), OWNER);

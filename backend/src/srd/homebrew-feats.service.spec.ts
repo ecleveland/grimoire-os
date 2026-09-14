@@ -14,9 +14,6 @@ import { CreateFeatDto } from './dto/create-feat.dto';
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
-/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
-const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
-
 function makeCreateDto(over: Partial<CreateFeatDto> = {}): CreateFeatDto {
   return {
     name: 'Shield Master',
@@ -41,7 +38,7 @@ describe('HomebrewFeatsService', () => {
   });
 
   it('passes feat columns through to the create', async () => {
-    prisma.feat.create.mockResolvedValue({ id: 'f1', ...STAMPED });
+    prisma.feat.create.mockResolvedValue({ id: 'f1' });
 
     await service.create(makeCreateDto(), OWNER);
 

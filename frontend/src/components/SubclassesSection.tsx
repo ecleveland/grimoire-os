@@ -30,6 +30,8 @@ const controlClass =
  * opening of the same form, and those two are equal in every field.
  */
 type FormOpening = { kind: 'create' } | { kind: 'edit'; id: string };
+type CreateOpening = Extract<FormOpening, { kind: 'create' }>;
+type EditOpening = Extract<FormOpening, { kind: 'edit' }>;
 
 interface SubclassesSectionProps {
   cls: SrdClass;
@@ -51,10 +53,19 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
   const [openForm, setOpenForm] = useState<FormOpening | null>(null);
   // The opening whose create or update is in flight. Only that form shows it.
   const [submittingForm, setSubmittingForm] = useState<FormOpening | null>(null);
-  // Rows with a DELETE in flight. A list, since a second delete can be confirmed
-  // while the first is still pending.
-  const [deletingIds, setDeletingIds] = useState<string[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState<SrdSubclass | null>(null);
+  // Rows whose card can't be trusted yet: a DELETE in flight, or a save that has
+  // landed while the refetch carrying its new values is still out. Their Edit and
+  // Delete stay withdrawn until that settles, so nothing re-deletes a row or seeds
+  // an edit from the values a save just replaced. One entry per mark, since a
+  // save and a delete can both be pending for the same row.
+  const [pendingIds, setPendingIds] = useState<string[]>([]);
+  const markPending = (id: string) => setPendingIds(prev => [...prev, id]);
+  const clearPending = (id: string) =>
+    setPendingIds(prev => {
+      const at = prev.indexOf(id);
+      return at === -1 ? prev : [...prev.slice(0, at), ...prev.slice(at + 1)];
+    });
 
   // Same hint CreateEntityLink reads: while the session hydrates, a browser that
   // was signed in keeps the section's place instead of popping it in afterwards.
@@ -88,43 +99,61 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
    */
   const submit = async (
     form: FormOpening,
-    verb: 'create' | 'update',
-    name: string,
+    sentName: string | undefined,
     send: () => Promise<unknown>
   ) => {
+    // Read off the opening, so the copy can't disagree with the form that saved.
+    const created = form.kind === 'create';
+    // An edit that keeps the name doesn't send it, so the toast names the row.
+    const name =
+      sentName ??
+      (form.kind === 'edit' ? subclasses.find(sc => sc.id === form.id)?.name : undefined) ??
+      'subclass';
     setSubmittingForm(form);
     try {
       await send();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : `Failed to ${verb} subclass`);
+      toast.error(
+        err instanceof Error ? err.message : `Failed to ${created ? 'create' : 'update'} subclass`
+      );
       return;
     } finally {
-      // Cleared before the refresh, which can be slow and has nothing to do with
-      // whether a form may be submitted again.
+      // Only this opening. Another form may have been opened and submitted since,
+      // and it is still saving.
       setSubmittingForm(prev => (prev === form ? null : prev));
     }
-    toast.success(`${verb === 'create' ? 'Created' : 'Updated'} ${name}`);
+    toast.success(`${created ? 'Created' : 'Updated'} ${name}`);
+    // Marked in the same render that closes the form, so the saved row's card
+    // never offers Edit while it still shows the values from before the save.
+    const savedRowId = form.kind === 'edit' ? form.id : null;
+    if (savedRowId) markPending(savedRowId);
     setOpenForm(prev => (prev === form ? null : prev));
-    await refresh();
+    try {
+      await refresh();
+    } finally {
+      if (savedRowId) clearPending(savedRowId);
+    }
   };
 
-  const handleCreate = (form: FormOpening, payload: SubclassPayload) =>
-    submit(form, 'create', payload.name, () =>
+  const handleCreate = (form: CreateOpening, payload: SubclassPayload) =>
+    submit(form, payload.name, () =>
       apiFetch('/srd/subclasses', {
         method: 'POST',
         body: JSON.stringify({ ...payload, classId: cls.id }),
       })
     );
 
-  const handleEdit = (form: FormOpening, sc: SrdSubclass, payload: SubclassPayload) =>
-    submit(form, 'update', payload.name, () =>
-      apiFetch(`/srd/subclasses/${sc.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
+  // The row id comes off the opening too, so the PATCH can't target a different
+  // row from the form that sent it.
+  const handleEdit = (form: EditOpening, payload: SubclassPayload) =>
+    submit(form, payload.name, () =>
+      apiFetch(`/srd/subclasses/${form.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
     );
 
   // Kept apart from `submit`: a delete has no form, so it must neither close nor
   // disable whichever form happens to be open when it lands.
   const handleDelete = async (sc: SrdSubclass) => {
-    setDeletingIds(prev => [...prev, sc.id]);
+    markPending(sc.id);
     try {
       await apiFetch(`/srd/subclasses/${sc.id}`, { method: 'DELETE' });
       toast.success(`Deleted ${sc.name}`);
@@ -134,7 +163,7 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete subclass');
     } finally {
-      setDeletingIds(prev => prev.filter(id => id !== sc.id));
+      clearPending(sc.id);
     }
   };
 
@@ -156,13 +185,13 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
                   initial={sc}
                   submitting={submittingForm === activeForm}
                   submitLabel="Save changes"
-                  onSubmit={payload => handleEdit(activeForm, sc, payload)}
+                  onSubmit={payload => handleEdit(activeForm, payload)}
                   onCancel={() => setOpenForm(null)}
                 />
               ) : (
                 <SubclassCard
                   sc={sc}
-                  canManage={canManage(sc) && activeForm === null && !deletingIds.includes(sc.id)}
+                  canManage={canManage(sc) && activeForm === null && !pendingIds.includes(sc.id)}
                   onEdit={() => setOpenForm({ kind: 'edit', id: sc.id })}
                   onDelete={() => setConfirmingDelete(sc)}
                 />

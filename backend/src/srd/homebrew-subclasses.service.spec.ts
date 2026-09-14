@@ -16,23 +16,11 @@ import { CreateSubclassDto } from './dto/create-subclass.dto';
  */
 
 const OWNER = { userId: 'owner-1', isAdmin: false };
-
-/** The ownership a real insert for OWNER carries; the skeleton re-checks it on the way out. */
-const STAMPED = { contentSource: 'homebrew', createdById: OWNER.userId };
 const CLASS_ID = 'c1';
 const VISIBLE_CLASS = { id: CLASS_ID, contentSource: 'srd', createdById: null };
 
 function makeCreateDto(over: Partial<CreateSubclassDto> = {}): CreateSubclassDto {
   return { name: 'Path of Ash', classId: CLASS_ID, ...over } as CreateSubclassDto;
-}
-
-function p2003(): Prisma.PrismaClientKnownRequestError {
-  return new Prisma.PrismaClientKnownRequestError('Foreign key constraint violated', {
-    code: 'P2003',
-    clientVersion: 'test',
-    // The shape a live Postgres raises for this insert, measured rather than assumed.
-    meta: { modelName: 'Subclass', constraint: 'subclasses_classId_fkey' },
-  });
 }
 
 function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
@@ -65,7 +53,7 @@ describe('HomebrewSubclassesService', () => {
 
   describe('the parent class', () => {
     it('passes the subclass columns through once the parent resolves', async () => {
-      prisma.subclass.create.mockResolvedValue({ id: 'sc1', ...STAMPED });
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
 
       await service.create(makeCreateDto({ description: 'Ash and cinders.' }), OWNER);
 
@@ -79,7 +67,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('looks the parent up scoped to what the author may see', async () => {
-      prisma.subclass.create.mockResolvedValue({ id: 'sc1', ...STAMPED });
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
 
       await service.create(makeCreateDto(), OWNER);
 
@@ -133,26 +121,6 @@ describe('HomebrewSubclassesService', () => {
       }
     );
 
-    // The visibility check and the insert are two statements, so the parent can
-    // be deleted between them. The FK then refuses the insert with P2003, and
-    // unmapped, that reached the client as a 400 carrying the engine's message
-    // and the constraint name. It has to be the same answer as a parent that
-    // was never visible, because from the author's side it is one.
-    it('refuses a parent deleted after the check with the visibility copy', async () => {
-      prisma.subclass.create.mockRejectedValue(p2003());
-
-      const err = await service.create(makeCreateDto(), OWNER).catch((e: unknown) => e);
-
-      expect(err).toBeInstanceOf(BadRequestException);
-      expect((err as BadRequestException).message).toBe('Parent class not found or not accessible');
-    });
-
-    it('passes a failure that is not an FK violation through untouched', async () => {
-      prisma.subclass.create.mockRejectedValue(new Error('connection reset'));
-
-      await expect(service.create(makeCreateDto(), OWNER)).rejects.toThrow('connection reset');
-    });
-
     it('never lets an update move a subclass to another class', async () => {
       prisma.subclass.findUnique.mockResolvedValue(homebrewRow);
       prisma.subclass.update.mockResolvedValue(homebrewRow);
@@ -164,6 +132,39 @@ describe('HomebrewSubclassesService', () => {
       };
       expect(data).not.toHaveProperty('classId');
       expect(data.description).toBe('x');
+    });
+
+    // Prisma's relation form sets `classId` without that string appearing in the
+    // payload, so dropping the scalar alone leaves this path open.
+    it('never lets an update reparent through the relation form either', async () => {
+      prisma.subclass.findUnique.mockResolvedValue(homebrewRow);
+      prisma.subclass.update.mockResolvedValue(homebrewRow);
+
+      await service.update(
+        'sc1',
+        { srdClass: { connect: { id: 'other-class' } }, description: 'x' } as never,
+        OWNER
+      );
+
+      const { data } = prisma.subclass.update.mock.calls[0][0] as {
+        data: Record<string, unknown>;
+      };
+      expect(data).not.toHaveProperty('srdClass');
+      expect(data.description).toBe('x');
+    });
+
+    // The create side of the same alias. There is no scalar `classId` to check,
+    // so the narrowing refuses it before the lookup, and the connect never
+    // reaches the insert to attach the row to a class nobody authorized.
+    it('refuses a create that names its parent only through the relation form', async () => {
+      await expect(
+        service.create(
+          { name: 'Path of Ash', srdClass: { connect: { id: 'other-class' } } } as never,
+          OWNER
+        )
+      ).rejects.toThrow('Parent class not found or not accessible');
+      expect(prisma.srdClass.findFirst).not.toHaveBeenCalled();
+      expect(prisma.subclass.create).not.toHaveBeenCalled();
     });
   });
 
@@ -191,7 +192,7 @@ describe('HomebrewSubclassesService', () => {
 
   describe('features on create', () => {
     beforeEach(() => {
-      prisma.subclass.create.mockResolvedValue({ id: 'sc1', ...STAMPED });
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
     });
 
     it('writes them as a nested create alongside the subclass columns', async () => {
@@ -282,6 +283,32 @@ describe('HomebrewSubclassesService', () => {
       expect(prisma.subclassFeature.createMany).toHaveBeenCalledWith({
         data: [{ subclassId: 'sc1', name: 'Ashen Step', level: 3, description: 'Rewritten.' }],
       });
+    });
+
+    // A features-only PATCH leaves the parent update with no columns, which Prisma
+    // runs as a SELECT that locks nothing. Without the row lock first, two
+    // overlapping replacements merge their lists instead of one replacing the other.
+    it('locks the parent row inside the transaction before touching it', async () => {
+      await service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] } as never, OWNER);
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const [query] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
+      expect(query.sql).toBe('SELECT 1 FROM "subclasses" WHERE "id" = ? FOR UPDATE');
+      expect(query.values).toEqual(['sc1']);
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.subclass.update.mock.invocationCallOrder[0]
+      );
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.subclassFeature.deleteMany.mock.invocationCallOrder[0]
+      );
+    });
+
+    // The lock belongs to the replacement. A scalar-only PATCH runs a real UPDATE,
+    // which locks the row itself, and opens no transaction to hold another one.
+    it('takes no lock when the body omits features', async () => {
+      await service.update('sc1', { description: 'New prose.' } as never, OWNER);
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('runs the parent update and both child writes inside one transaction', async () => {

@@ -11,6 +11,7 @@ import {
   ReactNode,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch, endDeadSession } from './api';
 import { Role } from './types';
 import type { User } from './types';
@@ -114,6 +115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getSessionCookieServerSnapshot
   );
   const router = useRouter();
+  // Cached API responses are per viewer but keyed by path alone, so every change
+  // of signed-in user drops them rather than serving one account's data to the
+  // next. The initial hydration keeps them: it is the same session.
+  const queryClient = useQueryClient();
 
   // Hydration: ask the backend whether the access cookie still represents a
   // valid session. Use raw fetch (not apiFetch) so a 401 here does NOT trigger
@@ -173,10 +178,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const { user: profile } = (await res.json()) as { user: User & { id: string } };
+      queryClient.clear();
       setUser(toUserInfo(profile));
       router.push('/');
     },
-    [router]
+    [router, queryClient]
   );
 
   const register = useCallback(
@@ -194,10 +200,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const { user: profile } = (await res.json()) as { user: User & { id: string } };
+      queryClient.clear();
       setUser(toUserInfo(profile));
       router.push('/');
     },
-    [router]
+    [router, queryClient]
   );
 
   const logout = useCallback(async () => {
@@ -209,9 +216,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Even if the server call fails, clear local state.
     }
+    queryClient.clear();
     setUser(null);
     router.push('/login');
-  }, [router]);
+  }, [router, queryClient]);
 
   const refreshProfile = useCallback(async () => {
     try {

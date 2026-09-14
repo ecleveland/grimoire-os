@@ -31,7 +31,7 @@ import { HomebrewSubclassesService } from './homebrew-subclasses.service';
  * The tiered-content write contract (VEG-336), asserted identically against
  * every service that writes `srd`/`shared`/`homebrew` rows.
  *
- * These six services each carry the same authorization skeleton: authorize the
+ * These eight services each carry the same authorization skeleton: authorize the
  * create tier, load-and-guard before any update or delete, force the ownership
  * stamp, and map Prisma's write errors to tier-appropriate HTTP semantics.
  * Until now that skeleton was asserted once per clone, which is exactly the
@@ -83,9 +83,9 @@ interface ContractCase {
   rowExtras?: Record<string, unknown>;
   /**
    * Arrange the mock for a service whose create hook reads the database before
-   * writing (subclasses look their parent class up). Runs once per case, before
-   * the case's own arrangement, so a create left unprimed would fail the guard
-   * rather than the contract.
+   * writing (subclasses look their parent class up). Runs in `beforeEach`, so
+   * before every test in the case and ahead of that test's own arrangement; a
+   * create left unprimed would fail the service's guard rather than the contract.
    */
   prime?: (prisma: MockPrismaService) => void;
 }
@@ -93,17 +93,11 @@ interface ContractCase {
 /** A parent every subclass case hangs off; the `prime` below makes it resolve. */
 const PARENT_CLASS_ID = '11111111-1111-4111-8111-111111111111';
 
-// A service whose create hook must read the database declares a `prime` that
-// arranges the lookup; see HomebrewSubclassesService below.
-//
-// NOTE for the first service that overrides `performUpdate` (VEG-507's class
-// features are the expected one). The `update` cases below assert against
-// `delegate.update`, which a transactional override may not call at all, so that
-// service will fail them with no way to declare the exception. Add a
-// `performsOwnUpdate?: boolean` to ContractCase and branch those assertions on
-// it. Do not reach for the other fix and drop the service from CASES: an
-// unenrolled service is exactly the drift `contract enrollment` below exists to
-// catch, and it will fail that test instead.
+// The `update` cases below assert against `delegate.update`, with DTOs that carry
+// no child rows. A `performUpdate` override that skips `delegate.update` for such
+// a payload fails them; classes and subclasses both fall through to it. Do not
+// fix that by dropping the service from CASES, which `contract enrollment` below
+// exists to catch.
 const CASES: ContractCase[] = [
   {
     title: 'HomebrewMonstersService',
@@ -231,17 +225,6 @@ describe.each(CASES)(
       ...rowExtras,
     });
 
-    /**
-     * The row an insert by `actor` produces. The skeleton re-checks the written
-     * row's tier and owner against the stamp, so a mock row without them would
-     * be refused, exactly as a real override that dropped the stamp would be.
-     */
-    const createdRow = (actor: ContentActor) => ({
-      id: 'row-1',
-      contentSource: tier,
-      createdById: actor.userId,
-    });
-
     /** The actor who owns `ownRow()` at this tier and may edit it. */
     const editor = tier === 'shared' ? ADMIN : OWNER;
     const editableRow = tier === 'shared' ? sharedRow : ownRow;
@@ -259,7 +242,7 @@ describe.each(CASES)(
 
     describe('create', () => {
       it(`stamps contentSource "${tier}", the owner, and source "${sourceLabel}"`, async () => {
-        delegate.create.mockResolvedValue(createdRow(creator));
+        delegate.create.mockResolvedValue({ id: 'row-1' });
 
         await service.create(makeCreateDto() as never, creator);
 
@@ -273,7 +256,7 @@ describe.each(CASES)(
       });
 
       it('overrides client-supplied ownership and tier fields with the server stamp', async () => {
-        delegate.create.mockResolvedValue(createdRow(creator));
+        delegate.create.mockResolvedValue({ id: 'row-1' });
 
         await service.create(
           {
@@ -314,7 +297,7 @@ describe.each(CASES)(
       });
 
       it('leaves the caller\u2019s DTO untouched', async () => {
-        delegate.create.mockResolvedValue(createdRow(creator));
+        delegate.create.mockResolvedValue({ id: 'row-1' });
         const dto = { ...makeCreateDto(), contentSource: 'srd', id: 'forced-id' };
         const before = JSON.parse(JSON.stringify(dto)) as Record<string, unknown>;
 
@@ -343,7 +326,7 @@ describe.each(CASES)(
         });
       } else {
         it('lets any authenticated user create their own homebrew', async () => {
-          delegate.create.mockResolvedValue(createdRow(STRANGER));
+          delegate.create.mockResolvedValue({ id: 'row-1' });
 
           await expect(service.create(makeCreateDto() as never, STRANGER)).resolves.toBeDefined();
           expect(delegate.create).toHaveBeenCalled();
@@ -701,18 +684,12 @@ describe('skeleton integrity', () => {
 });
 
 /**
- * The two extension points `update` offers a subclass, driven through a probe
- * rather than the six real services, none of which override either today.
- *
- * `performUpdate` exists so an entity whose update must span child rows can do
- * that inside the authorized sequence instead of hand-rolling a transaction
- * outside it (VEG-512, ahead of the per-level class features in VEG-507). The
- * hooks return their column data so that an override written in the natural
- * immutable style cannot silently no-op.
- */
-/**
- * The two extension points `update` offers a subclass, driven through a probe
- * rather than the six real services, none of which override either today.
+ * The extension points the skeleton offers a subclass, driven through a probe
+ * rather than the eight real services. Several of those do override them
+ * (classes and subclasses override `performUpdate`; monsters, backgrounds,
+ * classes and subclasses override a create or update hook), but each does it
+ * for its own columns, so none of them isolates the skeleton's side of the
+ * contract the way a probe with nothing else going on does.
  *
  * `performUpdate` exists so an entity whose update must span child rows can do
  * that inside the authorized sequence instead of hand-rolling a transaction
@@ -904,88 +881,6 @@ describe('update extension points', () => {
       await expect(
         new StealingProbe(prisma).update('row-1', { name: 'X' } as never, OWNER)
       ).rejects.toThrow(InternalServerErrorException);
-    });
-  });
-
-  describe('performCreate', () => {
-    it('defaults to a plain delegate create', async () => {
-      const { prisma, delegate } = makeProbeEnv();
-
-      await new Probe(prisma).create({ name: 'X' } as never, OWNER);
-
-      expect(delegate.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ name: 'X' }),
-      });
-    });
-
-    it('lets an override replace the write, handing it the already-stamped data', async () => {
-      const { prisma, delegate } = makeProbeEnv();
-      const created: ProbeRow = { ...homebrewRow(), name: 'from the override' };
-      let received: ColumnData | undefined;
-      class CreateProbe extends Probe {
-        protected override performCreate(data: ColumnData): Promise<ProbeRow> {
-          received = data;
-          return Promise.resolve(created);
-        }
-      }
-
-      await expect(
-        new CreateProbe(prisma).create(
-          { name: 'X', contentSource: 'srd', createdById: 'evil' } as never,
-          OWNER
-        )
-      ).resolves.toBe(created);
-      expect(delegate.create).not.toHaveBeenCalled();
-      // The stamp is applied before the hand-off, so an override cannot receive
-      // a row the client got to label.
-      expect(received).toEqual({
-        name: 'X',
-        source: 'Homebrew',
-        contentSource: 'homebrew',
-        createdById: OWNER.userId,
-      });
-    });
-
-    it('maps a failure inside the override with the service tier', async () => {
-      const { prisma } = makeProbeEnv();
-      class FailingProbe extends Probe {
-        protected override performCreate(): Promise<ProbeRow> {
-          return Promise.reject(p2002());
-        }
-      }
-
-      await expect(new FailingProbe(prisma).create({ name: 'X' } as never, OWNER)).rejects.toThrow(
-        'You already have a probe with this name'
-      );
-    });
-
-    // The create-side twin of the update re-check. An override owns the insert,
-    // so it can write a payload of its own rather than the stamped one it was
-    // handed, and nothing before the write can see that.
-    it('refuses a returned row whose tier is not the stamped one', async () => {
-      const { prisma } = makeProbeEnv();
-      class EscalatingProbe extends Probe {
-        protected override performCreate(): Promise<ProbeRow> {
-          return Promise.resolve({ ...homebrewRow(), contentSource: 'srd' });
-        }
-      }
-
-      await expect(
-        new EscalatingProbe(prisma).create({ name: 'X' } as never, OWNER)
-      ).rejects.toThrow(InternalServerErrorException);
-    });
-
-    it('refuses a returned row whose owner is not the stamped one', async () => {
-      const { prisma } = makeProbeEnv();
-      class StealingProbe extends Probe {
-        protected override performCreate(): Promise<ProbeRow> {
-          return Promise.resolve({ ...homebrewRow(), createdById: 'someone-else' });
-        }
-      }
-
-      await expect(new StealingProbe(prisma).create({ name: 'X' } as never, OWNER)).rejects.toThrow(
-        'Refusing to return a probe whose ownership changed during the write'
-      );
     });
   });
 
