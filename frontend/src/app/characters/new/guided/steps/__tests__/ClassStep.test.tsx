@@ -360,6 +360,105 @@ describe('ClassStep — SRD class selection', () => {
   });
 });
 
+// The API accepts a class whose numSkillChoices exceeds its skill pool. A bare
+// `{ name, hitDie }` stores the default count of 2 over an empty pool. The
+// exact-count rule and pick cap for a normal class are covered by the
+// 'requires exactly numSkillChoices skill picks' case above.
+describe('ClassStep skill count larger than the pool', () => {
+  it('reports the step valid with no picks when the class has an empty pool', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([makeClass({ skillChoices: [], numSkillChoices: 2 })]);
+
+    await pickClass(user, 'Fighter');
+
+    // The grants summary proves the class resolved, so this is not the
+    // unrecognized-name path that skips the skill rule.
+    await screen.findByRole('group', { name: /class grants/i });
+    expect(onValid).toHaveBeenLastCalledWith(true);
+    expect(screen.queryByRole('group', { name: /skills/i })).toBeNull();
+  });
+
+  it('asks for one pick when the pool holds one skill', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([
+      makeClass({ skillChoices: ['Athletics'], numSkillChoices: 2 }),
+    ]);
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(onValid).toHaveBeenLastCalledWith(false);
+
+    await user.click(within(skills).getByRole('button', { name: /athletics/i }));
+    expect(onValid).toHaveBeenLastCalledWith(true);
+    expect(within(skills).getByText('Choose 1: 1 of 1 chosen')).toBeInTheDocument();
+  });
+});
+
+// A count of 0 over a populated pool passes the write boundary, and the class
+// form re-saves such a class untouched. The exact-count case for a class that
+// does offer picks is covered by 'requires exactly numSkillChoices skill picks
+// before the step is valid' above.
+describe('ClassStep class that offers no skill picks', () => {
+  it('renders no skills group and reports the step valid', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([
+      makeClass({ skillChoices: ['Athletics'], numSkillChoices: 0 }),
+    ]);
+
+    await pickClass(user, 'Fighter');
+    await screen.findByRole('group', { name: /class grants/i });
+
+    // Chips here would be dead controls, since the toggle refuses every pick.
+    expect(screen.queryByRole('group', { name: /skills/i })).toBeNull();
+    expect(onValid).toHaveBeenLastCalledWith(true);
+  });
+});
+
+// The class DTO checks each pool entry against the catalog but not for
+// uniqueness, so the API accepts a pool that repeats a skill.
+describe('ClassStep skill pool that repeats a skill', () => {
+  const repeatedPool = () =>
+    makeClass({ skillChoices: ['Athletics', 'Athletics'], numSkillChoices: 2 });
+
+  it('renders one chip for the repeated skill', async () => {
+    const user = userEvent.setup();
+    renderStep([repeatedPool()]);
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(within(skills).getAllByRole('button', { name: /athletics/i })).toHaveLength(1);
+  });
+
+  it('reports invalid before the pick and valid after picking the skill', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([repeatedPool()]);
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(onValid).toHaveBeenLastCalledWith(false);
+
+    // Take the first match so this case turns on the pick count, not the chip count.
+    const [athletics] = within(skills).getAllByRole('button', { name: /athletics/i });
+    await user.click(athletics);
+    expect(onValid).toHaveBeenLastCalledWith(true);
+  });
+
+  it('logs no duplicate-key warning', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderStep([repeatedPool()]);
+
+    await pickClass(user, 'Fighter');
+    await screen.findByRole('group', { name: /skills/i });
+
+    const duplicateKeyErrors = consoleError.mock.calls.filter(args =>
+      args.map(String).join(' ').includes('same key')
+    );
+    consoleError.mockRestore();
+    expect(duplicateKeyErrors).toEqual([]);
+  });
+});
+
 // VEG-524. VEG-506 made a class name non-unique, so the picker has to record
 // *which* row was chosen. These mirror the background picker's VEG-473 suite.
 describe('ClassStep — duplicate class names (VEG-524)', () => {

@@ -175,6 +175,22 @@ describe('MonsterLookupPanel', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('toasts "Monster not found" and closes the detail panel when the detail comes back null', async () => {
+    vi.mocked(toast.error).mockClear();
+    // The tiered detail endpoint answers null for a monster the caller can't see.
+    routeApi([goblin], () => Promise.resolve(null));
+    const user = userEvent.setup();
+    render(<MonsterLookupPanel />);
+
+    await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
+    await user.click(await screen.findByRole('button', { name: /goblin/i }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Monster not found', { id: 'lookup-load-monster' })
+    );
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('toasts when the search request fails', async () => {
     vi.mocked(toast.error).mockClear();
     mockApiFetch.mockRejectedValue(new Error('search boom'));

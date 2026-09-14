@@ -3,12 +3,10 @@ import { apiFetch, ApiError } from '../api';
 
 const API_URL = 'http://localhost:3001/api';
 
+// A real Response, so the body reads once through text() or json() as it does
+// in a browser. The Response constructor rejects a body on a 204.
 function mockResponse(status: number, body?: unknown) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    json: vi.fn().mockResolvedValue(body ?? {}),
-  };
+  return new Response(status === 204 ? null : JSON.stringify(body ?? {}), { status });
 }
 
 describe('apiFetch', () => {
@@ -205,6 +203,21 @@ describe('apiFetch', () => {
       const result = await apiFetch('/test');
 
       expect(result).toBeUndefined();
+    });
+
+    it('returns null for a 200 response with an empty body', async () => {
+      // Nest sends a tiered detail endpoint's null for a hidden row this way.
+      vi.mocked(fetch).mockResolvedValue(new Response('', { status: 200 }));
+
+      const result = await apiFetch('/srd/classes/hidden-class');
+
+      expect(result).toBeNull();
+    });
+
+    it('still throws a SyntaxError for a 200 response with a malformed body', async () => {
+      vi.mocked(fetch).mockResolvedValue(new Response('{"data": ', { status: 200 }));
+
+      await expect(apiFetch('/test')).rejects.toThrow(SyntaxError);
     });
   });
 

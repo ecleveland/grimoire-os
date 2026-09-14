@@ -1,5 +1,6 @@
-// Server-side SRD data fetching for the public reference pages (classes, races,
-// backgrounds). These endpoints live on the un-guarded, 24h-cached SrdController
+// Server-side SRD data fetching for the races reference page, the only public
+// reference page still rendered on the server. These endpoints live on the
+// un-guarded, 24h-cached SrdController
 // — user-invariant content, safe to fetch without a session and to share across
 // requests. (VEG-320)
 //

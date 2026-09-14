@@ -185,5 +185,9 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
     return undefined as T;
   }
 
-  return res.json();
+  // Tiered detail endpoints send null for a row the caller can't see, and that
+  // null arrives as a 200 with an empty body.
+  const text = await res.text();
+  if (!text) return null as T;
+  return JSON.parse(text);
 }

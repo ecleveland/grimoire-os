@@ -1,5 +1,5 @@
 import type { SrdBackground } from '@/lib/types';
-import { optionalText, parseIntInRange, parseLines } from '@/lib/form-helpers';
+import { cleanList, optionalText, parseIntInRange, parseLines } from '@/lib/form-helpers';
 
 export { parseLines };
 
@@ -58,25 +58,6 @@ export interface BackgroundPayload {
 }
 
 export type BackgroundFormResult = { payload: BackgroundPayload } | { error: string };
-
-/**
- * Trim, drop blanks, and remove exact duplicates while preserving order. The
- * ToggleChips / TokenListEditor controls keep the live value clean, so this only
- * guards legacy data authored in the free-text era (blank or duplicated entries)
- * from being written straight back on a re-save (VEG-474).
- */
-function cleanList(values: string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const token = value.trim();
-    if (token && !seen.has(token)) {
-      seen.add(token);
-      out.push(token);
-    }
-  }
-  return out;
-}
 
 export function emptyBackgroundFormState(): BackgroundFormState {
   return {
