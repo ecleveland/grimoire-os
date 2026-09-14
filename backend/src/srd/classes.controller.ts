@@ -17,9 +17,12 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SrdService } from './srd.service';
 import { AnonymousCacheInterceptor } from './anonymous-cache.interceptor';
 import { HomebrewClassesService } from './homebrew-classes.service';
+import { HomebrewSubclassesService } from './homebrew-subclasses.service';
 import { toActor } from './homebrew-write.helpers';
 import { CreateClassDto } from './dto/create-class.dto';
 import { UpdateClassDto } from './dto/update-class.dto';
+import { CreateSubclassDto } from './dto/create-subclass.dto';
+import { UpdateSubclassDto } from './dto/update-subclass.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type {
@@ -109,7 +112,10 @@ export class ClassesController {
 @Controller('srd/subclasses')
 @UseInterceptors(AnonymousCacheInterceptor)
 export class SubclassesController {
-  constructor(private readonly srdService: SrdService) {}
+  constructor(
+    private readonly srdService: SrdService,
+    private readonly homebrewSubclasses: HomebrewSubclassesService
+  ) {}
 
   @Get()
   @UseGuards(OptionalJwtAuthGuard)
@@ -123,5 +129,38 @@ export class SubclassesController {
   @ApiOperation({ summary: 'Get subclass by ID' })
   findSubclass(@Param('id') id: string, @Req() req: OptionallyAuthenticatedRequest) {
     return this.srdService.findSubclass(id, req.user?.userId);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create a homebrew subclass owned by the caller',
+    description:
+      'The parent class must be one the caller can see: SRD, shared, or their own homebrew.',
+  })
+  createSubclass(@Body() dto: CreateSubclassDto, @Req() req: AuthenticatedRequest) {
+    return this.homebrewSubclasses.create(dto, toActor(req.user));
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a subclass (own homebrew; shared requires admin)' })
+  updateSubclass(
+    @Param('id') id: string,
+    @Body() dto: UpdateSubclassDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return this.homebrewSubclasses.update(id, dto, toActor(req.user));
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Delete a subclass (own homebrew; shared requires admin)' })
+  removeSubclass(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.homebrewSubclasses.remove(id, toActor(req.user));
   }
 }

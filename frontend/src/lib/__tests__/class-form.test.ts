@@ -5,7 +5,6 @@ import {
   formStateToPayload,
   type ClassFormState,
 } from '@/lib/class-form';
-import type { ClassFeatureDraft } from '@/components/ClassFeaturesEditor';
 import { DEFAULT_HIT_DIE, type SrdClass } from '@/lib/types';
 
 function makeClass(over: Partial<SrdClass> = {}): SrdClass {
@@ -171,34 +170,6 @@ describe('formStateToPayload', () => {
     );
   });
 
-  it('trims feature names and descriptions, and sends a missing description as blank', () => {
-    const payload = payloadOf(
-      makeState({
-        features: [
-          { name: '  Rage ', level: 1, description: '  Primal ferocity. ' },
-          { name: 'Reckless Attack', level: 2 },
-        ],
-      })
-    );
-
-    expect(payload.features).toEqual([
-      { name: 'Rage', level: 1, description: 'Primal ferocity.' },
-      { name: 'Reckless Attack', level: 2, description: '' },
-    ]);
-  });
-
-  it('sends only name, level and description on a feature row, even one carrying an id', () => {
-    const withId = {
-      name: 'Rage',
-      level: 1,
-      description: '',
-      id: 'cf-1',
-    } as unknown as ClassFeatureDraft;
-    const [row] = payloadOf(makeState({ features: [withId] })).features!;
-
-    expect(Object.keys(row).sort()).toEqual(['description', 'level', 'name']);
-  });
-
   it('never carries the JSON rule columns, even for a class that has all three', () => {
     const payload = payloadOf(
       classToFormState(
@@ -209,19 +180,6 @@ describe('formStateToPayload', () => {
     expect('spellcasting' in payload).toBe(false);
     expect('equipmentChoices' in payload).toBe(false);
     expect('multiclassing' in payload).toBe(false);
-  });
-
-  it('allows the same feature name at two different levels', () => {
-    const payload = payloadOf(
-      makeState({
-        features: [
-          { name: 'Ability Score Improvement', level: 4 },
-          { name: 'Ability Score Improvement', level: 8 },
-        ],
-      })
-    );
-
-    expect(payload.features).toHaveLength(2);
   });
 
   describe('validation', () => {
@@ -276,36 +234,6 @@ describe('formStateToPayload', () => {
     it.each(['0', '21', '2.5', 'third'])('rejects a subclass level of %s', level => {
       expect(formStateToPayload(makeState({ subclassLevel: level }))).toEqual({
         error: 'Subclass level must be a whole number from 1 to 20',
-      });
-    });
-
-    it('requires every feature to have a name that is not just whitespace', () => {
-      const state = makeState({
-        features: [
-          { name: 'Rage', level: 1 },
-          { name: '   ', level: 2 },
-        ],
-      });
-
-      expect(formStateToPayload(state)).toEqual({ error: 'Every feature needs a name' });
-    });
-
-    it.each([Number.NaN, 0, 21, 1.5])('rejects a feature level of %s', level => {
-      expect(formStateToPayload(makeState({ features: [{ name: 'Rage', level }] }))).toEqual({
-        error: 'Every feature needs a level from 1 to 20',
-      });
-    });
-
-    it('treats "Rage" and "Rage " at the same level as a duplicate, since both send "Rage"', () => {
-      const state = makeState({
-        features: [
-          { name: 'Rage', level: 1 },
-          { name: 'Rage ', level: 1 },
-        ],
-      });
-
-      expect(formStateToPayload(state)).toEqual({
-        error: 'Two features share a name at the same level; each pairing must be unique',
       });
     });
 
@@ -410,138 +338,19 @@ describe('formStateToPayload', () => {
     });
   });
 
-  describe('features in the payload', () => {
-    const loaded = () =>
-      makeState({
-        features: [
-          { name: 'Rage', level: 1, description: 'Primal ferocity.' },
-          { name: 'Reckless Attack', level: 2, description: 'Swing wild.' },
-        ],
-      });
-
-    it('leaves out a list that matches the loaded one (VEG-508)', () => {
-      const baseline = loaded();
-
-      const payload = payloadOf({ ...baseline, description: 'Edited.' }, baseline);
-
-      expect('features' in payload).toBe(false);
+  // The send rules are tested once, in feature-rows.test.ts. This proves the class
+  // form hands its lists to them and keeps what they return.
+  it('sends features only when they changed against the loaded class, and surfaces their errors', () => {
+    const baseline = makeState({
+      features: [{ name: 'Rage', level: 1, description: 'Primal ferocity.' }],
     });
 
-    it('leaves out a list that was only reordered (VEG-508)', () => {
-      const baseline = loaded();
-      const reordered = { ...baseline, features: [...baseline.features].reverse() };
-
-      expect('features' in payloadOf(reordered, baseline)).toBe(false);
-    });
-
-    it('sends the list when a feature description changed', () => {
-      const baseline = loaded();
-      const [rage, reckless] = baseline.features;
-      const edited = {
-        ...baseline,
-        features: [rage, { ...reckless, description: 'Swing wilder.' }],
-      };
-
-      expect(payloadOf(edited, baseline).features).toEqual([
-        { name: 'Rage', level: 1, description: 'Primal ferocity.' },
-        { name: 'Reckless Attack', level: 2, description: 'Swing wilder.' },
-      ]);
-    });
-
-    it('sends the list when a row was added or removed', () => {
-      const baseline = loaded();
-      const [rage, reckless] = baseline.features;
-      const added = {
-        ...baseline,
-        features: [rage, reckless, { name: 'Brutal Critical', level: 9, description: '' }],
-      };
-      const removed = { ...baseline, features: [rage] };
-
-      expect(payloadOf(added, baseline).features).toHaveLength(3);
-      expect(payloadOf(removed, baseline).features).toEqual([
-        { name: 'Rage', level: 1, description: 'Primal ferocity.' },
-      ]);
-    });
-
-    it('sends the list when a row was renamed', () => {
-      const baseline = loaded();
-      const [rage, reckless] = baseline.features;
-      const renamed = { ...baseline, features: [{ ...rage, name: 'Fury' }, reckless] };
-
-      expect(payloadOf(renamed, baseline).features).toEqual([
-        { name: 'Fury', level: 1, description: 'Primal ferocity.' },
-        { name: 'Reckless Attack', level: 2, description: 'Swing wild.' },
-      ]);
-    });
-
-    it('sends the list for a new class, even when it is empty', () => {
-      expect(payloadOf(makeState()).features).toEqual([]);
-      expect(payloadOf(loaded()).features).toHaveLength(2);
-    });
-  });
-
-  // A create has no baseline, so every feature check still runs on one; the
-  // validation tests above cover that.
-  describe('features the API stored but this form would reject', () => {
-    // The write DTO and the unique index compare raw names, while the form trims
-    // them, so "Rage" and "Rage " at one level are two legal stored rows.
-    const collidingOnTrim = () =>
-      makeState({
-        features: [
-          { name: 'Rage', level: 1, description: '' },
-          { name: 'Rage ', level: 1, description: '' },
-        ],
-      });
-
-    it('saves an unrelated edit without sending the list (VEG-508)', () => {
-      const baseline = collidingOnTrim();
-
-      const payload = payloadOf({ ...baseline, description: 'Fixed a typo.' }, baseline);
-
-      expect('features' in payload).toBe(false);
-    });
-
-    it('checks the list once an edit sends it', () => {
-      const baseline = collidingOnTrim();
-      const [rage, spaced] = baseline.features;
-      const renamed = { ...baseline, features: [rage, { ...spaced, name: 'Fury' }] };
-
-      expect(payloadOf(renamed, baseline).features).toEqual([
-        { name: 'Rage', level: 1, description: '' },
-        { name: 'Fury', level: 1, description: '' },
-      ]);
-    });
-
-    it('still refuses an edit that makes two trimmed names collide', () => {
-      const baseline = makeState({
-        features: [
-          { name: 'Rage', level: 1, description: '' },
-          { name: 'Fury', level: 1, description: '' },
-        ],
-      });
-      const [rage, fury] = baseline.features;
-      const collides = { ...baseline, features: [rage, { ...fury, name: 'Rage ' }] };
-
-      expect(formStateToPayload(collides, baseline)).toEqual({
-        error: 'Two features share a name at the same level; each pairing must be unique',
-      });
-    });
-
-    it('saves an unrelated edit when a loaded row has a blank name (VEG-508)', () => {
-      const baseline = makeState({
-        features: [{ name: '', level: 1, description: 'Half drafted.' }],
-      });
-
-      const payload = payloadOf({ ...baseline, description: 'Fixed a typo.' }, baseline);
-
-      expect('features' in payload).toBe(false);
-    });
-
-    it('still refuses a blank name on a row the author added', () => {
-      const baseline = collidingOnTrim();
-      const added = { ...baseline, features: [...baseline.features, { name: '', level: 3 }] };
-
-      expect(formStateToPayload(added, baseline)).toEqual({ error: 'Every feature needs a name' });
-    });
+    expect('features' in payloadOf({ ...baseline, description: 'Edited.' }, baseline)).toBe(false);
+    expect(
+      payloadOf({ ...baseline, features: [{ name: 'Fury', level: 1 }] }, baseline).features
+    ).toEqual([{ name: 'Fury', level: 1, description: '' }]);
+    expect(
+      formStateToPayload({ ...baseline, features: [{ name: '', level: 1 }] }, baseline)
+    ).toEqual({ error: 'Every feature needs a name' });
   });
 });

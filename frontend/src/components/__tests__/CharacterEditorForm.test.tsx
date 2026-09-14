@@ -97,16 +97,32 @@ const srdBackgrounds: SrdBackground[] = [
   },
 ];
 const srdSubclasses: SrdSubclass[] = [
-  { id: 'sub-champion', name: 'Champion', classId: 'cls-fighter', source: 'SRD' },
+  {
+    id: 'sub-champion',
+    name: 'Champion',
+    classId: 'cls-fighter',
+    source: 'SRD',
+    contentSource: 'srd',
+  },
 ];
+
+// Every path the comboboxes fetch, so a test can assert which class the subclass
+// query was scoped to. The mock below answers on the path prefix alone.
+const fetchedPaths: string[] = [];
 
 vi.mock('@/lib/api', () => ({
   apiFetch: (path: string) => {
+    fetchedPaths.push(path);
     if (path === '/srd/classes') return Promise.resolve(srdClasses);
     if (path === '/srd/races') return Promise.resolve(srdRaces);
     if (path === '/srd/backgrounds') return Promise.resolve(srdBackgrounds);
     if (path === '/srd/languages') return Promise.resolve([{ id: 'lang-1', name: 'Draconic' }]);
-    if (path.startsWith('/srd/subclasses')) return Promise.resolve(srdSubclasses);
+    // Scoped the way the API scopes it, so a picker that asks for the wrong class
+    // gets the wrong rows rather than every row.
+    if (path.startsWith('/srd/subclasses')) {
+      const classId = new URLSearchParams(path.split('?')[1]).get('classId');
+      return Promise.resolve(srdSubclasses.filter(sc => sc.classId === classId));
+    }
     return Promise.reject(new Error(`unexpected apiFetch: ${path}`));
   },
 }));
@@ -563,7 +579,7 @@ describe('CharacterEditorForm rendering', () => {
 
   it('gates the subclass picker until an SRD class is chosen', async () => {
     renderForm();
-    expect(screen.getByText(/select an srd class to list its subclasses/i)).toBeInTheDocument();
+    expect(screen.getByText(/select a class to list its subclasses/i)).toBeInTheDocument();
   });
 
   // VEG-452 made the stored column an additive bonus over the Dex modifier. This
@@ -963,12 +979,62 @@ describe('CharacterEditorForm autofill', () => {
     // With an SRD class chosen, the gating hint is gone and the scoped subclass
     // (Champion, classId cls-fighter) is offered.
     await waitFor(() =>
-      expect(
-        screen.queryByText(/select an srd class to list its subclasses/i)
-      ).not.toBeInTheDocument()
+      expect(screen.queryByText(/select a class to list its subclasses/i)).not.toBeInTheDocument()
     );
     await userEvent.click(screen.getByLabelText(/^subclass/i));
     expect(await screen.findByRole('option', { name: 'Champion' })).toBeInTheDocument();
+  });
+
+  it('scopes the picker to a homebrew class and source-labels colliding names (VEG-509)', async () => {
+    // A homebrew class sharing the SRD Fighter's name. Both of its subclasses are
+    // named Champion, the same as the SRD Fighter's own, which must stay out.
+    const homebrewFighter: SrdClass = {
+      ...srdClasses[0],
+      id: 'cls-fighter-hb',
+      contentSource: 'homebrew',
+    };
+    const underHomebrew: SrdSubclass[] = [
+      {
+        id: 'sub-champion-hb',
+        name: 'Champion',
+        classId: 'cls-fighter-hb',
+        source: 'Homebrew',
+        contentSource: 'homebrew',
+      },
+      {
+        id: 'sub-champion-shared',
+        name: 'Champion',
+        classId: 'cls-fighter-hb',
+        source: 'Shared',
+        contentSource: 'shared',
+      },
+    ];
+    srdClasses.push(homebrewFighter);
+    srdSubclasses.push(...underHomebrew);
+    fetchedPaths.length = 0;
+
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.class = 'Fighter';
+      initial.classId = 'cls-fighter-hb';
+      renderForm({ initialValues: initial });
+
+      // The id, not the shared name, is what scopes the query (VEG-524).
+      await waitFor(() => expect(fetchedPaths).toContain('/srd/subclasses?classId=cls-fighter-hb'));
+      expect(fetchedPaths).not.toContain('/srd/subclasses?classId=cls-fighter');
+
+      await userEvent.click(screen.getByLabelText(/^subclass/i));
+      expect(
+        await screen.findByRole('option', { name: 'Champion (Homebrew)' })
+      ).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Champion (Shared)' })).toBeInTheDocument();
+      // Exactly the selected class's two rows. A picker scoped by name would add
+      // the SRD Fighter's Champion as a third.
+      expect(within(screen.getByRole('listbox')).getAllByRole('option')).toHaveLength(2);
+    } finally {
+      srdClasses.pop();
+      srdSubclasses.splice(-underHomebrew.length);
+    }
   });
 });
 

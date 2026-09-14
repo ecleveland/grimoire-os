@@ -1,6 +1,6 @@
-import { classFeatureIdentity } from '@grimoire-os/shared';
 import type { ClassFeatureDraft } from '@/components/ClassFeaturesEditor';
 import { MAX_LEVEL } from '@/lib/character-level';
+import { featureDraftsFrom, featuresToSend, type FeatureRow } from '@/lib/feature-rows';
 import { cleanList, optionalText, parseIntInRange } from '@/lib/form-helpers';
 import { DEFAULT_HIT_DIE, type SrdClass } from '@/lib/types';
 
@@ -43,20 +43,11 @@ export interface ClassPayload {
   weaponProficiencies: string[];
   toolProficiencies: string[];
   subclassLevel: number | null;
-  /**
-   * Sent only when the list changed. The API replaces every stored row and gives
-   * each a new id, which orphans print-tray entries that still hold the old ones.
-   */
-  features?: ClassFeatureDraft[];
+  /** Present only when `featuresToSend` says the list must go; see there for why. */
+  features?: FeatureRow[];
 }
 
 export type ClassFormResult = { payload: ClassPayload } | { error: string };
-
-interface FeatureRow {
-  name: string;
-  level: number;
-  description: string;
-}
 
 export function emptyClassFormState(): ClassFormState {
   return {
@@ -89,14 +80,7 @@ export function classToFormState(cls: SrdClass): ClassFormState {
     toolProficiencies: cls.toolProficiencies ?? [],
     // The API sends null for a class without one, which the shared type doesn't admit.
     subclassLevel: cls.subclassLevel == null ? '' : String(cls.subclassLevel),
-    // Named fields, not a spread. The draft type refuses an `id`, so tsc catches
-    // that key, but a spread would still carry any other key an API row has and
-    // the type doesn't declare, and the write DTO 400s a save that sends one.
-    features: (cls.features ?? []).map(f => ({
-      name: f.name,
-      level: f.level,
-      description: f.description ?? '',
-    })),
+    features: featureDraftsFrom(cls.features),
   };
 }
 
@@ -105,30 +89,6 @@ function sameMembers(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const members = new Set(b);
   return a.every(value => members.has(value));
-}
-
-/** Feature rows as the payload sends them, trimmed. */
-function toFeatureRows(features: ClassFeatureDraft[]): FeatureRow[] {
-  return features.map(f => ({
-    name: f.name.trim(),
-    level: f.level,
-    description: (f.description ?? '').trim(),
-  }));
-}
-
-/** Whether two feature lists hold the same rows, in any order. Row order is a drafting aid. */
-function sameFeatures(a: FeatureRow[], b: FeatureRow[]): boolean {
-  if (a.length !== b.length) return false;
-  // JSON keeps the identity and the description apart, whatever characters either holds.
-  const key = (f: FeatureRow) => JSON.stringify([classFeatureIdentity(f), f.description]);
-  const counts = new Map<string, number>();
-  for (const f of a) counts.set(key(f), (counts.get(key(f)) ?? 0) + 1);
-  for (const f of b) {
-    const left = counts.get(key(f)) ?? 0;
-    if (left === 0) return false;
-    counts.set(key(f), left - 1);
-  }
-  return true;
 }
 
 export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState): ClassFormResult {
@@ -170,30 +130,8 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
     return { error: `Subclass level must be a whole number from 1 to ${MAX_LEVEL}` };
   }
 
-  const features = toFeatureRows(s.features);
-  const featuresChanged = !baseline || !sameFeatures(features, toFeatureRows(baseline.features));
-  // Checked only when the list is being sent. The API stores rows this form
-  // would reject, because the write boundary compares raw names where this trims
-  // them, and such a row must not block an edit that leaves the list alone.
-  if (featuresChanged) {
-    if (features.some(f => !f.name)) return { error: 'Every feature needs a name' };
-    // The editor holds NaN while a level box is cleared, until the box loses focus.
-    if (features.some(f => !Number.isInteger(f.level) || f.level < 1 || f.level > MAX_LEVEL)) {
-      return { error: `Every feature needs a level from 1 to ${MAX_LEVEL}` };
-    }
-    // Compared on the trimmed names, since those are what gets sent. The editor's
-    // live warning sees "Rage" and "Rage " as two rows; the server sees one.
-    const seen = new Set<string>();
-    for (const feature of features) {
-      const identity = classFeatureIdentity(feature);
-      if (seen.has(identity)) {
-        return {
-          error: 'Two features share a name at the same level; each pairing must be unique',
-        };
-      }
-      seen.add(identity);
-    }
-  }
+  const sent = featuresToSend(s.features, baseline?.features);
+  if ('error' in sent) return { error: sent.error };
 
   const payload: ClassPayload = {
     name,
@@ -208,6 +146,6 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
     toolProficiencies: cleanList(s.toolProficiencies),
     subclassLevel,
   };
-  if (featuresChanged) payload.features = features;
+  if (sent.features) payload.features = sent.features;
   return { payload };
 }

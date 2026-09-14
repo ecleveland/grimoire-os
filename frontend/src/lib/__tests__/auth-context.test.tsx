@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactElement, ReactNode } from 'react';
 import { AuthProvider, useAuth } from '../auth-context';
 
 const mockPush = vi.fn();
@@ -54,11 +56,20 @@ function TestConsumer() {
   );
 }
 
-function renderWithProvider() {
-  return render(
+/** AuthProvider reads the query client, as it does under the root layout's QueryProvider. */
+function renderInQueryClient(ui: ReactElement, client: QueryClient = new QueryClient()) {
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return render(ui, { wrapper });
+}
+
+function renderWithProvider(client?: QueryClient) {
+  return renderInQueryClient(
     <AuthProvider>
       <TestConsumer />
-    </AuthProvider>
+    </AuthProvider>,
+    client
   );
 }
 
@@ -374,7 +385,7 @@ describe('AuthProvider', () => {
         );
       }
 
-      render(
+      renderInQueryClient(
         <AuthProvider>
           <ErrorCapture />
         </AuthProvider>
@@ -456,7 +467,7 @@ describe('AuthProvider', () => {
         );
       }
 
-      render(
+      renderInQueryClient(
         <AuthProvider>
           <ErrorCapture />
         </AuthProvider>
@@ -500,7 +511,7 @@ describe('AuthProvider', () => {
         );
       }
 
-      render(
+      renderInQueryClient(
         <AuthProvider>
           <ErrorCapture />
         </AuthProvider>
@@ -565,6 +576,78 @@ describe('AuthProvider', () => {
       await waitFor(() => {
         expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
         expect(mockPush).toHaveBeenCalledWith('/login');
+      });
+    });
+  });
+
+  // Cached API responses are per viewer but keyed by path alone, so a response
+  // cached for one account must never be served to the next one in the same tab.
+  describe('query cache across a change of user', () => {
+    const SECRET_KEY = ['api', '/srd/classes/cls-fighter'];
+    const OTHER_PROFILE = { ...TEST_PROFILE, id: 'user-2', username: 'otheruser' };
+
+    function seededClient() {
+      const client = new QueryClient();
+      client.setQueryData(SECRET_KEY, { subclasses: [{ name: 'Private Deadeye' }] });
+      return client;
+    }
+
+    it('clears the cache on logout, before navigating away', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE))
+        .mockResolvedValue(mockFetchResponse(204));
+      const client = seededClient();
+      const clear = vi.spyOn(client, 'clear');
+      const user = userEvent.setup();
+      renderWithProvider(client);
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+
+      await user.click(screen.getByText('Logout'));
+
+      await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/login'));
+      expect(client.getQueryData(SECRET_KEY)).toBeUndefined();
+      expect(clear.mock.invocationCallOrder[0]).toBeLessThan(mockPush.mock.invocationCallOrder[0]);
+    });
+
+    it('clears the cache when another user logs in', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration as user-1
+        .mockResolvedValueOnce(mockFetchResponse(200, { user: OTHER_PROFILE })); // login as user-2
+      const client = seededClient();
+      const user = userEvent.setup();
+      renderWithProvider(client);
+      await waitFor(() => expect(screen.getByTestId('username')).toHaveTextContent('testuser'));
+
+      await user.click(screen.getByText('Login'));
+
+      await waitFor(() => expect(screen.getByTestId('username')).toHaveTextContent('otheruser'));
+      expect(client.getQueryData(SECRET_KEY)).toBeUndefined();
+    });
+
+    it('clears the cache when a new account registers', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(201, { user: OTHER_PROFILE })); // register
+      const client = seededClient();
+      const user = userEvent.setup();
+      renderWithProvider(client);
+      await waitFor(() => expect(screen.getByTestId('isLoading')).toHaveTextContent('false'));
+
+      await user.click(screen.getByText('Register'));
+
+      await waitFor(() => expect(screen.getByTestId('username')).toHaveTextContent('otheruser'));
+      expect(client.getQueryData(SECRET_KEY)).toBeUndefined();
+    });
+
+    it('keeps the cache through the initial hydration of an existing session', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockFetchResponse(200, TEST_PROFILE));
+      const client = seededClient();
+      renderWithProvider(client);
+
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+      expect(client.getQueryData(SECRET_KEY)).toEqual({
+        subclasses: [{ name: 'Private Deadeye' }],
       });
     });
   });

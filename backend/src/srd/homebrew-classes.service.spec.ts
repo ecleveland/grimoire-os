@@ -421,6 +421,32 @@ describe('HomebrewClassesService', () => {
       expect(prisma.srdClass.update).toHaveBeenCalledWith({ where: { id: 'c1' }, data: {} });
     });
 
+    // A features-only PATCH leaves the parent update with no columns, which Prisma
+    // runs as a SELECT that locks nothing. Without the row lock first, two
+    // overlapping replacements merge their lists instead of one replacing the other.
+    it('locks the parent row inside the transaction before touching it', async () => {
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const [query] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
+      expect(query.sql).toBe('SELECT 1 FROM "srd_classes" WHERE "id" = ? FOR UPDATE');
+      expect(query.values).toEqual(['c1']);
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.srdClass.update.mock.invocationCallOrder[0]
+      );
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.classFeature.deleteMany.mock.invocationCallOrder[0]
+      );
+    });
+
+    // The lock belongs to the replacement. A scalar-only PATCH runs a real UPDATE,
+    // which locks the row itself, and opens no transaction to hold another one.
+    it('takes no lock when the body omits features', async () => {
+      await service.update('c1', { description: 'New prose.' } as never, OWNER);
+
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('runs the parent update and both child writes inside one transaction', async () => {
       await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
 
@@ -433,6 +459,20 @@ describe('HomebrewClassesService', () => {
         prisma.classFeature.createMany.mock.invocationCallOrder[0],
       ];
       expect(order).toEqual([...order].sort((a, b) => a - b));
+    });
+
+    // Asserted on what the caller receives, not on the mock's arguments: the
+    // write skeleton hands this value straight back as the response body, and
+    // POST cannot include features, so PATCH must not either.
+    it('resolves to the class row without its features', async () => {
+      const result = await service.update(
+        'c1',
+        { features: [{ name: 'Rage', level: 1 }] } as never,
+        OWNER
+      );
+
+      expect(result).toEqual(homebrewRow);
+      expect(result).not.toHaveProperty('features');
     });
 
     it('returns the row the update produced, not the row it authorized', async () => {

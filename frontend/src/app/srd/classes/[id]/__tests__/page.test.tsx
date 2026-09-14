@@ -51,12 +51,17 @@ vi.mock('next/navigation', () => ({
 
 type ClassWithSubclasses = SrdClass & { subclasses?: SrdSubclass[] };
 
+// Deliberately an SRD row: nobody may manage it, so the Edit and Delete controls
+// on this page are unambiguously the class's own. SubclassesSection's own spec
+// covers who may manage a subclass.
 const DEADEYE: SrdSubclass = {
   id: 'sc-deadeye',
   name: 'Deadeye',
   classId: 'class-hb',
   description: 'A patient marksman.',
-  source: 'Homebrew',
+  source: 'SRD 5.2.1',
+  contentSource: 'srd',
+  createdById: null,
 };
 
 function makeClass(over: Partial<ClassWithSubclasses> = {}): ClassWithSubclasses {
@@ -274,6 +279,16 @@ describe('ClassDetailPage', () => {
 
       expect(screen.queryByRole('heading', { name: 'Subclasses' })).not.toBeInTheDocument();
       expect(screen.queryByText(/Chosen at level/)).not.toBeInTheDocument();
+    });
+
+    it('offers Add subclass to a signed-in visitor on a class with none', () => {
+      authAsOwner();
+      mockUseApiQuery.mockReturnValue(queryResult({ data: makeClass({ subclasses: [] }) }));
+
+      renderPage();
+
+      expect(screen.getByRole('heading', { name: 'Subclasses' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add subclass' })).toBeInTheDocument();
     });
 
     it('shows no subclasses section when subclasses is absent', () => {

@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import Badge from '@/components/Badge';
 import ClassDetail from '@/components/ClassDetail';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import SubclassesSection from '@/components/SubclassesSection';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { apiQueryKey, invalidateApiPath, useApiQuery } from '@/lib/query';
@@ -164,29 +165,7 @@ export default function ClassDetailPage() {
         <ClassDetail cls={cls} />
       </div>
 
-      {subclasses.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Subclasses</h2>
-          {cls.subclassLevel != null && (
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Chosen at level {cls.subclassLevel}.
-            </p>
-          )}
-          <div className="mt-3 space-y-3">
-            {subclasses.map(sc => (
-              <div
-                key={sc.id}
-                className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4"
-              >
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{sc.name}</h3>
-                {sc.description && (
-                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{sc.description}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
+      <SubclassesSection cls={cls} subclasses={subclasses} />
 
       <ConfirmDialog
         open={confirmingDelete}

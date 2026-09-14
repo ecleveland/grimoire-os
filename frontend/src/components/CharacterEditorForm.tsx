@@ -49,6 +49,7 @@ import {
   resolveClass,
   uniqueSkillPool,
 } from '@/lib/class-selection';
+import { sourceLabelledOptions } from '@/lib/content-selection';
 import ToggleChips from '@/components/ToggleChips';
 import TokenListEditor from '@/components/TokenListEditor';
 import WeaponsEditor from '@/components/WeaponsEditor';
@@ -720,10 +721,15 @@ export default function CharacterEditorForm({
   // informational; resolves to none for a free-typed/homebrew class.
   const recommendedAbilities = recommendedAbilityKeys(selectedClass?.primaryAbilities);
 
-  const subclasses =
-    useApiQuery<SrdSubclass[]>(`/srd/subclasses?classId=${selectedClass?.id ?? ''}`, {
-      enabled: !!selectedClass,
-    }).data ?? [];
+  const subclasses = useApiQuery<SrdSubclass[]>(
+    `/srd/subclasses?classId=${selectedClass?.id ?? ''}`,
+    { enabled: !!selectedClass }
+  ).data;
+  // Source-labelled like the class picker: a homebrew subclass may reuse an SRD
+  // one's name under the same class, and the bare names would be indistinguishable.
+  // Keyed on the query data itself, since `?? []` outside would be a new array
+  // every render and the memo would never hold.
+  const subclassOptions = useMemo(() => sourceLabelledOptions(subclasses ?? []), [subclasses]);
 
   const set = <K extends keyof CharacterFormValues>(key: K, value: CharacterFormValues[K]) =>
     setValues(prev => ({ ...prev, [key]: value }));
@@ -796,9 +802,9 @@ export default function CharacterEditorForm({
           <SrdCombobox
             label="Subclass"
             value={values.subclass}
-            options={subclasses}
+            options={subclassOptions}
             onChange={v => set('subclass', v)}
-            helperText={selectedClass ? undefined : 'Select an SRD class to list its subclasses.'}
+            helperText={selectedClass ? undefined : 'Select a class to list its subclasses.'}
           />
           <FormField
             label="Level"

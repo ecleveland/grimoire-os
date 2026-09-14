@@ -19,6 +19,22 @@ import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const BCRYPT_ROUNDS = 12;
 
+/**
+ * Whether an error is the FK a class delete trips when a subclass still points
+ * at it. Keyed on the constraint rather than on which statement threw, so any
+ * other relation that blocks the delete still reaches the filter's diagnostic.
+ * The name is read from `meta.constraint`, where a live Postgres reports it for
+ * this delete.
+ */
+function isSubclassParentViolation(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2003') {
+    return false;
+  }
+  return (
+    (error.meta as { constraint?: unknown } | undefined)?.constraint === 'subclasses_classId_fkey'
+  );
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -182,7 +198,16 @@ export class UsersService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new NotFoundException(`User with ID "${id}" not found`);
       }
-      // P2003 (a relation missing an onDelete policy, VEG-312) propagates to
+      // The ordering above handles subclasses that exist when the transaction
+      // runs. One the user being deleted adds under their own class between the
+      // two deletes trips this FK and rolls the delete back; a retry succeeds, so
+      // it is answered as that race rather than as a missing onDelete policy.
+      if (isSubclassParentViolation(error)) {
+        throw new ConflictException(
+          'Content was added while this user was being deleted; try again'
+        );
+      }
+      // Any other P2003 (a relation missing an onDelete policy, VEG-312) propagates to
       // AllExceptionsFilter, which maps DELETE-blocking FK violations to 409.
       throw error;
     }

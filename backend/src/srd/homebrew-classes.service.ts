@@ -1,7 +1,14 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { Prisma, SrdClass } from '@prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
-import { ClassFeatureDto, CreateClassDto } from './dto/create-class.dto';
+import {
+  lockFeatureParent,
+  nestFeaturesForCreate,
+  replaceFeatures,
+  takeFeatures,
+  toFeatureRows,
+} from './feature-rows';
+import { CreateClassDto } from './dto/create-class.dto';
 import { UpdateClassDto } from './dto/update-class.dto';
 import { ContentActor } from './content-access.service';
 
@@ -21,96 +28,6 @@ const STRING_ARRAY_COLUMNS = [
 /** Nullable `Json?` columns: Prisma wants DbNull, not a plain null. */
 const JSON_COLUMNS = ['spellcasting', 'equipmentChoices', 'multiclassing'] as const;
 
-/** Copy for a repeated (name, level) pairing, shared by both write paths. */
-const DUPLICATE_FEATURE_MESSAGE =
-  'Two features share a name at the same level; each pairing must be unique';
-
-/** A normalized `ClassFeature` row, parent id excluded. */
-interface FeatureRow {
-  name: string;
-  level: number;
-  description: string;
-}
-
-/**
- * Pull the normalized feature list off column data, leaving the parent columns
- * behind. `undefined` means the request said nothing about features; an array
- * (possibly empty) means replace the lot.
- *
- * Mutates rather than returning a copy so there is exactly one object in play:
- * a `{ rest, features }` split would leave the caller free to write the wrong
- * half, and `features` reaching `srdClass.update` as a column is a Prisma error
- * at best and a silent nested write at worst.
- */
-function takeFeatures(data: ColumnData): FeatureRow[] | undefined {
-  const rows = data.features;
-  // Always drop the key, even when the value is undefined: `features` reaching
-  // `srdClass.update` as a scalar column is a Prisma error at best and a silent
-  // nested write at worst, and an undefined own-key is still an own key.
-  delete data.features;
-  return rows === undefined ? undefined : (rows as FeatureRow[]);
-}
-
-/**
- * Whether a Prisma error is a unique violation on the class_features index
- * rather than on the parent class's name.
- *
- * `level` is the discriminator because none of the class-name indexes carry it:
- * the three partial uniques on `srd_classes` key on `name` and `createdById`
- * (VEG-505), while `class_features` keys on `[classId, name, level]`. Prisma
- * reports the field names rather than the index name — verified against a live
- * Postgres, where the duplicate raises `meta.target = ['classId','name','level']`
- * — so this reads the same list the unit spec constructs.
- */
-function isFeatureConflict(err: unknown): boolean {
-  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
-  const target = (err.meta as { target?: unknown } | undefined)?.target;
-  return Array.isArray(target) && target.includes('level');
-}
-
-/**
- * Refuse a feature list that repeats a (name, level) pairing.
- *
- * Mirrors the DTO's `@ArrayUnique`, for the callers that never meet it. Same
- * copy as the conflict `performUpdate` translates, so the two write paths answer
- * a duplicate feature identically instead of one of them blaming the class.
- */
-function assertNoDuplicateFeatures(rows: FeatureRow[]): void {
-  const seen = new Set<string>();
-  for (const row of rows) {
-    const key = `${row.level}|${row.name}`;
-    if (seen.has(key)) throw new ConflictException(DUPLICATE_FEATURE_MESSAGE);
-    seen.add(key);
-  }
-}
-
-/**
- * Normalize the DTO's feature list into insertable rows.
- *
- * `description` is optional on the DTO and NOT NULL on the column, so a missing
- * one becomes the empty string rather than reaching Prisma as undefined — a
- * half-drafted feature is a real state and should not need invented prose. A
- * null list clears every row, matching the `String[]` null-clear convention.
- *
- * Order is preserved from the payload but is not load-bearing: every read path
- * sorts by `(level, name)`.
- */
-function toFeatureRows(value: ClassFeatureDto[] | null | undefined): FeatureRow[] {
-  if (!value) return [];
-  // Named fields, not a spread. A spread into an object literal skips
-  // excess-property checking, so `tsc` cannot tell the two apart and any extra
-  // key on the payload would ride through to the insert — `id` most of all,
-  // which would let a caller choose a row's primary key. The DTO already
-  // refuses both over HTTP; this is the copy of that rule that a seed or import
-  // caller, which the write skeleton documents as bypassing the pipe, still
-  // meets.
-  return value.map(f => ({
-    name: f.name,
-    level: f.level,
-    description: f.description ?? '',
-  }));
-}
-
 /**
  * CRUD for user-authored (homebrew) classes (VEG-506), the first new consumer of
  * the {@link ContentCrudService} skeleton since VEG-336 held it once. The
@@ -120,7 +37,8 @@ function toFeatureRows(value: ClassFeatureDto[] | null | undefined): FeatureRow[
  *
  * Features are child `ClassFeature` rows written in the same request (VEG-507),
  * which makes this the first consumer of the skeleton's `performUpdate` seam.
- * Subclasses still arrive with VEG-509.
+ * {@link HomebrewSubclassesService} shares that feature handling
+ * through `feature-rows.ts`.
  */
 @Injectable()
 export class HomebrewClassesService extends ContentCrudService<
@@ -136,31 +54,12 @@ export class HomebrewClassesService extends ContentCrudService<
   }
 
   /**
-   * Turn the normalized feature list into Prisma's nested-create form.
-   *
-   * Not done in {@link toColumnData}, which is handed a `CreateClassDto |
-   * UpdateClassDto` and cannot tell which: the update path needs the same rows
-   * as a plain array so {@link performUpdate} can delete-then-insert them, and
-   * a nested `create` there would append to the existing rows instead of
-   * replacing them.
-   *
-   * An absent `features` key stays absent, so a create that says nothing about
-   * features writes no child rows rather than an empty relation.
+   * Turn the normalized feature list into Prisma's nested-create form, refusing a
+   * duplicate (name, level) before the write. {@link nestFeaturesForCreate} says
+   * why both happen here rather than in {@link toColumnData} or after the insert.
    */
   protected override beforeCreate(data: ColumnData, _actor: ContentActor): ColumnData {
-    const features = takeFeatures(data);
-    if (features) {
-      // Same reasoning as the catch in performUpdate, applied to the path that
-      // cannot catch. `create` is final, and the skeleton maps every failure
-      // from it with the parent noun, so a P2002 from the nested feature insert
-      // would reach the client as "you already have a class with this name" — a
-      // message about the wrong entity. There is no seam to translate it after
-      // the fact, so the check happens before the write instead. The DTO's
-      // @ArrayUnique makes it unreachable over HTTP; the write skeleton names
-      // seed and import callers as sitting outside that pipe.
-      assertNoDuplicateFeatures(features);
-      data.features = { create: features };
-    }
+    nestFeaturesForCreate(data);
     return data;
   }
 
@@ -187,7 +86,9 @@ export class HomebrewClassesService extends ContentCrudService<
    *
    * The transaction is what makes the replacement safe: without it a failure
    * between the delete and the insert would leave the class with no features at
-   * all, having been asked to change two of them.
+   * all, having been asked to change two of them. The row lock taken first is
+   * what keeps two overlapping replacements from merging; see
+   * {@link lockFeatureParent}.
    *
    * Returns the row the parent update produced, per the hook's contract — not a
    * re-read, and not the row `update` authorized, either of which would serve
@@ -200,35 +101,9 @@ export class HomebrewClassesService extends ContentCrudService<
     if (!features) return this.delegate.update({ where: { id }, data });
 
     return this.prisma.$transaction(async tx => {
+      await lockFeatureParent(tx, 'srd_classes', id);
       const updated = await tx.srdClass.update({ where: { id }, data });
-      await tx.classFeature.deleteMany({ where: { classId: id } });
-      if (features.length > 0) {
-        try {
-          await tx.classFeature.createMany({
-            // `classId` last so a row cannot override the parent id. This is
-            // the second of two guards and no test distinguishes it, because
-            // the first one already holds: `toFeatureRows` builds each row from
-            // three named fields, so a stray `classId` never reaches here. Kept
-            // because it is free and it makes the question local — under the
-            // other order, whether a feature can reparent itself depends on a
-            // whitelist two functions away.
-            data: features.map(f => ({ ...f, classId: id })),
-          });
-        } catch (err) {
-          // Unreachable through the HTTP boundary today: the DTO's @ArrayUnique
-          // rejects a payload that repeats a (name, level) pair, and the
-          // deleteMany above clears the only other rows the index could collide
-          // with. Kept because `update` maps every failure with the parent's
-          // noun, so without this a duplicate *feature* would reach the client
-          // as "you already have a class with this name" — a message about the
-          // wrong entity is worse than no message. Anything already an
-          // HttpException passes through mapWriteError untouched.
-          if (isFeatureConflict(err)) {
-            throw new ConflictException(DUPLICATE_FEATURE_MESSAGE);
-          }
-          throw err;
-        }
-      }
+      await replaceFeatures(tx.classFeature, 'classId', id, features);
       return updated;
     });
   }
