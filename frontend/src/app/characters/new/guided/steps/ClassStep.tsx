@@ -6,7 +6,12 @@ import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
 import { useDraftGrants } from '../useCharacterDraft';
-import { classOptions, resolveClass } from '@/lib/class-selection';
+import {
+  classOptions,
+  requiredSkillPicks,
+  resolveClass,
+  uniqueSkillPool,
+} from '@/lib/class-selection';
 import type { WizardStepProps } from './types';
 
 /**
@@ -35,12 +40,8 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
   );
   const subclasses = subclassesQuery.data ?? [];
 
-  const skillPool = selectedClass?.skillChoices ?? [];
-  const numSkillChoices = selectedClass?.numSkillChoices ?? 0;
-  // The API accepts a numSkillChoices larger than the class's skill pool, and
-  // demanding more picks than the pool holds strands the wizard on this step.
-  // So the required count is capped at the pool size.
-  const requiredPicks = Math.min(numSkillChoices, skillPool.length);
+  const skillPool = uniqueSkillPool(selectedClass);
+  const requiredPicks = requiredSkillPicks(selectedClass);
   // The class owns the choose-N skill picks as its own grant slice, so they
   // survive a background switch and don't double-count a background-granted skill
   // that happens to be in the pool.

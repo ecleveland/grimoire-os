@@ -174,7 +174,7 @@ describe('ClassForm', () => {
     });
   });
 
-  it('submits the edited class as the exact payload', async () => {
+  it('submits the edited class as the exact payload, including a changed feature', async () => {
     const user = userEvent.setup();
     renderForm({ initial: makeClass(), submitLabel: 'Save changes' });
 
@@ -190,6 +190,9 @@ describe('ClassForm', () => {
     await user.type(screen.getByLabelText('Weapon proficiencies'), 'Longbows{Enter}');
     await user.type(screen.getByLabelText('Tool proficiencies'), "Cartographer's Tools{Enter}");
     fireEvent.change(screen.getByLabelText('Subclass level'), { target: { value: '5' } });
+    fireEvent.change(screen.getAllByLabelText('Feature description')[1], {
+      target: { value: 'Step between trees.' },
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -207,8 +210,32 @@ describe('ClassForm', () => {
       subclassLevel: 5,
       features: [
         { name: 'Wardens Bond', level: 1, description: 'A bond.' },
-        { name: 'Grove Step', level: 4, description: '' },
+        { name: 'Grove Step', level: 4, description: 'Step between trees.' },
       ],
+    });
+  });
+
+  it('leaves features out of a description-only edit (VEG-508)', async () => {
+    const user = userEvent.setup();
+    renderForm({ initial: makeClass(), submitLabel: 'Save changes' });
+
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Fixed a typo.' } });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    // Strict, so a `features` key fails it whatever its value.
+    expect(onSubmit.mock.calls[0][0]).toStrictEqual({
+      name: 'Warden',
+      hitDie: 'd10',
+      description: 'Fixed a typo.',
+      primaryAbilities: ['Strength', 'Wisdom'],
+      savingThrows: ['Strength', 'Constitution'],
+      skillChoices: ['Athletics', 'Nature', 'Survival'],
+      numSkillChoices: 2,
+      armorProficiencies: ['Light armor', 'Medium armor', 'Shields'],
+      weaponProficiencies: ['Simple weapons', 'Martial weapons'],
+      toolProficiencies: ['Herbalism Kit'],
+      subclassLevel: 3,
     });
   });
 
@@ -224,7 +251,7 @@ describe('ClassForm', () => {
 
     expect(toast.error).not.toHaveBeenCalled();
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit.mock.calls[0][0]).toEqual({
+    expect(onSubmit.mock.calls[0][0]).toStrictEqual({
       name: 'Warden',
       hitDie: 'd10',
       description: 'Fixed a typo.',
@@ -236,10 +263,6 @@ describe('ClassForm', () => {
       weaponProficiencies: ['Simple weapons', 'Martial weapons'],
       toolProficiencies: ['Herbalism Kit'],
       subclassLevel: 3,
-      features: [
-        { name: 'Wardens Bond', level: 1, description: 'A bond.' },
-        { name: 'Grove Step', level: 4, description: '' },
-      ],
     });
   });
 

@@ -37,8 +37,15 @@ export default function MonsterLookupPanel({ canAdd = false, onAdd }: Props) {
     setDetailLoading(true);
     setDetailOpen(true);
     setAdding(false);
-    apiFetch<SrdMonster>(`/srd/monsters/${id}`)
-      .then(setDetail)
+    apiFetch<SrdMonster | null>(`/srd/monsters/${id}`)
+      .then(monster => {
+        if (!monster) {
+          toast.error('Monster not found', { id: 'lookup-load-monster' });
+          setDetailOpen(false);
+          return;
+        }
+        setDetail(monster);
+      })
       .catch(err => {
         console.error('Failed to load monster:', err);
         toast.error('Failed to load monster', { id: 'lookup-load-monster' });

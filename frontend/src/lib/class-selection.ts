@@ -37,3 +37,18 @@ export function resolveClass(
 export function classOptions(classes: SrdClass[]): SrdComboboxOption[] {
   return sourceLabelledOptions(classes);
 }
+
+export function uniqueSkillPool(cls: Pick<SrdClass, 'skillChoices'> | undefined): string[] {
+  return [...new Set(cls?.skillChoices ?? [])];
+}
+
+/**
+ * How many class skills a character picks. The API accepts a `numSkillChoices`
+ * above the pool size and a pool that repeats a skill, so the count is capped at
+ * the distinct skills in the pool.
+ */
+export function requiredSkillPicks(
+  cls: Pick<SrdClass, 'skillChoices' | 'numSkillChoices'> | undefined
+): number {
+  return Math.min(cls?.numSkillChoices ?? 0, uniqueSkillPool(cls).length);
+}

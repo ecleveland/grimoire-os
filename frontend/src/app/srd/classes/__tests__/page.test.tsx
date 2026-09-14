@@ -8,12 +8,13 @@ import type { SrdClass } from '@/lib/types';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 // The list rides the credentialed useApiQuery so the caller's homebrew appears;
-// deletes go through apiFetch.
+// deletes go through apiFetch. The options are recorded so the error toast is
+// checked too.
 const mockUseApiQuery = vi.fn();
 const mockInvalidateApiPath = vi.fn();
 vi.mock('@/lib/query', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/query')>()),
-  useApiQuery: (path: string) => mockUseApiQuery(path),
+  useApiQuery: (path: string, options?: unknown) => mockUseApiQuery(path, options),
   invalidateApiPath: (...args: unknown[]) => mockInvalidateApiPath(...args),
 }));
 
@@ -131,10 +132,15 @@ describe('ClassListPage', () => {
   });
 
   describe('rendering', () => {
-    it('fetches /srd/classes and renders the list', () => {
+    it('fetches /srd/classes with the load-failure toast and renders the list', () => {
       renderPage();
 
-      expect(mockUseApiQuery).toHaveBeenCalledWith('/srd/classes');
+      expect(mockUseApiQuery).toHaveBeenCalledWith(
+        '/srd/classes',
+        expect.objectContaining({
+          errorToast: { message: 'Failed to load classes', id: 'load-classes' },
+        })
+      );
       expect(screen.getByText('Fighter')).toBeInTheDocument();
       expect(screen.getByText(/Hit Die: d10/)).toBeInTheDocument();
     });
@@ -171,6 +177,17 @@ describe('ClassListPage', () => {
       expect(
         screen.getByText('Failed to load classes. Please try again later.')
       ).toBeInTheDocument();
+    });
+
+    it('keeps the loaded list on screen when a background refresh fails', () => {
+      mockUseApiQuery.mockReturnValue(queryResult({ isError: true }));
+
+      renderPage();
+
+      expect(screen.getByText('Fighter')).toBeInTheDocument();
+      expect(
+        screen.queryByText('Failed to load classes. Please try again later.')
+      ).not.toBeInTheDocument();
     });
 
     it('links each card to its class page, for anonymous visitors too', async () => {
@@ -258,6 +275,20 @@ describe('ClassListPage', () => {
 
       renderPage();
       await user.click(screen.getByRole('button', { name: /Gunslinger/, expanded: false }));
+
+      expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    });
+
+    it('shows no Edit/Delete to a non-admin who created a shared class', async () => {
+      authAsOwner();
+      mockUseApiQuery.mockReturnValue(
+        queryResult({ data: [makeClass({ contentSource: 'shared', createdById: 'u1' })] })
+      );
+      const user = userEvent.setup();
+
+      renderPage();
+      await user.click(screen.getByRole('button', { name: /Fighter/, expanded: false }));
 
       expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();

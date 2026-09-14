@@ -1027,6 +1027,31 @@ describe('CharacterEditorForm — editable proficiencies', () => {
     expect(screen.getByText(/1 of 2 chosen/i)).toBeInTheDocument();
   });
 
+  // The API accepts a skill count above the class's pool, so the counter asks
+  // for no more picks than the pool holds.
+  it('caps the class skill counter at the pool size', async () => {
+    const narrowPool: SrdClass = {
+      ...srdClasses[0],
+      id: 'cls-duelist',
+      name: 'Duelist',
+      contentSource: 'homebrew',
+      skillChoices: ['Athletics'],
+      numSkillChoices: 2,
+    };
+    srdClasses.push(narrowPool);
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.class = 'Duelist';
+      renderForm({ initialValues: initial });
+
+      expect(
+        await screen.findByText(/from your class \(choose 1\): 0 of 1 chosen/i)
+      ).toBeInTheDocument();
+    } finally {
+      srdClasses.pop();
+    }
+  });
+
   it('toggles armor training into the submitted payload', async () => {
     const initial = emptyCharacterFormValues();
     initial.name = 'Hero';

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider, type Query } from '@tanstack/react-qu
 import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import EditClassPage from '../page';
+import { ApiError } from '@/lib/api';
 import type { SrdClass } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
@@ -31,11 +32,18 @@ vi.mock('next/navigation', () => ({
 }));
 
 const DETAIL = '/srd/classes/cls-hb';
+const DENIAL = 'You can only edit your own homebrew classes.';
 const OWNER_AUTH = {
   isAuthenticated: true,
   isAdmin: false,
   isLoading: false,
   user: { userId: 'u1' },
+};
+const ADMIN_AUTH = {
+  isAuthenticated: true,
+  isAdmin: true,
+  isLoading: false,
+  user: { userId: 'admin-1' },
 };
 
 function makeClass(over: Partial<SrdClass> = {}): SrdClass {
@@ -103,6 +111,21 @@ function invalidates(spy: MockInstance<QueryClient['invalidateQueries']>, path: 
   return predicate({ queryKey: ['api', path] } as unknown as Query);
 }
 
+/** The loaded fixture's scalar fields, as a PATCH that leaves them alone sends them. */
+const UNCHANGED_FIELDS = {
+  name: 'Warden',
+  hitDie: 'd10',
+  description: 'A sworn protector of wild places.',
+  primaryAbilities: ['Strength', 'Wisdom'],
+  savingThrows: ['Strength', 'Constitution'],
+  skillChoices: ['Athletics', 'Nature', 'Survival'],
+  numSkillChoices: 2,
+  armorProficiencies: ['Light armor', 'Medium armor', 'Shields'],
+  weaponProficiencies: ['Simple weapons', 'Martial weapons'],
+  toolProficiencies: ['Herbalism Kit'],
+  subclassLevel: 3,
+};
+
 describe('EditClassPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -145,16 +168,34 @@ describe('EditClassPage', () => {
     expect(screen.getByText(/^This class also has multiclassing rules\./)).toBeInTheDocument();
   });
 
-  it('shows the failure state for the empty body a hidden or deleted class comes back as', async () => {
-    // The server answers 200 with no body, and apiFetch's res.json() rejects on it.
-    routeApi(() => Promise.reject(new SyntaxError('Unexpected end of JSON input')));
+  it('shows Class not found. with a way back and no Retry for a hidden or deleted class (null) (VEG-508)', async () => {
+    // apiFetch reads the empty 200 the API sends for a class the caller can't see as null.
+    routeApi(() => Promise.resolve(null));
+
+    renderPage();
+
+    expect(await screen.findByText('Class not found.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to classes' })).toHaveAttribute(
+      'href',
+      '/srd/classes'
+    );
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Failed to load class.')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('shows Failed to load class. with Retry and the toast during an outage (VEG-508)', async () => {
+    routeApi(() => Promise.reject(new ApiError(503, 'Service Unavailable')));
 
     renderPage();
 
     expect(await screen.findByText('Failed to load class.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith('Failed to load class', { id: 'load-class' })
     );
+    expect(screen.queryByText('Class not found.')).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
   });
 
@@ -164,7 +205,7 @@ describe('EditClassPage', () => {
     await screen.findByDisplayValue('Warden');
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Grove Warden' } });
-    routeApi(() => Promise.reject(new SyntaxError('Unexpected end of JSON input')));
+    routeApi(() => Promise.reject(new ApiError(503, 'Service Unavailable')));
     await act(() => client.refetchQueries({ queryKey: ['api', DETAIL] }));
 
     // The toast proves the reload really failed before the screen is judged.
@@ -175,13 +216,20 @@ describe('EditClassPage', () => {
     expect(screen.getByLabelText(/^Name/)).toHaveValue('Grove Warden');
   });
 
-  it('shows the same failure state for a null body', async () => {
-    routeApi(() => Promise.resolve(null));
-
+  it('renders the form after Retry once the next load succeeds', async () => {
+    const get = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(503, 'Service Unavailable'))
+      .mockResolvedValue(makeClass());
+    routeApi(get);
+    const user = userEvent.setup();
     renderPage();
 
     expect(await screen.findByText('Failed to load class.')).toBeInTheDocument();
-    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByDisplayValue('Warden')).toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it('denies editing an SRD class', async () => {
@@ -189,9 +237,7 @@ describe('EditClassPage', () => {
 
     renderPage();
 
-    expect(
-      await screen.findByText('You can only edit your own homebrew classes.')
-    ).toBeInTheDocument();
+    expect(await screen.findByText(DENIAL)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to classes' })).toHaveAttribute(
       'href',
       '/srd/classes'
@@ -204,19 +250,31 @@ describe('EditClassPage', () => {
 
     renderPage();
 
-    expect(
-      await screen.findByText('You can only edit your own homebrew classes.')
-    ).toBeInTheDocument();
+    expect(await screen.findByText(DENIAL)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+  });
+
+  it('denies a non-admin editing a shared class, even one they created (VEG-508)', async () => {
+    routeApi(() => Promise.resolve(makeClass({ contentSource: 'shared', createdById: 'u1' })));
+
+    renderPage();
+
+    expect(await screen.findByText(DENIAL)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+  });
+
+  it('denies an admin editing an SRD class (VEG-508)', async () => {
+    mockUseAuth.mockReturnValue(ADMIN_AUTH);
+    routeApi(() => Promise.resolve(makeClass({ contentSource: 'srd', createdById: null })));
+
+    renderPage();
+
+    expect(await screen.findByText(DENIAL)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
   });
 
   it('lets an admin edit a shared class', async () => {
-    mockUseAuth.mockReturnValue({
-      isAuthenticated: true,
-      isAdmin: true,
-      isLoading: false,
-      user: { userId: 'admin-1' },
-    });
+    mockUseAuth.mockReturnValue(ADMIN_AUTH);
     routeApi(() =>
       Promise.resolve(makeClass({ contentSource: 'shared', createdById: 'other-admin' }))
     );
@@ -226,7 +284,7 @@ describe('EditClassPage', () => {
     expect(await screen.findByDisplayValue('Warden')).toBeInTheDocument();
   });
 
-  it('PATCHes the exact body with no feature ids or JSON columns, then returns to the list (VEG-508)', async () => {
+  it('PATCHes a rename without features or the JSON columns, and navigates before invalidating (VEG-508)', async () => {
     routeApi(() => Promise.resolve(makeClass()));
     const user = userEvent.setup();
     const { client } = renderPage();
@@ -236,29 +294,38 @@ describe('EditClassPage', () => {
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Grove Warden' } });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1));
+    // Exact: the unchanged features and the fixture's multiclassing rules stay out.
+    expect(patchBody()).toStrictEqual({ ...UNCHANGED_FIELDS, name: 'Grove Warden' });
+    expect(toast.success).toHaveBeenCalledWith('Class updated');
+    expect(mockPush).toHaveBeenCalledWith('/srd/classes');
+    expect(mockPush.mock.invocationCallOrder[0]).toBeLessThan(
+      invalidate.mock.invocationCallOrder[0]
+    );
+    // The bare key is the one the list page and the builder steps cache.
+    expect(invalidates(invalidate, '/srd/classes')).toBe(true);
+    expect(invalidates(invalidate, DETAIL)).toBe(true);
+  });
+
+  it('sends features, without their ids, when a feature is renamed (VEG-508)', async () => {
+    routeApi(() => Promise.resolve(makeClass()));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByDisplayValue('Warden');
+
+    fireEvent.change(screen.getAllByLabelText('Feature name')[1], {
+      target: { value: 'Grove Stride' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/classes'));
-    // Exact: the fixture's feature ids and its multiclassing rules must not ride along.
-    expect(patchBody()).toEqual({
-      name: 'Grove Warden',
-      hitDie: 'd10',
-      description: 'A sworn protector of wild places.',
-      primaryAbilities: ['Strength', 'Wisdom'],
-      savingThrows: ['Strength', 'Constitution'],
-      skillChoices: ['Athletics', 'Nature', 'Survival'],
-      numSkillChoices: 2,
-      armorProficiencies: ['Light armor', 'Medium armor', 'Shields'],
-      weaponProficiencies: ['Simple weapons', 'Martial weapons'],
-      toolProficiencies: ['Herbalism Kit'],
-      subclassLevel: 3,
+    expect(patchBody()).toStrictEqual({
+      ...UNCHANGED_FIELDS,
       features: [
         { name: 'Wardens Bond', level: 1, description: 'A bond.' },
-        { name: 'Grove Step', level: 4, description: 'Step between trees.' },
+        { name: 'Grove Stride', level: 4, description: 'Step between trees.' },
       ],
     });
-    expect(toast.success).toHaveBeenCalledWith('Class updated');
-    expect(invalidate).toHaveBeenCalledTimes(1);
-    expect(invalidates(invalidate, DETAIL)).toBe(true);
-    expect(invalidates(invalidate, '/srd/classes?page=1&limit=100')).toBe(true);
   });
 
   it('toasts the API error message and stays on the page when the save fails', async () => {
@@ -293,19 +360,30 @@ describe('EditClassPage', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it('renders the form after Retry once the next load succeeds', async () => {
-    const get = vi
-      .fn()
-      .mockRejectedValueOnce(new SyntaxError('Unexpected end of JSON input'))
-      .mockResolvedValue(makeClass());
-    routeApi(get);
+  it('shows a disabled Saving... button while the save is still in flight', async () => {
+    routeApi(
+      () => Promise.resolve(makeClass()),
+      () => new Promise(() => {})
+    );
     const user = userEvent.setup();
     renderPage();
+    await screen.findByDisplayValue('Warden');
 
-    expect(await screen.findByText('Failed to load class.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    expect(await screen.findByDisplayValue('Warden')).toBeInTheDocument();
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('button', { name: 'Saving...' })).toBeDisabled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('goes back when Cancel is pressed', async () => {
+    routeApi(() => Promise.resolve(makeClass()));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByDisplayValue('Warden');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(() => patchBody()).toThrow('no PATCH was sent');
   });
 });

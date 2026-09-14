@@ -30,9 +30,10 @@ export default function EditClassPage() {
     {
       onSuccess: async () => {
         toast.success('Class updated');
-        // The prefix covers this class's detail key as well as the list pages.
-        await invalidateApiPath(queryClient, '/srd/classes');
+        // The prefix also matches this page's own detail key, so navigating first
+        // avoids waiting on a refetch that nothing renders.
         router.push('/srd/classes');
+        await invalidateApiPath(queryClient, '/srd/classes');
       },
       onError: err => {
         console.error('Failed to update class:', err);
@@ -43,13 +44,25 @@ export default function EditClassPage() {
 
   const cls = query.data;
 
-  // A class the caller can't see comes back as a 200 with an empty body, which
-  // apiFetch fails to parse, so a hidden or deleted class arrives as a query
-  // error. A null body gets the same treatment. The failure view only stands in
-  // for a class that never loaded: a reload that fails in the background, say
-  // after the network drops mid-edit, keeps the form and its unsaved changes,
-  // and the error toast still reports the failure.
-  if (cls === null || (query.isError && cls === undefined))
+  // The API answers a class the caller can't see, or one that is gone, with an
+  // empty body, which reads as null.
+  if (cls === null)
+    return (
+      <div className="text-center py-12">
+        <p className="text-gray-500 dark:text-gray-400 mb-4">Class not found.</p>
+        <Link
+          href="/srd/classes"
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        >
+          Back to classes
+        </Link>
+      </div>
+    );
+
+  // The failure view is only for a class that never loaded. A reload that fails
+  // in the background, say after the network drops mid-edit, keeps the form and
+  // its unsaved changes, and the error toast still reports the failure.
+  if (query.isError && cls === undefined)
     return (
       <div className="text-center py-12">
         <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load class.</p>

@@ -103,7 +103,7 @@ describe('ClassFeaturesEditor', () => {
   describe('rows the API sent', () => {
     it('never emits an id, whatever the caller handed in', () => {
       const onChange = vi.fn();
-      const withId = { ...f(), id: 'cf-1' } as ClassFeatureDraft;
+      const withId = { ...f(), id: 'cf-1' } as unknown as ClassFeatureDraft;
       render(<ClassFeaturesEditor value={[withId]} onChange={onChange} />);
 
       fireEvent.change(screen.getByLabelText('Feature description'), {
@@ -120,7 +120,7 @@ describe('ClassFeaturesEditor', () => {
       const rows = [
         { ...f({ name: 'A' }), id: 'cf-1' },
         { ...f({ name: 'B' }), id: 'cf-2' },
-      ] as ClassFeatureDraft[];
+      ] as unknown as ClassFeatureDraft[];
       render(<ClassFeaturesEditor value={rows} onChange={onChange} />);
 
       fireEvent.change(screen.getAllByLabelText('Feature name')[0], { target: { value: 'A!' } });

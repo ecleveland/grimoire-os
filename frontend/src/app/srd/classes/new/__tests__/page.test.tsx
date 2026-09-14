@@ -123,7 +123,8 @@ describe('NewClassPage', () => {
     });
     expect(toast.success).toHaveBeenCalledWith('Class created');
     expect(invalidate).toHaveBeenCalledTimes(1);
-    expect(invalidates(invalidate, '/srd/classes?page=1&limit=100')).toBe(true);
+    // The bare key is the one the list page and the builder steps cache.
+    expect(invalidates(invalidate, '/srd/classes')).toBe(true);
     expect(invalidates(invalidate, '/srd/backgrounds')).toBe(false);
   });
 
@@ -171,5 +172,27 @@ describe('NewClassPage', () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to create class'));
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('shows a disabled Saving... button while the create is still in flight', async () => {
+    routeApi(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderPage();
+
+    fillName();
+    await user.click(screen.getByRole('button', { name: 'Create class' }));
+
+    expect(await screen.findByRole('button', { name: 'Saving...' })).toBeDisabled();
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('goes back when Cancel is pressed', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(mockApiFetch).not.toHaveBeenCalled();
   });
 });

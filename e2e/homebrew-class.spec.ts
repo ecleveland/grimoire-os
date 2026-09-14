@@ -112,6 +112,10 @@ test.describe('Homebrew class pages (VEG-508)', () => {
       multiclassing: MULTICLASSING,
     });
 
+    const before = await page.request.get(`${BACKEND}/api/srd/classes/${id}`);
+    expect(before.ok(), `class read failed: ${before.status()}`).toBeTruthy();
+    const featureId = ((await before.json()).features as { id: string }[])[0].id;
+
     await page.goto(`/srd/classes/${id}/edit`);
     await expect(page.getByText(/^This class also has multiclassing rules\./)).toBeVisible({
       timeout: 10_000,
@@ -127,7 +131,8 @@ test.describe('Homebrew class pages (VEG-508)', () => {
     expect(saved.multiclassing).toEqual(MULTICLASSING);
     expect(saved.description).toBe('Rewritten through the form.');
     expect(saved.features).toHaveLength(1);
-    expect(saved.features[0]).toMatchObject({ name: featureName, level: 1 });
+    // The same id proves the save left the feature rows alone instead of replacing them.
+    expect(saved.features[0]).toMatchObject({ id: featureId, name: featureName, level: 1 });
     // The column's default count survives the save, even against an empty pool.
     expect(saved.numSkillChoices).toBe(2);
     expect(saved.skillChoices).toEqual([]);
@@ -178,7 +183,8 @@ test.describe('Homebrew class pages (VEG-508)', () => {
     });
 
     await page.goto(`/srd/classes/${id}/edit`);
-    await expect(page.getByText('Failed to load class.', { exact: true })).toBeVisible({
+    await expect(page).toHaveURL(new RegExp(`/srd/classes/${id}/edit$`));
+    await expect(page.getByText('Class not found.', { exact: true })).toBeVisible({
       timeout: 10_000,
     });
     await expect(page.getByLabel(/^Name/)).toHaveCount(0);

@@ -10,7 +10,7 @@ import ClassDetail from '@/components/ClassDetail';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import { invalidateApiPath, useApiQuery } from '@/lib/query';
+import { apiQueryKey, invalidateApiPath, useApiQuery } from '@/lib/query';
 import type { SrdClass, SrdSubclass } from '@/lib/types';
 
 /** The detail GET includes the class's subclasses, which the list payload leaves out. */
@@ -21,7 +21,11 @@ export default function ClassDetailPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { isAdmin, user } = useAuth();
-  const query = useApiQuery<ClassWithSubclasses | null>(`/srd/classes/${id}`);
+  const [deleted, setDeleted] = useState(false);
+  const query = useApiQuery<ClassWithSubclasses | null>(`/srd/classes/${id}`, {
+    errorToast: { message: 'Failed to load class', id: 'load-class' },
+    enabled: !deleted,
+  });
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const cls = query.data;
@@ -37,31 +41,50 @@ export default function ClassDetailPage() {
     </p>
   );
 
-  // A class the caller can't see comes back as an empty 200, which apiFetch
-  // fails to parse, so hidden and deleted classes land here as errors. A failed
-  // background refetch keeps the loaded class on screen.
-  if (cls === null || (query.isError && cls === undefined)) {
+  if (deleted) {
+    return (
+      <div>
+        {backLink}
+        <p className="text-gray-500 dark:text-gray-400">Class deleted.</p>
+      </div>
+    );
+  }
+
+  // The API answers null for a class the caller can't see, which covers hidden and
+  // deleted classes. An error with nothing loaded is a failed request, so the page
+  // offers a retry instead of calling the class missing. A failed background
+  // refetch keeps the loaded class on screen.
+  if (cls === null) {
     return (
       <div>
         {backLink}
         <div className="text-center py-12">
           <p className="text-gray-500 dark:text-gray-400 mb-4">Class not found.</p>
-          <div className="flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => query.refetch()}
-              disabled={query.isFetching}
-              className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              Retry
-            </button>
-            <Link
-              href="/srd/classes"
-              className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-            >
-              Back to classes
-            </Link>
-          </div>
+          <Link
+            href="/srd/classes"
+            className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            Back to classes
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (query.isError && cls === undefined) {
+    return (
+      <div>
+        {backLink}
+        <div className="text-center py-12">
+          <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load class.</p>
+          <button
+            type="button"
+            onClick={() => query.refetch()}
+            disabled={query.isFetching}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -86,10 +109,14 @@ export default function ClassDetailPage() {
   const handleDelete = async () => {
     try {
       await apiFetch(`/srd/classes/${id}`, { method: 'DELETE' });
+      // The page stays mounted until the navigation lands. Disabling the query keeps
+      // the next render from fetching the deleted id again, and removing its cache
+      // entry before the list refresh keeps that refresh from refetching it too. A
+      // later visit to this URL then starts empty instead of from a stale copy.
+      setDeleted(true);
       toast.success(`Deleted ${cls.name}`);
-      // Navigation comes first because the prefix also matches this page's own
-      // detail key, and refetching a deleted class fails only after a retry.
       router.push('/srd/classes');
+      queryClient.removeQueries({ queryKey: apiQueryKey(`/srd/classes/${id}`), exact: true });
       await invalidateApiPath(queryClient, '/srd/classes');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete class');

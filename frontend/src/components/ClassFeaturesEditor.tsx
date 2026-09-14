@@ -30,6 +30,8 @@ export interface ClassFeatureDraft {
   name: string;
   level: number;
   description?: string;
+  /** API rows carry an id, and the write DTO refuses it. */
+  id?: never;
 }
 
 const EMPTY_FEATURE: ClassFeatureDraft = { name: '', level: 1, description: '' };

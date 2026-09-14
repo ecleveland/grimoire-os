@@ -43,7 +43,12 @@ import {
 import FormField from '@/components/FormField';
 import SrdCombobox from '@/components/SrdCombobox';
 import { backgroundOptions, resolveBackground } from '@/lib/background-selection';
-import { classOptions, resolveClass } from '@/lib/class-selection';
+import {
+  classOptions,
+  requiredSkillPicks,
+  resolveClass,
+  uniqueSkillPool,
+} from '@/lib/class-selection';
 import ToggleChips from '@/components/ToggleChips';
 import TokenListEditor from '@/components/TokenListEditor';
 import WeaponsEditor from '@/components/WeaponsEditor';
@@ -883,8 +888,8 @@ export default function CharacterEditorForm({
       <ProficienciesSection
         values={values}
         set={set}
-        classSkillPool={selectedClass?.skillChoices ?? []}
-        numSkillChoices={selectedClass?.numSkillChoices ?? 0}
+        classSkillPool={uniqueSkillPool(selectedClass)}
+        numSkillChoices={requiredSkillPicks(selectedClass)}
         languageSuggestions={languageSuggestions}
       />
 

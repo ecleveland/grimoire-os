@@ -312,6 +312,30 @@ describe('AdminEquipmentPage', () => {
     expect(mockToastSuccess).toHaveBeenCalledWith('Pack contents saved');
   });
 
+  it('toasts "That item no longer exists" and opens no editor when the pack detail comes back null', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.startsWith('/admin/items?')) {
+        return Promise.resolve(
+          paginated([
+            makeItem({ id: 'pack-1', name: "Explorer's Pack", category: 'Equipment Pack' }),
+          ])
+        );
+      }
+      // The detail endpoint answers null once the item is gone.
+      if (path.startsWith('/srd/items/')) return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+    const user = userEvent.setup();
+    render(<AdminEquipmentPage />);
+    await screen.findByText("Explorer's Pack");
+
+    await user.click(screen.getByRole('button', { name: /contents/i }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('That item no longer exists'));
+    expect(mockToastError).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: /edit contents of/i })).not.toBeInTheDocument();
+  });
+
   it('toasts and re-enables the save button when saving contents fails', async () => {
     mockApiFetch.mockImplementation((path: string, opts?: RequestInit) => {
       if (path === '/admin/items/pack-1/contents' && opts?.method === 'PUT') {

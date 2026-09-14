@@ -53,7 +53,8 @@ export default function ClassListPage() {
     }
   }
 
-  if (classesQuery.isError) {
+  // A failed background refresh keeps the loaded list on screen.
+  if (classesQuery.isError && classesQuery.data === undefined) {
     return (
       <div className="text-red-600 dark:text-red-400">
         Failed to load classes. Please try again later.

@@ -394,6 +394,51 @@ describe('ClassStep skill count larger than the pool', () => {
   });
 });
 
+// The class DTO checks each pool entry against the catalog but not for
+// uniqueness, so the API accepts a pool that repeats a skill.
+describe('ClassStep skill pool that repeats a skill', () => {
+  const repeatedPool = () =>
+    makeClass({ skillChoices: ['Athletics', 'Athletics'], numSkillChoices: 2 });
+
+  it('renders one chip for the repeated skill', async () => {
+    const user = userEvent.setup();
+    renderStep([repeatedPool()]);
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(within(skills).getAllByRole('button', { name: /athletics/i })).toHaveLength(1);
+  });
+
+  it('reports invalid before the pick and valid after picking the skill', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([repeatedPool()]);
+
+    await pickClass(user, 'Fighter');
+    const skills = await screen.findByRole('group', { name: /skills/i });
+    expect(onValid).toHaveBeenLastCalledWith(false);
+
+    // Take the first match so this case turns on the pick count, not the chip count.
+    const [athletics] = within(skills).getAllByRole('button', { name: /athletics/i });
+    await user.click(athletics);
+    expect(onValid).toHaveBeenLastCalledWith(true);
+  });
+
+  it('logs no duplicate-key warning', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderStep([repeatedPool()]);
+
+    await pickClass(user, 'Fighter');
+    await screen.findByRole('group', { name: /skills/i });
+
+    const duplicateKeyErrors = consoleError.mock.calls.filter(args =>
+      args.map(String).join(' ').includes('same key')
+    );
+    consoleError.mockRestore();
+    expect(duplicateKeyErrors).toEqual([]);
+  });
+});
+
 // VEG-524. VEG-506 made a class name non-unique, so the picker has to record
 // *which* row was chosen. These mirror the background picker's VEG-473 suite.
 describe('ClassStep — duplicate class names (VEG-524)', () => {

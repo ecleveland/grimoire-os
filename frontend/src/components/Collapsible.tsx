@@ -3,14 +3,14 @@
 import { useState, type ReactNode } from 'react';
 
 /**
- * Accordion card used by the SRD reference pages (classes/races/backgrounds).
- * The only interactive state is open/closed, so this stays a small client island
- * inside otherwise server-rendered pages (VEG-320): the `summary`, `headerAside`,
- * and detail `children` are all server-rendered markup passed in as props.
+ * Accordion card used by the SRD reference pages for classes, races and
+ * backgrounds. Its only state is whether it is open, so it works the same inside
+ * the server-rendered races page and the client-rendered classes and backgrounds
+ * pages.
  *
- * The detail panel is kept in the DOM (toggled via the `hidden` attribute) rather
- * than conditionally mounted, so its content ships in the server HTML and stays
- * crawlable even while collapsed.
+ * The detail panel is toggled with the `hidden` attribute instead of mounting on
+ * open, so its content is always in the DOM. On the races page that content ships
+ * in the server HTML, and on every page crawlers can find it while it is collapsed.
  */
 export default function Collapsible({
   summary,

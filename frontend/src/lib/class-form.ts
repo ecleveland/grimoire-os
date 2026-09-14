@@ -43,11 +43,20 @@ export interface ClassPayload {
   weaponProficiencies: string[];
   toolProficiencies: string[];
   subclassLevel: number | null;
-  /** Always sent. The form owns the whole list, and the API replaces every stored row with it. */
-  features: ClassFeatureDraft[];
+  /**
+   * Sent only when the list changed. The API replaces every stored row and gives
+   * each a new id, which orphans print-tray entries that still hold the old ones.
+   */
+  features?: ClassFeatureDraft[];
 }
 
 export type ClassFormResult = { payload: ClassPayload } | { error: string };
+
+interface FeatureRow {
+  name: string;
+  level: number;
+  description: string;
+}
 
 export function emptyClassFormState(): ClassFormState {
   return {
@@ -80,10 +89,9 @@ export function classToFormState(cls: SrdClass): ClassFormState {
     toolProficiencies: cls.toolProficiencies ?? [],
     // The API sends null for a class without one, which the shared type doesn't admit.
     subclassLevel: cls.subclassLevel == null ? '' : String(cls.subclassLevel),
-    // Named fields, not a spread. API rows carry an `id` and the write DTO refuses
-    // any key it doesn't whitelist, so a spread row would 400 every save of an
-    // existing class. tsc can't catch it, because a spread skips the
-    // excess-property check.
+    // Named fields, not a spread. The draft type refuses an `id`, so tsc catches
+    // that key, but a spread would still carry any other key an API row has and
+    // the type doesn't declare, and the write DTO 400s a save that sends one.
     features: (cls.features ?? []).map(f => ({
       name: f.name,
       level: f.level,
@@ -99,6 +107,30 @@ function sameMembers(a: string[], b: string[]): boolean {
   return a.every(value => members.has(value));
 }
 
+/** Feature rows as the payload sends them, trimmed. */
+function toFeatureRows(features: ClassFeatureDraft[]): FeatureRow[] {
+  return features.map(f => ({
+    name: f.name.trim(),
+    level: f.level,
+    description: (f.description ?? '').trim(),
+  }));
+}
+
+/** Whether two feature lists hold the same rows, in any order. Row order is a drafting aid. */
+function sameFeatures(a: FeatureRow[], b: FeatureRow[]): boolean {
+  if (a.length !== b.length) return false;
+  // JSON keeps the identity and the description apart, whatever characters either holds.
+  const key = (f: FeatureRow) => JSON.stringify([classFeatureIdentity(f), f.description]);
+  const counts = new Map<string, number>();
+  for (const f of a) counts.set(key(f), (counts.get(key(f)) ?? 0) + 1);
+  for (const f of b) {
+    const left = counts.get(key(f)) ?? 0;
+    if (left === 0) return false;
+    counts.set(key(f), left - 1);
+  }
+  return true;
+}
+
 export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState): ClassFormResult {
   const name = s.name.trim();
   if (!name) return { error: 'Name is required' };
@@ -112,12 +144,13 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
   // The API can store a count that doesn't fit the pool, and the character
   // builder caps the picks it asks for at the pool size, so such a class still
   // works. Skill fields left as they loaded skip the two rules below, so an
-  // unrelated edit isn't blocked by a mismatch the author never made.
+  // unrelated edit isn't blocked by a mismatch the author never made. Counts
+  // compare as numbers, so retyping "02" over a loaded 2 changes nothing.
   const skillChoices = cleanList(s.skillChoices);
   const skillsUnchanged =
     baseline !== undefined &&
     sameMembers(skillChoices, cleanList(baseline.skillChoices)) &&
-    s.numSkillChoices.trim() === baseline.numSkillChoices.trim();
+    numSkillChoices === parseIntInRange(baseline.numSkillChoices, 0, 18);
   if (!skillsUnchanged) {
     // A count above the pool asks for picks that don't exist, and a count of 0
     // with skills offered leaves the pool unused.
@@ -137,41 +170,44 @@ export function formStateToPayload(s: ClassFormState, baseline?: ClassFormState)
     return { error: `Subclass level must be a whole number from 1 to ${MAX_LEVEL}` };
   }
 
-  const features = s.features.map(f => ({
-    name: f.name.trim(),
-    level: f.level,
-    description: (f.description ?? '').trim(),
-  }));
-  if (features.some(f => !f.name)) return { error: 'Every feature needs a name' };
-  // The editor holds NaN while a level box is cleared, until the box loses focus.
-  if (features.some(f => !Number.isInteger(f.level) || f.level < 1 || f.level > MAX_LEVEL)) {
-    return { error: `Every feature needs a level from 1 to ${MAX_LEVEL}` };
-  }
-  // Compared on the trimmed names, since those are what gets sent. The editor's
-  // live warning sees "Rage" and "Rage " as two rows; the server sees one.
-  const seen = new Set<string>();
-  for (const feature of features) {
-    const identity = classFeatureIdentity(feature);
-    if (seen.has(identity)) {
-      return { error: 'Two features share a name at the same level; each pairing must be unique' };
+  const features = toFeatureRows(s.features);
+  const featuresChanged = !baseline || !sameFeatures(features, toFeatureRows(baseline.features));
+  // Checked only when the list is being sent. The API stores rows this form
+  // would reject, because the write boundary compares raw names where this trims
+  // them, and such a row must not block an edit that leaves the list alone.
+  if (featuresChanged) {
+    if (features.some(f => !f.name)) return { error: 'Every feature needs a name' };
+    // The editor holds NaN while a level box is cleared, until the box loses focus.
+    if (features.some(f => !Number.isInteger(f.level) || f.level < 1 || f.level > MAX_LEVEL)) {
+      return { error: `Every feature needs a level from 1 to ${MAX_LEVEL}` };
     }
-    seen.add(identity);
+    // Compared on the trimmed names, since those are what gets sent. The editor's
+    // live warning sees "Rage" and "Rage " as two rows; the server sees one.
+    const seen = new Set<string>();
+    for (const feature of features) {
+      const identity = classFeatureIdentity(feature);
+      if (seen.has(identity)) {
+        return {
+          error: 'Two features share a name at the same level; each pairing must be unique',
+        };
+      }
+      seen.add(identity);
+    }
   }
 
-  return {
-    payload: {
-      name,
-      hitDie: s.hitDie,
-      description: optionalText(s.description),
-      primaryAbilities: cleanList(s.primaryAbilities),
-      savingThrows: cleanList(s.savingThrows),
-      skillChoices,
-      numSkillChoices,
-      armorProficiencies: cleanList(s.armorProficiencies),
-      weaponProficiencies: cleanList(s.weaponProficiencies),
-      toolProficiencies: cleanList(s.toolProficiencies),
-      subclassLevel,
-      features,
-    },
+  const payload: ClassPayload = {
+    name,
+    hitDie: s.hitDie,
+    description: optionalText(s.description),
+    primaryAbilities: cleanList(s.primaryAbilities),
+    savingThrows: cleanList(s.savingThrows),
+    skillChoices,
+    numSkillChoices,
+    armorProficiencies: cleanList(s.armorProficiencies),
+    weaponProficiencies: cleanList(s.weaponProficiencies),
+    toolProficiencies: cleanList(s.toolProficiencies),
+    subclassLevel,
   };
+  if (featuresChanged) payload.features = features;
+  return { payload };
 }

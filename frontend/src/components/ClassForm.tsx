@@ -55,16 +55,16 @@ export default function ClassForm({
   onSubmit,
   onCancel,
 }: ClassFormProps) {
-  // Seeded once. The features editor keys its rows on mount, so handing it a
-  // different list later would pair those keys with the wrong rows.
-  const [form, setForm] = useState<ClassFormState>(() =>
-    initial ? classToFormState(initial) : emptyClassFormState()
-  );
-  // The values as loaded, so a save can tell skill fields the author changed
-  // from ones they left alone. A new class has none.
+  // The class as it loaded, so a save can tell what the author changed. A new
+  // class has none.
   const [baseline] = useState<ClassFormState | undefined>(() =>
     initial ? classToFormState(initial) : undefined
   );
+  // Seeded once from the loaded state. The features editor keys its rows on
+  // mount, so handing it a different list later would pair those keys with the
+  // wrong rows. Nothing mutates state in place, so sharing the baseline's arrays
+  // is safe.
+  const [form, setForm] = useState<ClassFormState>(() => baseline ?? emptyClassFormState());
 
   // The API accepts d20 and d100 as a class hit die, and a select can't show a
   // value it has no option for. The extra comes from `initial`, not live state,

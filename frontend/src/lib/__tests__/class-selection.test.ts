@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import type { SrdClass } from '@/lib/types';
-import { resolveClass, classOptions } from '../class-selection';
+import {
+  resolveClass,
+  classOptions,
+  requiredSkillPicks,
+  uniqueSkillPool,
+} from '../class-selection';
 
 function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   return {
@@ -133,5 +138,43 @@ describe('classOptions', () => {
 
   it('returns an empty list for an empty catalog', () => {
     expect(classOptions([])).toEqual([]);
+  });
+});
+
+// The API accepts a count above the pool and a pool that repeats a skill. The
+// guided class step and the character editor both take their pick count here.
+describe('requiredSkillPicks', () => {
+  it('caps at the pool size', () => {
+    expect(requiredSkillPicks(makeClass({ skillChoices: ['Athletics'], numSkillChoices: 2 }))).toBe(
+      1
+    );
+    // A count the pool can satisfy is left alone.
+    expect(
+      requiredSkillPicks(
+        makeClass({ skillChoices: ['Acrobatics', 'Athletics', 'History'], numSkillChoices: 2 })
+      )
+    ).toBe(2);
+  });
+
+  it('counts a repeated skill once', () => {
+    expect(
+      requiredSkillPicks(
+        makeClass({ skillChoices: ['Athletics', 'Athletics'], numSkillChoices: 2 })
+      )
+    ).toBe(1);
+  });
+
+  it('returns 0 for an undefined class', () => {
+    expect(requiredSkillPicks(undefined)).toBe(0);
+  });
+});
+
+describe('uniqueSkillPool', () => {
+  it('removes repeats and keeps first-seen order', () => {
+    expect(
+      uniqueSkillPool(
+        makeClass({ skillChoices: ['Stealth', 'Athletics', 'Stealth', 'Acrobatics', 'Athletics'] })
+      )
+    ).toEqual(['Stealth', 'Athletics', 'Acrobatics']);
   });
 });

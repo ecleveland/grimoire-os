@@ -43,8 +43,8 @@ function makeState(over: Partial<ClassFormState> = {}): ClassFormState {
 }
 
 /** The payload for a state expected to validate; fails the test with the error otherwise. */
-function payloadOf(state: ClassFormState) {
-  const result = formStateToPayload(state);
+function payloadOf(state: ClassFormState, baseline?: ClassFormState) {
+  const result = formStateToPayload(state, baseline);
   if ('error' in result) throw new Error(`expected a payload, got: ${result.error}`);
   return result.payload;
 }
@@ -188,8 +188,13 @@ describe('formStateToPayload', () => {
   });
 
   it('sends only name, level and description on a feature row, even one carrying an id', () => {
-    const withId = { name: 'Rage', level: 1, description: '', id: 'cf-1' } as ClassFeatureDraft;
-    const [row] = payloadOf(makeState({ features: [withId] })).features;
+    const withId = {
+      name: 'Rage',
+      level: 1,
+      description: '',
+      id: 'cf-1',
+    } as unknown as ClassFeatureDraft;
+    const [row] = payloadOf(makeState({ features: [withId] })).features!;
 
     expect(Object.keys(row).sort()).toEqual(['description', 'level', 'name']);
   });
@@ -386,6 +391,157 @@ describe('formStateToPayload', () => {
       expect(formStateToPayload({ ...baseline }, baseline)).toEqual({
         error: 'Number of skill choices must be a whole number from 0 to 18',
       });
+    });
+
+    it('counts a retyped "02" as the loaded count of 2 (VEG-508)', () => {
+      const baseline = defaultCount();
+
+      expect(formStateToPayload({ ...baseline, numSkillChoices: '02' }, baseline)).toEqual({
+        payload: expect.objectContaining({ numSkillChoices: 2, skillChoices: [] }),
+      });
+    });
+
+    it('still refuses removing a skill that leaves the count above the pool (VEG-508)', () => {
+      const baseline = makeState({ skillChoices: ['Athletics', 'Nature'], numSkillChoices: '2' });
+
+      expect(formStateToPayload({ ...baseline, skillChoices: ['Athletics'] }, baseline)).toEqual({
+        error: "Number of skill choices can't be more than the skills offered (1)",
+      });
+    });
+  });
+
+  describe('features in the payload', () => {
+    const loaded = () =>
+      makeState({
+        features: [
+          { name: 'Rage', level: 1, description: 'Primal ferocity.' },
+          { name: 'Reckless Attack', level: 2, description: 'Swing wild.' },
+        ],
+      });
+
+    it('leaves out a list that matches the loaded one (VEG-508)', () => {
+      const baseline = loaded();
+
+      const payload = payloadOf({ ...baseline, description: 'Edited.' }, baseline);
+
+      expect('features' in payload).toBe(false);
+    });
+
+    it('leaves out a list that was only reordered (VEG-508)', () => {
+      const baseline = loaded();
+      const reordered = { ...baseline, features: [...baseline.features].reverse() };
+
+      expect('features' in payloadOf(reordered, baseline)).toBe(false);
+    });
+
+    it('sends the list when a feature description changed', () => {
+      const baseline = loaded();
+      const [rage, reckless] = baseline.features;
+      const edited = {
+        ...baseline,
+        features: [rage, { ...reckless, description: 'Swing wilder.' }],
+      };
+
+      expect(payloadOf(edited, baseline).features).toEqual([
+        { name: 'Rage', level: 1, description: 'Primal ferocity.' },
+        { name: 'Reckless Attack', level: 2, description: 'Swing wilder.' },
+      ]);
+    });
+
+    it('sends the list when a row was added or removed', () => {
+      const baseline = loaded();
+      const [rage, reckless] = baseline.features;
+      const added = {
+        ...baseline,
+        features: [rage, reckless, { name: 'Brutal Critical', level: 9, description: '' }],
+      };
+      const removed = { ...baseline, features: [rage] };
+
+      expect(payloadOf(added, baseline).features).toHaveLength(3);
+      expect(payloadOf(removed, baseline).features).toEqual([
+        { name: 'Rage', level: 1, description: 'Primal ferocity.' },
+      ]);
+    });
+
+    it('sends the list when a row was renamed', () => {
+      const baseline = loaded();
+      const [rage, reckless] = baseline.features;
+      const renamed = { ...baseline, features: [{ ...rage, name: 'Fury' }, reckless] };
+
+      expect(payloadOf(renamed, baseline).features).toEqual([
+        { name: 'Fury', level: 1, description: 'Primal ferocity.' },
+        { name: 'Reckless Attack', level: 2, description: 'Swing wild.' },
+      ]);
+    });
+
+    it('sends the list for a new class, even when it is empty', () => {
+      expect(payloadOf(makeState()).features).toEqual([]);
+      expect(payloadOf(loaded()).features).toHaveLength(2);
+    });
+  });
+
+  // A create has no baseline, so every feature check still runs on one; the
+  // validation tests above cover that.
+  describe('features the API stored but this form would reject', () => {
+    // The write DTO and the unique index compare raw names, while the form trims
+    // them, so "Rage" and "Rage " at one level are two legal stored rows.
+    const collidingOnTrim = () =>
+      makeState({
+        features: [
+          { name: 'Rage', level: 1, description: '' },
+          { name: 'Rage ', level: 1, description: '' },
+        ],
+      });
+
+    it('saves an unrelated edit without sending the list (VEG-508)', () => {
+      const baseline = collidingOnTrim();
+
+      const payload = payloadOf({ ...baseline, description: 'Fixed a typo.' }, baseline);
+
+      expect('features' in payload).toBe(false);
+    });
+
+    it('checks the list once an edit sends it', () => {
+      const baseline = collidingOnTrim();
+      const [rage, spaced] = baseline.features;
+      const renamed = { ...baseline, features: [rage, { ...spaced, name: 'Fury' }] };
+
+      expect(payloadOf(renamed, baseline).features).toEqual([
+        { name: 'Rage', level: 1, description: '' },
+        { name: 'Fury', level: 1, description: '' },
+      ]);
+    });
+
+    it('still refuses an edit that makes two trimmed names collide', () => {
+      const baseline = makeState({
+        features: [
+          { name: 'Rage', level: 1, description: '' },
+          { name: 'Fury', level: 1, description: '' },
+        ],
+      });
+      const [rage, fury] = baseline.features;
+      const collides = { ...baseline, features: [rage, { ...fury, name: 'Rage ' }] };
+
+      expect(formStateToPayload(collides, baseline)).toEqual({
+        error: 'Two features share a name at the same level; each pairing must be unique',
+      });
+    });
+
+    it('saves an unrelated edit when a loaded row has a blank name (VEG-508)', () => {
+      const baseline = makeState({
+        features: [{ name: '', level: 1, description: 'Half drafted.' }],
+      });
+
+      const payload = payloadOf({ ...baseline, description: 'Fixed a typo.' }, baseline);
+
+      expect('features' in payload).toBe(false);
+    });
+
+    it('still refuses a blank name on a row the author added', () => {
+      const baseline = collidingOnTrim();
+      const added = { ...baseline, features: [...baseline.features, { name: '', level: 3 }] };
+
+      expect(formStateToPayload(added, baseline)).toEqual({ error: 'Every feature needs a name' });
     });
   });
 });

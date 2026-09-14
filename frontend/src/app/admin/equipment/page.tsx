@@ -136,7 +136,11 @@ export default function AdminEquipmentPage() {
   const openContents = async (item: SrdItem) => {
     try {
       // The detail endpoint resolves bundle contents; the list response omits them.
-      const detail = await apiFetch<SrdItem>(`/srd/items/${item.id}`);
+      const detail = await apiFetch<SrdItem | null>(`/srd/items/${item.id}`);
+      if (!detail) {
+        toast.error('That item no longer exists');
+        return;
+      }
       setContentsEdit({ item, contents: detail.contents ?? [], saving: false });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load pack contents');
