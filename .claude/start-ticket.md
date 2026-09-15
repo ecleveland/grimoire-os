@@ -61,14 +61,17 @@ Run both steps below with Bash `run_in_background: true` — `verify.sh` is eigh
 
 Classify the PR before running any automated review. Measure against main (`git diff --shortstat origin/main...HEAD` + changed-file list); risk triggers win over size.
 
-**Risk triggers** (always at least deep tier, regardless of diff size): auth/JWT/cookies, Prisma schema/migrations or seed data, content-access rules (srd/shared/homebrew tiers), rate limiting.
+**Risk triggers** (always the risk tier, regardless of diff size): auth/JWT/cookies, Prisma schema/migrations or seed data, content-access rules (srd/shared/homebrew tiers), rate limiting.
 
-| Tier                    | When                                                                                                                                                                 | What Claude runs, unprompted                                                                                            |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **skip**                | Docs/markdown-only, CI/config tweaks, dependency-pin bumps, or ≤30 changed lines across ≤3 files with no risk trigger and no behaviour change beyond a localized fix | Nothing — CI is the gate. Say so in the report.                                                                         |
-| **standard**            | Anything between skip and deep: typical bug fixes, small UI tweaks, single-component changes                                                                         | `/code-review medium --comment` + self-review                                                                           |
-| **deep**                | Full feature (new page, endpoint, or data model), OR ≥400 changed lines, OR ≥10 files                                                                                | `/code-review xhigh --comment` + both toolkit agents + self-review                                                      |
-| **deep + risk trigger** | Any risk trigger above                                                                                                                                               | `/code-review max --comment` + both toolkit agents + self-review. Offer `ultra` as a user-run option; never attempt it. |
+| Tier         | When                                                                                                                                                                 | What Claude runs, unprompted, once                                                                                        |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **skip**     | Docs/markdown-only, CI/config tweaks, dependency-pin bumps, or ≤30 changed lines across ≤3 files with no risk trigger and no behaviour change beyond a localized fix | Nothing. CI is the gate. Say so in the report.                                                                            |
+| **standard** | Everything else with no risk trigger, whatever its size: bug fixes, UI tweaks, full features                                                                         | `/code-review medium --comment` + self-review                                                                             |
+| **risk**     | Any risk trigger above                                                                                                                                               | `/code-review xhigh --comment` + both toolkit agents + self-review. Offer `ultra` as a user-run option; never attempt it. |
+
+There is no `max` tier and no deep tier. On VEG-509 (PR #280) the old policy
+ran `max` for three rounds: 120 review agents against 5 implementers, about
+85% of the ticket's subagent tokens, and the user stopped it by hand.
 
 Compute the tier, do not judge it. Production files only — test-only and
 generated files (lockfiles, `tsconfig.tsbuildinfo`, snapshots) do not count
@@ -93,8 +96,8 @@ finder angles. If it ever does refuse, test it rather than trusting this
 paragraph either.)
 
 The one genuine exception is **`ultra`**, which runs in the cloud and is billed.
-That is user-triggered only. Name it as an option at the deep + risk-trigger
-gate; do not attempt it.
+That is user-triggered only. Name it as an option at the risk-tier gate; do not
+attempt it.
 
 **Two passes, at different points:**
 
@@ -103,14 +106,22 @@ gate; do not attempt it.
    keeps the PR history clean instead of accreting review-round commits. Skip
    for trivial diffs.
 2. **Post-PR**, after `gh pr create`: the tier-appropriate command with
-   `--comment`, so findings anchor to lines. This is the one that gates.
+   `--comment`, so findings anchor to lines. This is the one that gates, and it
+   runs once per PR.
 
 **Acting on findings, without asking:**
 
-- **CONFIRMED** (the reviewer named a triggering input and the wrong output) —
-  fix it. TDD where behaviour changes: regression test first, then re-verify,
-  commit, push. Reply to the PR comment noting it is resolved.
-- **PLAUSIBLE** (real mechanism, uncertain trigger) — report, do not edit.
+- **CONFIRMED and harmful**: a user-visible defect, a security or authorization
+  hole, or data loss, where the reviewer named the triggering input and the
+  wrong output. Fix it. TDD where behaviour changes: regression test first, then
+  re-verify, commit, push. Reply to the PR comment noting it is resolved.
+- **CONFIRMED otherwise**: cleanup, dead code, duplicated docs, comment wording,
+  schema hints, test naming, weak-but-passing tests, and gaps that predate the
+  PR. Do not edit. List each in the round summary with its file:line. It
+  becomes a ticket only under the follow-up policy below. On VEG-509 the fixes
+  for findings like these caused the two worst later findings, a logout
+  regression and an edit that silently dropped features.
+- **PLAUSIBLE** (real mechanism, uncertain trigger): report, do not edit.
   Summarize for the user with the file:line and what would have to be true.
 - Either way, **verify the finding against the code before acting on it.** On
   VEG-453 a review agent cited a species trait's prose as structured data and
@@ -120,14 +131,18 @@ gate; do not attempt it.
   reformatted the line the replace string matched on. A no-op mutation reads
   exactly like a healthy passing suite — assert the edit applied.
 
-**Iteration cap:** re-run the same tier after fixing. Stop when a round returns
-no new actionable findings, or at 1 re-review for standard / 3 for deep. A
-finding disputed once and confirmed invalid does not count as new. At the cap,
-present what is left rather than churning.
+**No re-review of the whole PR.** After the fixes land, do not run the tier's
+review again. A second full pass rereads code the first pass already cleared
+and always finds something new to verify. When a fix changes runtime behaviour,
+check that fix alone: one `reviewer` agent (`model: "opus"`) on
+`git diff <sha-before-fixes>..HEAD`, asked only for bugs the fix introduced.
+Fix what it confirms under the same harmful-only rule, then stop. Pure test or
+comment fixes get no check. Then move to CI.
 
-**The toolkit agents stay additive.** At deep tier and above, also run
+**The toolkit agents stay additive, once.** At the risk tier, also run
 `pr-review-toolkit:pr-test-analyzer` and `pr-review-toolkit:type-design-analyzer`
-— test coverage and type design are not `/code-review` angles. Do not run the
+alongside the single `/code-review xhigh` pass. Test coverage and type design
+are not `/code-review` angles. Do not rerun them after fixes. Do not run the
 full `/pr-review-toolkit:review-pr`; its `code-reviewer` and
 `silent-failure-hunter` passes duplicate what `/code-review` covers at `xhigh`,
 without its independent-verifier step. Ask these agents for concrete `file:line`
