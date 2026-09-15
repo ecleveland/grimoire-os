@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { CancelledError } from '@tanstack/react-query';
 import SubclassesSection from '@/components/SubclassesSection';
 import { ApiError } from '@/lib/api';
 import { PrintTrayProvider } from '@/lib/print-tray-context';
@@ -614,6 +615,24 @@ describe('SubclassesSection', () => {
       });
     });
 
+    // A later write's invalidation cancels this one's refetch, which rejects it
+    // with CancelledError. The new rows still arrive, on that newer refetch, so
+    // reading it as a failed reload would withdraw the row for good.
+    it('treats a superseded refetch as a refresh that landed', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockRejectedValueOnce(new CancelledError());
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
+      expect(await within(cardFor('Deadeye')).findByRole('button', { name: 'Edit' })).toBeVisible();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
     // The row was deleted from another tab, so this page is stale. Without a
     // refresh the card stays listed and every retry answers 404.
     it('refreshes after a 404 on an edit, so the row that is gone can drop out', async () => {
@@ -930,6 +949,21 @@ describe('SubclassesSection', () => {
       expect(mockToast.success).toHaveBeenCalledWith('Deleted Deadeye');
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    });
+
+    it('treats a superseded refetch as a refresh that landed', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockRejectedValueOnce(new CancelledError());
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Deleted Deadeye'));
+      // The mock never drops the row, so the controls returning shows the mark lifted.
+      expect(await screen.findByRole('button', { name: 'Delete' })).toBeVisible();
+      expect(mockToast.error).not.toHaveBeenCalled();
     });
 
     it('refreshes after a 404 on a delete, so the row that is gone can drop out', async () => {

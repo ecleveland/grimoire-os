@@ -364,15 +364,18 @@ describe('UsersService', () => {
       await expect(service.remove(USER_ID)).rejects.toThrow(NotFoundException);
     });
 
-    it('propagates P2003 untouched so AllExceptionsFilter can map it to 409 (VEG-312)', async () => {
+    // Not left to AllExceptionsFilter (VEG-312). Its DELETE arm reads a P2003 as
+    // a relation missing an onDelete policy, which is the wrong diagnostic and
+    // the wrong message for content arriving mid-delete.
+    it('answers a persistent FK violation with the race conflict', async () => {
       const fkError = new PrismaClientKnownRequestError('Foreign key constraint failed', {
         code: 'P2003',
         clientVersion: '6.0.0',
       });
       prisma.user.delete.mockRejectedValue(fkError);
 
-      await expect(service.remove(USER_ID)).rejects.toBe(fkError);
-      // The first failure buys a retry; the second one is what reaches the filter.
+      await expect(service.remove(USER_ID)).rejects.toThrow(ConflictException);
+      // The first failure buys a retry; the second one is what answers.
       expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     });
 
@@ -413,13 +416,35 @@ describe('UsersService', () => {
         expect(prisma.$transaction).toHaveBeenCalledTimes(2);
       });
 
-      it('rethrows the second failure untouched rather than retrying again', async () => {
-        const first = fkViolation();
-        const second = fkViolation();
-        prisma.$transaction.mockRejectedValueOnce(first).mockRejectedValueOnce(second);
+      // A second failure of the same shape is answered here rather than
+      // rethrown. The FK would otherwise reach AllExceptionsFilter's DELETE arm
+      // and the CHECK shape has no mapping at all, so it would be a 500.
+      it.each([
+        ['FK violation', fkViolation],
+        ['CHECK violation', checkViolation],
+      ])('answers a second %s with a retryable conflict', async (_name, makeError) => {
+        prisma.$transaction.mockRejectedValueOnce(makeError()).mockRejectedValueOnce(makeError());
 
-        await expect(service.remove(USER_ID)).rejects.toBe(second);
+        const err = await service.remove(USER_ID).catch((e: unknown) => e);
+
+        expect(err).toBeInstanceOf(ConflictException);
+        expect((err as ConflictException).message).toBe(
+          'Content was added while this user was being deleted; try again'
+        );
         expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      });
+
+      // The retry is keyed on the code, not on the error class. A unique
+      // violation is a real failure to report, not a row that arrived late.
+      it('never retries a known Prisma error with an unrelated code (P2002)', async () => {
+        const conflict = new PrismaClientKnownRequestError('Unique constraint failed', {
+          code: 'P2002',
+          clientVersion: '6.0.0',
+        });
+        prisma.$transaction.mockRejectedValueOnce(conflict);
+
+        await expect(service.remove(USER_ID)).rejects.toBe(conflict);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       });
 
       it('never retries a missing user (P2025)', async () => {

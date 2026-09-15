@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { CancelledError, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Badge from '@/components/Badge';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -93,10 +93,17 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
   // together, so a failure on the class query can't skip the pickers and leave
   // them serving the old rows for the rest of the session.
   const refresh = async () => {
-    await Promise.all([
-      invalidateApiPath(queryClient, `/srd/classes/${cls.id}`, { throwOnError: true }),
-      invalidateApiPath(queryClient, '/srd/subclasses', { throwOnError: true }),
-    ]);
+    try {
+      await Promise.all([
+        invalidateApiPath(queryClient, `/srd/classes/${cls.id}`, { throwOnError: true }),
+        invalidateApiPath(queryClient, '/srd/subclasses', { throwOnError: true }),
+      ]);
+    } catch (err) {
+      // A later write's invalidation cancels this refetch rather than racing it,
+      // and the newer one carries the rows, so a supersession is a refresh that
+      // landed. Everything else is a refetch that never arrived.
+      if (!(err instanceof CancelledError)) throw err;
+    }
   };
 
   /**

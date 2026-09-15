@@ -225,8 +225,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Only the server can clear the httpOnly cookies, so a logout that didn't
       // reach it leaves the session live and the middleware would bounce /login
-      // back to /. Stay here and say so rather than faking a sign-out.
-      toast.error('Could not sign out. Check your connection and try again.');
+      // back to /. Stay here and say so rather than faking a sign-out. The
+      // reachable non-2xx is a 429, which an idle tab draws from the anonymous
+      // per-IP bucket once its access token has expired, so the copy says wait.
+      toast.error('Could not sign out. Try again in a moment.');
       return;
     }
     window.location.replace('/login');

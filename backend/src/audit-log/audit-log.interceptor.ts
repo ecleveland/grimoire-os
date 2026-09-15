@@ -25,8 +25,9 @@ const ENTITY_MAP: Record<string, string> = {
   users: 'User',
 };
 
-// Every content type with write routes under /srd/*. Writes under /admin/*
-// resolve through ENTITY_MAP instead.
+// Every content type with write routes under /srd/*. The /admin/* routes are
+// looked up in ENTITY_MAP, which covers admin user edits but none of the admin
+// content routes (items, npc-data, loot-odds), so those writes go unaudited.
 const SRD_CONTENT_ENTITY_MAP: Record<string, string> = {
   monsters: 'Monster',
   spells: 'Spell',

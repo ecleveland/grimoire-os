@@ -19,7 +19,7 @@ import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const BCRYPT_ROUNDS = 12;
 
-/** Attempts a user delete gets. One retry, no backoff; see {@link UsersService.remove}. */
+/** How many times a user delete is tried. One retry, no backoff; see {@link UsersService.remove}. */
 const USER_DELETE_ATTEMPTS = 2;
 
 /**
@@ -184,7 +184,8 @@ export class UsersService {
    * FK or the homebrew CHECK constraint and rolls the whole transaction back,
    * because the pass over that row's table has already gone by. One retry of the
    * entire transaction clears it for every content table, since the second pass
-   * sees the new row. A second failure is no longer a race and propagates.
+   * sees the new row. A second failure of the same shape answers 409 and asks
+   * the caller to try again.
    */
   async remove(id: string): Promise<void> {
     for (let attempt = 1; ; attempt++) {
@@ -215,10 +216,18 @@ export class UsersService {
         if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
           throw new NotFoundException(`User with ID "${id}" not found`);
         }
-        if (attempt < USER_DELETE_ATTEMPTS && isConcurrentWriteConflict(error)) continue;
-        // Everything else propagates untouched. AllExceptionsFilter maps a
-        // DELETE-blocking P2003 to 409 and logs the relation that blocked it,
-        // which is the diagnostic for a missing onDelete policy (VEG-312).
+        if (isConcurrentWriteConflict(error)) {
+          if (attempt < USER_DELETE_ATTEMPTS) continue;
+          // Answered here rather than rethrown. A P2003 would reach
+          // AllExceptionsFilter's DELETE arm, which logs a missing onDelete
+          // policy (VEG-312) and tells the client that other records depend on
+          // this one, and neither describes a row that arrived mid-delete. The
+          // CHECK shape has no mapping at all and would answer 500.
+          throw new ConflictException(
+            'Content was added while this user was being deleted; try again'
+          );
+        }
+        // Everything else propagates untouched.
         throw error;
       }
     }

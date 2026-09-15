@@ -622,9 +622,7 @@ describe('AuthProvider', () => {
       await user.click(screen.getByText('Logout'));
 
       await waitFor(() =>
-        expect(mockToastError).toHaveBeenCalledWith(
-          'Could not sign out. Check your connection and try again.'
-        )
+        expect(mockToastError).toHaveBeenCalledWith('Could not sign out. Try again in a moment.')
       );
       expect(mockReplace).not.toHaveBeenCalled();
       expect(mockAssign).not.toHaveBeenCalled();
@@ -644,9 +642,7 @@ describe('AuthProvider', () => {
       await user.click(screen.getByText('Logout'));
 
       await waitFor(() =>
-        expect(mockToastError).toHaveBeenCalledWith(
-          'Could not sign out. Check your connection and try again.'
-        )
+        expect(mockToastError).toHaveBeenCalledWith('Could not sign out. Try again in a moment.')
       );
       expect(mockReplace).not.toHaveBeenCalled();
       expect(mockPush).not.toHaveBeenCalled();
