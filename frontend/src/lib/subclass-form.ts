@@ -25,9 +25,10 @@ export interface SubclassFormState {
  * Request body for POST and PATCH /srd/subclasses, minus the create-only `classId`.
  *
  * A create carries `name` and `description`. An edit carries only the fields the
- * author changed, and may be empty: the card an edit opens from can be stale when
- * the refetch after the last save failed, and resending an untouched field from
- * it would revert that save. A PATCH that omits a key leaves the stored value.
+ * author changed, and may be empty, because the card an edit opens from can be
+ * stale when the refetch after the last save failed, and resending an untouched
+ * field from it would revert that save. A PATCH that omits a key leaves the
+ * stored value.
  */
 export interface SubclassPayload {
   name?: string;

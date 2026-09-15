@@ -8,9 +8,9 @@
 //    class. Another user's homebrew class is refused with the same status and
 //    message as an id that never existed. A direct insert under that same class
 //    succeeds, which pins that no database constraint backs the service check.
-// 2. The row's own visibility: a stranger reads nothing and gets 404 on update
+// 2. The row's own visibility. A stranger reads nothing and gets 404 on update
 //    and delete, and the owner's delete takes the feature rows with it.
-// 3. The RESTRICT FK from the other side: HomebrewClassesService refuses to delete
+// 3. The RESTRICT FK from the other side. HomebrewClassesService refuses to delete
 //    a class while a subclass hangs off it, and allows it once the subclass is gone.
 // 4. The real `UsersService.remove` across two authors. A owns a homebrew class
 //    with a homebrew subclass under it, which fails if the service deletes classes
@@ -86,8 +86,8 @@ function pauseAfterFeatureInsert(real: PrismaService, pause: () => Promise<void>
 
 /**
  * Wait until some session on the test database is blocked on a lock. Polling
- * `pg_stat_activity` makes the interleave deterministic: the second update is
- * released only once Postgres itself reports it waiting, rather than after a
+ * `pg_stat_activity` makes the interleave deterministic, because the second
+ * update is released only once Postgres itself reports it waiting, rather than after a
  * sleep that is either too short on a slow machine or wasted on a fast one.
  */
 async function waitForBlockedSession(prisma: PrismaService): Promise<void> {
@@ -119,7 +119,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   let strangerClassId: string;
 
   beforeAll(async () => {
-    // No truncate and no seed: every row this file reads it inserts, under a
+    // No truncate and no seed. Every row this file reads it inserts, under a
     // RUN-stamped name, and nothing here counts rows it did not write.
     ctx = await createSeedContext();
 
@@ -156,8 +156,8 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           source: HOMEBREW_SOURCE_LABEL,
         },
       }),
-      // Inserted directly: the shared tier is admin-published and this spec has
-      // no admin actor, but the tier is what the visibility rule reads.
+      // Inserted directly, because the shared tier is admin-published and this
+      // spec has no admin actor, while the tier is what the visibility rule reads.
       ctx.prisma.srdClass.create({
         data: {
           name: `Veg509 Shared Cantor ${RUN}`,
@@ -220,7 +220,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     });
 
     // The confidentiality property, and the reason the check is a scoped
-    // findFirst rather than a findUnique plus a tier test: the stranger's class
+    // findFirst rather than a findUnique plus a tier test. The stranger's class
     // and a class that never existed have to be the same answer, or the endpoint
     // is an oracle for whether a given id belongs to somebody.
     it("refuses another user's homebrew class exactly as it refuses a nonexistent one", async () => {
@@ -248,7 +248,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     });
 
     // Deleting the service guard makes the refusal test above fail loudly. What
-    // this one pins is the other half: the database alone accepts the row the
+    // this one pins is the other half. The database alone accepts the row the
     // service refuses, so the service check is the only line of defense, and
     // no one should remove it on the belief that a constraint backs it up.
     it('has no database constraint behind it, so the service check is the only guard', async () => {

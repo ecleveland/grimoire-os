@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { apiFetch, endDeadSession } from './api';
 import { Role } from './types';
 import type { User } from './types';
@@ -115,9 +116,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     getSessionCookieServerSnapshot
   );
   const router = useRouter();
-  // Cached API responses are per viewer but keyed by path alone, so every change
-  // of signed-in user drops them rather than serving one account's data to the
-  // next. The initial hydration keeps them: it is the same session.
+  // Cached API responses are per viewer but keyed by path alone, so login and
+  // register drop this tab's cache rather than serving one account's responses
+  // to the next. Logout leaves by a full page load, which drops the whole client
+  // without a refetch. Other tabs keep their own cache either way.
   const queryClient = useQueryClient();
 
   // Hydration: ask the backend whether the access cookie still represents a
@@ -207,19 +209,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [router, queryClient]
   );
 
+  // A full page load, not a soft navigation. Clearing the cache or the user
+  // in place re-renders the private page that is still mounted, and its queries
+  // refetch with the cookies already gone, which walks apiFetch through a 401,
+  // a failed refresh and its dead-session teardown. Reloading throws away the
+  // whole client instead, with nothing left to refetch. `replace` matches
+  // `endDeadSession`, so Back can't return to the signed-in page.
   const logout = useCallback(async () => {
     try {
-      await fetch(`${API_URL}/auth/logout`, {
+      const res = await fetch(`${API_URL}/auth/logout`, {
         method: 'POST',
         credentials: 'include',
       });
+      if (!res.ok) throw new Error(`logout failed: ${res.status}`);
     } catch {
-      // Even if the server call fails, clear local state.
+      // Only the server can clear the httpOnly cookies, so a logout that didn't
+      // reach it leaves the session live and the middleware would bounce /login
+      // back to /. Stay here and say so rather than faking a sign-out.
+      toast.error('Could not sign out. Check your connection and try again.');
+      return;
     }
-    queryClient.clear();
-    setUser(null);
-    router.push('/login');
-  }, [router, queryClient]);
+    window.location.replace('/login');
+  }, []);
 
   const refreshProfile = useCallback(async () => {
     try {

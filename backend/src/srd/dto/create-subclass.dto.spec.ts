@@ -38,7 +38,7 @@ describe('CreateSubclassDto (through the production ValidationPipe)', () => {
     );
   });
 
-  // The parent is the whole ticket: a subclass with no class is not a thing the
+  // The parent is the whole ticket. A subclass with no class is not a thing the
   // read paths can render, and the service's visibility check has nothing to
   // look up without it.
   it('requires a classId', async () => {
@@ -72,8 +72,8 @@ describe('CreateSubclassDto (through the production ValidationPipe)', () => {
     await reject(validBody({ [column]: {} }));
   });
 
-  // @ValidateNested({ each: true }) alone lets this through: it reads a nested
-  // array as a collection and validates its (zero) members, so every constraint
+  // @ValidateNested({ each: true }) alone lets this through, because it reads a
+  // nested array as a collection and validates its (zero) members, so every constraint
   // passes vacuously and `{ name: undefined, level: undefined }` reaches the
   // insert as a 500. @IsObject({ each: true }) is what refuses it.
   it('rejects a nested array masquerading as a feature', async () => {
@@ -81,7 +81,7 @@ describe('CreateSubclassDto (through the production ValidationPipe)', () => {
   });
 
   // The DTO check and the [subclassId, name, level] unique index must reject the
-  // same set: one name at several levels is the shape of a real subclass, and
+  // same set. One name at several levels is the shape of a real subclass, and
   // the same name twice at one level is what the index still refuses.
   it('accepts one name recurring at different levels', async () => {
     await accept(

@@ -1,6 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import {
+  PrismaClientKnownRequestError,
+  PrismaClientUnknownRequestError,
+} from '@prisma/client/runtime/library';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
@@ -369,51 +372,74 @@ describe('UsersService', () => {
       prisma.user.delete.mockRejectedValue(fkError);
 
       await expect(service.remove(USER_ID)).rejects.toBe(fkError);
+      // The first failure buys a retry; the second one is what reaches the filter.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
     });
 
-    // The user being deleted can add a subclass under their own class between
-    // the subclass and class deletes. The class delete then trips the RESTRICT
-    // FK. That is a race a retry clears, not the missing onDelete policy the
-    // filter would otherwise log for an unmapped P2003 on a DELETE.
-    describe('a subclass added while the user is being deleted', () => {
-      // The meta a live Postgres raises for this delete, measured rather than assumed.
-      const raceError = () =>
+    // The user being deleted can add homebrew content between the deleteMany
+    // that would have caught it and `user.delete`. Depending on which table and
+    // which parent, that trips an FK or the homebrew CHECK constraint, and
+    // either way the transaction rolls back. A retry of the whole transaction
+    // clears it, because the second pass deletes the row the first one missed.
+    describe('content added while the user is being deleted [VEG-559]', () => {
+      // The meta a live Postgres raises for the class delete, measured rather
+      // than assumed.
+      const fkViolation = () =>
         new PrismaClientKnownRequestError('Foreign key constraint violated', {
           code: 'P2003',
           clientVersion: '6.0.0',
           meta: { modelName: 'SrdClass', constraint: 'subclasses_classId_fkey' },
         });
 
-      it('answers the class-delete FK violation with a retryable conflict', async () => {
-        prisma.srdClass.deleteMany.mockRejectedValue(raceError());
-
-        const err = await service.remove(USER_ID).catch((e: unknown) => e);
-
-        expect(err).toBeInstanceOf(ConflictException);
-        expect((err as ConflictException).message).toBe(
-          'Content was added while this user was being deleted; try again'
-        );
-      });
-
-      // Mapped by constraint, not by statement: any other FK a class delete
-      // trips is a relation without an onDelete policy, and that must still
-      // reach the filter's diagnostic.
-      it('leaves a P2003 on any other constraint untouched', async () => {
-        const other = new PrismaClientKnownRequestError('Foreign key constraint violated', {
-          code: 'P2003',
+      // A subclass inserted under an SRD or shared class instead trips
+      // `subclasses_homebrew_has_creator_check` when the user delete nulls its
+      // creator. Prisma raises SQLSTATE 23514 as this, with no code and no meta.
+      const checkViolation = () =>
+        new PrismaClientUnknownRequestError('check constraint violated', {
           clientVersion: '6.0.0',
-          meta: { modelName: 'SrdClass', constraint: 'widgets_classId_fkey' },
         });
-        prisma.srdClass.deleteMany.mockRejectedValue(other);
 
-        await expect(service.remove(USER_ID)).rejects.toBe(other);
+      it('retries once after an FK violation and succeeds', async () => {
+        prisma.$transaction.mockRejectedValueOnce(fkViolation());
+
+        await expect(service.remove(USER_ID)).resolves.toBeUndefined();
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
       });
 
-      it('rethrows an error that is not a Prisma known error untouched', async () => {
+      it('retries once after a CHECK violation, which carries no Prisma code', async () => {
+        prisma.$transaction.mockRejectedValueOnce(checkViolation());
+
+        await expect(service.remove(USER_ID)).resolves.toBeUndefined();
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('rethrows the second failure untouched rather than retrying again', async () => {
+        const first = fkViolation();
+        const second = fkViolation();
+        prisma.$transaction.mockRejectedValueOnce(first).mockRejectedValueOnce(second);
+
+        await expect(service.remove(USER_ID)).rejects.toBe(second);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('never retries a missing user (P2025)', async () => {
+        prisma.$transaction.mockRejectedValueOnce(
+          new PrismaClientKnownRequestError('Record not found', {
+            code: 'P2025',
+            clientVersion: '6.0.0',
+          })
+        );
+
+        await expect(service.remove(USER_ID)).rejects.toThrow(NotFoundException);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      });
+
+      it('rethrows an error that is not a constraint failure, without retrying', async () => {
         const failure = new Error('connection reset');
-        prisma.srdClass.deleteMany.mockRejectedValue(failure);
+        prisma.$transaction.mockRejectedValueOnce(failure);
 
         await expect(service.remove(USER_ID)).rejects.toBe(failure);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       });
     });
 
