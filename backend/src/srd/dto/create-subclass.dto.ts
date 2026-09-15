@@ -8,7 +8,7 @@ import { ClassFeatureDto, IsFeatureList } from './create-class.dto';
  * `contentSource: 'homebrew'` and the actor's `createdById`, and strips those
  * keys from the payload regardless.
  *
- * `classId` is the one field with a rule of its own: the parent must be a class
+ * `classId` is the one field with a rule of its own. The parent must be a class
  * the author can see (SRD, admin-published shared, or their own homebrew), which
  * {@link HomebrewSubclassesService} checks against the database. It is required,
  * and only on create. A subclass cannot be reparented afterwards, so
@@ -46,6 +46,10 @@ export class CreateSubclassDto {
     description:
       "Per-level features. Replaces the subclass's existing features outright; " +
       'omit to leave them alone, send [] or null to clear them.',
+    // Stated here rather than read off `ArrayUnique`, because the Swagger CLI
+    // plugin only sees decorators written on the property and `IsFeatureList`
+    // composes that one through `applyDecorators`.
+    uniqueItems: true,
   })
   @IsFeatureList()
   // `| null` because null is a real, tested input here, not a stray: it is how

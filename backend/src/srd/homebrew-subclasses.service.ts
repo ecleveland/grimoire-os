@@ -77,22 +77,14 @@ export class HomebrewSubclassesService extends ContentCrudService<
 
   /**
    * Replace the subclass's features in the same transaction as the parent
-   * update, exactly as {@link HomebrewClassesService.performUpdate} does for a
-   * class: full replacement rather than a merge, because the row's only natural
-   * key is `(name, level)` and a rename is indistinguishable from a delete plus
-   * an add. Feature ids are therefore not stable across a write, with the same
-   * consequence for print-tray entries recorded there.
-   *
-   * The transaction is what makes the replacement safe: without it a failure
-   * between the delete and the insert would leave the subclass with no features
-   * at all, having been asked to change two of them. The row lock taken first is
-   * what keeps two overlapping replacements from merging; see
-   * {@link lockFeatureParent}.
+   * update. See {@link replaceFeatures} for why the list is replaced whole
+   * rather than merged, and {@link lockFeatureParent} for why the lock is taken
+   * first; {@link HomebrewClassesService.performUpdate} records what unstable
+   * feature ids cost the print tray, which holds for these rows too.
    *
    * Returns the row the parent update produced, per the hook's contract, and
-   * without its features: the delegate's `create` cannot include them, so
-   * including them here would make POST and PATCH disagree about what a subclass
-   * response carries.
+   * without its features, because the delegate's `create` cannot include them
+   * and POST and PATCH have to agree on what a subclass response carries.
    */
   protected override async performUpdate(id: string, data: ColumnData): Promise<Subclass> {
     const features = takeFeatures(data);
@@ -130,12 +122,13 @@ export class HomebrewSubclassesService extends ContentCrudService<
     if (typeof data.description === 'string' && !data.description.trim()) {
       data.description = null;
     }
-    // Keyed on the VALUE, never on `'features' in data`: a pipe-produced DTO
-    // carries every declared field as an own key holding undefined (ES2023
-    // [[Define]] semantics on class fields), so a presence check would read
-    // "the client sent features" on every write and make an unrelated PATCH
-    // delete the subclass's whole feature list. See the longer note in
-    // {@link HomebrewClassesService.toColumnData}.
+    // Keyed on the VALUE, never on `'features' in data`. A pipe-produced
+    // CreateSubclassDto carries every declared field as an own key holding
+    // undefined (ES2023 [[Define]] semantics on class fields), so a presence
+    // check would read "the client sent features" on every create. The longer
+    // note in {@link HomebrewClassesService.toColumnData} has the measurement
+    // and says why the update path must not lean on `PartialType` behaving
+    // differently.
     //
     // undefined -> absent, leave the rows alone. null -> clear them. An array
     // replaces them.

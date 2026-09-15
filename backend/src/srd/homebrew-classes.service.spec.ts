@@ -461,9 +461,9 @@ describe('HomebrewClassesService', () => {
       expect(order).toEqual([...order].sort((a, b) => a - b));
     });
 
-    // Asserted on what the caller receives, not on the mock's arguments: the
-    // write skeleton hands this value straight back as the response body, and
-    // POST cannot include features, so PATCH must not either.
+    // Asserted on what the caller receives, not on the mock's arguments,
+    // because the write skeleton hands this value straight back as the response
+    // body, and POST cannot include features, so PATCH must not either.
     it('resolves to the class row without its features', async () => {
       const result = await service.update(
         'c1',

@@ -13,7 +13,7 @@ import { Prisma } from '@prisma/client';
  *
  * Prisma's error reference documents the key as `field_name`, but the engine
  * this backend runs reports a P2003 under `constraint` instead (measured against
- * a live Postgres: a subclass insert under a missing class raises
+ * a live Postgres, where a subclass insert under a missing class raises
  * `meta.constraint = 'subclasses_classId_fkey'`). Reading `field_name` alone
  * logged "unknown relation" for every real violation.
  */
@@ -99,8 +99,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
         }
         // On a write, the row the request points at was there when the service
         // checked and gone by the insert. The engine's message is not safe to
-        // return: outside production it carries the server's file path, a source
-        // frame and the constraint name. The constraint goes to the log instead.
+        // return, because outside production it carries the server's file path, a
+        // source frame and the constraint name. The constraint goes to the log
+        // instead.
         this.logger.error(`P2003 rejected a ${method ?? 'write'} via "${relationOf(exception)}"`);
         return {
           statusCode: HttpStatus.BAD_REQUEST,
@@ -108,7 +109,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           error: 'Bad Request',
         };
       case 'P2006':
-        // Same reason as the write branch above: the message names the model,
+        // Same reason as the write branch above. The message names the model,
         // the field and the rejected value, so it stays in the log.
         this.logger.error(`P2006 rejected a value for "${relationOf(exception)}"`);
         return {

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement, ReactNode } from 'react';
 import { AuthProvider, useAuth } from '../auth-context';
+import { useApiQuery } from '../query';
 
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -15,6 +16,11 @@ const mockEndDeadSession = vi.fn();
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
   endDeadSession: (...args: unknown[]) => mockEndDeadSession(...args),
+}));
+
+const mockToastError = vi.fn();
+vi.mock('sonner', () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args) },
 }));
 
 const TEST_PROFILE = {
@@ -73,6 +79,27 @@ function renderWithProvider(client?: QueryClient) {
   );
 }
 
+/**
+ * A protected page, mounted alongside the consumer that logs out. It observes a
+ * cached query and reads `useAuth`, as the real ones do, so a change of user
+ * re-renders it while it is still the page on screen.
+ */
+function CachedPageReader() {
+  const { isAuthenticated } = useAuth();
+  const { data } = useApiQuery<{ subclasses: { name: string }[] }>('/srd/classes/cls-fighter');
+  return <span data-testid="cached-page">{`${data ? 'loaded' : 'empty'}/${isAuthenticated}`}</span>;
+}
+
+function renderWithCachedPage(client: QueryClient) {
+  return renderInQueryClient(
+    <AuthProvider>
+      <TestConsumer />
+      <CachedPageReader />
+    </AuthProvider>,
+    client
+  );
+}
+
 describe('useAuth outside provider', () => {
   it('throws "useAuth must be used within an AuthProvider"', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -82,16 +109,36 @@ describe('useAuth outside provider', () => {
 });
 
 describe('AuthProvider', () => {
+  const originalLocation = window.location;
+  const mockAssign = vi.fn();
+  const mockReplace = vi.fn();
+
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
     mockPush.mockReset();
+    mockAssign.mockReset();
+    mockReplace.mockReset();
+    mockToastError.mockReset();
     mockApiFetch.mockReset();
     mockEndDeadSession.mockReset();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      // `assign` and `replace` are Location prototype methods, so the spread
+      // above doesn't copy them. Stub both so logout's full page load is a no-op
+      // we can assert on, and so a navigation by either one is visible.
+      value: { ...originalLocation, assign: mockAssign, replace: mockReplace, pathname: '/' },
+    });
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: originalLocation,
+    });
     // jsdom persists document.cookie across tests — clear the session-present hint cookie
     // so a test that sets it can't leak into the next (which would silently make
     // likelyAuthenticated-blind assertions start seeing a "probable session").
@@ -548,21 +595,22 @@ describe('AuthProvider', () => {
       });
     });
 
-    it('clears user state and navigates to /login', async () => {
+    it('leaves for /login by a full page load, not a soft navigation', async () => {
       const user = userEvent.setup();
       renderWithProvider();
       await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
 
       await user.click(screen.getByText('Logout'));
 
-      await waitFor(() => {
-        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
-        expect(screen.getByTestId('username')).toHaveTextContent('none');
-        expect(mockPush).toHaveBeenCalledWith('/login');
-      });
+      // `replace`, not `assign`, so Back can't return to the signed-in page.
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/login'));
+      expect(mockAssign).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
     });
 
-    it('still clears local state when /auth/logout call fails', async () => {
+    // A logout that never reached the server leaves the cookies set, so /login
+    // would bounce straight back to / and look like nothing happened.
+    it('stays put and says so when the /auth/logout call fails', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE))
@@ -573,40 +621,68 @@ describe('AuthProvider', () => {
 
       await user.click(screen.getByText('Logout'));
 
-      await waitFor(() => {
-        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
-        expect(mockPush).toHaveBeenCalledWith('/login');
-      });
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith('Could not sign out. Try again in a moment.')
+      );
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(mockAssign).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    });
+
+    it('stays put and says so when /auth/logout answers 500', async () => {
+      vi.mocked(fetch).mockReset();
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE))
+        .mockResolvedValueOnce(mockFetchResponse(500));
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+
+      await user.click(screen.getByText('Logout'));
+
+      await waitFor(() =>
+        expect(mockToastError).toHaveBeenCalledWith('Could not sign out. Try again in a moment.')
+      );
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
     });
   });
 
   // Cached API responses are per viewer but keyed by path alone, so a response
-  // cached for one account must never be served to the next one in the same tab.
+  // cached for one account must never be served to the next one in the same tab
+  // through login or register.
   describe('query cache across a change of user', () => {
     const SECRET_KEY = ['api', '/srd/classes/cls-fighter'];
     const OTHER_PROFILE = { ...TEST_PROFILE, id: 'user-2', username: 'otheruser' };
 
     function seededClient() {
-      const client = new QueryClient();
+      // The app's staleTime, so a reader of the seeded entry serves it instead of
+      // refetching on mount, and any refetch below is one a logout caused.
+      const client = new QueryClient({
+        defaultOptions: { queries: { staleTime: 60_000, retry: false } },
+      });
       client.setQueryData(SECRET_KEY, { subclasses: [{ name: 'Private Deadeye' }] });
       return client;
     }
 
-    it('clears the cache on logout, before navigating away', async () => {
+    // Clearing the cache while the page being left is still mounted makes its
+    // observers rebuild and refetch with the cookies already gone, which walks
+    // apiFetch through a 401, a failed refresh and its dead-session teardown.
+    it('does not refetch the page being logged out of', async () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE))
         .mockResolvedValue(mockFetchResponse(204));
       const client = seededClient();
-      const clear = vi.spyOn(client, 'clear');
       const user = userEvent.setup();
-      renderWithProvider(client);
+      renderWithCachedPage(client);
       await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+      expect(screen.getByTestId('cached-page')).toHaveTextContent('loaded/true');
 
       await user.click(screen.getByText('Logout'));
 
-      await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/login'));
-      expect(client.getQueryData(SECRET_KEY)).toBeUndefined();
-      expect(clear.mock.invocationCallOrder[0]).toBeLessThan(mockPush.mock.invocationCallOrder[0]);
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/login'));
+      expect(mockApiFetch).not.toHaveBeenCalledWith('/srd/classes/cls-fighter');
     });
 
     it('clears the cache when another user logs in', async () => {
@@ -751,28 +827,6 @@ describe('AuthProvider', () => {
       fireEvent(window, new Event('focus'));
 
       await waitFor(() => {
-        expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
-      });
-    });
-
-    it('flips to false on logout (cookie cleared, provider re-renders)', async () => {
-      document.cookie = 'session_present=1';
-      vi.mocked(fetch)
-        .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration
-        .mockResolvedValue(mockFetchResponse(204)); // POST /auth/logout
-      const user = userEvent.setup();
-
-      renderWithProvider();
-      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
-      expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('true');
-
-      // Production clears the session_present cookie server-side on logout; mirror that, then
-      // the setUser(null) re-render must re-read the snapshot to false.
-      document.cookie = 'session_present=; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-      await user.click(screen.getByText('Logout'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
         expect(screen.getByTestId('likelyAuthenticated')).toHaveTextContent('false');
       });
     });

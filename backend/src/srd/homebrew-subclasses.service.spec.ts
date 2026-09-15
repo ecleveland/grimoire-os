@@ -1,11 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { HomebrewSubclassesService } from './homebrew-subclasses.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS } from '../bootstrap-config';
 import { CreateSubclassDto } from './dto/create-subclass.dto';
+import { UpdateSubclassDto } from './dto/update-subclass.dto';
 
 /**
  * Subclass-specific write behavior only. The authorization skeleton (the
@@ -83,7 +85,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     // One mock serves both the foreign-homebrew class and the class that never
-    // existed, which is the point: the lookup is visibility-scoped, so the two
+    // existed, which is the point. The lookup is visibility-scoped, so the two
     // are the same query returning the same null and the same 400. Nothing in
     // the response says which one it was.
     it('refuses a parent it cannot resolve, without writing', async () => {
@@ -187,6 +189,51 @@ describe('HomebrewSubclassesService', () => {
         data: Record<string, unknown>;
       };
       expect(data.description).toBeNull();
+    });
+  });
+
+  // Every other case in this file builds DTOs as plain object literals cast with
+  // `as CreateSubclassDto`. A literal has no `features` key at all, while a real
+  // pipe-produced DTO carries every declared field as an own key holding
+  // undefined (ES2023 [[Define]] semantics on class fields), so a service that
+  // keyed on presence instead of on the value would stay green through the whole
+  // file while deleting a subclass's features on an unrelated PATCH. These two
+  // cases run the production pipe so the service sees what the controller hands
+  // it (VEG-559).
+  describe('against a real pipe-produced DTO', () => {
+    const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
+    const transform = <T>(body: object, metatype: T) =>
+      pipe.transform(body, { type: 'body' as const, metatype: metatype as never });
+    // `classId` is `@IsUUID()`, so the pipe needs a real one here. Which class it
+    // names does not matter, since the visibility lookup is mocked.
+    const PARENT_UUID = '6f1f3b8a-4d1e-4f2b-9c37-9a2a5f3e1c40';
+
+    it('writes no features relation when the create body never mentioned them', async () => {
+      prisma.subclass.create.mockResolvedValue({ id: 'sc1' });
+      const dto = await transform({ name: 'Path of Ash', classId: PARENT_UUID }, CreateSubclassDto);
+
+      // Guard the premise rather than assume it. If this stops holding, the
+      // assertion below stops testing anything.
+      expect('features' in (dto as object)).toBe(true);
+      expect((dto as { features?: unknown }).features).toBeUndefined();
+
+      await service.create(dto as CreateSubclassDto, OWNER);
+
+      const { data } = prisma.subclass.create.mock.calls[0][0] as { data: Record<string, unknown> };
+      expect(data).not.toHaveProperty('features');
+    });
+
+    it('leaves existing rows alone when the patch body never mentioned features', async () => {
+      prisma.subclass.findUnique.mockResolvedValue(homebrewRow);
+      prisma.subclass.update.mockResolvedValue(homebrewRow);
+      const dto = await transform({ description: 'Rewritten.' }, UpdateSubclassDto);
+
+      await service.update('sc1', dto as UpdateSubclassDto, OWNER);
+
+      expect(prisma.subclassFeature.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      const { data } = prisma.subclass.update.mock.calls[0][0] as { data: Record<string, unknown> };
+      expect(data).not.toHaveProperty('features');
     });
   });
 
@@ -349,8 +396,8 @@ describe('HomebrewSubclassesService', () => {
       expect(prisma.subclassFeature.createMany).not.toHaveBeenCalled();
     });
 
-    // Pins the field mapping: replacing its named fields with a spread makes
-    // this fail. tsc cannot see the loss, because a spread into an object
+    // Pins the field mapping. Replacing its named fields with a spread makes
+    // this fail, and tsc cannot see the loss, because a spread into an object
     // literal skips excess-property checking.
     it('never lets a row reparent itself or smuggle an id past the field mapping', async () => {
       await service.update(
@@ -366,9 +413,9 @@ describe('HomebrewSubclassesService', () => {
       });
     });
 
-    // Asserted on what the caller receives, not on the mock's arguments: the
-    // write skeleton hands this value straight back as the response body, and
-    // POST cannot include features, so PATCH must not either.
+    // Asserted on what the caller receives, not on the mock's arguments,
+    // because the write skeleton hands this value straight back as the response
+    // body, and POST cannot include features, so PATCH must not either.
     it('resolves to the subclass row without its features', async () => {
       const result = await service.update(
         'sc1',

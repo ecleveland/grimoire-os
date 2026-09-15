@@ -131,7 +131,7 @@ const NAME_ORDER = { name: 'asc' as const };
 //
 // Do not read a tier preference into the `contentSource` key. Postgres sorts an
 // enum by its internal sort order, not alphabetically or by the order in
-// schema.prisma: `shared` was appended by a later ALTER TYPE ADD VALUE, so the
+// schema.prisma. `shared` was appended by a later ALTER TYPE ADD VALUE, so the
 // real order is srd, homebrew, shared. Stability is the only property claimed.
 //
 // One constant for classes and subclasses, so duplicate names in either list
@@ -533,7 +533,7 @@ export class SrdService {
   // unambiguous — only the character's stored `classId` does that — it just
   // stops the ambiguity being intermittent.
   //
-  // VEG-528 deleted the tier preference loadClassData used to apply: an
+  // VEG-528 deleted the tier preference loadClassData used to apply. An
   // ambiguous name now resolves to nothing on both sides rather than to a
   // guessed tier, so a character's stored `classId` is the only thing that
   // picks between duplicate names.

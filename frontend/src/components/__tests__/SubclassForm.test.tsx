@@ -139,6 +139,14 @@ describe('SubclassForm', () => {
     expect(screen.queryByRole('button', { name: 'Create subclass' })).not.toBeInTheDocument();
   });
 
+  // Dismissing a form whose write is still out would hand the card back before
+  // the save lands, and an edit reopened from it would freeze the pre-save values.
+  it('disables Cancel while submitting', () => {
+    renderForm({ submitting: true });
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  });
+
   it('calls onCancel from the cancel button without submitting', async () => {
     const user = userEvent.setup();
     renderForm();

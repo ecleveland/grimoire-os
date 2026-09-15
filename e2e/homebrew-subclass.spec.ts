@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import { BACKEND, csrfHeaders, escapeRegExp, registerAndLogin } from './helpers';
 
 /** Literal-match regex for names carrying regex metacharacters. */
@@ -51,16 +51,40 @@ test.describe('Homebrew subclasses (VEG-509)', () => {
     await expect(page.getByLabel(/^Name/)).toHaveValue(name);
     await page.getByLabel('Description', { exact: true }).fill('A patient marksman.');
     await page.getByRole('button', { name: 'Save changes', exact: true }).click();
-    await expect(page.getByText('A patient marksman.', { exact: true })).toBeVisible({
+    // Scoped to the card, which the open form replaces. A page-wide match also
+    // finds the textarea React copies the controlled value into, so it would pass
+    // the moment Save changes is clicked and survive a failed PATCH.
+    await expect(card.getByText('A patient marksman.', { exact: true })).toBeVisible({
       timeout: 10_000,
     });
+
+    // ── Save an untouched edit ─────────────────────────────────────────────
+    // Nothing changed, so there is nothing to send. A PATCH with no fields would
+    // still toast a save and refetch the page for a change nobody made.
+    const writes: { method: string; url: string }[] = [];
+    const recordWrite = (req: Request) => writes.push({ method: req.method(), url: req.url() });
+    page.on('request', recordWrite);
+
+    await card.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.getByLabel(/^Name/)).toHaveValue(name);
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+
+    await expect(card.getByRole('button', { name: 'Edit', exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(page.getByRole('button', { name: 'Save changes', exact: true })).toHaveCount(0);
+    // Removed before the navigations below, so their requests can't reach it.
+    page.off('request', recordWrite);
+    expect(
+      writes.filter(w => w.method === 'PATCH' && w.url.includes('/api/srd/subclasses/'))
+    ).toHaveLength(0);
 
     // ── Pick it on a new character ─────────────────────────────────────────
     await page.goto('/characters/new');
     await page.getByLabel(/^name/i).fill(`Sharpshooter ${stamp}`);
 
-    // Scoped to the combobox's listbox: a page-wide option query also matches the
-    // native selects that are always in the DOM (VEG-505).
+    // Scoped to the combobox's listbox, because a page-wide option query also
+    // matches the native selects that are always in the DOM (VEG-505).
     const classInput = page.getByLabel(/^class/i);
     await classInput.click();
     await page.getByRole('listbox').getByRole('option', { name: 'Fighter', exact: true }).click();
@@ -91,6 +115,10 @@ test.describe('Homebrew subclasses (VEG-509)', () => {
     await expect(savedCard).toBeVisible({ timeout: 10_000 });
     await savedCard.getByRole('button', { name: 'Delete', exact: true }).click();
     await page.getByRole('button', { name: 'Delete subclass', exact: true }).click();
+
+    // The row's buttons unmount with the dialog, so the dialog's focus restore
+    // finds nothing and the section heading has to catch focus.
+    await expect(page.getByRole('heading', { level: 2, name: 'Subclasses' })).toBeFocused();
 
     await expect(page.getByRole('heading', { level: 3, name: exact(name) })).toHaveCount(0, {
       timeout: 10_000,

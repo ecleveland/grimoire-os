@@ -65,36 +65,19 @@ export class HomebrewClassesService extends ContentCrudService<
 
   /**
    * Replace the class's features in the same transaction as the parent update.
+   * See {@link replaceFeatures} for why the list is replaced whole rather than
+   * merged, and {@link lockFeatureParent} for why the lock is taken first.
    *
-   * Full replacement, not a merge — see the `features` docs on
-   * {@link CreateClassDto}. Delete-then-insert rather than a diff: the row's
-   * only natural key is `(name, level)`, so a rename is indistinguishable from
-   * a delete plus an add and any merge would have to guess which the author
-   * meant.
+   * One consequence of unstable feature ids lands outside this module. The print
+   * tray persists `{ type, id }` pairs to localStorage indefinitely
+   * (`print-tray-context.tsx:137`), so a class feature toggled into the tray and
+   * then edited by its owner leaves an id that `hydrateFeatures` silently drops,
+   * and the card disappears from `/srd/print`. Stable ids would need a
+   * client-supplied key on each row, a design change rather than a fix.
    *
-   * Feature ids are therefore not stable across a write, and one consumer does
-   * hold them across one: the print tray persists `{ type, id }` pairs to
-   * localStorage indefinitely (`print-tray-context.tsx:137`). A class feature
-   * toggled into the tray and then edited by its owner leaves behind an id that
-   * no longer resolves, and `hydrateFeatures` drops unresolvable ids silently,
-   * so the card disappears from `/srd/print` without explanation. That is the
-   * accepted cost of replacement over merge — a merge would have to guess
-   * whether a changed name is an edit or a delete plus an add — and it is
-   * bounded to the owner's own tray entries for the class they just edited.
-   * Recorded rather than papered over: stable ids would need a client-supplied
-   * key on each row, which is a design change and not a fix.
-   *
-   * The transaction is what makes the replacement safe: without it a failure
-   * between the delete and the insert would leave the class with no features at
-   * all, having been asked to change two of them. The row lock taken first is
-   * what keeps two overlapping replacements from merging; see
-   * {@link lockFeatureParent}.
-   *
-   * Returns the row the parent update produced, per the hook's contract — not a
-   * re-read, and not the row `update` authorized, either of which would serve
-   * the caller state it just replaced. Features are deliberately not included:
-   * the delegate's `create` cannot include them, so including them here would
-   * make POST and PATCH disagree about what a class response contains.
+   * Returns the row the parent update produced, per the hook's contract, and
+   * without its features, because the delegate's `create` cannot include them
+   * and POST and PATCH have to agree on what a class response carries.
    */
   protected override async performUpdate(id: string, data: ColumnData): Promise<SrdClass> {
     const features = takeFeatures(data);
