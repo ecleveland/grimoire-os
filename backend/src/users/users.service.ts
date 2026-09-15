@@ -22,20 +22,33 @@ const BCRYPT_ROUNDS = 12;
 /** How many times a user delete is tried. One retry, no backoff; see {@link UsersService.remove}. */
 const USER_DELETE_ATTEMPTS = 2;
 
+/** Postgres's SQLSTATE for a CHECK violation, which Prisma leaves only in the message. */
+const CHECK_VIOLATION_SQLSTATE = '23514';
+
 /**
  * Whether a failed user delete is a constraint the content-delete pass would
  * have cleared had the row existed when it ran.
  *
  * Two shapes reach here. An FK violation arrives as P2003, which is what a
  * homebrew class delete raises while a subclass still points at it. A CHECK
- * violation arrives as `PrismaClientUnknownRequestError` with no code and no
- * meta, which is how Prisma surfaces SQLSTATE 23514, raised when the user delete
- * nulls the creator of a homebrew row inserted after that row's table was
- * cleared. Neither is keyed on a constraint name, so every content table is
- * covered rather than the one subclass FK.
+ * violation arrives as `PrismaClientUnknownRequestError`, which is how Prisma
+ * surfaces SQLSTATE 23514, raised when the user delete nulls the creator of a
+ * homebrew row inserted after that row's table was cleared. That second shape
+ * was measured against Postgres 16 through Prisma 6.19.2 in
+ * `test/db/subclass-authorization.db-spec.ts`, which pins it. It carries no
+ * Prisma error code at all, so it is recognized by its class plus the SQLSTATE,
+ * which survives only in the message text. Neither
+ * shape is keyed on a constraint name, so every content table is covered rather
+ * than the one subclass FK.
+ *
+ * The SQLSTATE is required on that second arm because Prisma raises a deadlock,
+ * a serialization failure and a statement timeout as the same class, and none of
+ * those is a row that arrived late.
  */
-function isConcurrentWriteConflict(error: unknown): boolean {
-  if (error instanceof Prisma.PrismaClientUnknownRequestError) return true;
+export function isConcurrentWriteConflict(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    return error.message.includes(CHECK_VIOLATION_SQLSTATE);
+  }
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003';
 }
 

@@ -15,18 +15,20 @@
 // 4. The real `UsersService.remove` across two authors. A owns a homebrew class
 //    with a homebrew subclass under it, which fails if the service deletes classes
 //    before subclasses, and a shared class that B has subclassed, which must
-//    survive A with a nulled creator and then go with B.
+//    survive A with a nulled creator and then go with B. Alongside it, the error
+//    class a homebrew CHECK violation really carries, which is what the delete's
+//    retry predicate keys on.
 // 5. Two overlapping features-only updates on one subclass, interleaved on
 //    purpose, which must end with one list or the other and never both.
 import { createSeedContext, teardownSeedContext, type SeedContext } from './db-harness';
 import type { Cache } from 'cache-manager';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SrdService } from '../../src/srd/srd.service';
 import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { HomebrewSubclassesService } from '../../src/srd/homebrew-subclasses.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
-import { UsersService } from '../../src/users/users.service';
+import { UsersService, isConcurrentWriteConflict } from '../../src/users/users.service';
 import { HOMEBREW_SOURCE_LABEL, SHARED_SOURCE_LABEL } from '../../src/srd/homebrew-write.helpers';
 import type { RefreshTokenService } from '../../src/auth/refresh-token.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
@@ -403,6 +405,44 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       await users.remove(authorB.id);
 
       expect(await ctx.prisma.subclass.count({ where: { id: subOfB.id } })).toBe(0);
+    });
+
+    // The error shape `UsersService.remove` retries on, measured rather than
+    // inferred. A subclass added under a class the content pass never deletes
+    // (an SRD one here) survives to `user.delete`, where ON DELETE SET NULL
+    // nulls its creator and `subclasses_homebrew_has_creator_check` refuses the
+    // row. Deleting the user directly reproduces that final statement without
+    // racing anything. The predicate reads the class, not a code, and this is
+    // what says the class is the right thing to read.
+    it('raises a CHECK violation the retry predicate recognizes', async () => {
+      const author = await ctx.prisma.user.create({
+        data: { username: `veg559-check-${RUN}`, passwordHash: 'x', displayName: 'C' },
+      });
+      const sub = await service.create(
+        { name: `Veg559 Check Path ${RUN}`, classId: srdClassId } as never,
+        { userId: author.id, isAdmin: false }
+      );
+
+      const err = await ctx.prisma.user
+        .delete({ where: { id: author.id } })
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      // Postgres 16 through Prisma 6.19.2. SQLSTATE 23514 arrives with no
+      // Prisma error code at all, so anything keyed on a code (P2004 among
+      // them) would miss it. The SQLSTATE and the constraint name survive only
+      // in the message text.
+      expect(err).toBeInstanceOf(Prisma.PrismaClientUnknownRequestError);
+      expect(err).not.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((err as { code?: unknown }).code).toBeUndefined();
+      expect((err as Error).message).toContain('23514');
+      expect((err as Error).message).toContain('subclasses_homebrew_has_creator_check');
+      expect(isConcurrentWriteConflict(err)).toBe(true);
+
+      // The service's own path clears both rows, since it deletes the subclass
+      // before the user.
+      await users.remove(author.id);
+      expect(await ctx.prisma.subclass.count({ where: { id: sub.id } })).toBe(0);
     });
   });
 

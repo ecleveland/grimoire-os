@@ -396,11 +396,14 @@ describe('UsersService', () => {
 
       // A subclass inserted under an SRD or shared class instead trips
       // `subclasses_homebrew_has_creator_check` when the user delete nulls its
-      // creator. Prisma raises SQLSTATE 23514 as this, with no code and no meta.
+      // creator. Prisma raises SQLSTATE 23514 as this, with no code and no meta,
+      // so the SQLSTATE is only readable in the message. The real text is pinned
+      // in `test/db/subclass-authorization.db-spec.ts`.
       const checkViolation = () =>
-        new PrismaClientUnknownRequestError('check constraint violated', {
-          clientVersion: '6.0.0',
-        });
+        new PrismaClientUnknownRequestError(
+          'new row violates check constraint "subclasses_homebrew_has_creator_check" (SQLSTATE 23514)',
+          { clientVersion: '6.0.0' }
+        );
 
       it('retries once after an FK violation and succeeds', async () => {
         prisma.$transaction.mockRejectedValueOnce(fkViolation());
@@ -444,6 +447,20 @@ describe('UsersService', () => {
         prisma.$transaction.mockRejectedValueOnce(conflict);
 
         await expect(service.remove(USER_ID)).rejects.toBe(conflict);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      });
+
+      // Prisma raises a deadlock, a serialization failure and a statement
+      // timeout as the same class as the CHECK violation. Only the CHECK
+      // violation is a row that arrived late, so the retry reads the SQLSTATE.
+      it('never retries an unknown error that is not the CHECK violation', async () => {
+        const timeout = new PrismaClientUnknownRequestError(
+          'canceling statement due to statement timeout',
+          { clientVersion: '6.0.0' }
+        );
+        prisma.$transaction.mockRejectedValueOnce(timeout);
+
+        await expect(service.remove(USER_ID)).rejects.toBe(timeout);
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       });
 
