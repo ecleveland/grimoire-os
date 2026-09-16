@@ -321,6 +321,14 @@ describe('ClassForm', () => {
     expect(screen.queryByRole('button', { name: 'Create class' })).not.toBeInTheDocument();
   });
 
+  // A cancel mid-save lands on a detail page still showing the pre-save class,
+  // and an edit reopened from there resends the old feature list over the save.
+  it('disables Cancel while submitting [VEG-560]', () => {
+    renderForm({ submitting: true });
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  });
+
   it('calls onCancel from the cancel button without submitting', async () => {
     const user = userEvent.setup();
     renderForm();
