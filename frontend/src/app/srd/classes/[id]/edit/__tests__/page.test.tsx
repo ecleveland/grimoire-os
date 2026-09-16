@@ -375,6 +375,27 @@ describe('EditClassPage', () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
+  // Cancel is `router.back()` onto a detail page the cache still serves from
+  // before the save, so leaving mid-save and re-editing there would resend the
+  // stale feature list over the write still in flight.
+  it('withholds Cancel while the save is still in flight [VEG-560]', async () => {
+    routeApi(
+      () => Promise.resolve(makeClass()),
+      () => new Promise(() => {})
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByDisplayValue('Warden');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await screen.findByRole('button', { name: 'Saving...' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    expect(cancel).toBeDisabled();
+    await user.click(cancel);
+    expect(mockBack).not.toHaveBeenCalled();
+  });
+
   it('goes back when Cancel is pressed', async () => {
     routeApi(() => Promise.resolve(makeClass()));
     const user = userEvent.setup();
