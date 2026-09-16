@@ -134,7 +134,7 @@ describe('AuditLogInterceptor', () => {
   it('skips SRD routes without a content-entity mapping', done => {
     const { context, next } = createContext({
       method: 'POST',
-      url: '/api/srd/spells',
+      url: '/api/srd/search',
     });
 
     interceptor.intercept(context, next).subscribe(() => {
@@ -190,6 +190,55 @@ describe('AuditLogInterceptor', () => {
         })
       );
       done();
+    });
+  });
+
+  // Every content type with a write route under /srd, not just the first one
+  // that shipped. An unmapped segment writes no audit row at all, so a missing
+  // entry is silent (VEG-559).
+  describe.each([
+    ['spells', 'Spell'],
+    ['feats', 'Feat'],
+    ['items', 'Item'],
+    ['backgrounds', 'Background'],
+    ['classes', 'Class'],
+    ['subclasses', 'Subclass'],
+  ])('/api/srd/%s', (segment, entity) => {
+    it(`logs a create as ${entity}`, done => {
+      const { context, next } = createContext({
+        method: 'POST',
+        url: `/api/srd/${segment}`,
+        body: { name: 'Test' },
+      });
+
+      interceptor.intercept(context, next).subscribe(() => {
+        expect(auditLogService.log).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.CREATE,
+            entity,
+            entityId: 'new-entity-id',
+          })
+        );
+        done();
+      });
+    });
+
+    it(`logs a delete as ${entity} with the id from the URL`, done => {
+      const { context, next } = createContext({
+        method: 'DELETE',
+        url: `/api/srd/${segment}/x-1`,
+      });
+
+      interceptor.intercept(context, next).subscribe(() => {
+        expect(auditLogService.log).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: AuditAction.DELETE,
+            entity,
+            entityId: 'x-1',
+          })
+        );
+        done();
+      });
     });
   });
 

@@ -25,10 +25,17 @@ const ENTITY_MAP: Record<string, string> = {
   users: 'User',
 };
 
-// User-mutable content types living under /srd/* (homebrew, VEG-293). Extend as
-// VEG-294/295/296 add spells/feats/items CRUD.
+// Every content type with write routes under /srd/*. The /admin/* routes are
+// looked up in ENTITY_MAP, which covers admin user edits but none of the admin
+// content routes (items, npc-data, loot-odds), so those writes go unaudited.
 const SRD_CONTENT_ENTITY_MAP: Record<string, string> = {
   monsters: 'Monster',
+  spells: 'Spell',
+  feats: 'Feat',
+  items: 'Item',
+  backgrounds: 'Background',
+  classes: 'Class',
+  subclasses: 'Subclass',
 };
 
 const SENSITIVE_KEYS = ['password', 'passwordHash', 'currentPassword', 'newPassword'];

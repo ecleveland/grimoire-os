@@ -113,6 +113,15 @@ export class AdminItemsService extends ContentCrudService<Item, CreateItemDto, U
 
     try {
       await this.prisma.$transaction(async tx => {
+        // Hold the pack row for the rest of the transaction. Rewriting the
+        // entries is a delete plus an insert, and nothing else in here touches
+        // the pack, so under READ COMMITTED two overlapping saves neither wait
+        // for each other nor see each other's inserts, and the pack ends up with
+        // both lists merged. `FOR NO KEY UPDATE` rather than `FOR UPDATE`,
+        // because `item_bundle_entries.componentId` also references `items`, so
+        // a key-share conflict could deadlock two saves that nest packs in each
+        // other.
+        await tx.$queryRaw(Prisma.sql`SELECT 1 FROM "items" WHERE "id" = ${id} FOR NO KEY UPDATE`);
         await tx.itemBundleEntry.deleteMany({ where: { bundleId: id } });
         if (entries.length) {
           await tx.itemBundleEntry.createMany({

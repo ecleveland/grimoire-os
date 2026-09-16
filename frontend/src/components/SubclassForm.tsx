@@ -35,9 +35,9 @@ export default function SubclassForm({
   onCancel,
 }: SubclassFormProps) {
   // The loaded form state, so a save can tell what the author changed. A new
-  // subclass has none. Frozen on mount: the class page keeps its query mounted,
-  // so a background refetch hands over a new `initial`, and neither the edit nor
-  // what a save compares against may swap under the author.
+  // subclass has none. Frozen on mount, because the class page keeps its query
+  // mounted, so a background refetch hands over a new `initial`, and neither the
+  // edit nor what a save compares against may swap under the author.
   const [baseline] = useState<SubclassFormState | undefined>(() =>
     initial ? subclassToFormState(initial) : undefined
   );
@@ -89,7 +89,8 @@ export default function SubclassForm({
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          disabled={submitting}
+          className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 transition-colors"
         >
           Cancel
         </button>

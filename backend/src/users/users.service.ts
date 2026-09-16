@@ -19,20 +19,37 @@ import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const BCRYPT_ROUNDS = 12;
 
+/** How many times a user delete is tried. One retry, no backoff; see {@link UsersService.remove}. */
+const USER_DELETE_ATTEMPTS = 2;
+
+/** Postgres's SQLSTATE for a CHECK violation, which Prisma leaves only in the message. */
+const CHECK_VIOLATION_SQLSTATE = '23514';
+
 /**
- * Whether an error is the FK a class delete trips when a subclass still points
- * at it. Keyed on the constraint rather than on which statement threw, so any
- * other relation that blocks the delete still reaches the filter's diagnostic.
- * The name is read from `meta.constraint`, where a live Postgres reports it for
- * this delete.
+ * Whether a failed user delete is a constraint the content-delete pass would
+ * have cleared had the row existed when it ran.
+ *
+ * Two shapes reach here. An FK violation arrives as P2003, which is what a
+ * homebrew class delete raises while a subclass still points at it. A CHECK
+ * violation arrives as `PrismaClientUnknownRequestError`, which is how Prisma
+ * surfaces SQLSTATE 23514, raised when the user delete nulls the creator of a
+ * homebrew row inserted after that row's table was cleared. That second shape
+ * was measured against Postgres 16 through Prisma 6.19.2 in
+ * `test/db/subclass-authorization.db-spec.ts`, which pins it. It carries no
+ * Prisma error code at all, so it is recognized by its class plus the SQLSTATE,
+ * which survives only in the message text. Neither
+ * shape is keyed on a constraint name, so every content table is covered rather
+ * than the one subclass FK.
+ *
+ * The SQLSTATE is required on that second arm because Prisma raises a deadlock,
+ * a serialization failure and a statement timeout as the same class, and none of
+ * those is a row that arrived late.
  */
-function isSubclassParentViolation(error: unknown): boolean {
-  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2003') {
-    return false;
+export function isConcurrentWriteConflict(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    return error.message.includes(CHECK_VIOLATION_SQLSTATE);
   }
-  return (
-    (error.meta as { constraint?: unknown } | undefined)?.constraint === 'subclasses_classId_fkey'
-  );
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003';
 }
 
 @Injectable()
@@ -172,44 +189,60 @@ export class UsersService {
     });
   }
 
+  /**
+   * Delete a user and the homebrew content that dies with them.
+   *
+   * The delete order inside the transaction handles the rows that exist when it
+   * starts. A row the user's own still-valid session adds while it runs trips an
+   * FK or the homebrew CHECK constraint and rolls the whole transaction back,
+   * because the pass over that row's table has already gone by. One retry of the
+   * entire transaction clears it for every content table, since the second pass
+   * sees the new row. A second failure of the same shape answers 409 and asks
+   * the caller to try again.
+   */
   async remove(id: string): Promise<void> {
-    try {
-      // Homebrew content dies with its author; admin-published `shared`
-      // content survives via the SET NULL FK. The explicit deletes are
-      // required because a homebrew row with a nulled creator would violate
-      // the DB CHECK constraint and abort the user delete (VEG-317).
-      await this.prisma.$transaction(async tx => {
-        const homebrewByUser = {
-          where: { createdById: id, contentSource: 'homebrew' as const },
-        };
-        await tx.spell.deleteMany(homebrewByUser);
-        await tx.monster.deleteMany(homebrewByUser);
-        await tx.item.deleteMany(homebrewByUser);
-        await tx.feat.deleteMany(homebrewByUser);
-        await tx.background.deleteMany(homebrewByUser);
-        // Subclasses before classes (VEG-505): Subclass.classId has no cascade,
-        // so removing a homebrew class while its subclasses still reference it
-        // raises an FK violation and aborts the whole user delete.
-        await tx.subclass.deleteMany(homebrewByUser);
-        await tx.srdClass.deleteMany(homebrewByUser);
-        await tx.user.delete({ where: { id } });
-      });
-    } catch (error: unknown) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
-        throw new NotFoundException(`User with ID "${id}" not found`);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        // Homebrew content dies with its author; admin-published `shared`
+        // content survives via the SET NULL FK. The explicit deletes are
+        // required because a homebrew row with a nulled creator would violate
+        // the DB CHECK constraint and abort the user delete (VEG-317).
+        await this.prisma.$transaction(async tx => {
+          const homebrewByUser = {
+            where: { createdById: id, contentSource: 'homebrew' as const },
+          };
+          await tx.spell.deleteMany(homebrewByUser);
+          await tx.monster.deleteMany(homebrewByUser);
+          await tx.item.deleteMany(homebrewByUser);
+          await tx.feat.deleteMany(homebrewByUser);
+          await tx.background.deleteMany(homebrewByUser);
+          // Subclasses before classes (VEG-505): Subclass.classId has no cascade,
+          // so removing a homebrew class while its subclasses still reference it
+          // raises an FK violation and aborts the whole user delete.
+          await tx.subclass.deleteMany(homebrewByUser);
+          await tx.srdClass.deleteMany(homebrewByUser);
+          await tx.user.delete({ where: { id } });
+        });
+        return;
+      } catch (error: unknown) {
+        // A missing user is never a race, so it answers on the first attempt.
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+          throw new NotFoundException(`User with ID "${id}" not found`);
+        }
+        if (isConcurrentWriteConflict(error)) {
+          if (attempt < USER_DELETE_ATTEMPTS) continue;
+          // Answered here rather than rethrown. A P2003 would reach
+          // AllExceptionsFilter's DELETE arm, which logs a missing onDelete
+          // policy (VEG-312) and tells the client that other records depend on
+          // this one, and neither describes a row that arrived mid-delete. The
+          // CHECK shape has no mapping at all and would answer 500.
+          throw new ConflictException(
+            'Content was added while this user was being deleted; try again'
+          );
+        }
+        // Everything else propagates untouched.
+        throw error;
       }
-      // The ordering above handles subclasses that exist when the transaction
-      // runs. One the user being deleted adds under their own class between the
-      // two deletes trips this FK and rolls the delete back; a retry succeeds, so
-      // it is answered as that race rather than as a missing onDelete policy.
-      if (isSubclassParentViolation(error)) {
-        throw new ConflictException(
-          'Content was added while this user was being deleted; try again'
-        );
-      }
-      // Any other P2003 (a relation missing an onDelete policy, VEG-312) propagates to
-      // AllExceptionsFilter, which maps DELETE-blocking FK violations to 409.
-      throw error;
     }
   }
 }

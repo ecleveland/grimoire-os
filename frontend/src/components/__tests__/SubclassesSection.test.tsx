@@ -1,14 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { CancelledError } from '@tanstack/react-query';
 import SubclassesSection from '@/components/SubclassesSection';
+import { ApiError } from '@/lib/api';
 import { PrintTrayProvider } from '@/lib/print-tray-context';
 import type { SrdClass, SrdSubclass } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockApiFetch = vi.fn();
-vi.mock('@/lib/api', () => ({
+// The real module stays, so a test can reject with a genuine ApiError and the
+// component's `instanceof` check sees the same class.
+vi.mock('@/lib/api', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 
@@ -326,8 +331,12 @@ describe('SubclassesSection', () => {
           classId: 'cls-hb',
         }),
       });
-      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/classes/cls-hb');
-      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses');
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/classes/cls-hb', {
+        throwOnError: true,
+      });
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses', {
+        throwOnError: true,
+      });
       // The form closes once the write lands.
       expect(screen.queryByRole('button', { name: 'Create subclass' })).not.toBeInTheDocument();
     });
@@ -390,6 +399,25 @@ describe('SubclassesSection', () => {
 
       expect(await screen.findByRole('button', { name: 'Saving...' })).toBeDisabled();
     });
+
+    // 400 is also where the validation pipe lands, so refetching on one would
+    // reload the page under the author on every rejected name they correct.
+    it('does not refresh after a 400 on a create', async () => {
+      authAs('u2');
+      mockApiFetch.mockRejectedValue(new ApiError(400, 'name must be shorter than 100 characters'));
+      const user = userEvent.setup();
+
+      renderSection([]);
+      await startCreate(user, 'Deadeye');
+      await user.click(screen.getByRole('button', { name: 'Create subclass' }));
+
+      await waitFor(() =>
+        expect(mockToast.error).toHaveBeenCalledWith('name must be shorter than 100 characters')
+      );
+      expect(mockInvalidateApiPath).not.toHaveBeenCalled();
+      // The author's work is still in the form, ready to be corrected.
+      expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
+    });
   });
 
   describe('editing', () => {
@@ -411,8 +439,12 @@ describe('SubclassesSection', () => {
         // Only the field the author changed.
         body: JSON.stringify({ description: 'Reworded.' }),
       });
-      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/classes/cls-hb');
-      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses');
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/classes/cls-hb', {
+        throwOnError: true,
+      });
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses', {
+        throwOnError: true,
+      });
     });
 
     it('toasts a failed edit and leaves the form open', async () => {
@@ -514,6 +546,113 @@ describe('SubclassesSection', () => {
         expect(mockToast.error).toHaveBeenCalledWith('Failed to update subclass')
       );
       expect(mockInvalidateApiPath).not.toHaveBeenCalled();
+    });
+
+    // A PATCH with no fields still runs the write and refetches the page for a
+    // change nobody made.
+    it('closes an untouched edit without sending a PATCH', async () => {
+      authAs('u1');
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      expect(mockApiFetch).not.toHaveBeenCalled();
+      expect(mockToast.success).not.toHaveBeenCalled();
+      expect(mockToast.error).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible();
+    });
+
+    // The save landed, so the card on screen is a version behind. Handing Edit
+    // back would seed the next form from it and revert what was just saved.
+    it('keeps the saved row withdrawn and says so when the refresh fails', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockRejectedValueOnce(new Error('offline'));
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      await waitFor(() =>
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'Saved, but the page could not reload. Refresh to see the change.'
+        )
+      );
+      expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye');
+      const deadeye = cardFor('Deadeye');
+      expect(within(deadeye).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(within(deadeye).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    });
+
+    // The two invalidations are independent. Skipping the picker list because the
+    // class query's refetch failed would leave the character builder offering the
+    // old rows for the rest of the session.
+    it('still marks the picker lists stale when the class refetch fails', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockImplementation((_client: unknown, prefix: string) =>
+        prefix === '/srd/classes/cls-hb'
+          ? Promise.reject(new Error('offline'))
+          : Promise.resolve(undefined)
+      );
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      await waitFor(() =>
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'Saved, but the page could not reload. Refresh to see the change.'
+        )
+      );
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses', {
+        throwOnError: true,
+      });
+    });
+
+    // A later write's invalidation cancels this one's refetch, which rejects it
+    // with CancelledError. The new rows still arrive, on that newer refetch, so
+    // reading it as a failed reload would withdraw the row for good.
+    it('treats a superseded refetch as a refresh that landed', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockRejectedValueOnce(new CancelledError());
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
+      expect(await within(cardFor('Deadeye')).findByRole('button', { name: 'Edit' })).toBeVisible();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    // The row was deleted from another tab, so this page is stale. Without a
+    // refresh the card stays listed and every retry answers 404.
+    it('refreshes after a 404 on an edit, so the row that is gone can drop out', async () => {
+      authAs('u1');
+      mockApiFetch.mockRejectedValue(new ApiError(404, 'Subclass not found'));
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Subclass not found'));
+      await waitFor(() =>
+        expect(mockInvalidateApiPath).toHaveBeenCalledWith(
+          expect.anything(),
+          '/srd/classes/cls-hb',
+          { throwOnError: true }
+        )
+      );
     });
   });
 
@@ -641,28 +780,9 @@ describe('SubclassesSection', () => {
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
     });
 
-    it('keeps a second create form open when a cancelled create lands', async () => {
-      authAs('u1');
-      const create = deferred<unknown>();
-      mockApiFetch.mockReturnValueOnce(create.promise);
-      const user = userEvent.setup();
-
-      renderSection(twoRows());
-      await startCreate(user, 'Gunner');
-      await user.click(screen.getByRole('button', { name: 'Create subclass' }));
-      await user.click(screen.getByRole('button', { name: 'Cancel' }));
-      await startCreate(user, 'Second draft');
-
-      // The reopened form is a different form, so the first write's pending state isn't its.
-      expect(screen.getByRole('button', { name: 'Create subclass' })).toBeEnabled();
-
-      create.resolve({});
-
-      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Created Gunner'));
-      expect(screen.getByLabelText(/^Name/)).toHaveValue('Second draft');
-    });
-
-    it('keeps the edit of another row open when a cancelled edit lands', async () => {
+    // Dismissing a form mid-save would hand the card back before the save lands,
+    // and an edit reopened from it would freeze the values the save replaced.
+    it('disables Cancel while the save is in flight', async () => {
       authAs('u1');
       const patch = deferred<unknown>();
       mockApiFetch.mockReturnValueOnce(patch.promise);
@@ -672,38 +792,39 @@ describe('SubclassesSection', () => {
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
       fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
-      await user.click(screen.getByRole('button', { name: 'Cancel' }));
-      await user.click(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), {
-        target: { value: 'Half written.' },
-      });
+
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
 
       patch.resolve({});
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
-      expect(screen.getByLabelText('Description')).toHaveValue('Half written.');
+      expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
     });
 
-    it('leaves a second form saving when an earlier cancelled create lands first', async () => {
+    // The edited row can leave the list mid-save, deleted elsewhere and dropped by
+    // a refetch, which takes its form with it. A form opened in that window would
+    // inherit the in-flight save and mount frozen, with both buttons disabled.
+    it('withdraws every control while a save is in flight, even after its row leaves', async () => {
       authAs('u1');
-      const first = deferred<unknown>();
-      const second = deferred<unknown>();
-      mockApiFetch.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      const patch = deferred<unknown>();
+      mockApiFetch.mockReturnValueOnce(patch.promise);
       const user = userEvent.setup();
 
-      renderSection(twoRows());
-      await startCreate(user, 'Gunner');
-      await user.click(screen.getByRole('button', { name: 'Create subclass' }));
-      await user.click(screen.getByRole('button', { name: 'Cancel' }));
-      await startCreate(user, 'Second draft');
-      await user.click(screen.getByRole('button', { name: 'Create subclass' }));
+      const { rerender } = renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
+      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
-      first.resolve({});
+      rerender(sectionElement([makeSubclass({ id: 'sc-sharp', name: 'Sharpshooter' })]));
 
-      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Created Gunner'));
-      // The second POST is still out, so its form must still read as saving.
-      expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled();
-      expect(screen.getByLabelText(/^Name/)).toHaveValue('Second draft');
+      expect(screen.queryByRole('button', { name: 'Add subclass' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+
+      patch.resolve({});
+
+      expect(await screen.findByRole('button', { name: 'Add subclass' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible();
     });
 
     it('keeps a second pending delete withdrawn when the first one settles', async () => {
@@ -732,41 +853,6 @@ describe('SubclassesSection', () => {
       expect(
         within(cardFor('Deadeye')).queryByRole('button', { name: 'Delete' })
       ).not.toBeInTheDocument();
-    });
-
-    // A save cancelled in flight gives the card back, so the same row can be
-    // deleted while the PATCH is still out. Each write holds its own mark, and one
-    // settling must not lift the other's.
-    it('keeps a row withdrawn while a save still refreshes, even after its delete settles', async () => {
-      authAs('u1');
-      const patch = deferred<unknown>();
-      const del = deferred();
-      const refetch = deferred();
-      mockApiFetch.mockReturnValueOnce(patch.promise).mockReturnValueOnce(del.promise);
-      mockInvalidateApiPath.mockReturnValueOnce(refetch.promise);
-      const user = userEvent.setup();
-
-      renderSection([makeSubclass()]);
-      await user.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
-      await user.click(screen.getByRole('button', { name: 'Save changes' }));
-      await user.click(screen.getByRole('button', { name: 'Cancel' }));
-      await user.click(screen.getByRole('button', { name: 'Delete' }));
-      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
-
-      // The save lands and starts its refresh; then the delete fails.
-      patch.resolve({});
-      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
-      del.reject(new Error('Network down'));
-      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Network down'));
-
-      // The save's refresh is still out, so the card is still stale.
-      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
-
-      refetch.resolve();
-
-      expect(await screen.findByRole('button', { name: 'Edit' })).toBeVisible();
     });
 
     it('keeps a deleted row withdrawn until the refresh that drops it settles', async () => {
@@ -809,8 +895,12 @@ describe('SubclassesSection', () => {
       expect(mockApiFetch).toHaveBeenCalledWith('/srd/subclasses/sc-deadeye', {
         method: 'DELETE',
       });
-      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/classes/cls-hb');
-      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses');
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/classes/cls-hb', {
+        throwOnError: true,
+      });
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/subclasses', {
+        throwOnError: true,
+      });
     });
 
     it('writes nothing when the confirmation is cancelled', async () => {
@@ -838,6 +928,88 @@ describe('SubclassesSection', () => {
         expect(mockToast.error).toHaveBeenCalledWith('Failed to delete subclass')
       );
       expect(mockInvalidateApiPath).not.toHaveBeenCalled();
+    });
+
+    // The row is gone on the server and the refetch that would drop it never
+    // landed, so offering Delete again would only send a second DELETE.
+    it('keeps the deleted row withdrawn and says so when the refresh fails', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockRejectedValueOnce(new Error('offline'));
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
+
+      await waitFor(() =>
+        expect(mockToast.error).toHaveBeenCalledWith(
+          'Deleted, but the page could not reload. Refresh to see the change.'
+        )
+      );
+      expect(mockToast.success).toHaveBeenCalledWith('Deleted Deadeye');
+      expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+    });
+
+    it('treats a superseded refetch as a refresh that landed', async () => {
+      authAs('u1');
+      mockInvalidateApiPath.mockRejectedValueOnce(new CancelledError());
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Deleted Deadeye'));
+      // The mock never drops the row, so the controls returning shows the mark lifted.
+      expect(await screen.findByRole('button', { name: 'Delete' })).toBeVisible();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it('refreshes after a 404 on a delete, so the row that is gone can drop out', async () => {
+      authAs('u1');
+      mockApiFetch.mockRejectedValue(new ApiError(404, 'Subclass not found'));
+      const user = userEvent.setup();
+
+      renderSection([makeSubclass()]);
+      await user.click(screen.getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Subclass not found'));
+      await waitFor(() =>
+        expect(mockInvalidateApiPath).toHaveBeenCalledWith(
+          expect.anything(),
+          '/srd/classes/cls-hb',
+          { throwOnError: true }
+        )
+      );
+    });
+
+    // The row's buttons unmount in the same render that closes the dialog, so the
+    // dialog's focus restore finds nothing and focus falls to the body.
+    it('moves focus to the section heading when a row is deleted', async () => {
+      authAs('u1');
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Deleted Deadeye'));
+      expect(screen.getByRole('heading', { level: 2, name: 'Subclasses' })).toHaveFocus();
+    });
+
+    it('moves focus to the section heading when the delete fails', async () => {
+      authAs('u1');
+      mockApiFetch.mockRejectedValue(new Error('Network down'));
+      const user = userEvent.setup();
+
+      renderSection(twoRows());
+      await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Delete' }));
+      await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Network down'));
+      expect(screen.getByRole('heading', { level: 2, name: 'Subclasses' })).toHaveFocus();
     });
   });
 });

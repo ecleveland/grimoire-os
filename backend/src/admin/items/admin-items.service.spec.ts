@@ -136,6 +136,25 @@ describe('AdminItemsService', () => {
       ]);
     });
 
+    // Delete-then-insert with nothing holding the pack row is the race
+    // `lockFeatureParent` closes for feature rows. Two overlapping saves of one
+    // pack merge their lists, and when the lists share a component the second
+    // insert hits `@@unique([bundleId, componentId])` and answers with a
+    // duplicate-item-name message (VEG-559).
+    it('locks the pack row before rewriting its entries', async () => {
+      prisma.item.findMany.mockResolvedValue([{ id: 'c1', name: 'Candle' }]);
+
+      await service.setBundleContents('pack-1', [{ itemId: 'c1', quantity: 1 }], ADMIN);
+
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const [query] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
+      expect(query.sql).toBe('SELECT 1 FROM "items" WHERE "id" = ? FOR NO KEY UPDATE');
+      expect(query.values).toEqual(['pack-1']);
+      expect(prisma.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.itemBundleEntry.deleteMany.mock.invocationCallOrder[0]
+      );
+    });
+
     it('clears the bundle when given an empty set (no createMany)', async () => {
       const result = await service.setBundleContents('pack-1', [], ADMIN);
 

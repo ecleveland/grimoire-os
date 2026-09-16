@@ -217,7 +217,8 @@ export class ClassFeatureDto {
  * DTOs. `ClassFeature` and `SubclassFeature` are the same table shape, so the two
  * lists must refuse exactly the same payloads, and a rule held once cannot be
  * dropped from one of them while the other's spec stays green. That matters most
- * for the size cap: nothing after the DTO counts the rows one request writes.
+ * for the size cap, since nothing after the DTO counts the rows one request
+ * writes.
  *
  * `@IsObject({ each: true })` is there because `@ValidateNested({ each: true })`
  * does not reject an element that is itself an array. It treats one as a nested
@@ -381,6 +382,10 @@ export class CreateClassDto {
     description:
       'Per-level features. Replaces the class’s existing features outright; ' +
       'omit to leave them alone, send [] or null to clear them.',
+    // Stated here rather than read off `ArrayUnique`, because the Swagger CLI
+    // plugin only sees decorators written on the property and `IsFeatureList`
+    // composes that one through `applyDecorators`.
+    uniqueItems: true,
   })
   @IsFeatureList()
   // `| null` because null is a real, tested input here, not a stray: it is how

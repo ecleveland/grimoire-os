@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
+import { CancelledError, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Badge from '@/components/Badge';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import FeatureChips from '@/components/FeatureChips';
 import Skeleton from '@/components/Skeleton';
 import SubclassForm from '@/components/SubclassForm';
-import { apiFetch } from '@/lib/api';
+import { ApiError, apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { invalidateApiPath } from '@/lib/query';
 import type { SubclassPayload } from '@/lib/subclass-form';
@@ -20,14 +20,10 @@ const controlClass =
   'px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors';
 
 /**
- * One opening of a form. One slot, because an open form holds an unsaved draft
- * in its own state: while a form is open, every control that would unmount it
- * (Add, and the rows' Edit and Delete) is withdrawn, so save and cancel are the
- * only ways out.
- *
- * Each opening is a fresh object and is compared by reference, not by kind and
- * id. A write started from one opening must not close or disable a later
- * opening of the same form, and those two are equal in every field.
+ * Which form is open, and for which row. One slot, because an open form holds
+ * an unsaved draft in its own state, so while a form is open every control that
+ * would unmount it (Add, and the rows' Edit and Delete) is withdrawn. Save and
+ * Cancel are the only ways out, and Cancel is withdrawn while the save is out.
  */
 type FormOpening = { kind: 'create' } | { kind: 'edit'; id: string };
 type CreateOpening = Extract<FormOpening, { kind: 'create' }>;
@@ -51,9 +47,14 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
   const { isAdmin, isAuthenticated, isLoading, likelyAuthenticated, user } = useAuth();
   const queryClient = useQueryClient();
   const [openForm, setOpenForm] = useState<FormOpening | null>(null);
-  // The opening whose create or update is in flight. Only that form shows it.
-  const [submittingForm, setSubmittingForm] = useState<FormOpening | null>(null);
+  // Whether a create or update is in flight. Only one form is open at a time and
+  // it can't be dismissed while its write is out, so a flag says everything a
+  // per-opening slot used to. It also withdraws Add and the rows' controls on its
+  // own, because the edited row can leave the list mid-save and take its form
+  // with it, and a form opened in that window would mount already frozen.
+  const [submitting, setSubmitting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<SrdSubclass | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   // Rows whose card can't be trusted yet: a DELETE in flight, or a save that has
   // landed while the refetch carrying its new values is still out. Their Edit and
   // Delete stay withdrawn until that settles, so nothing re-deletes a row or seeds
@@ -85,17 +86,48 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
     (sc.contentSource === 'homebrew' && sc.createdById === user?.userId) ||
     (sc.contentSource === 'shared' && isAdmin);
 
+  // The class detail query owns the rows on this page, so it is the one with an
+  // observer here and the one whose failed refetch this reports. The list
+  // endpoint has no observer on this page, and invalidating it just marks the
+  // character builder's subclass pickers stale for their next mount. Both start
+  // together, so a failure on the class query can't skip the pickers and leave
+  // them serving the old rows for the rest of the session.
   const refresh = async () => {
-    // The class detail query owns the rows on this page; the list endpoint backs
-    // the character builder's subclass pickers.
-    await invalidateApiPath(queryClient, `/srd/classes/${cls.id}`);
-    await invalidateApiPath(queryClient, '/srd/subclasses');
+    try {
+      await Promise.all([
+        invalidateApiPath(queryClient, `/srd/classes/${cls.id}`, { throwOnError: true }),
+        invalidateApiPath(queryClient, '/srd/subclasses', { throwOnError: true }),
+      ]);
+    } catch (err) {
+      // A later write's invalidation cancels this refetch rather than racing it,
+      // and the newer one carries the rows, so a supersession is a refresh that
+      // landed. Everything else is a refetch that never arrived.
+      if (!(err instanceof CancelledError)) throw err;
+    }
   };
 
   /**
-   * Save from one form opening, then toast, close that opening and refresh. The
-   * form stays open on failure. The author may cancel and open another form
-   * while this is in flight, so everything here touches only `form`.
+   * Refresh after a write the server refused because the row is gone, deleted
+   * from another tab say. The page still lists it, and without this nothing
+   * refetches, so every retry answers the same 404. Keyed on 404 alone, because
+   * 400 is also the validation pipe's answer to a name or feature the author can
+   * still fix, and reloading the page under them would throw that work away.
+   * This leaves a create under a class deleted elsewhere, which answers 400,
+   * uncovered. A failure here is swallowed, since the write has already toasted.
+   */
+  const refreshIfTargetGone = async (err: unknown) => {
+    if (!(err instanceof ApiError) || err.status !== 404) return;
+    try {
+      await refresh();
+    } catch {
+      // The page stays stale until the author reloads it.
+    }
+  };
+
+  /**
+   * Save from the open form, then toast, close it and refresh. The form stays
+   * open on failure, and cannot be dismissed while the write is out, so the
+   * form this started from is still the open one when it lands.
    */
   const submit = async (
     form: FormOpening,
@@ -109,30 +141,34 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
       sentName ??
       (form.kind === 'edit' ? subclasses.find(sc => sc.id === form.id)?.name : undefined) ??
       'subclass';
-    setSubmittingForm(form);
+    setSubmitting(true);
     try {
       await send();
     } catch (err) {
+      setSubmitting(false);
       toast.error(
         err instanceof Error ? err.message : `Failed to ${created ? 'create' : 'update'} subclass`
       );
+      await refreshIfTargetGone(err);
       return;
-    } finally {
-      // Only this opening. Another form may have been opened and submitted since,
-      // and it is still saving.
-      setSubmittingForm(prev => (prev === form ? null : prev));
     }
+    setSubmitting(false);
     toast.success(`${created ? 'Created' : 'Updated'} ${name}`);
     // Marked in the same render that closes the form, so the saved row's card
     // never offers Edit while it still shows the values from before the save.
     const savedRowId = form.kind === 'edit' ? form.id : null;
     if (savedRowId) markPending(savedRowId);
-    setOpenForm(prev => (prev === form ? null : prev));
+    setOpenForm(null);
     try {
       await refresh();
-    } finally {
-      if (savedRowId) clearPending(savedRowId);
+    } catch {
+      // The new values never arrived, so the card is a version behind. The mark
+      // stays on until the author reloads, rather than handing back an Edit that
+      // would seed from the values the save replaced.
+      toast.error('Saved, but the page could not reload. Refresh to see the change.');
+      return;
     }
+    if (savedRowId) clearPending(savedRowId);
   };
 
   const handleCreate = (form: CreateOpening, payload: SubclassPayload) =>
@@ -145,31 +181,57 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
 
   // The row id comes off the opening too, so the PATCH can't target a different
   // row from the form that sent it.
-  const handleEdit = (form: EditOpening, payload: SubclassPayload) =>
-    submit(form, payload.name, () =>
+  const handleEdit = (form: EditOpening, payload: SubclassPayload): void => {
+    // An untouched edit has nothing to change, and a PATCH with no fields would
+    // still toast a save and refetch the page for it.
+    if (Object.keys(payload).length === 0) {
+      setOpenForm(null);
+      return;
+    }
+    void submit(form, payload.name, () =>
       apiFetch(`/srd/subclasses/${form.id}`, { method: 'PATCH', body: JSON.stringify(payload) })
     );
+  };
 
-  // Kept apart from `submit`: a delete has no form, so it must neither close nor
-  // disable whichever form happens to be open when it lands.
+  // Kept apart from `submit`, because a delete has no form, so it must neither
+  // close nor disable whichever form happens to be open when it lands.
   const handleDelete = async (sc: SrdSubclass) => {
+    // The row's buttons unmount in the same render that closes the confirmation,
+    // so the dialog's focus restore finds nothing and focus would fall to the
+    // body. The section heading is what the deleted row sat under.
+    headingRef.current?.focus();
     markPending(sc.id);
     try {
       await apiFetch(`/srd/subclasses/${sc.id}`, { method: 'DELETE' });
-      toast.success(`Deleted ${sc.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete subclass');
+      await refreshIfTargetGone(err);
+      clearPending(sc.id);
+      return;
+    }
+    toast.success(`Deleted ${sc.name}`);
+    try {
       // Awaited while the row is still marked, so its controls stay withdrawn
       // until the refetch drops it and it can't be deleted twice.
       await refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete subclass');
-    } finally {
-      clearPending(sc.id);
+    } catch {
+      // The row is gone on the server but still listed here, so the mark stays
+      // on rather than offering a Delete that would send a second DELETE.
+      toast.error('Deleted, but the page could not reload. Refresh to see the change.');
+      return;
     }
+    clearPending(sc.id);
   };
 
   return (
     <section className="mt-8">
-      <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Subclasses</h2>
+      <h2
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-xl font-semibold text-gray-900 dark:text-white"
+      >
+        Subclasses
+      </h2>
       {cls.subclassLevel != null && (
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           Chosen at level {cls.subclassLevel}.
@@ -183,7 +245,7 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
               {activeForm?.kind === 'edit' && activeForm.id === sc.id ? (
                 <SubclassForm
                   initial={sc}
-                  submitting={submittingForm === activeForm}
+                  submitting={submitting}
                   submitLabel="Save changes"
                   onSubmit={payload => handleEdit(activeForm, payload)}
                   onCancel={() => setOpenForm(null)}
@@ -191,7 +253,12 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
               ) : (
                 <SubclassCard
                   sc={sc}
-                  canManage={canManage(sc) && activeForm === null && !pendingIds.includes(sc.id)}
+                  canManage={
+                    canManage(sc) &&
+                    activeForm === null &&
+                    !submitting &&
+                    !pendingIds.includes(sc.id)
+                  }
                   onEdit={() => setOpenForm({ kind: 'edit', id: sc.id })}
                   onDelete={() => setConfirmingDelete(sc)}
                 />
@@ -204,7 +271,7 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
       {activeForm?.kind === 'create' && (
         <div className={`${cardClass} mt-3`}>
           <SubclassForm
-            submitting={submittingForm === activeForm}
+            submitting={submitting}
             submitLabel="Create subclass"
             onSubmit={payload => handleCreate(activeForm, payload)}
             onCancel={() => setOpenForm(null)}
@@ -212,6 +279,7 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
         </div>
       )}
       {activeForm === null &&
+        !submitting &&
         (isAuthenticated ? (
           <button
             type="button"

@@ -149,17 +149,28 @@ export function useApiMutation<TData = unknown, TVariables = void>(
  * Matching is a plain `startsWith`, so pass a prefix that ends at a token
  * boundary (`/srd/monsters?`, `/encounters?campaignId=${id}&`) to avoid
  * accidentally matching a sibling key (`campaignId=10` vs `campaignId=1`).
+ *
+ * `options` passes straight to `invalidateQueries`. Pass `{ throwOnError: true }`
+ * where a failed refetch has to be reported, since the returned promise
+ * otherwise resolves whether or not the refetch landed.
  */
-export function invalidateApiPath(client: QueryClient, prefix: string): Promise<void> {
-  return client.invalidateQueries({
-    predicate: query => {
-      const key = query.queryKey;
-      return (
-        Array.isArray(key) &&
-        key[0] === 'api' &&
-        typeof key[1] === 'string' &&
-        key[1].startsWith(prefix)
-      );
+export function invalidateApiPath(
+  client: QueryClient,
+  prefix: string,
+  options?: { throwOnError?: boolean }
+): Promise<void> {
+  return client.invalidateQueries(
+    {
+      predicate: query => {
+        const key = query.queryKey;
+        return (
+          Array.isArray(key) &&
+          key[0] === 'api' &&
+          typeof key[1] === 'string' &&
+          key[1].startsWith(prefix)
+        );
+      },
     },
-  });
+    options
+  );
 }

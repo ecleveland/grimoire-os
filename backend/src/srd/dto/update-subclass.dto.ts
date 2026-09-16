@@ -3,7 +3,7 @@ import { CreateSubclassDto } from './create-subclass.dto';
 
 /**
  * Body for updating a homebrew subclass. `classId` is omitted rather than made
- * optional: the parent is fixed at creation, and with `forbidNonWhitelisted` on
+ * optional. The parent is fixed at creation, and with `forbidNonWhitelisted` on
  * the global pipe, a PATCH that carries one is a 400 rather than a silent no-op.
  *
  * Reparenting is refused because the create-time visibility check decides which

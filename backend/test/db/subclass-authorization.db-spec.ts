@@ -8,25 +8,27 @@
 //    class. Another user's homebrew class is refused with the same status and
 //    message as an id that never existed. A direct insert under that same class
 //    succeeds, which pins that no database constraint backs the service check.
-// 2. The row's own visibility: a stranger reads nothing and gets 404 on update
+// 2. The row's own visibility. A stranger reads nothing and gets 404 on update
 //    and delete, and the owner's delete takes the feature rows with it.
-// 3. The RESTRICT FK from the other side: HomebrewClassesService refuses to delete
+// 3. The RESTRICT FK from the other side. HomebrewClassesService refuses to delete
 //    a class while a subclass hangs off it, and allows it once the subclass is gone.
 // 4. The real `UsersService.remove` across two authors. A owns a homebrew class
 //    with a homebrew subclass under it, which fails if the service deletes classes
 //    before subclasses, and a shared class that B has subclassed, which must
-//    survive A with a nulled creator and then go with B.
+//    survive A with a nulled creator and then go with B. Alongside it, the error
+//    class a homebrew CHECK violation really carries, which is what the delete's
+//    retry predicate keys on.
 // 5. Two overlapping features-only updates on one subclass, interleaved on
 //    purpose, which must end with one list or the other and never both.
 import { createSeedContext, teardownSeedContext, type SeedContext } from './db-harness';
 import type { Cache } from 'cache-manager';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SrdService } from '../../src/srd/srd.service';
 import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { HomebrewSubclassesService } from '../../src/srd/homebrew-subclasses.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
-import { UsersService } from '../../src/users/users.service';
+import { UsersService, isConcurrentWriteConflict } from '../../src/users/users.service';
 import { HOMEBREW_SOURCE_LABEL, SHARED_SOURCE_LABEL } from '../../src/srd/homebrew-write.helpers';
 import type { RefreshTokenService } from '../../src/auth/refresh-token.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
@@ -86,8 +88,8 @@ function pauseAfterFeatureInsert(real: PrismaService, pause: () => Promise<void>
 
 /**
  * Wait until some session on the test database is blocked on a lock. Polling
- * `pg_stat_activity` makes the interleave deterministic: the second update is
- * released only once Postgres itself reports it waiting, rather than after a
+ * `pg_stat_activity` makes the interleave deterministic, because the second
+ * update is released only once Postgres itself reports it waiting, rather than after a
  * sleep that is either too short on a slow machine or wasted on a fast one.
  */
 async function waitForBlockedSession(prisma: PrismaService): Promise<void> {
@@ -119,7 +121,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   let strangerClassId: string;
 
   beforeAll(async () => {
-    // No truncate and no seed: every row this file reads it inserts, under a
+    // No truncate and no seed. Every row this file reads it inserts, under a
     // RUN-stamped name, and nothing here counts rows it did not write.
     ctx = await createSeedContext();
 
@@ -156,8 +158,8 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           source: HOMEBREW_SOURCE_LABEL,
         },
       }),
-      // Inserted directly: the shared tier is admin-published and this spec has
-      // no admin actor, but the tier is what the visibility rule reads.
+      // Inserted directly, because the shared tier is admin-published and this
+      // spec has no admin actor, while the tier is what the visibility rule reads.
       ctx.prisma.srdClass.create({
         data: {
           name: `Veg509 Shared Cantor ${RUN}`,
@@ -220,7 +222,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     });
 
     // The confidentiality property, and the reason the check is a scoped
-    // findFirst rather than a findUnique plus a tier test: the stranger's class
+    // findFirst rather than a findUnique plus a tier test. The stranger's class
     // and a class that never existed have to be the same answer, or the endpoint
     // is an oracle for whether a given id belongs to somebody.
     it("refuses another user's homebrew class exactly as it refuses a nonexistent one", async () => {
@@ -248,7 +250,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     });
 
     // Deleting the service guard makes the refusal test above fail loudly. What
-    // this one pins is the other half: the database alone accepts the row the
+    // this one pins is the other half. The database alone accepts the row the
     // service refuses, so the service check is the only line of defense, and
     // no one should remove it on the belief that a constraint backs it up.
     it('has no database constraint behind it, so the service check is the only guard', async () => {
@@ -403,6 +405,44 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       await users.remove(authorB.id);
 
       expect(await ctx.prisma.subclass.count({ where: { id: subOfB.id } })).toBe(0);
+    });
+
+    // The error shape `UsersService.remove` retries on, measured rather than
+    // inferred. A subclass added under a class the content pass never deletes
+    // (an SRD one here) survives to `user.delete`, where ON DELETE SET NULL
+    // nulls its creator and `subclasses_homebrew_has_creator_check` refuses the
+    // row. Deleting the user directly reproduces that final statement without
+    // racing anything. The predicate reads the class, not a code, and this is
+    // what says the class is the right thing to read.
+    it('raises a CHECK violation the retry predicate recognizes', async () => {
+      const author = await ctx.prisma.user.create({
+        data: { username: `veg559-check-${RUN}`, passwordHash: 'x', displayName: 'C' },
+      });
+      const sub = await service.create(
+        { name: `Veg559 Check Path ${RUN}`, classId: srdClassId } as never,
+        { userId: author.id, isAdmin: false }
+      );
+
+      const err = await ctx.prisma.user
+        .delete({ where: { id: author.id } })
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      // Postgres 16 through Prisma 6.19.2. SQLSTATE 23514 arrives with no
+      // Prisma error code at all, so anything keyed on a code (P2004 among
+      // them) would miss it. The SQLSTATE and the constraint name survive only
+      // in the message text.
+      expect(err).toBeInstanceOf(Prisma.PrismaClientUnknownRequestError);
+      expect(err).not.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect((err as { code?: unknown }).code).toBeUndefined();
+      expect((err as Error).message).toContain('23514');
+      expect((err as Error).message).toContain('subclasses_homebrew_has_creator_check');
+      expect(isConcurrentWriteConflict(err)).toBe(true);
+
+      // The service's own path clears both rows, since it deletes the subclass
+      // before the user.
+      await users.remove(author.id);
+      expect(await ctx.prisma.subclass.count({ where: { id: sub.id } })).toBe(0);
     });
   });
 

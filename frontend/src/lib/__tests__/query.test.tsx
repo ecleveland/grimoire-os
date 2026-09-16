@@ -208,4 +208,17 @@ describe('invalidateApiPath', () => {
     expect(predicate!({ queryKey: apiQueryKey('/srd/monsters?page=1') } as never)).toBe(true);
     expect(predicate!({ queryKey: apiQueryKey('/notes?campaignId=1') } as never)).toBe(false);
   });
+
+  // A caller that shows the author what a save did needs to know the refetch
+  // carrying the new values failed, which only `throwOnError` reports.
+  it('forwards invalidate options to the client', async () => {
+    const client = makeClient();
+    const spy = vi.spyOn(client, 'invalidateQueries');
+
+    await invalidateApiPath(client, '/srd/monsters?', { throwOnError: true });
+    await invalidateApiPath(client, '/srd/monsters?');
+
+    expect(spy.mock.calls[0][1]).toEqual({ throwOnError: true });
+    expect(spy.mock.calls[1][1]).toBeUndefined();
+  });
 });
