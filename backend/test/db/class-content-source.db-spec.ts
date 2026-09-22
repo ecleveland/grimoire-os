@@ -589,10 +589,14 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
     });
 
     it('still returns the SRD class to all three callers', async () => {
+      // A page big enough for every row the fixture puts under this one name,
+      // so adding another later cannot push the SRD row off the default page
+      // of 20 and redden this without touching the code it tests.
+      const query = { types: ['class'] as const, q: srdClassName, limit: 100 };
       const [owner, stranger, anon] = await Promise.all([
-        srd.search({ types: ['class'], q: srdClassName }, userId),
-        srd.search({ types: ['class'], q: srdClassName }, otherUserId),
-        srd.search({ types: ['class'], q: srdClassName }),
+        srd.search({ ...query }, userId),
+        srd.search({ ...query }, otherUserId),
+        srd.search({ ...query }),
       ]);
 
       // Ids, not the count: this fixture deliberately has a shared row and two

@@ -1840,6 +1840,7 @@ describe('SrdService', () => {
       prisma.spell.findMany.mockResolvedValue([]);
       prisma.feat.findMany.mockResolvedValue([]);
       prisma.item.findMany.mockResolvedValue([]);
+      prisma.srdClass.findMany.mockResolvedValue([]);
       prisma.classFeature.findMany.mockResolvedValue([]);
       prisma.subclassFeature.findMany.mockResolvedValue([]);
       prisma.raceTrait.findMany.mockResolvedValue([]);
