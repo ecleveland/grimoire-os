@@ -126,7 +126,7 @@ export type UnifiedFeatureData = {
 // 24h per cached page.
 const UNIFIED_CLASS_SELECT = Object.fromEntries(
   SEARCH_CLASS_HIT_FIELDS.map(f => [f, true])
-) as Record<SearchClassHitField, true>;
+) as Record<SearchClassHitField, true> satisfies Prisma.SrdClassSelect;
 
 export type UnifiedClassHitData = Pick<SrdClass, SearchClassHitField>;
 
@@ -1412,6 +1412,14 @@ export class SrdService {
             });
           }
           break;
+        }
+        // A source added to UnifiedSourceTag without a case here would otherwise
+        // have its rows counted by the total and then dropped from the page,
+        // which looks like a pagination bug rather than a missing branch. The
+        // never binding makes it a compile error instead.
+        default: {
+          const unhandled: never = row.source;
+          throw new Error(`Unhandled search source ${String(unhandled)}`);
         }
       }
     }

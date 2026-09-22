@@ -1037,6 +1037,13 @@ describe('SrdService', () => {
 
           expect(idSql()).toContain('"srd_classes"');
           expect(idSql()).not.toContain('"createdById"');
+          // The absent owner clause is only half of it. Without the catalog
+          // predicate as well, dropping the gate for anonymous callers reads as
+          // "no filter" rather than "srd + shared", and every user's homebrew
+          // class is public.
+          expect(idSql()).toContain('"contentSource"');
+          expect(idValues()).toContain('srd');
+          expect(idValues()).toContain('shared');
         });
 
         it('matches a class on name or description [VEG-510]', async () => {
