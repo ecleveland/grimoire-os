@@ -1063,9 +1063,9 @@ describe('SrdService', () => {
 
           expect(page.total).toBe(1);
           expect(page.data).toEqual([{ kind: 'class', data: { id: 'c1', name: 'Warden' } }]);
-          // Summary columns only. The multiclassing, spellcasting and equipment
-          // JSON is what this select exists to leave behind, so the assertion is
-          // the whole object rather than a subset.
+          // Summary columns only. The rule JSON a card never shows and the
+          // owner's user id are both what this select exists to leave behind,
+          // so the assertion is the whole object rather than a subset.
           expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
             where: { id: { in: ['c1'] } },
             select: {
@@ -1075,7 +1075,6 @@ describe('SrdService', () => {
               subclassLevel: true,
               description: true,
               contentSource: true,
-              createdById: true,
             },
           });
         });

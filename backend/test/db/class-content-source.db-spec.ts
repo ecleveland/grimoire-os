@@ -582,6 +582,9 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
     it('hides it from an anonymous caller', async () => {
       const page = await srd.search({ types: ['class'], q: BREW_NAME });
 
+      // `total` alone would miss a hydrate-path leak: it comes from the count
+      // query, which is a separate predicate from the one that picked the ids.
+      expect(page.data).toEqual([]);
       expect(page.total).toBe(0);
     });
 

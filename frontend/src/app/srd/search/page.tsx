@@ -54,7 +54,7 @@ export default function SrdSearchPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
-  const [enabledKinds, setEnabledKinds] = useState<Set<SearchKind>>(new Set(SEARCH_KINDS));
+  const [enabledKinds, setEnabledKinds] = useState<Set<SearchKind>>(() => new Set(SEARCH_KINDS));
 
   // Spell sub-filters
   const [spellClass, setSpellClass] = useState('');
@@ -89,7 +89,10 @@ export default function SrdSearchPage() {
     params.set('limit', String(LIMIT));
     if (search) params.set('q', search);
     if (enabledKinds.size > 0 && enabledKinds.size < SEARCH_KINDS.length) {
-      params.set('types', Array.from(enabledKinds).join(','));
+      // Canonical order, not the Set's insertion order: toggling a chip off and
+      // back on would otherwise move that kind to the end, and the anonymous
+      // response cache keys on the whole URL.
+      params.set('types', SEARCH_KINDS.filter(k => enabledKinds.has(k)).join(','));
     }
     const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
     const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
@@ -523,13 +526,13 @@ function subtitleFor(hit: UnifiedSearchHit): string {
 function ClassSummary({ cls }: { cls: UnifiedClassHitData }) {
   return (
     <div className="space-y-3">
+      {/* Same classes as ClassDetail, so a description does not wrap one way in
+          the hit and another on the class page. */}
       {cls.description && (
-        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
-          {cls.description}
-        </p>
+        <p className="text-gray-600 dark:text-gray-400 text-sm">{cls.description}</p>
       )}
       <Link
-        href={`/srd/classes/${cls.id}`}
+        href={parentDetailHref({ kind: 'class', id: cls.id })}
         className="inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
       >
         Open {cls.name} Class →

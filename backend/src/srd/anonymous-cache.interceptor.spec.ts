@@ -15,9 +15,18 @@ function makeCacheManager() {
   };
 }
 
-function makeContext(req: { method: string; url: string; user?: unknown }): ExecutionContext {
+type FakeResponse = { setHeader: jest.Mock };
+
+function makeResponse(): FakeResponse {
+  return { setHeader: jest.fn() };
+}
+
+function makeContext(
+  req: { method: string; url: string; user?: unknown },
+  res: FakeResponse = makeResponse()
+): ExecutionContext {
   return {
-    switchToHttp: () => ({ getRequest: () => req, getResponse: () => ({}) }),
+    switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
     getArgByIndex: () => req,
     getHandler: () => () => undefined,
     getClass: () => class {},
@@ -210,5 +219,29 @@ describe('AnonymousCacheInterceptor (VEG-333)', () => {
     expect(anonAgain).toEqual(catalogOnly);
     expect(handler).toHaveBeenCalledTimes(2);
     expect(cache.store.get(url)).toEqual(catalogOnly);
+  });
+
+  // Skipping the in-process cache protects this process only. A reverse proxy
+  // fronting /api/srd/* sees a plain 200 on a bare URL and is entitled to store
+  // it, which would hand one user's homebrew to the next anonymous visitor.
+  it('tells a proxy not to store an authenticated response', async () => {
+    const res = makeResponse();
+    const ctx = makeContext(
+      { method: 'GET', url: '/api/srd/search?types=class', user: { userId: 'u1' } },
+      res
+    );
+
+    await run(makeInterceptor(makeCacheManager()), ctx, { total: 1, data: [] }, jest.fn());
+
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, no-store');
+  });
+
+  it('leaves an anonymous response cacheable by a proxy', async () => {
+    const res = makeResponse();
+    const ctx = makeContext({ method: 'GET', url: '/api/srd/search?types=class' }, res);
+
+    await run(makeInterceptor(makeCacheManager()), ctx, { total: 0, data: [] }, jest.fn());
+
+    expect(res.setHeader).not.toHaveBeenCalledWith('Cache-Control', expect.anything());
   });
 });

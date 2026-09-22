@@ -124,7 +124,6 @@ const wardenClass: UnifiedClassHitData = {
   subclassLevel: 3,
   description: 'A sworn protector of wild places.',
   contentSource: 'srd',
-  createdById: null,
 };
 
 // A class saved with neither optional column. They arrive as null, not absent,
@@ -137,7 +136,6 @@ const skirmisherClass = {
   subclassLevel: null,
   description: null,
   contentSource: 'srd',
-  createdById: null,
 } as unknown as UnifiedClassHitData;
 
 /** A class hit, with `over` applied to the base Warden fixture. */
@@ -584,14 +582,7 @@ describe('SrdSearchPage', () => {
 
     it('shows the Homebrew badge on a homebrew class hit', async () => {
       mockApiFetch.mockResolvedValue(
-        paginated([
-          classHit({
-            id: 'cls-hb',
-            name: 'Runecarver',
-            contentSource: 'homebrew',
-            createdById: 'u1',
-          }),
-        ])
+        paginated([classHit({ id: 'cls-hb', name: 'Runecarver', contentSource: 'homebrew' })])
       );
       renderPage();
 
@@ -802,6 +793,25 @@ describe('SrdSearchPage', () => {
       });
       const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
       expect(url).toContain('types=spell');
+    });
+
+    it('emits types in canonical kind order however the chips were toggled [VEG-510]', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+
+      // Off and back on moves a kind to the end of the Set's insertion order.
+      // The anonymous cache keys on the whole URL, so one selection reaching it
+      // under several orderings would occupy several entries.
+      await user.click(screen.getByRole('button', { name: 'Spells' }));
+      await user.click(screen.getByRole('button', { name: 'Spells' }));
+      mockApiFetch.mockClear();
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
+      const types = new URLSearchParams(url.split('?')[1]).get('types');
+      expect(types).toBe('spell,feat,item,feature');
     });
   });
 });

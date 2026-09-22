@@ -112,10 +112,10 @@ test.describe('SRD print golden path (VEG-269)', () => {
     // every other kind leaves every result a spell, so the first add-button is
     // deterministically a spell regardless of seed ordering.
     await page.goto('/srd/search');
-    await page.getByRole('button', { name: 'Feats' }).click();
-    await page.getByRole('button', { name: 'Items' }).click();
+    await page.getByRole('button', { name: 'Feats', exact: true }).click();
+    await page.getByRole('button', { name: 'Items', exact: true }).click();
     await page.getByRole('button', { name: 'Classes', exact: true }).click();
-    await page.getByRole('button', { name: 'Features' }).click();
+    await page.getByRole('button', { name: 'Features', exact: true }).click();
     const addSpell = page.getByRole('button', { name: addToSetButton }).first();
     await expect(addSpell).toBeVisible({ timeout: 10_000 });
     await addSpell.click();

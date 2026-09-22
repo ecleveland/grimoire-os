@@ -2,12 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { Spell, Monster, Item, Feat, SrdClass, Prisma } from '@prisma/client';
-import {
-  SEARCH_CLASS_HIT_FIELDS,
-  SEARCH_KINDS,
-  type SearchClassHitField,
-  type SearchKind,
-} from '@grimoire-os/shared';
+import { SEARCH_KINDS, type SearchClassHitField, type SearchKind } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
@@ -120,13 +115,18 @@ export type UnifiedFeatureData = {
   parent: { kind: FeatureParentType; id: string; name: string };
 };
 
-// The columns a class search card renders, from the shared list the frontend
-// hit type is built on. The rest of the row is the multiclassing, spellcasting
-// and equipment JSON, which no hit shows and the anonymous cache would hold for
-// 24h per cached page.
-const UNIFIED_CLASS_SELECT = Object.fromEntries(
-  SEARCH_CLASS_HIT_FIELDS.map(f => [f, true])
-) as Record<SearchClassHitField, true> satisfies Prisma.SrdClassSelect;
+// The columns a class search card renders. The rest of the row is the
+// multiclassing, spellcasting and equipment JSON, which no hit shows and the
+// anonymous cache would hold for 24h per cached page. The annotation is what
+// ties this to the shared field list: a key missing or extra fails to compile.
+const UNIFIED_CLASS_SELECT: Record<SearchClassHitField, true> = {
+  id: true,
+  name: true,
+  hitDie: true,
+  subclassLevel: true,
+  description: true,
+  contentSource: true,
+};
 
 export type UnifiedClassHitData = Pick<SrdClass, SearchClassHitField>;
 
@@ -168,15 +168,13 @@ type FeatureSearchHit = {
   parent: { id: string; name: string };
 };
 
-type UnifiedSourceTag =
-  | 'spell'
-  | 'feat'
-  | 'item'
-  | 'class'
-  | 'feature:class'
-  | 'feature:subclass'
-  | 'feature:race'
-  | 'feature:background';
+// One source per kind, except `feature`, which fans out to one source per
+// parent table. Derived from SEARCH_KINDS rather than restated: a sixth kind
+// added in shared would otherwise compile here and answer `{ total: 0 }` as
+// though nothing matched, since `types` filters against a list this union never
+// sees. Written out, it leaves the kind missing from `idsBySource` and from the
+// hydrate switch's never default, both of which stop the build.
+type UnifiedSourceTag = Exclude<SearchKind, 'feature'> | `feature:${FeatureParentType}`;
 
 type UnifiedSource = {
   tag: UnifiedSourceTag;
@@ -1413,10 +1411,10 @@ export class SrdService {
           }
           break;
         }
-        // A source added to UnifiedSourceTag without a case here would otherwise
-        // have its rows counted by the total and then dropped from the page,
-        // which looks like a pagination bug rather than a missing branch. The
-        // never binding makes it a compile error instead.
+        // Compile-time only: the never binding turns a tag added to
+        // UnifiedSourceTag with no case here into a build error. An unknown
+        // source at runtime never gets this far, since the idsBySource lookup
+        // above throws on it first, so the message is a defensive fallback.
         default: {
           const unhandled: never = row.source;
           throw new Error(`Unhandled search source ${String(unhandled)}`);

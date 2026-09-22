@@ -139,9 +139,10 @@ export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 /**
  * The columns a class search hit carries. A hit is a pointer to the class page,
- * so the rule JSON and the feature rows stay out of it. The backend builds its
- * Prisma `select` from this list and the frontend types the hit from it, so the
- * wire shape has one definition.
+ * so the rule JSON and the feature rows stay out of it, and so does the owner's
+ * id, which no card reads and which an anonymous cache entry would otherwise
+ * hold for a day. The backend builds its Prisma `select` from this list and the
+ * frontend types the hit from it, so the wire shape has one definition.
  */
 export const SEARCH_CLASS_HIT_FIELDS = [
   'id',
@@ -150,7 +151,6 @@ export const SEARCH_CLASS_HIT_FIELDS = [
   'subclassLevel',
   'description',
   'contentSource',
-  'createdById',
 ] as const satisfies readonly (keyof SrdClass)[];
 export type SearchClassHitField = (typeof SEARCH_CLASS_HIT_FIELDS)[number];
 

@@ -22,4 +22,19 @@ describe('QuerySearchDto', () => {
 
     expect(dto.types).toBeUndefined();
   });
+
+  // `?types=class&types=bogus` reaches the DTO as an array, not a string, so the
+  // two branches have to filter alike. Unfiltered, an unknown kind becomes a
+  // source nothing builds and the search answers an empty page.
+  it('filters a repeated query parameter the same way as the comma form [VEG-510]', async () => {
+    const dto = (await transform({ types: ['class', 'bogus'] })) as QuerySearchDto;
+
+    expect(dto.types).toEqual(['class']);
+  });
+
+  it('falls back to every kind when an array names none that exist [VEG-510]', async () => {
+    const dto = (await transform({ types: ['x', 'y'] })) as QuerySearchDto;
+
+    expect(dto.types).toBeUndefined();
+  });
 });
