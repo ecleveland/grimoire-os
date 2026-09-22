@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
+import { SEARCH_KINDS, type SearchKind } from '@grimoire-os/shared';
 import type { PaginatedResponse } from '@/lib/types';
 import {
-  ALL_SEARCH_KINDS,
   KIND_LABEL,
   KIND_LABEL_PLURAL,
-  SearchKind,
+  UnifiedClassHitData,
   UnifiedFeatureData,
   UnifiedSearchHit,
   parentDetailHref,
@@ -54,7 +54,7 @@ export default function SrdSearchPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
-  const [enabledKinds, setEnabledKinds] = useState<Set<SearchKind>>(new Set(ALL_SEARCH_KINDS));
+  const [enabledKinds, setEnabledKinds] = useState<Set<SearchKind>>(new Set(SEARCH_KINDS));
 
   // Spell sub-filters
   const [spellClass, setSpellClass] = useState('');
@@ -88,7 +88,7 @@ export default function SrdSearchPage() {
     params.set('page', String(page));
     params.set('limit', String(LIMIT));
     if (search) params.set('q', search);
-    if (enabledKinds.size > 0 && enabledKinds.size < ALL_SEARCH_KINDS.length) {
+    if (enabledKinds.size > 0 && enabledKinds.size < SEARCH_KINDS.length) {
       params.set('types', Array.from(enabledKinds).join(','));
     }
     const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
@@ -191,12 +191,12 @@ export default function SrdSearchPage() {
       <div className="mb-4">
         <SearchBox
           onDebouncedChange={handleDebouncedSearch}
-          placeholder="Search spells, feats, items, and features..."
+          placeholder="Search spells, feats, items, classes, and features..."
         />
       </div>
 
       <div className="flex gap-2 mb-4 flex-wrap">
-        {ALL_SEARCH_KINDS.map(kind => {
+        {SEARCH_KINDS.map(kind => {
           const enabled = enabledKinds.has(kind);
           return (
             <button
@@ -416,7 +416,8 @@ function ResultCard({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  // Spells, items, and features are printable card types; feats are not.
+  // Spells, items and features are printable card types. Feats are not, and
+  // neither is a class, whose features print individually from its own page.
   const printable =
     hit.kind === 'spell' || hit.kind === 'item' || hit.kind === 'feature'
       ? { type: hit.kind, id: hit.data.id, name: hit.data.name }
@@ -452,12 +453,13 @@ function ResultCard({
                   Requires Attunement
                 </span>
               )}
-              {(hit.kind === 'spell' || hit.kind === 'feat' || hit.kind === 'item') &&
-                hit.data.contentSource === 'homebrew' && (
-                  <Badge variant="homebrew" className="ml-2 inline-block align-middle">
-                    Homebrew
-                  </Badge>
-                )}
+              {/* Every kind but feature carries its own content tier; a feature
+                  inherits its parent's, which the hit does not include. */}
+              {hit.kind !== 'feature' && hit.data.contentSource === 'homebrew' && (
+                <Badge variant="homebrew" className="ml-2 inline-block align-middle">
+                  Homebrew
+                </Badge>
+              )}
             </h2>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{subtitleFor(hit)}</p>
           </div>
@@ -482,6 +484,7 @@ function ResultCard({
           {hit.kind === 'spell' && <SpellDetail spell={hit.data} />}
           {hit.kind === 'feat' && <FeatDetail feat={hit.data} />}
           {hit.kind === 'item' && <ItemDetail item={hit.data} />}
+          {hit.kind === 'class' && <ClassSummary cls={hit.data} />}
           {hit.kind === 'feature' && <FeatureDetail feature={hit.data} />}
         </div>
       )}
@@ -501,9 +504,38 @@ function subtitleFor(hit: UnifiedSearchHit): string {
     const parts = [hit.data.category, hit.data.rarity].filter(Boolean) as string[];
     return parts.length ? parts.join(' · ') : 'Item';
   }
+  if (hit.kind === 'class') {
+    const sub =
+      hit.data.subclassLevel != null ? ` · Subclass at level ${hit.data.subclassLevel}` : '';
+    return `${hit.data.hitDie} hit die${sub}`;
+  }
   // feature
   const lvl = hit.data.level !== undefined ? ` · Level ${hit.data.level}` : '';
   return `${capitalize(hit.data.parent.kind)}: ${hit.data.parent.name}${lvl}`;
+}
+
+/**
+ * A class hit's expanded body. Deliberately a summary and a link rather than the
+ * full `ClassDetail`. The class page is where the tables, proficiencies and
+ * feature print chips live, and a search result that reproduced them would bury
+ * the other hits.
+ */
+function ClassSummary({ cls }: { cls: UnifiedClassHitData }) {
+  return (
+    <div className="space-y-3">
+      {cls.description && (
+        <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
+          {cls.description}
+        </p>
+      )}
+      <Link
+        href={`/srd/classes/${cls.id}`}
+        className="inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+      >
+        Open {cls.name} Class →
+      </Link>
+    </div>
+  );
 }
 
 function FeatureDetail({ feature }: { feature: UnifiedFeatureData }) {

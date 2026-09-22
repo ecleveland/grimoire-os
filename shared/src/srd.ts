@@ -130,6 +130,31 @@ export interface BackgroundFeature {
 export type ContentSource = 'srd' | 'shared' | 'homebrew';
 
 /**
+ * The result kinds the unified `/srd/search` endpoint can return, in the order
+ * the search page offers them. Shared so the backend's kind filter and the
+ * frontend's kind chips cannot disagree about which kinds exist.
+ */
+export const SEARCH_KINDS = ['spell', 'feat', 'item', 'class', 'feature'] as const;
+export type SearchKind = (typeof SEARCH_KINDS)[number];
+
+/**
+ * The columns a class search hit carries. A hit is a pointer to the class page,
+ * so the rule JSON and the feature rows stay out of it. The backend builds its
+ * Prisma `select` from this list and the frontend types the hit from it, so the
+ * wire shape has one definition.
+ */
+export const SEARCH_CLASS_HIT_FIELDS = [
+  'id',
+  'name',
+  'hitDie',
+  'subclassLevel',
+  'description',
+  'contentSource',
+  'createdById',
+] as const satisfies readonly (keyof SrdClass)[];
+export type SearchClassHitField = (typeof SEARCH_CLASS_HIT_FIELDS)[number];
+
+/**
  * Authorship/scope fields carried by every content type that can originate from
  * the SRD seed, an admin, or a user (monsters, spells, feats, magic items,
  * backgrounds).

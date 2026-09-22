@@ -178,4 +178,37 @@ describe('AnonymousCacheInterceptor (VEG-333)', () => {
     expect(authed).toEqual({ catalog: true, homebrew: ['mine'] });
     expect(handler).toHaveBeenCalledTimes(2);
   });
+
+  // Classes joined the unified search in VEG-510, so a `types=class` URL now
+  // returns owner-scoped rows the way `types=spell` always has. The entry the
+  // next anonymous caller is served must still be the catalog-only one.
+  it("keeps an owner's class hit out of the anonymous entry [VEG-510]", async () => {
+    const cache = makeCacheManager();
+    const interceptor = makeInterceptor(cache);
+    const handler = jest.fn();
+    const url = '/api/srd/search?types=class&q=Warden';
+    const catalogOnly = { total: 0, data: [] };
+
+    const anon = await run(interceptor, makeContext({ method: 'GET', url }), catalogOnly, handler);
+    const owner = await run(
+      interceptor,
+      makeContext({ method: 'GET', url, user: { userId: 'u1' } }),
+      { total: 1, data: [{ kind: 'class' }] },
+      handler
+    );
+    // A third anonymous hit: whatever it gets came from the cache, since the
+    // handler value here is one no caller should ever see.
+    const anonAgain = await run(
+      interceptor,
+      makeContext({ method: 'GET', url }),
+      { total: 1, data: [{ kind: 'SHOULD_NOT_BE_SERVED' }] },
+      handler
+    );
+
+    expect(anon).toEqual(catalogOnly);
+    expect(owner).toEqual({ total: 1, data: [{ kind: 'class' }] });
+    expect(anonAgain).toEqual(catalogOnly);
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(cache.store.get(url)).toEqual(catalogOnly);
+  });
 });

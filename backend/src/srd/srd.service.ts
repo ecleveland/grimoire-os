@@ -1,7 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
-import { Spell, Monster, Item, Feat, Prisma } from '@prisma/client';
+import { Spell, Monster, Item, Feat, SrdClass, Prisma } from '@prisma/client';
+import {
+  SEARCH_CLASS_HIT_FIELDS,
+  SEARCH_KINDS,
+  type SearchClassHitField,
+  type SearchKind,
+} from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QuerySpellsDto } from './dto/query-spells.dto';
@@ -9,7 +15,7 @@ import { QueryMonstersDto } from './dto/query-monsters.dto';
 import { QueryItemsDto, SearchItemsDto } from './dto/query-items.dto';
 import { QueryFeatsDto } from './dto/query-feats.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
-import { QuerySearchDto, SearchKind } from './dto/query-search.dto';
+import { QuerySearchDto } from './dto/query-search.dto';
 import { ContentAccessService, GLOBAL_CONTENT_SOURCES } from './content-access.service';
 
 // Raw-SQL counterpart of ContentAccessService.globalWhere(), for the pg_trgm and
@@ -114,10 +120,21 @@ export type UnifiedFeatureData = {
   parent: { kind: FeatureParentType; id: string; name: string };
 };
 
+// The columns a class search card renders, from the shared list the frontend
+// hit type is built on. The rest of the row is the multiclassing, spellcasting
+// and equipment JSON, which no hit shows and the anonymous cache would hold for
+// 24h per cached page.
+const UNIFIED_CLASS_SELECT = Object.fromEntries(
+  SEARCH_CLASS_HIT_FIELDS.map(f => [f, true])
+) as Record<SearchClassHitField, true>;
+
+export type UnifiedClassHitData = Pick<SrdClass, SearchClassHitField>;
+
 export type UnifiedSearchHit =
   | { kind: 'spell'; data: Spell }
   | { kind: 'feat'; data: Feat }
   | { kind: 'item'; data: Item }
+  | { kind: 'class'; data: UnifiedClassHitData }
   | { kind: 'feature'; data: UnifiedFeatureData };
 
 const CLASS_FEATURE_ORDER = [{ level: 'asc' as const }, { name: 'asc' as const }];
@@ -155,6 +172,7 @@ type UnifiedSourceTag =
   | 'spell'
   | 'feat'
   | 'item'
+  | 'class'
   | 'feature:class'
   | 'feature:subclass'
   | 'feature:race'
@@ -1053,7 +1071,7 @@ export class SrdService {
     });
   }
 
-  // ── Unified search (spells + feats + features) ──────
+  // ── Unified search (spells + feats + items + classes + features) ──────
   //
   // Pagination happens at the SQL layer via UNION ALL + LIMIT/OFFSET so that
   // the catalog never has to be loaded into Node memory to slice a single page.
@@ -1073,9 +1091,7 @@ export class SrdService {
     const page = dto.page ?? 1;
     const limit = dto.limit ?? 20;
     const offset = (page - 1) * limit;
-    const types: SearchKind[] = dto.types?.length
-      ? dto.types
-      : ['spell', 'feat', 'item', 'feature'];
+    const types: SearchKind[] = dto.types?.length ? dto.types : [...SEARCH_KINDS];
 
     const sources = this.buildUnifiedSources(dto, types, userId);
     if (sources.length === 0) {
@@ -1136,6 +1152,13 @@ export class SrdService {
         whereSql: this.buildItemWhereSql(dto, userId),
       });
     }
+    if (types.includes('class')) {
+      sources.push({
+        tag: 'class',
+        table: Prisma.sql`"srd_classes"`,
+        whereSql: this.buildClassWhereSql(dto, userId),
+      });
+    }
     if (types.includes('feature')) {
       const parents = dto.parentType ? [dto.parentType] : ALL_FEATURE_PARENTS;
       for (const parent of parents) {
@@ -1188,6 +1211,16 @@ export class SrdService {
     return joinWhere(conds);
   }
 
+  // A class carries no sub-filters: the search page offers none for this kind,
+  // and free text plus visibility is the whole predicate. The visibility gate
+  // leads for the same reason it does in every sibling builder, so a later edit
+  // to `conds` cannot quietly drop it.
+  private buildClassWhereSql(dto: QuerySearchDto, userId?: string): Prisma.Sql {
+    const conds: Prisma.Sql[] = [visibleSourceSql(userId)];
+    if (dto.q) conds.push(this.buildTextMatchSql(dto.q));
+    return joinWhere(conds);
+  }
+
   private buildFeatureWhereSql(
     dto: QuerySearchDto,
     parent: FeatureParentType,
@@ -1213,9 +1246,9 @@ export class SrdService {
   //
   // Deliberately unscoped, features included (VEG-507). Every id here came from
   // the id query above, which is already filtered to what the caller may read —
-  // by contentSource for spells, feats and items, and by the parent EXISTS gate
-  // for features. Re-filtering would re-derive the same answer at the cost of
-  // four more joins per page, and the seven branches would then have to agree
+  // by contentSource for spells, feats, items and classes, and by the parent
+  // EXISTS gate for features. Re-filtering would re-derive the same answer at the cost of
+  // four more joins per page, and the eight branches would then have to agree
   // with `buildUnifiedSources` about the rule rather than simply inheriting it.
   // `findFeaturesByIds` is the opposite case and IS scoped: its ids come from
   // the client, not from a query this service ran.
@@ -1224,6 +1257,7 @@ export class SrdService {
       spell: [],
       feat: [],
       item: [],
+      class: [],
       'feature:class': [],
       'feature:subclass': [],
       'feature:race': [],
@@ -1231,46 +1265,61 @@ export class SrdService {
     };
     for (const row of idRows) idsBySource[row.source].push(row.id);
 
-    const [spells, feats, items, classFeatures, subclassFeatures, raceTraits, backgroundFeatures] =
-      await Promise.all([
-        idsBySource.spell.length
-          ? this.prisma.spell.findMany({ where: { id: { in: idsBySource.spell } } })
-          : Promise.resolve([] as Spell[]),
-        idsBySource.feat.length
-          ? this.prisma.feat.findMany({ where: { id: { in: idsBySource.feat } } })
-          : Promise.resolve([] as Feat[]),
-        idsBySource.item.length
-          ? this.prisma.item.findMany({ where: { id: { in: idsBySource.item } } })
-          : Promise.resolve([] as Item[]),
-        idsBySource['feature:class'].length
-          ? this.prisma.classFeature.findMany({
-              where: { id: { in: idsBySource['feature:class'] } },
-              include: { class: { select: { id: true, name: true } } },
-            })
-          : Promise.resolve([]),
-        idsBySource['feature:subclass'].length
-          ? this.prisma.subclassFeature.findMany({
-              where: { id: { in: idsBySource['feature:subclass'] } },
-              include: { subclass: { select: { id: true, name: true } } },
-            })
-          : Promise.resolve([]),
-        idsBySource['feature:race'].length
-          ? this.prisma.raceTrait.findMany({
-              where: { id: { in: idsBySource['feature:race'] } },
-              include: { race: { select: { id: true, name: true } } },
-            })
-          : Promise.resolve([]),
-        idsBySource['feature:background'].length
-          ? this.prisma.backgroundFeature.findMany({
-              where: { id: { in: idsBySource['feature:background'] } },
-              include: { background: { select: { id: true, name: true } } },
-            })
-          : Promise.resolve([]),
-      ]);
+    const [
+      spells,
+      feats,
+      items,
+      classes,
+      classFeatures,
+      subclassFeatures,
+      raceTraits,
+      backgroundFeatures,
+    ] = await Promise.all([
+      idsBySource.spell.length
+        ? this.prisma.spell.findMany({ where: { id: { in: idsBySource.spell } } })
+        : Promise.resolve([] as Spell[]),
+      idsBySource.feat.length
+        ? this.prisma.feat.findMany({ where: { id: { in: idsBySource.feat } } })
+        : Promise.resolve([] as Feat[]),
+      idsBySource.item.length
+        ? this.prisma.item.findMany({ where: { id: { in: idsBySource.item } } })
+        : Promise.resolve([] as Item[]),
+      idsBySource.class.length
+        ? this.prisma.srdClass.findMany({
+            where: { id: { in: idsBySource.class } },
+            select: UNIFIED_CLASS_SELECT,
+          })
+        : Promise.resolve([] as UnifiedClassHitData[]),
+      idsBySource['feature:class'].length
+        ? this.prisma.classFeature.findMany({
+            where: { id: { in: idsBySource['feature:class'] } },
+            include: { class: { select: { id: true, name: true } } },
+          })
+        : Promise.resolve([]),
+      idsBySource['feature:subclass'].length
+        ? this.prisma.subclassFeature.findMany({
+            where: { id: { in: idsBySource['feature:subclass'] } },
+            include: { subclass: { select: { id: true, name: true } } },
+          })
+        : Promise.resolve([]),
+      idsBySource['feature:race'].length
+        ? this.prisma.raceTrait.findMany({
+            where: { id: { in: idsBySource['feature:race'] } },
+            include: { race: { select: { id: true, name: true } } },
+          })
+        : Promise.resolve([]),
+      idsBySource['feature:background'].length
+        ? this.prisma.backgroundFeature.findMany({
+            where: { id: { in: idsBySource['feature:background'] } },
+            include: { background: { select: { id: true, name: true } } },
+          })
+        : Promise.resolve([]),
+    ]);
 
     const spellMap = new Map(spells.map(s => [s.id, s]));
     const featMap = new Map(feats.map(f => [f.id, f]));
     const itemMap = new Map(items.map(i => [i.id, i]));
+    const classMap = new Map(classes.map(c => [c.id, c]));
     const classFeatureMap = new Map(classFeatures.map(f => [f.id, f]));
     const subclassFeatureMap = new Map(subclassFeatures.map(f => [f.id, f]));
     const raceTraitMap = new Map(raceTraits.map(t => [t.id, t]));
@@ -1292,6 +1341,14 @@ export class SrdService {
         case 'item': {
           const data = itemMap.get(row.id);
           if (data) result.push({ kind: 'item', data });
+          break;
+        }
+        // Only the columns the search card renders, listed in
+        // SEARCH_CLASS_HIT_FIELDS. A hit is a pointer to the class page, and
+        // neither the features nor the rule JSON show up on the way there.
+        case 'class': {
+          const data = classMap.get(row.id);
+          if (data) result.push({ kind: 'class', data });
           break;
         }
         case 'feature:class': {

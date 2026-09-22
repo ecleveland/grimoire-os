@@ -7,7 +7,7 @@ import { OptionalJwtAuthGuard } from '../auth/guards/optional-jwt-auth.guard';
 import type { OptionallyAuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 
 /**
- * Unified search across spells, feats, items, and features (VEG-294). Lives
+ * Unified search across spells, feats, items, classes, and features (VEG-294). Lives
  * apart from {@link SrdController} because the response varies per user — the
  * caller's homebrew spells, feats, and items ride along with the catalog — so
  * it must stay off that controller's blanket URL-keyed cache, which would leak
@@ -26,7 +26,7 @@ export class SearchController {
   @UseGuards(OptionalJwtAuthGuard)
   @ApiOperation({
     summary:
-      'Unified search across spells, feats, items, and features (incl. the caller’s homebrew)',
+      'Unified search across spells, feats, items, classes, and features (incl. the caller’s homebrew)',
   })
   search(@Query() query: QuerySearchDto, @Req() req: OptionallyAuthenticatedRequest) {
     return this.srdService.search(query, req.user?.userId);

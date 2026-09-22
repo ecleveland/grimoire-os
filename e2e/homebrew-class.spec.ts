@@ -1,5 +1,17 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { BACKEND, csrfHeaders, escapeRegExp, registerAndLogin } from './helpers';
+
+/** The unified search box, which names every kind it covers. */
+const SEARCH_PLACEHOLDER = 'Search spells, feats, items, classes, and features...';
+
+/** How many classes the given request context can see under this name. */
+async function classSearchTotal(request: APIRequestContext, name: string): Promise<number> {
+  const res = await request.get(
+    `${BACKEND}/api/srd/search?types=class&q=${encodeURIComponent(name)}`
+  );
+  expect(res.ok(), `search failed: ${res.status()}`).toBeTruthy();
+  return (await res.json()).total as number;
+}
 
 /** Literal-match regex for names carrying regex metacharacters (e.g. "(Revised)"). */
 function exact(text: string): RegExp {
@@ -154,7 +166,8 @@ test.describe('Homebrew class pages (VEG-508)', () => {
     await page.getByRole('button', { name: 'Spells', exact: true }).click();
     await page.getByRole('button', { name: 'Feats', exact: true }).click();
     await page.getByRole('button', { name: 'Items', exact: true }).click();
-    await page.getByPlaceholder('Search spells, feats, items, and features...').fill(featureName);
+    await page.getByRole('button', { name: 'Classes', exact: true }).click();
+    await page.getByPlaceholder(SEARCH_PLACEHOLDER).fill(featureName);
 
     // Anchored, so the result's print toggle ("Add ... to print set") can't match.
     const result = page.getByRole('button', {
@@ -168,6 +181,88 @@ test.describe('Homebrew class pages (VEG-508)', () => {
     await expect(page.getByRole('heading', { level: 1, name: exact(className) })).toBeVisible({
       timeout: 10_000,
     });
+  });
+
+  test('a homebrew class is found by the Classes search kind, and not by anyone else [VEG-510]', async ({
+    page,
+    browser,
+  }) => {
+    await registerAndLogin(page, 'class-kind', 'E2E Class Namer');
+    const stamp = Date.now();
+    const className = `Warden ${stamp}`;
+    const id = await createClass(page, {
+      name: className,
+      hitDie: 'd10',
+      description: 'A sworn protector of wild places.',
+    });
+
+    // Leave only Classes switched on, so a spell or feature sharing the stamp
+    // can't stand in for the class hit.
+    await page.goto('/srd/search');
+    for (const kind of ['Spells', 'Feats', 'Items', 'Features']) {
+      await page.getByRole('button', { name: kind, exact: true }).click();
+    }
+    await page.getByPlaceholder(SEARCH_PLACEHOLDER).fill(className);
+
+    const heading = page.getByRole('heading', { level: 2, name: exact(className) });
+    await expect(heading).toHaveCount(1, { timeout: 10_000 });
+    await expect(heading.getByText('Homebrew', { exact: true })).toBeVisible();
+
+    // Anchored, so the surrounding card's other controls can't match.
+    await page.getByRole('button', { name: new RegExp(`^${escapeRegExp(className)}`) }).click();
+    await page.getByRole('link', { name: `Open ${className} Class →`, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/srd/classes/${id}$`));
+
+    // Homebrew is a per-user library: nobody else sees it, signed in or not.
+    const anon = await browser.newContext();
+    try {
+      expect(await classSearchTotal(anon.request, className)).toBe(0);
+    } finally {
+      await anon.close();
+    }
+
+    const strangerContext = await browser.newContext();
+    try {
+      const strangerPage = await strangerContext.newPage();
+      await registerAndLogin(strangerPage, 'class-kind-stranger', 'E2E Class Stranger');
+      expect(await classSearchTotal(strangerPage.request, className)).toBe(0);
+    } finally {
+      await strangerContext.close();
+    }
+  });
+
+  test('a homebrew class feature prints from its own class page [VEG-510]', async ({ page }) => {
+    await registerAndLogin(page, 'class-print', 'E2E Class Printer');
+    const stamp = Date.now();
+    const className = `Warden ${stamp}`;
+    const featureName = `Grove Step ${stamp}`;
+    const id = await createClass(page, {
+      name: className,
+      hitDie: 'd10',
+      features: [{ name: featureName, level: 1, description: 'Printed.' }],
+    });
+
+    // A class is not printable, but its features are, and the chips are on the
+    // class page rather than on the search result.
+    await page.goto(`/srd/classes/${id}`);
+    const addFeature = page.getByRole('button', { name: `Add ${featureName} to print set` });
+    await expect(addFeature).toBeVisible({ timeout: 10_000 });
+    await addFeature.click();
+    await expect(page.getByRole('link', { name: 'Print (1)' })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole('link', { name: 'Print (1)' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('link', { name: 'Print (1)' }).click();
+    await expect(page).toHaveURL('/srd/print');
+
+    const groups = page.getByTestId('print-group');
+    await expect(groups).toHaveCount(1, { timeout: 10_000 });
+    await expect(groups.nth(0)).toHaveAttribute('data-card-type', 'feature');
+
+    const featureCard = page.locator('[data-card-type="feature"] [data-testid="print-card"]');
+    await expect(featureCard).toHaveCount(1);
+    await expect(featureCard).toContainText(featureName);
+    await expect(featureCard.locator('header')).toContainText(`Class · ${className}`);
   });
 
   test("a stranger can't reach another user's class pages", async ({ page }) => {

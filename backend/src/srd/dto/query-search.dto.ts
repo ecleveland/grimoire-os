@@ -1,12 +1,9 @@
 import { IsOptional, IsString, IsInt, IsIn, IsBooleanString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { SEARCH_KINDS, type SearchKind } from '@grimoire-os/shared';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import type { FeatureParentType } from './query-features.dto';
-
-export type SearchKind = 'spell' | 'feat' | 'item' | 'feature';
-
-const ALL_KINDS: SearchKind[] = ['spell', 'feat', 'item', 'feature'];
 
 export class QuerySearchDto extends PaginationDto {
   @ApiPropertyOptional({ description: 'Free-text search across name and description' })
@@ -16,8 +13,8 @@ export class QuerySearchDto extends PaginationDto {
 
   @ApiPropertyOptional({
     description:
-      'Comma-separated list of kinds to include. Defaults to all (spell, feat, item, feature).',
-    example: 'spell,feature',
+      'Comma-separated list of kinds to include. Defaults to all (spell, feat, item, class, feature).',
+    example: 'spell,class',
   })
   @IsOptional()
   @Transform(({ value }) => {
@@ -26,7 +23,7 @@ export class QuerySearchDto extends PaginationDto {
     const kinds = value
       .split(',')
       .map(s => s.trim())
-      .filter((s): s is SearchKind => (ALL_KINDS as string[]).includes(s));
+      .filter((s): s is SearchKind => (SEARCH_KINDS as readonly string[]).includes(s));
     return kinds.length ? kinds : undefined;
   })
   types?: SearchKind[];

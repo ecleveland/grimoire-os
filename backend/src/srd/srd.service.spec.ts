@@ -1000,6 +1000,79 @@ describe('SrdService', () => {
         expect(countSql).toContain('EXISTS');
         expect(countSql).toContain('"srd_classes"');
       });
+
+      describe('the class source', () => {
+        it('includes the class source by default and when types names it [VEG-510]', async () => {
+          await service.search({});
+
+          // The tag is bound, not interpolated, so it lands in values. The table
+          // name on its own proves nothing here, since the class-feature gate
+          // names "srd_classes" too.
+          expect(idSql()).toContain('"srd_classes"');
+          expect(idValues()).toContain('class');
+
+          prisma.$queryRaw.mockClear();
+          await service.search({ types: ['class'] });
+
+          expect(idSql()).toContain('"srd_classes"');
+          expect(idValues()).toContain('class');
+        });
+
+        it('omits the class source when types excludes it [VEG-510]', async () => {
+          await service.search({ types: ['spell'] });
+
+          expect(idSql()).not.toContain('"srd_classes"');
+        });
+
+        it("gates the class source on the caller's visibility, with the id bound as a parameter [VEG-510]", async () => {
+          await service.search({ types: ['class'] }, 'user-1');
+
+          expect(idSql()).toContain('"createdById" =');
+          expect(idValues()).toContain('user-1');
+          expect(idSql()).not.toContain('user-1');
+        });
+
+        it('pins an anonymous class search to the global catalog [VEG-510]', async () => {
+          await service.search({ types: ['class'] });
+
+          expect(idSql()).toContain('"srd_classes"');
+          expect(idSql()).not.toContain('"createdById"');
+        });
+
+        it('matches a class on name or description [VEG-510]', async () => {
+          await service.search({ types: ['class'], q: 'warden' });
+
+          expect(idSql()).toContain('ILIKE');
+          expect(idValues()).toContain('%warden%');
+        });
+
+        it('hydrates a class id row as a class hit [VEG-510]', async () => {
+          prisma.$queryRaw
+            .mockResolvedValueOnce([{ source: 'class', id: 'c1' }])
+            .mockResolvedValueOnce([{ total: 1 }]);
+          prisma.srdClass.findMany.mockResolvedValue([{ id: 'c1', name: 'Warden' }]);
+
+          const page = await service.search({ types: ['class'] }, 'user-1');
+
+          expect(page.total).toBe(1);
+          expect(page.data).toEqual([{ kind: 'class', data: { id: 'c1', name: 'Warden' } }]);
+          // Summary columns only. The multiclassing, spellcasting and equipment
+          // JSON is what this select exists to leave behind, so the assertion is
+          // the whole object rather than a subset.
+          expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
+            where: { id: { in: ['c1'] } },
+            select: {
+              id: true,
+              name: true,
+              hitDie: true,
+              subclassLevel: true,
+              description: true,
+              contentSource: true,
+              createdById: true,
+            },
+          });
+        });
+      });
     });
   });
 
@@ -1779,13 +1852,14 @@ describe('SrdService', () => {
       prisma.$queryRaw.mockResolvedValueOnce(idRows).mockResolvedValueOnce([{ total }]);
     }
 
-    it('runs UNION ALL across all seven sources when types is unset', async () => {
+    it('runs UNION ALL across all eight sources when types is unset', async () => {
       await service.search({});
       const { idQuery, countQuery } = captureSql();
       for (const table of [
         '"spells"',
         '"feats"',
         '"items"',
+        '"srd_classes"',
         '"class_features"',
         '"subclass_features"',
         '"race_traits"',
@@ -1852,8 +1926,8 @@ describe('SrdService', () => {
       const { idQuery } = captureSql();
       expect(idQuery?.sql).toContain('ILIKE');
       const wildcardMatches = idQuery?.values.filter(v => v === '%fire%') ?? [];
-      // 7 sources × 2 columns (name + description) per source.
-      expect(wildcardMatches.length).toBe(14);
+      // 8 sources × 2 columns (name + description) per source.
+      expect(wildcardMatches.length).toBe(16);
     });
 
     it('restricts the spell and feat sources to the global catalog (srd + shared)', async () => {
