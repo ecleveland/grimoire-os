@@ -1,4 +1,11 @@
-import { containsInsensitive, equalsInsensitive, escapeLike, likeContainsPattern } from './like';
+import {
+  containsInsensitive,
+  endsWithInsensitive,
+  equalsInsensitive,
+  escapeLike,
+  likeContainsPattern,
+  startsWithInsensitive,
+} from './like';
 
 describe('escapeLike [VEG-529]', () => {
   it('escapes each LIKE metacharacter Postgres honours', () => {
@@ -7,7 +14,7 @@ describe('escapeLike [VEG-529]', () => {
     expect(escapeLike('Back\\slash')).toBe('Back\\\\slash');
   });
 
-  it('escapes a trailing backslash, which raises 22025 unescaped', () => {
+  it('escapes a trailing backslash, which would otherwise swallow what follows', () => {
     expect(escapeLike('abc\\')).toBe('abc\\\\');
   });
 
@@ -24,6 +31,24 @@ describe('containsInsensitive [VEG-529]', () => {
 
   it('leaves a value without metacharacters untouched', () => {
     expect(containsInsensitive('fire')).toEqual({ contains: 'fire', mode: 'insensitive' });
+  });
+});
+
+describe('startsWithInsensitive [VEG-529]', () => {
+  it('builds a case-insensitive prefix filter with the value escaped', () => {
+    expect(startsWithInsensitive('Fire_')).toEqual({ startsWith: 'Fire\\_', mode: 'insensitive' });
+  });
+});
+
+describe('endsWithInsensitive [VEG-529]', () => {
+  it('builds a case-insensitive suffix filter with the value escaped', () => {
+    expect(endsWithInsensitive('%Bolt')).toEqual({ endsWith: '\\%Bolt', mode: 'insensitive' });
+  });
+
+  // Prisma appends nothing after the value here, so an unescaped trailing
+  // backslash is left dangling at the end of the pattern.
+  it('escapes a trailing backslash, which nothing else would terminate', () => {
+    expect(endsWithInsensitive('Bolt\\')).toEqual({ endsWith: 'Bolt\\\\', mode: 'insensitive' });
   });
 });
 

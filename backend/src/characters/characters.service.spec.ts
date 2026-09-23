@@ -1505,13 +1505,12 @@ describe('CharactersService', () => {
         );
       });
 
-      // The backslash case, which is worse than the other two metacharacters and
-      // had no test: `%` and `_` merely match the wrong row, but a name ending in
-      // a backslash makes Postgres raise 22025 ("LIKE pattern must not end with
-      // escape character") during the scan. Unescaped that is a 500 on every read
-      // of the sheet AND on the derivation, not a wrong answer. `class` carries
-      // only @IsOptional() @IsString(), so the name is accepted.
-      it('escapes a trailing backslash, which Postgres would otherwise reject', async () => {
+      // The backslash case, the third metacharacter and the one that had no test.
+      // Unescaped, a trailing backslash is a dangling LIKE escape. Measured on
+      // Postgres 16 it does not raise 22025 as once believed, it silently fails
+      // to match, so the class would never resolve rather than error. `class`
+      // carries only @IsOptional() @IsString(), so the name is accepted.
+      it('escapes a trailing backslash so the name can still match', async () => {
         prisma.character.findUnique.mockResolvedValue({
           ...mockCharacter,
           class: 'Fighter\\',

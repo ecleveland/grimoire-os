@@ -15,9 +15,12 @@ import { Prisma } from '@prisma/client';
  * class's spell slots to a class that does not exist. The same characters reach
  * a free-text search box far more often (VEG-529), where `q=%` listed the whole
  * catalog, `q=_` matched any single character, and a name holding a `%` or `_`
- * could not be searched for at all. A value ending in a backslash is worse
- * still: where nothing follows it, Postgres raises 22025 ("LIKE pattern must not
- * end with escape character") mid-scan, which surfaces as a 500.
+ * could not be searched for at all. A value ending in a backslash is the quiet
+ * one: the dangling escape swallows whatever follows it, so the query silently
+ * becomes a different query. Measured on Postgres 16.13, it does not raise
+ * 22025 ("LIKE pattern must not end with escape character") as older notes here
+ * claimed: `'Blood' ILIKE 'Blood\'` returns false, with or without an explicit
+ * ESCAPE clause. A wrong answer, not a 500.
  *
  * Postgres reads the default LIKE escape character as a backslash, so no ESCAPE
  * clause is needed anywhere these are used.
@@ -37,6 +40,32 @@ export const containsInsensitive = (value: string) => ({
 });
 
 /**
+ * Prisma `startsWith` filter matching a value literally, case-insensitively. The
+ * prefix match a type-ahead wants.
+ *
+ * No caller yet. It exists so the ban on hand-written `mode: 'insensitive'` has
+ * an answer for the first one, rather than an eslint-disable.
+ */
+export const startsWithInsensitive = (value: string) => ({
+  startsWith: escapeLike(value),
+  mode: Prisma.QueryMode.insensitive,
+});
+
+/**
+ * Prisma `endsWith` filter matching a value literally, case-insensitively.
+ *
+ * The one filter with nothing appended after the value: Prisma binds `%value`,
+ * so an unescaped trailing backslash ends the pattern as a dangling escape and
+ * silently swallows the comparison. Escaping is what keeps it a suffix match.
+ *
+ * No caller yet, for the same reason as the prefix twin above.
+ */
+export const endsWithInsensitive = (value: string) => ({
+  endsWith: escapeLike(value),
+  mode: Prisma.QueryMode.insensitive,
+});
+
+/**
  * Prisma `equals` filter matching a value literally, case-insensitively. Still a
  * pattern under the hood, which is the whole trap: `equals: '%'` matches every
  * row. `catalogNameWhere` is the caller.
@@ -52,3 +81,17 @@ export const equalsInsensitive = (value: string) => ({
  * wildcards are meant as wildcards.
  */
 export const likeContainsPattern = (value: string) => `%${escapeLike(value)}%`;
+
+/**
+ * A case-insensitive substring match against one column, as raw SQL.
+ *
+ * The only place in the backend that writes ILIKE. A builder composes these
+ * rather than spelling the operator out, so there is exactly one expression to
+ * read to know that every raw pattern in the app is escaped, and one place a
+ * mistake could be made. A lint rule holds the line.
+ *
+ * The column is `Prisma.Sql` rather than a string so it can only be assembled
+ * from literal SQL a caller wrote, never from a bound value.
+ */
+export const ilikeContains = (column: Prisma.Sql, value: string): Prisma.Sql =>
+  Prisma.sql`${column} ILIKE ${likeContainsPattern(value)}`;

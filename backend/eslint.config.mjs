@@ -23,14 +23,54 @@ const noContentCrudOverride = {
 // (VEG-529). The helpers escape it; this keeps the next filter from being
 // written by hand without them.
 //
-// Both spellings of the key, because a quoted `'mode'` parses as a string
-// literal rather than an identifier. Three shapes for the value, because all
-// three were in the tree: the bare literal, the `Prisma.QueryMode.insensitive`
-// member, and the literal widened with `as const`, which wraps it in a
-// TSAsExpression that a plain `value.value` test walks straight past.
+// Both spellings of the key, because a quoted or computed `'mode'` parses as a
+// string literal rather than an identifier. Three shapes for the value, because
+// all three were in the tree: the bare literal, the
+// `Prisma.QueryMode.insensitive` member, and the literal widened with
+// `as const`, which wraps it in a TSAsExpression that a plain `value.value` test
+// walks straight past.
+const insensitiveModeProperty =
+  "Property:matches([key.name='mode'], [key.value='mode']):matches([value.value='insensitive'], [value.property.name='insensitive'], [value.expression.value='insensitive'])";
+
+// The calls that count as escaping. An allowlist rather than "any call": a value
+// that has been through `q.trim()` is a call too, and is no safer than `q`. Both
+// a bare call and a qualified one (`like.escapeLike`, `this.escapeLike`) count,
+// since the helper is the same either way.
+const ESCAPING_HELPERS = [
+  'escapeLike',
+  'containsInsensitive',
+  'startsWithInsensitive',
+  'endsWithInsensitive',
+  'equalsInsensitive',
+  'likeContainsPattern',
+  'ilikeContains',
+];
+const escapingCallOn = subject =>
+  `:matches(${ESCAPING_HELPERS.flatMap(helper => [
+    `[${subject}.callee.name='${helper}']`,
+    `[${subject}.callee.property.name='${helper}']`,
+  ]).join(', ')})`;
+
+// Prisma's `contains`, `startsWith` and `endsWith` compile to LIKE, which honours
+// the same wildcards whether or not `mode` is set. Written as a key or assigned
+// to one later, and spelled bare, quoted or computed.
+//
+// A string literal value is exempt. These three words are not Prisma's alone
+// (`{ startsWith: '/api' }` is a route matcher), and a value written into the
+// source carries no user input to escape, so flagging it would be noise with an
+// escaping message attached.
+const LIKE_FILTER_KEYS = ['contains', 'startsWith', 'endsWith'];
+const likeFilterKey = `:matches(${LIKE_FILTER_KEYS.flatMap(key => [
+  `[key.name='${key}']`,
+  `[key.value='${key}']`,
+]).join(', ')})`;
+const likeFilterTarget = `:matches(${LIKE_FILTER_KEYS.flatMap(key => [
+  `[left.property.name='${key}']`,
+  `[left.property.value='${key}']`,
+]).join(', ')})`;
+
 const noRawInsensitiveMode = {
-  selector:
-    "Property:matches([key.name='mode'], [key.value='mode']):matches([value.value='insensitive'], [value.property.name='insensitive'], [value.expression.value='insensitive'])",
+  selector: insensitiveModeProperty,
   message:
     'Build case-insensitive Prisma filters with containsInsensitive from common/helpers/like.ts (or catalogNameWhere, which uses it), so LIKE metacharacters are escaped.',
 };
@@ -39,35 +79,34 @@ const noRawInsensitiveMode = {
 // `ILIKE ${value}` binds a pattern exactly as Prisma's does, with nothing in the
 // types to say so.
 //
-// A template literal offers no way to correlate "this quasi ends in ILIKE" with
-// "the expression that follows it" in one selector, so each interpolation slot
-// is spelled out: quasi i ends in ILIKE, and expression i is not a call to
-// likeContainsPattern. The helper must therefore appear AT the binding site
-// rather than through a local, which is the point — the escape is then visible
-// wherever the pattern is bound. Six slots covers every builder in the tree with
-// room to spare; a seventh ILIKE in one template would go unchecked, so extend
-// the range if one appears.
-const noRawIlikePattern = {
-  selector: [0, 1, 2, 3, 4, 5]
-    .map(
-      slot =>
-        `TemplateLiteral[quasis.${slot}.value.raw=/ilike\\s*$/i][expressions.${slot}.callee.name!='likeContainsPattern']`
-    )
-    .join(', '),
+// So the operator itself is what is banned. Outside the helper module there is
+// no legitimate reason to write it, and banning the operator rather than the
+// binding catches every spelling at once: plain LIKE, the `~~` and `~~*`
+// operators, a pattern concatenated SQL-side with `||`, and any number of
+// interpolation slots. `ilikeContains` is the one place it is written, so it is
+// also the one place that can get it wrong.
+const noRawLikeOperator = {
+  selector:
+    "TaggedTemplateExpression[tag.property.name='sql'] > TemplateLiteral > TemplateElement[value.raw=/(like[\\s(]|like$|~~)/i]",
   message:
-    'Bind an ILIKE pattern with likeContainsPattern(value) from common/helpers/like.ts, at the binding site, so LIKE metacharacters are escaped.',
+    'Do not write LIKE/ILIKE by hand. Compose ilikeContains(column, value) from common/helpers/like.ts, which binds the escaped pattern.',
 };
 
-// Prisma's `contains`, `startsWith` and `endsWith` compile to LIKE, which honours
-// the same wildcards whether or not `mode` is set. A value that went through a
-// helper is a call; a bare identifier or literal went through nothing. The
-// `mode` case is left to noRawInsensitiveMode so one filter is not reported
-// twice.
+// Suppressed only by a `mode` sibling that noRawInsensitiveMode itself
+// recognises, so a filter is never reported twice and a `mode` written some
+// other way (a variable, say) cannot buy silence here as well as there.
 const noUnescapedLikeFilter = {
-  selector:
-    "ObjectExpression:not(:has(> Property:matches([key.name='mode'], [key.value='mode']))) > Property:matches([key.name='contains'], [key.name='startsWith'], [key.name='endsWith']):not([value.type='CallExpression'])",
+  selector: `ObjectExpression:not(:has(> ${insensitiveModeProperty})) > Property${likeFilterKey}:not([value.type='Literal']):not(${escapingCallOn('value')})`,
   message:
     'contains/startsWith/endsWith compile to LIKE. Escape the value with escapeLike, or use containsInsensitive, from common/helpers/like.ts.',
+};
+
+// The same filter written as a mutation rather than a literal. No `mode`
+// exemption here: an assignment has no siblings to read it from.
+const noUnescapedLikeAssignment = {
+  selector: `AssignmentExpression${likeFilterTarget}:not([right.type='Literal']):not(${escapingCallOn('right')})`,
+  message:
+    'contains/startsWith/endsWith compile to LIKE. Escape the assigned value with escapeLike from common/helpers/like.ts.',
 };
 
 export default tseslint.config(
@@ -122,20 +161,23 @@ export default tseslint.config(
     //
     // Exempt: a spec writes the literal as an expected value, which is the
     // query being pinned, and common/helpers/like.ts is where the escaping
-    // lives, so the helpers cannot be built out of themselves.
+    // lives, so the helpers cannot be built out of themselves. `src/test/**` is
+    // deliberately not exempt: it holds fixtures and a Prisma mock, none of
+    // which build a filter, so there is nothing there to excuse.
     // `test/**` is in the lint script's glob and its `.db-spec.ts` files build
     // real queries, so they are covered too. They do not match the `**/*.spec.ts`
     // ignore below (the separator before `spec` is a hyphen), which is what keeps
     // them guarded rather than exempt by accident.
     files: ['src/**/*.ts', 'test/**/*.ts'],
-    ignores: ['**/*.spec.ts', 'src/test/**', 'src/common/helpers/like.ts'],
+    ignores: ['**/*.spec.ts', 'src/common/helpers/like.ts'],
     rules: {
       'no-restricted-syntax': [
         'error',
         noContentCrudOverride,
         noRawInsensitiveMode,
-        noRawIlikePattern,
+        noRawLikeOperator,
         noUnescapedLikeFilter,
+        noUnescapedLikeAssignment,
       ],
     },
   }

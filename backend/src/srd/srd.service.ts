@@ -12,7 +12,7 @@ import { QueryFeatsDto } from './dto/query-feats.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto } from './dto/query-search.dto';
 import { ContentAccessService, GLOBAL_CONTENT_SOURCES } from './content-access.service';
-import { containsInsensitive, likeContainsPattern } from '../common/helpers/like';
+import { containsInsensitive, ilikeContains } from '../common/helpers/like';
 
 // Raw-SQL counterpart of ContentAccessService.globalWhere(), for the pg_trgm and
 // unified-search queries that build SQL by hand. Pins a content table to the
@@ -96,6 +96,11 @@ function featureParentVisibilitySql(parent: FeatureParentType, userId?: string):
       return null;
   }
 }
+
+// The two columns every free-text search reads. Named so a builder composes
+// `ilikeContains` against them instead of spelling the operator out.
+const NAME_COLUMN = Prisma.sql`"name"`;
+const DESCRIPTION_COLUMN = Prisma.sql`"description"`;
 
 // Minimum query length that triggers pg_trgm similarity matching. Below this we
 // fall back to plain ILIKE substring matching — single-char fuzzy queries return
@@ -222,15 +227,14 @@ function shouldUseFuzzy(q?: string): q is string {
 // and partial fragments still match). The matching CASE expression mirrors the
 // branches so substring hits score 1.0 / 0.9 and similarity hits fall below.
 //
-// The ILIKE arguments are patterns and the similarity arguments are plain text,
-// so only the former is escaped. Escaping the text ones would change the
-// trigrams a score is computed from and break the exact-match branch below.
-// The helper is called at each binding rather than hoisted into a local, so the
-// escape is visible at every site and the lint rule can check each one.
+// The substring halves are patterns and the similarity halves are plain text, so
+// only the former is escaped. `ilikeContains` carries that escaping; escaping the
+// similarity arguments too would change the trigrams a score is computed from and
+// break the exact-match branch below.
 function buildFuzzyMatchSql(query: string, threshold: number): Prisma.Sql {
   return Prisma.sql`(
-    "name" ILIKE ${likeContainsPattern(query)}
-    OR "description" ILIKE ${likeContainsPattern(query)}
+    ${ilikeContains(NAME_COLUMN, query)}
+    OR ${ilikeContains(DESCRIPTION_COLUMN, query)}
     OR similarity("name", ${query}) >= ${threshold}
     OR similarity(coalesce("description", ''), ${query}) >= ${threshold}
   )`;
@@ -239,8 +243,8 @@ function buildFuzzyMatchSql(query: string, threshold: number): Prisma.Sql {
 function buildFuzzyScoreSql(query: string): Prisma.Sql {
   return Prisma.sql`CASE
     WHEN LOWER("name") = LOWER(${query}) THEN 2.0
-    WHEN "name" ILIKE ${likeContainsPattern(query)} THEN 1.0
-    WHEN "description" ILIKE ${likeContainsPattern(query)} THEN 0.9
+    WHEN ${ilikeContains(NAME_COLUMN, query)} THEN 1.0
+    WHEN ${ilikeContains(DESCRIPTION_COLUMN, query)} THEN 0.9
     ELSE GREATEST(
       similarity("name", ${query}),
       similarity(coalesce("description", ''), ${query})
@@ -1176,7 +1180,7 @@ export class SrdService {
   }
 
   private buildTextMatchSql(query: string): Prisma.Sql {
-    return Prisma.sql`("name" ILIKE ${likeContainsPattern(query)} OR "description" ILIKE ${likeContainsPattern(query)})`;
+    return Prisma.sql`(${ilikeContains(NAME_COLUMN, query)} OR ${ilikeContains(DESCRIPTION_COLUMN, query)})`;
   }
 
   private buildSpellWhereSql(dto: QuerySearchDto, userId?: string): Prisma.Sql {

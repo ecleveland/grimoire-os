@@ -8,10 +8,11 @@
 // rewrote the query into a search for a literal percent sign. Only a database
 // can fail on that.
 //
-// The 22025 abort ("LIKE pattern must not end with escape character") is NOT
-// reachable from these paths: `contains` and `likeContainsPattern` both append a
-// `%` that the stray escape consumes. It is reachable through `catalogNameWhere`,
-// whose `equals` appends nothing, which is why that helper is exercised here too.
+// A trailing backslash does not abort anything, on any of these paths. Measured
+// on Postgres 16.13: a pattern with a dangling escape returns false rather than
+// raising 22025, and `contains` and `likeContainsPattern` append a `%` that
+// consumes the escape before it can dangle at all. What it does instead is
+// quietly change the query, which is what the cases below pin.
 //
 // The catalog is hand-built. Nine rows cover the three metacharacters, a decoy
 // that only an unescaped pattern matches, and one homebrew row, which is enough
@@ -55,6 +56,14 @@ const UNDERSCORE_FEAT = stamped('Under_Score');
 const BACKSLASH_MONSTER = stamped('Back\\slash');
 // Exercises catalogNameWhere, the `equals` half of the escaping.
 const BLOOD_HUNTER = stamped('Blood_Hunter');
+// Each of the remaining `contains` sites reads a different table, and a site
+// with only one row in its table cannot tell a literal from a wildcard: both
+// return that row. So every one of these gets a plain sibling to be excluded.
+const PLAIN_FEAT = stamped('Plain Grit');
+const UNDERSCORE_BACKGROUND = stamped('Sage_Scribe');
+const PLAIN_BACKGROUND = stamped('Plain Farmhand');
+const UNDERSCORE_FEATURE = stamped('Rite_of_Blood');
+const PLAIN_FEATURE = stamped('Plain Rite');
 
 // No metacharacter may appear in any description: every text predicate here
 // searches name OR description, so a stray `%` would move the expected totals.
@@ -76,6 +85,8 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
   let underscoreFeatId: string;
   let backslashMonsterId: string;
   let bloodHunterId: string;
+  let underscoreBackgroundId: string;
+  let underscoreFeatureId: string;
 
   beforeAll(async () => {
     ctx = await createSeedContext();
@@ -112,6 +123,7 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
       backslashCord,
       trailingEdge,
       feat,
+      ,
       monster,
       bloodHunter,
     ] = await Promise.all([
@@ -138,6 +150,7 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
         data: { name: TRAILING_EDGE, category: 'Adventuring Gear', description: PLAIN_TEXT },
       }),
       prisma.feat.create({ data: { name: UNDERSCORE_FEAT, description: PLAIN_TEXT } }),
+      prisma.feat.create({ data: { name: PLAIN_FEAT, description: PLAIN_TEXT } }),
       prisma.monster.create({
         data: {
           name: BACKSLASH_MONSTER,
@@ -167,6 +180,25 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
     underscoreFeatId = feat.id;
     backslashMonsterId = monster.id;
     bloodHunterId = bloodHunter.id;
+
+    // Backgrounds and class features are created after the class they hang off.
+    const [underscoreBackground, underscoreFeature] = await Promise.all([
+      prisma.background.create({ data: { name: UNDERSCORE_BACKGROUND, description: PLAIN_TEXT } }),
+      prisma.classFeature.create({
+        data: {
+          name: UNDERSCORE_FEATURE,
+          level: 1,
+          description: PLAIN_TEXT,
+          classId: bloodHunter.id,
+        },
+      }),
+      prisma.background.create({ data: { name: PLAIN_BACKGROUND, description: PLAIN_TEXT } }),
+      prisma.classFeature.create({
+        data: { name: PLAIN_FEATURE, level: 2, description: PLAIN_TEXT, classId: bloodHunter.id },
+      }),
+    ]);
+    underscoreBackgroundId = underscoreBackground.id;
+    underscoreFeatureId = underscoreFeature.id;
   }, 60_000);
 
   afterAll(async () => {
@@ -195,12 +227,14 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
     });
 
     // Same for `_`, which used to match any single character and so every row.
-    // Two rows really hold one, so two is the whole answer rather than a subset.
+    // Three rows really hold one, so three is the whole answer, not a subset.
     it('treats a bare _ as a literal, not as "any character"', async () => {
       const page = await search('_', userAId);
 
-      expect(page.total).toBe(2);
-      expect(hitIds(page).sort()).toEqual([bloodHunterId, underscoreFeatId].sort());
+      expect(page.total).toBe(3);
+      expect(hitIds(page).sort()).toEqual(
+        [bloodHunterId, underscoreFeatId, underscoreFeatureId].sort()
+      );
     });
 
     it('finds a name containing a percent sign without matching the decoy', async () => {
@@ -260,11 +294,13 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
     // The unified search covers spells, feats, items, classes and features, so
     // the monster row is deliberately absent from these counts.
     it('returns every visible row when the query is empty', async () => {
-      // 1 SRD spell + 4 items + 1 feat + 1 class, plus user A's own homebrew spell.
-      expect((await srd.search({ q: '' } as QuerySearchDto, userAId)).total).toBe(8);
-      expect((await srd.search({} as QuerySearchDto, userAId)).total).toBe(8);
-      expect((await srd.search({} as QuerySearchDto, userBId)).total).toBe(7);
-      expect((await srd.search({} as QuerySearchDto)).total).toBe(7);
+      // 1 SRD spell + 4 items + 2 feats + 1 class + 2 class features, plus user
+      // A's own homebrew spell. Backgrounds are not a search kind; their
+      // features would be, and these hang off a class.
+      expect((await srd.search({ q: '' } as QuerySearchDto, userAId)).total).toBe(11);
+      expect((await srd.search({} as QuerySearchDto, userAId)).total).toBe(11);
+      expect((await srd.search({} as QuerySearchDto, userBId)).total).toBe(10);
+      expect((await srd.search({} as QuerySearchDto)).total).toBe(10);
     });
   });
 
@@ -285,6 +321,15 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
     it('refuses to let a percent sign in the name act as a wildcard', async () => {
       expect(await classesNamed('Blood%')).toEqual([]);
       expect(await classesNamed('%')).toEqual([]);
+    });
+
+    // `equals` appends nothing, so this is the one path where an unescaped
+    // trailing backslash really is left dangling. It resolves rather than
+    // rejecting either way (see the header), so this pins the answer, not the
+    // absence of an error: the name it is asked for does not exist, and the
+    // dangling escape must not turn it into a prefix match on the row that does.
+    it('answers a name ending in a backslash with no row', async () => {
+      await expect(classesNamed(`${BLOOD_HUNTER}\\`)).resolves.toEqual([]);
     });
   });
 
@@ -313,6 +358,32 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
       const page = await srd.searchItems({ q: '50%' });
 
       expect(page.data.map(item => item.id)).toContain(percentRopeId);
+    });
+
+    it('treats a bare % as a literal when searching spells', async () => {
+      const page = await srd.searchSpells({ q: '%' }, userAId);
+
+      // No spell holds a percent sign, so the literal matches nothing. Every
+      // spell the caller can see comes back if it is read as a wildcard.
+      expect(page.total).toBe(0);
+    });
+
+    it('treats a bare _ as a literal when searching feats', async () => {
+      const page = await srd.searchFeats({ q: '_' });
+
+      expect(page.data.map(row => row.id)).toEqual([underscoreFeatId]);
+    });
+
+    it('treats a bare _ as a literal when searching backgrounds', async () => {
+      const rows = await srd.searchBackgrounds('_');
+
+      expect(rows.map(row => row.id)).toEqual([underscoreBackgroundId]);
+    });
+
+    it('treats a bare _ as a literal when searching features', async () => {
+      const page = await srd.searchFeatures({ q: '_' });
+
+      expect(page.data.map(row => row.id)).toEqual([underscoreFeatureId]);
     });
 
     it('finds a monster whose name contains a backslash', async () => {
