@@ -10,6 +10,7 @@ import { UpdateCharacterDto } from './dto/update-character.dto';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { ContentAccessService } from '../srd/content-access.service';
+import { catalogNameWhere } from '../srd/resolve-catalog-ref';
 import {
   USER_ID,
   USER_ID_2,
@@ -38,13 +39,11 @@ const classSelect = {
   weaponProficiencies: true,
 };
 
-// Case-insensitive since VEG-528, so this resolver and the frontend's
-// `resolveByIdThenUniqueName` fold case identically. The value is LIKE-escaped
-// because Prisma compiles `mode: 'insensitive'` to ILIKE and binds it as a
-// pattern — unescaped, a class named "Fighte_" matched the SRD Fighter.
-const classNameWhere = (name: string) => ({
-  name: { equals: name, mode: 'insensitive' },
-});
+// The production filter, not a local copy of its shape. A copy that omitted the
+// escaping passed every fixture here, since none carries a metacharacter, while
+// claiming to prove the escaping. Importing it means these assertions pin what
+// the service really builds.
+const classNameWhere = catalogNameWhere;
 
 // The catalog row the default mocks stand for, and therefore the id every write
 // path derives for the fixture's "Fighter" (VEG-528).
@@ -1047,7 +1046,7 @@ describe('CharactersService', () => {
         await service.findOne(CHARACTER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual(classWhere('Fighte\\_'));
+        expect(args.where).toEqual(classWhere('Fighte_'));
       });
 
       it('escapes the percent wildcard too', async () => {
@@ -1060,7 +1059,7 @@ describe('CharactersService', () => {
         await service.findOne(CHARACTER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual(classWhere('\\%'));
+        expect(args.where).toEqual(classWhere('%'));
       });
 
       // Belt and braces: even if the SQL widened, the resolver decides on
@@ -1520,7 +1519,7 @@ describe('CharactersService', () => {
         await service.findOne(CHARACTER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual(classWhere('Fighter\\\\'));
+        expect(args.where).toEqual(classWhere('Fighter\\'));
       });
 
       // A wildcard name must not derive a key on the write path either. This is
