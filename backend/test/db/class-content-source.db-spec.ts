@@ -9,8 +9,8 @@
 // The load-bearing scenario: a user owns a homebrew class that reuses an SRD
 // class name. Before VEG-505 that could not exist, and the seed's
 // upsert-by-name would have clobbered it the moment it could.
-import type { Cache } from 'cache-manager';
 import {
+  noopCache,
   createSeedContext,
   teardownSeedContext,
   truncateAll,
@@ -21,10 +21,6 @@ import { SrdService } from '../../src/srd/srd.service';
 import { catalogNameWhere } from '../../src/srd/resolve-catalog-ref';
 
 const HOMEBREW_LABEL = 'Homebrew';
-
-// SeedModule provides neither SrdService nor a CACHE_MANAGER binding, and the
-// service touches the cache only from invalidateCache, so a no-op stands in.
-const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 
 // The real service, not a copy of it. It has no constructor dependencies, so a
 // spec can hold one directly — and then a change to visibleTo shows up here

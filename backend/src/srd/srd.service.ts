@@ -12,6 +12,7 @@ import { QueryFeatsDto } from './dto/query-feats.dto';
 import { QueryFeaturesDto, FeatureParentType } from './dto/query-features.dto';
 import { QuerySearchDto } from './dto/query-search.dto';
 import { ContentAccessService, GLOBAL_CONTENT_SOURCES } from './content-access.service';
+import { containsInsensitive, likeContainsPattern } from '../common/helpers/like';
 
 // Raw-SQL counterpart of ContentAccessService.globalWhere(), for the pg_trgm and
 // unified-search queries that build SQL by hand. Pins a content table to the
@@ -220,22 +221,26 @@ function shouldUseFuzzy(q?: string): q is string {
 // matching (so exact matches always qualify) with pg_trgm similarity (so typos
 // and partial fragments still match). The matching CASE expression mirrors the
 // branches so substring hits score 1.0 / 0.9 and similarity hits fall below.
+//
+// The ILIKE arguments are patterns and the similarity arguments are plain text,
+// so only the former is escaped. Escaping the text ones would change the
+// trigrams a score is computed from and break the exact-match branch below.
+// The helper is called at each binding rather than hoisted into a local, so the
+// escape is visible at every site and the lint rule can check each one.
 function buildFuzzyMatchSql(query: string, threshold: number): Prisma.Sql {
-  const like = `%${query}%`;
   return Prisma.sql`(
-    "name" ILIKE ${like}
-    OR "description" ILIKE ${like}
+    "name" ILIKE ${likeContainsPattern(query)}
+    OR "description" ILIKE ${likeContainsPattern(query)}
     OR similarity("name", ${query}) >= ${threshold}
     OR similarity(coalesce("description", ''), ${query}) >= ${threshold}
   )`;
 }
 
 function buildFuzzyScoreSql(query: string): Prisma.Sql {
-  const like = `%${query}%`;
   return Prisma.sql`CASE
     WHEN LOWER("name") = LOWER(${query}) THEN 2.0
-    WHEN "name" ILIKE ${like} THEN 1.0
-    WHEN "description" ILIKE ${like} THEN 0.9
+    WHEN "name" ILIKE ${likeContainsPattern(query)} THEN 1.0
+    WHEN "description" ILIKE ${likeContainsPattern(query)} THEN 0.9
     ELSE GREATEST(
       similarity("name", ${query}),
       similarity(coalesce("description", ''), ${query})
@@ -276,8 +281,8 @@ export class SrdService {
             { ...visible },
             {
               OR: [
-                { name: { contains: dto.q, mode: 'insensitive' } },
-                { description: { contains: dto.q, mode: 'insensitive' } },
+                { name: containsInsensitive(dto.q) },
+                { description: containsInsensitive(dto.q) },
               ],
             },
           ],
@@ -358,8 +363,8 @@ export class SrdService {
             { ...visible },
             {
               OR: [
-                { name: { contains: dto.q, mode: 'insensitive' } },
-                { description: { contains: dto.q, mode: 'insensitive' } },
+                { name: containsInsensitive(dto.q) },
+                { description: containsInsensitive(dto.q) },
               ],
             },
           ],
@@ -453,8 +458,8 @@ export class SrdService {
             { ...visible },
             {
               OR: [
-                { name: { contains: dto.q, mode: 'insensitive' } },
-                { description: { contains: dto.q, mode: 'insensitive' } },
+                { name: containsInsensitive(dto.q) },
+                { description: containsInsensitive(dto.q) },
               ],
             },
           ],
@@ -667,8 +672,8 @@ export class SrdService {
             { ...visible },
             {
               OR: [
-                { name: { contains: query, mode: 'insensitive' } },
-                { description: { contains: query, mode: 'insensitive' } },
+                { name: containsInsensitive(query) },
+                { description: containsInsensitive(query) },
               ],
             },
           ],
@@ -762,7 +767,7 @@ export class SrdService {
       ? [dto.parentType]
       : ['class', 'subclass', 'race', 'background'];
 
-    const nameFilter = dto.q ? { name: { contains: dto.q, mode: 'insensitive' as const } } : {};
+    const nameFilter = dto.q ? { name: containsInsensitive(dto.q) } : {};
 
     const queries = await Promise.all(
       types.map(type => this.queryFeatureTable(type, nameFilter, dto.parentId, userId))
@@ -988,8 +993,8 @@ export class SrdService {
             { ...visible },
             {
               OR: [
-                { name: { contains: dto.q, mode: 'insensitive' } },
-                { description: { contains: dto.q, mode: 'insensitive' } },
+                { name: containsInsensitive(dto.q) },
+                { description: containsInsensitive(dto.q) },
               ],
             },
           ],
@@ -1171,8 +1176,7 @@ export class SrdService {
   }
 
   private buildTextMatchSql(query: string): Prisma.Sql {
-    const like = `%${query}%`;
-    return Prisma.sql`("name" ILIKE ${like} OR "description" ILIKE ${like})`;
+    return Prisma.sql`("name" ILIKE ${likeContainsPattern(query)} OR "description" ILIKE ${likeContainsPattern(query)})`;
   }
 
   private buildSpellWhereSql(dto: QuerySearchDto, userId?: string): Prisma.Sql {

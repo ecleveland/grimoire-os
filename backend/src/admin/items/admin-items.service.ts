@@ -7,6 +7,7 @@ import { CreateItemDto } from '../../srd/dto/create-item.dto';
 import { UpdateItemDto } from '../../srd/dto/update-item.dto';
 import { buildPaginatedResponse } from '../../common/helpers/paginate';
 import { BundleContentEntryDto } from './dto/set-bundle-contents.dto';
+import { containsInsensitive } from '../../common/helpers/like';
 
 export interface ListItemsQuery {
   q?: string;
@@ -50,7 +51,7 @@ export class AdminItemsService extends ContentCrudService<Item, CreateItemDto, U
     const limit = query.limit ?? 20;
     const where: Prisma.ItemWhereInput = { contentSource: 'shared' };
     if (query.category) where.category = query.category;
-    if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
+    if (query.q) where.name = containsInsensitive(query.q);
 
     const [data, total] = await Promise.all([
       this.prisma.item.findMany({

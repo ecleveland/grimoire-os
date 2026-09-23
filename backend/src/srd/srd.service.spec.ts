@@ -85,6 +85,20 @@ describe('SrdService', () => {
       expect(countQuery?.sql).toContain('"spells"');
     });
 
+    // The two arguments are not the same kind of thing: the ILIKE one is a
+    // pattern, the similarity one is text. Escaping both would change the
+    // trigram score; escaping neither is VEG-529.
+    it('escapes LIKE metacharacters in the ILIKE pattern but not in the similarity text [VEG-529]', async () => {
+      prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
+
+      await service.searchSpells({ q: '50%' });
+
+      const { dataQuery } = captureSql();
+      expect(dataQuery?.values).toContain('%50\\%%');
+      expect(dataQuery?.values).toContain('50%');
+      expect(dataQuery?.values).not.toContain('%50%%');
+    });
+
     it('keeps exact substring matches scored highest (ILIKE branch beats similarity)', async () => {
       prisma.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([{ total: 0 }]);
 
@@ -1935,6 +1949,16 @@ describe('SrdService', () => {
       const wildcardMatches = idQuery?.values.filter(v => v === '%fire%') ?? [];
       // 8 sources × 2 columns (name + description) per source.
       expect(wildcardMatches.length).toBe(16);
+    });
+
+    it('escapes LIKE metacharacters in q for every source [VEG-529]', async () => {
+      await service.search({ q: '50%' });
+      const { idQuery, countQuery } = captureSql();
+      // Same 8 sources × 2 columns, every one of them escaped: a single source
+      // left unescaped still answers `%` with the whole catalog.
+      expect(idQuery?.values.filter(v => v === '%50\\%%').length).toBe(16);
+      expect(countQuery?.values.filter(v => v === '%50\\%%').length).toBe(16);
+      expect(idQuery?.values).not.toContain('%50%%');
     });
 
     it('restricts the spell and feat sources to the global catalog (srd + shared)', async () => {

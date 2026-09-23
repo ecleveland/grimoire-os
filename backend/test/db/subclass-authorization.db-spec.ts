@@ -20,8 +20,7 @@
 //    retry predicate keys on.
 // 5. Two overlapping features-only updates on one subclass, interleaved on
 //    purpose, which must end with one list or the other and never both.
-import { createSeedContext, teardownSeedContext, type SeedContext } from './db-harness';
-import type { Cache } from 'cache-manager';
+import { createSeedContext, noopCache, teardownSeedContext, type SeedContext } from './db-harness';
 import { Prisma } from '@prisma/client';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SrdService } from '../../src/srd/srd.service';
@@ -34,10 +33,6 @@ import type { RefreshTokenService } from '../../src/auth/refresh-token.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
 
 const RUN = Date.now();
-
-// SrdService only touches the cache from invalidateCache, which nothing here
-// calls, but the constructor demands one.
-const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 
 // `UsersService.remove` never touches refresh tokens; the constructor demands the
 // dependency for the password and role paths, which nothing here calls.

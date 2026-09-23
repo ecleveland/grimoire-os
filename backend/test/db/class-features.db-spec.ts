@@ -18,8 +18,8 @@
 // rows and show they agree. If they ever disagree, one of them is leaking a
 // user's homebrew class into everyone else's search results (VEG-335 in a new
 // place), and this is the spec that fails.
-import type { Cache } from 'cache-manager';
 import {
+  noopCache,
   createSeedContext,
   teardownSeedContext,
   truncateAll,
@@ -30,15 +30,6 @@ import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
 
 const HOMEBREW_LABEL = 'Homebrew';
-
-// The real cache is irrelevant to these assertions (SrdService only calls it
-// from invalidateCache), but the constructor demands one. A no-op keeps the spec
-// from depending on cache behaviour it is not testing.
-// Constructed directly rather than through Nest: SeedModule provides neither
-// SrdService nor a CACHE_MANAGER binding, and the cache is irrelevant to these
-// assertions (SrdService touches it only in invalidateCache). A no-op keeps the
-// spec from depending on cache behaviour it is not testing.
-const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 
 describe('class features — real DB (VEG-507)', () => {
   let ctx: SeedContext;

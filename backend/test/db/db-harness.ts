@@ -7,10 +7,19 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplicationContext } from '@nestjs/common';
+import type { Cache } from 'cache-manager';
 import { SeedModule } from '../../src/seed/seed.module';
 import { SeedService } from '../../src/seed/seed.service';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { assertTestDatabaseUrl } from './test-db-env';
+
+/**
+ * Stand-in for the cache SrdService's constructor demands. Specs here build that
+ * service directly, because SeedModule provides neither it nor a CACHE_MANAGER
+ * binding, and the service touches the cache only from invalidateCache, which
+ * none of them call.
+ */
+export const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 
 export interface SeedContext {
   app: INestApplicationContext;
