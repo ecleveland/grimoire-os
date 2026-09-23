@@ -1,9 +1,10 @@
+import { Prisma } from '@prisma/client';
 import {
   containsInsensitive,
   endsWithInsensitive,
   equalsInsensitive,
   escapeLike,
-  likeContainsPattern,
+  ilikeContains,
   startsWithInsensitive,
 } from './like';
 
@@ -58,9 +59,22 @@ describe('equalsInsensitive [VEG-529]', () => {
   });
 });
 
-describe('likeContainsPattern [VEG-529]', () => {
-  it('wraps the escaped value in the substring wildcards', () => {
-    expect(likeContainsPattern('50%')).toBe('%50\\%%');
-    expect(likeContainsPattern('fire')).toBe('%fire%');
+describe('ilikeContains [VEG-529]', () => {
+  const NAME = Prisma.sql`"name"`;
+
+  // Asserted through the composed SQL rather than on the pattern helper, which
+  // is private: the bound value is the thing that reaches Postgres, and it is
+  // bound rather than inlined, which is the other half of the claim.
+  it('binds the escaped substring pattern, leaving the column as literal SQL', () => {
+    const fragment = ilikeContains(NAME, '50%');
+
+    expect(fragment.values).toEqual(['%50\\%%']);
+    expect(fragment.sql).toContain('ILIKE');
+    expect(fragment.sql).toContain('"name"');
+    expect(fragment.sql).not.toContain('50%');
+  });
+
+  it('wraps a plain value in the substring wildcards untouched', () => {
+    expect(ilikeContains(NAME, 'fire').values).toEqual(['%fire%']);
   });
 });

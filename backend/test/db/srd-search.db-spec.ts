@@ -10,8 +10,8 @@
 //
 // A trailing backslash does not abort anything, on any of these paths. Measured
 // on Postgres 16.13: a pattern with a dangling escape returns false rather than
-// raising 22025, and `contains` and `likeContainsPattern` append a `%` that
-// consumes the escape before it can dangle at all. What it does instead is
+// raising 22025, and both the `contains` filter and the raw substring pattern
+// append a `%` that consumes the escape before it can dangle at all. What it does instead is
 // quietly change the query, which is what the cases below pin.
 //
 // The catalog is hand-built. Nine rows cover the three metacharacters, a decoy

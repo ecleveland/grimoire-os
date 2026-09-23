@@ -24,6 +24,7 @@ const HELPER_MODULE = 'src/common/helpers/like.ts';
 const UNIT_SPEC = 'src/srd/srd.service.spec.ts';
 const DB_SPEC = 'test/db/srd-search.db-spec.ts';
 const TEST_HELPERS = 'src/test/prisma-mock.factory.ts';
+const DB_HARNESS = 'test/db/db-harness.ts';
 
 // Declarations rather than imports: the snippet replaces the file's contents, so
 // nothing it names has to resolve for the selectors to see the right shapes.
@@ -32,6 +33,8 @@ const PRELUDE = [
   "declare const m: 'insensitive';",
   'declare const Prisma: any;',
   'declare const like: any;',
+  'declare const prisma: any;',
+  'declare function sql(s: TemplateStringsArray, ...v: unknown[]): unknown;',
   'declare const NAME: any;',
   'declare function escapeLike(v: string): string;',
   'declare function containsInsensitive(v: string): unknown;',
@@ -78,6 +81,16 @@ const FLAGGED: Array<[string, string]> = [
     'export const a = Prisma.sql`"name" ILIKE ${likeContainsPattern(q)}`;',
   ],
   ['a case-sensitive LIKE', 'export const a = Prisma.sql`"name" LIKE ${q}`;'],
+  // The raw tags are the idiom here, so they are as much a way in as Prisma.sql.
+  ['an ILIKE under $queryRaw', 'export const a = prisma.$queryRaw`SELECT 1 WHERE "n" ILIKE ${q}`;'],
+  [
+    'a LIKE under $executeRaw',
+    'export const a = prisma.$executeRaw`UPDATE t SET a = 1 WHERE "n" LIKE ${q}`;',
+  ],
+  ['an aliased sql tag', 'export const a = sql`"name" ILIKE ${q}`;'],
+  // Concatenation into SQL is the wildcard bug's parent problem.
+  ['a RawUnsafe call', "export const a = prisma.$queryRawUnsafe('SELECT ' + q);"],
+  ['an executeRawUnsafe call', "export const a = prisma.$executeRawUnsafe('DROP ' + q);"],
   ['the operator spelled as a tilde', 'export const a = Prisma.sql`"name" ~~* ${q}`;'],
   [
     'a pattern concatenated in SQL',
@@ -87,6 +100,13 @@ const FLAGGED: Array<[string, string]> = [
   // `mode` the insensitive selectors do not recognise must not suppress the
   // bare-filter rule.
   ['a call that is not an escaping helper', 'export const a = { contains: q.trim() };'],
+  // The substring pattern is not an escaping helper for any other filter: it
+  // wraps the value in wildcards, so a prefix filter built from it silently
+  // becomes a substring match.
+  [
+    'the substring pattern used as a prefix',
+    'export const a = { startsWith: likeContainsPattern(q) };',
+  ],
   ['a contains beside an unrecognised mode', 'export const a = { contains: q, mode: m };'],
   ['a computed filter key', "export const a = { ['contains']: q };"],
   ['a quoted filter key', "export const a = { 'startsWith': q };"],
@@ -114,6 +134,10 @@ const CLEAN: Array<[string, string]> = [
   ['a literal route prefix', "export const a = { startsWith: '/api' };"],
   ['a literal catalog name', "export const a = { contains: 'Longsword' };"],
   ['a literal suffix assignment', "export function f(w: any) { w.name.endsWith = '.json'; }"],
+  // The operator is matched on word boundaries, so an English word that happens
+  // to contain it, in a comment or a column name, is not SQL.
+  ['the word unlike in a comment', 'export const a = Prisma.sql`SELECT 1 -- unlike the count`;'],
+  ['a column named dislike', 'export const a = Prisma.sql`SELECT "dislike" FROM t`;'],
 ];
 
 for (const [name, code] of FLAGGED) queue(`flag:${name}`, code);
@@ -125,6 +149,12 @@ queue('scope:helper', SCOPE_SNIPPET, HELPER_MODULE);
 queue('scope:unit-spec', SCOPE_SNIPPET, UNIT_SPEC);
 queue('scope:test-helpers', SCOPE_SNIPPET, TEST_HELPERS);
 queue('scope:crud-override', 'export class A extends ContentCrudService { create() {} }');
+queue(
+  'scope:harness-unsafe',
+  "export const a = prisma.$executeRawUnsafe('TRUNCATE ' + q);",
+  DB_HARNESS
+);
+queue('scope:harness-filter', 'export const a = { contains: q };', DB_HARNESS);
 
 describe('LIKE-escaping lint rules [VEG-529]', () => {
   beforeAll(() => {
@@ -166,6 +196,14 @@ describe('LIKE-escaping lint rules [VEG-529]', () => {
 
     it('exempts a unit spec, which asserts on the literal filter it expects', () => {
       expect(findingsFor('scope:unit-spec').restricted).toEqual([]);
+    });
+
+    // The real-DB harness owns its database and builds DDL from its own
+    // constants, so it is the one place a RawUnsafe call is allowed. Everything
+    // else still applies there, which is the half worth pinning.
+    it('lets the real-DB harness call RawUnsafe, while still guarding its filters', () => {
+      expect(findingsFor('scope:harness-unsafe').restricted).toEqual([]);
+      expect(findingsFor('scope:harness-filter').restricted).not.toEqual([]);
     });
 
     // The escaping rules live in their own block, which replaces the rule's

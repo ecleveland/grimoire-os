@@ -42,7 +42,6 @@ const ESCAPING_HELPERS = [
   'startsWithInsensitive',
   'endsWithInsensitive',
   'equalsInsensitive',
-  'likeContainsPattern',
   'ilikeContains',
 ];
 const escapingCallOn = subject =>
@@ -85,11 +84,27 @@ const noRawInsensitiveMode = {
 // operators, a pattern concatenated SQL-side with `||`, and any number of
 // interpolation slots. `ilikeContains` is the one place it is written, so it is
 // also the one place that can get it wrong.
+//
+// Every tag that reaches SQL, not just `Prisma.sql`: `$queryRaw` and
+// `$executeRaw` are the idiom in the real-DB tests, and an aliased `sql` import
+// is one rename away. The operator is matched on word boundaries so an English
+// word that contains it ("unlike") or a column named `dislike` is not mistaken
+// for SQL.
 const noRawLikeOperator = {
   selector:
-    "TaggedTemplateExpression[tag.property.name='sql'] > TemplateLiteral > TemplateElement[value.raw=/(like[\\s(]|like$|~~)/i]",
+    "TaggedTemplateExpression:matches([tag.property.name=/^(sql|\\$queryRaw|\\$executeRaw)$/], [tag.name='sql']) > TemplateLiteral > TemplateElement[value.raw=/(^|\\W)i?like(\\s|\\(|$)|~~/i]",
   message:
     'Do not write LIKE/ILIKE by hand. Compose ilikeContains(column, value) from common/helpers/like.ts, which binds the escaped pattern.',
+};
+
+// The parent problem: `$queryRawUnsafe` and `$executeRawUnsafe` take a string,
+// so every value in them is concatenated rather than bound, and no amount of
+// escaping downstream helps. Production has no call sites and should acquire
+// none; the real-DB harness is exempted below, where the reason fits.
+const noRawUnsafe = {
+  selector: 'CallExpression[callee.property.name=/RawUnsafe$/]',
+  message:
+    'Do not use $queryRawUnsafe/$executeRawUnsafe: they concatenate values into SQL instead of binding them. Use Prisma.sql with interpolated values.',
 };
 
 // Suppressed only by a `mode` sibling that noRawInsensitiveMode itself
@@ -108,6 +123,16 @@ const noUnescapedLikeAssignment = {
   message:
     'contains/startsWith/endsWith compile to LIKE. Escape the assigned value with escapeLike from common/helpers/like.ts.',
 };
+
+// One list, so the harness exemption below can subtract a single rule by
+// identity instead of restating a keep-list that the next rule would miss.
+const escapingRules = [
+  noRawInsensitiveMode,
+  noRawLikeOperator,
+  noRawUnsafe,
+  noUnescapedLikeFilter,
+  noUnescapedLikeAssignment,
+];
 
 export default tseslint.config(
   {
@@ -171,13 +196,22 @@ export default tseslint.config(
     files: ['src/**/*.ts', 'test/**/*.ts'],
     ignores: ['**/*.spec.ts', 'src/common/helpers/like.ts'],
     rules: {
+      'no-restricted-syntax': ['error', noContentCrudOverride, ...escapingRules],
+    },
+  },
+  {
+    // The real-DB harness provisions and truncates its own disposable database.
+    // CREATE DATABASE cannot run inside a transaction and a TRUNCATE list is a
+    // set of identifiers, neither of which can be a bound parameter, so these
+    // two files are the one legitimate home for a RawUnsafe call. Every other
+    // rule still applies to them, subtracted by identity so a rule added later
+    // reaches them without anyone remembering to add it here.
+    files: ['test/db/db-harness.ts', 'test/db/global-setup.ts'],
+    rules: {
       'no-restricted-syntax': [
         'error',
         noContentCrudOverride,
-        noRawInsensitiveMode,
-        noRawLikeOperator,
-        noUnescapedLikeFilter,
-        noUnescapedLikeAssignment,
+        ...escapingRules.filter(rule => rule !== noRawUnsafe),
       ],
     },
   }

@@ -76,11 +76,16 @@ export const equalsInsensitive = (value: string) => ({
 });
 
 /**
- * The `%...%` pattern for a hand-written ILIKE, with the value's metacharacters
- * escaped. The raw-SQL counterpart of `containsInsensitive`: only the wrapping
- * wildcards are meant as wildcards.
+ * The `%...%` pattern for an ILIKE, with the value's metacharacters escaped:
+ * only the wrapping wildcards are meant as wildcards.
+ *
+ * Private, and the export is worth not adding back. The wildcards make it a
+ * substring pattern and nothing else, so as the value of any other filter
+ * (`{ startsWith: likeContainsPattern(q) }`) it binds `%q%` and quietly turns a
+ * prefix match into a substring one. `ilikeContains` below is the one shape
+ * that uses it correctly, and it is the only thing that should.
  */
-export const likeContainsPattern = (value: string) => `%${escapeLike(value)}%`;
+const likeContainsPattern = (value: string) => `%${escapeLike(value)}%`;
 
 /**
  * A case-insensitive substring match against one column, as raw SQL.
