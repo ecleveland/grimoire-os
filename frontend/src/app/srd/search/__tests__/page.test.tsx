@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import SrdSearchPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { PaginatedResponse, SrdSpell, SrdFeat, SrdItem } from '@/lib/types';
-import type { UnifiedFeatureData, UnifiedSearchHit } from '@/lib/srd-search';
+import type { UnifiedClassHitData, UnifiedFeatureData, UnifiedSearchHit } from '@/lib/srd-search';
 
 const mockApiFetch = vi.fn();
 
@@ -114,6 +114,35 @@ const bagOfTricksItem: SrdItem = {
   source: 'SRD 5.2.1',
 };
 
+// Only the columns the endpoint selects, so a page reading anything else fails
+// to compile rather than passing against a field the wire never carries. In
+// particular there is no `features` key.
+const wardenClass: UnifiedClassHitData = {
+  id: 'cls-2',
+  name: 'Warden',
+  hitDie: 'd10',
+  subclassLevel: 3,
+  description: 'A sworn protector of wild places.',
+  contentSource: 'srd',
+};
+
+// A class saved with neither optional column. They arrive as null, not absent,
+// because Postgres sends null for a nullable column; the cast is because the
+// shared SrdClass spells them `subclassLevel?: number` / `description?: string`.
+const skirmisherClass = {
+  id: 'cls-3',
+  name: 'Skirmisher',
+  hitDie: 'd8',
+  subclassLevel: null,
+  description: null,
+  contentSource: 'srd',
+} as unknown as UnifiedClassHitData;
+
+/** A class hit, with `over` applied to the base Warden fixture. */
+function classHit(over: Partial<UnifiedClassHitData> = {}): UnifiedSearchHit {
+  return { kind: 'class', data: { ...wardenClass, ...over } };
+}
+
 const fireball: UnifiedSearchHit = { kind: 'spell', data: fireballSpell };
 const bagOfTricks: UnifiedSearchHit = { kind: 'item', data: bagOfTricksItem };
 const bless: UnifiedSearchHit = { kind: 'spell', data: blessSpell };
@@ -121,6 +150,7 @@ const detectMagic: UnifiedSearchHit = { kind: 'spell', data: detectMagicSpell };
 const sharpshooter: UnifiedSearchHit = { kind: 'feat', data: sharpshooterFeat };
 const tough: UnifiedSearchHit = { kind: 'feat', data: toughFeat };
 const sneakAttack: UnifiedSearchHit = { kind: 'feature', data: sneakAttackFeature };
+const skirmisher: UnifiedSearchHit = { kind: 'class', data: skirmisherClass };
 
 function paginated(hits: UnifiedSearchHit[]): PaginatedResponse<UnifiedSearchHit> {
   return { data: hits, total: hits.length, page: 1, lastPage: 1 };
@@ -205,12 +235,13 @@ describe('SrdSearchPage', () => {
       });
     });
 
-    it('shows type-filter chips for Spells, Feats, Items, and Features', async () => {
+    it('shows type-filter chips for Spells, Feats, Items, Classes, and Features [VEG-510]', async () => {
       renderPage();
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Spells' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Feats' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Items' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Classes' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Features' })).toBeInTheDocument();
       });
     });
@@ -283,7 +314,8 @@ describe('SrdSearchPage', () => {
 
       await user.click(screen.getByText('Fireball'));
 
-      const heading = screen.getByText('Classes');
+      // By role, because the Classes kind chip is also labelled "Classes".
+      const heading = screen.getByRole('heading', { name: 'Classes' });
       const section = heading.closest('div')!;
       expect(section.textContent).toContain('Sorcerer');
       expect(section.textContent).toContain('Wizard');
@@ -476,6 +508,7 @@ describe('SrdSearchPage', () => {
 
       await user.click(screen.getByRole('button', { name: 'Spells' }));
       await user.click(screen.getByRole('button', { name: 'Feats' }));
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
       await user.click(screen.getByRole('button', { name: 'Features' }));
 
       mockApiFetch.mockClear();
@@ -487,6 +520,96 @@ describe('SrdSearchPage', () => {
       expect(url).toContain('types=item');
       expect(url).toContain('rarity=Rare');
       expect(url).toContain('isMagic=true');
+    });
+  });
+
+  describe('class hits [VEG-510]', () => {
+    it('renders the class hit with its hit die and subclass level', async () => {
+      mockApiFetch.mockResolvedValue(paginated([classHit()]));
+      renderPage();
+
+      expect(await screen.findByText('Warden')).toBeInTheDocument();
+      expect(screen.getByText('d10 hit die · Subclass at level 3')).toBeInTheDocument();
+    });
+
+    it('renders just the hit die when the class has no subclass level', async () => {
+      mockApiFetch.mockResolvedValue(paginated([skirmisher]));
+      renderPage();
+
+      expect(await screen.findByText('Skirmisher')).toBeInTheDocument();
+      expect(screen.getByText('d8 hit die')).toBeInTheDocument();
+    });
+
+    it('expands to just the class link when the class has no description', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([skirmisher]));
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Skirmisher')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Skirmisher'));
+
+      expect(screen.getByRole('link', { name: /Open Skirmisher Class/ })).toHaveAttribute(
+        'href',
+        '/srd/classes/cls-3'
+      );
+    });
+
+    it('shows the description and a link to the class page when expanded', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValue(paginated([classHit()]));
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Warden')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Warden'));
+
+      expect(screen.getByText('A sworn protector of wild places.')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /Open Warden Class/ })).toHaveAttribute(
+        'href',
+        '/srd/classes/cls-2'
+      );
+    });
+
+    it('renders no print toggle on a class hit (a whole class is not printable)', async () => {
+      mockApiFetch.mockResolvedValue(paginated([classHit()]));
+      renderPage();
+
+      const heading = await screen.findByText('Warden');
+      const card = heading.closest('div.bg-white')!;
+      expect(
+        within(card as HTMLElement).queryByRole('button', { name: /to print set/ })
+      ).not.toBeInTheDocument();
+    });
+
+    it('shows the Homebrew badge on a homebrew class hit', async () => {
+      mockApiFetch.mockResolvedValue(
+        paginated([classHit({ id: 'cls-hb', name: 'Runecarver', contentSource: 'homebrew' })])
+      );
+      renderPage();
+
+      const heading = await screen.findByText('Runecarver');
+      expect(within(heading.closest('h2')!).getByText('Homebrew')).toBeInTheDocument();
+    });
+
+    it('does not show the Homebrew badge on an SRD class hit', async () => {
+      mockApiFetch.mockResolvedValue(paginated([classHit()]));
+      renderPage();
+
+      const heading = await screen.findByText('Warden');
+      expect(within(heading.closest('h2')!).queryByText('Homebrew')).not.toBeInTheDocument();
+    });
+
+    it('drops class from the types param when the Classes chip is toggled off', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+
+      mockApiFetch.mockClear();
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
+      const types = new URLSearchParams(url.split('?')[1]).get('types');
+      expect(types).toBe('spell,feat,item,feature');
     });
   });
 
@@ -587,6 +710,7 @@ describe('SrdSearchPage', () => {
 
       await user.click(screen.getByRole('button', { name: 'Feats' }));
       await user.click(screen.getByRole('button', { name: 'Items' }));
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
       await user.click(screen.getByRole('button', { name: 'Features' }));
 
       expect(screen.getByLabelText('Spell Class')).toBeInTheDocument();
@@ -603,6 +727,7 @@ describe('SrdSearchPage', () => {
 
       await user.click(screen.getByRole('button', { name: 'Spells' }));
       await user.click(screen.getByRole('button', { name: 'Items' }));
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
       await user.click(screen.getByRole('button', { name: 'Features' }));
 
       expect(screen.getByLabelText('Feat Category')).toBeInTheDocument();
@@ -619,6 +744,7 @@ describe('SrdSearchPage', () => {
 
       await user.click(screen.getByRole('button', { name: 'Spells' }));
       await user.click(screen.getByRole('button', { name: 'Feats' }));
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
       await user.click(screen.getByRole('button', { name: 'Features' }));
 
       expect(screen.getByLabelText('Item Category')).toBeInTheDocument();
@@ -636,6 +762,7 @@ describe('SrdSearchPage', () => {
       await user.click(screen.getByRole('button', { name: 'Spells' }));
       await user.click(screen.getByRole('button', { name: 'Feats' }));
       await user.click(screen.getByRole('button', { name: 'Items' }));
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
 
       expect(screen.getByLabelText('Parent Type')).toBeInTheDocument();
     });
@@ -666,6 +793,25 @@ describe('SrdSearchPage', () => {
       });
       const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
       expect(url).toContain('types=spell');
+    });
+
+    it('emits types in canonical kind order however the chips were toggled [VEG-510]', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+
+      // Off and back on moves a kind to the end of the Set's insertion order.
+      // The anonymous cache keys on the whole URL, so one selection reaching it
+      // under several orderings would occupy several entries.
+      await user.click(screen.getByRole('button', { name: 'Spells' }));
+      await user.click(screen.getByRole('button', { name: 'Spells' }));
+      mockApiFetch.mockClear();
+      await user.click(screen.getByRole('button', { name: 'Classes' }));
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+      const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
+      const types = new URLSearchParams(url.split('?')[1]).get('types');
+      expect(types).toBe('spell,feat,item,feature');
     });
   });
 });

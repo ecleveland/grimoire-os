@@ -9,6 +9,7 @@
 // The load-bearing scenario: a user owns a homebrew class that reuses an SRD
 // class name. Before VEG-505 that could not exist, and the seed's
 // upsert-by-name would have clobbered it the moment it could.
+import type { Cache } from 'cache-manager';
 import {
   createSeedContext,
   teardownSeedContext,
@@ -16,9 +17,14 @@ import {
   type SeedContext,
 } from './db-harness';
 import { ContentAccessService } from '../../src/srd/content-access.service';
+import { SrdService } from '../../src/srd/srd.service';
 import { catalogNameWhere } from '../../src/srd/resolve-catalog-ref';
 
 const HOMEBREW_LABEL = 'Homebrew';
+
+// SeedModule provides neither SrdService nor a CACHE_MANAGER binding, and the
+// service touches the cache only from invalidateCache, so a no-op stands in.
+const noopCache = { clear: () => Promise.resolve() } as unknown as Cache;
 
 // The real service, not a copy of it. It has no constructor dependencies, so a
 // spec can hold one directly — and then a change to visibleTo shows up here
@@ -52,6 +58,7 @@ const candidateByIdWhere = (classId: string, userId?: string) => ({
 
 describe('class content-source tiering — real DB (VEG-505)', () => {
   let ctx: SeedContext;
+  let srd: SrdService;
   let userId: string;
   let otherUserId: string;
 
@@ -69,6 +76,8 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
 
     await truncateAll(prisma);
     await seed.seed();
+
+    srd = new SrdService(prisma, new ContentAccessService(), noopCache);
 
     // Discover a real class that has both a subclass and features rather than
     // hardcoding "Fighter", so a data edit does not silently skip the assertions.
@@ -534,6 +543,67 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
 
         expect(candidates.map(c => c.contentSource).sort()).toEqual(['homebrew', 'shared', 'srd']);
       });
+    });
+  });
+
+  // The class kind's unit spec asserts the SQL the source generates, which shows
+  // the predicate is written but not that Postgres excludes anything by it. This
+  // is where a homebrew class either stays private or does not.
+  describe('unified search, class kind [VEG-510]', () => {
+    const BREW_NAME = `Veg510 Warden ${Date.now()}`;
+
+    beforeAll(async () => {
+      await ctx.prisma.srdClass.create({
+        data: {
+          name: BREW_NAME,
+          hitDie: 'd10',
+          contentSource: 'homebrew',
+          createdById: userId,
+          source: HOMEBREW_LABEL,
+        },
+      });
+    });
+
+    it('finds a homebrew class with no features at all, for its owner', async () => {
+      const page = await srd.search({ types: ['class'], q: BREW_NAME }, userId);
+
+      expect(page.total).toBe(1);
+      expect(page.data[0].kind).toBe('class');
+      expect(page.data[0].data.name).toBe(BREW_NAME);
+    });
+
+    it('hides it from another user, count included', async () => {
+      const page = await srd.search({ types: ['class'], q: BREW_NAME }, otherUserId);
+
+      expect(page.data).toEqual([]);
+      expect(page.total).toBe(0);
+    });
+
+    it('hides it from an anonymous caller', async () => {
+      const page = await srd.search({ types: ['class'], q: BREW_NAME });
+
+      // `total` alone would miss a hydrate-path leak: it comes from the count
+      // query, which is a separate predicate from the one that picked the ids.
+      expect(page.data).toEqual([]);
+      expect(page.total).toBe(0);
+    });
+
+    it('still returns the SRD class to all three callers', async () => {
+      // A page big enough for every row the fixture puts under this one name,
+      // so adding another later cannot push the SRD row off the default page
+      // of 20 and redden this without touching the code it tests.
+      const query = { types: ['class' as const], q: srdClassName, limit: 100 };
+      const [owner, stranger, anon] = await Promise.all([
+        srd.search({ ...query }, userId),
+        srd.search({ ...query }, otherUserId),
+        srd.search({ ...query }),
+      ]);
+
+      // Ids, not the count: this fixture deliberately has a shared row and two
+      // users' homebrew under that one name, so the totals differ per caller.
+      for (const page of [owner, stranger, anon]) {
+        expect(page.data.map(hit => hit.data.id)).toContain(srdClassId);
+      }
     });
   });
 

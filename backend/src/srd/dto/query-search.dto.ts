@@ -1,12 +1,9 @@
 import { IsOptional, IsString, IsInt, IsIn, IsBooleanString } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { SEARCH_KINDS, type SearchKind } from '@grimoire-os/shared';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import type { FeatureParentType } from './query-features.dto';
-
-export type SearchKind = 'spell' | 'feat' | 'item' | 'feature';
-
-const ALL_KINDS: SearchKind[] = ['spell', 'feat', 'item', 'feature'];
 
 export class QuerySearchDto extends PaginationDto {
   @ApiPropertyOptional({ description: 'Free-text search across name and description' })
@@ -16,17 +13,23 @@ export class QuerySearchDto extends PaginationDto {
 
   @ApiPropertyOptional({
     description:
-      'Comma-separated list of kinds to include. Defaults to all (spell, feat, item, feature).',
-    example: 'spell,feature',
+      'Comma-separated list of kinds to include. Defaults to all (spell, feat, item, class, feature).',
+    example: 'spell,class',
   })
   @IsOptional()
+  // Both shapes a kind list arrives in run through one filter: `types=a,b` is a
+  // string, while a repeated `types=a&types=b` is already an array. An unknown
+  // kind left in either would become a source nothing builds, so the search
+  // would answer an empty page rather than fall back to the full kind set.
   @Transform(({ value }) => {
-    if (Array.isArray(value)) return value;
-    if (typeof value !== 'string') return undefined;
-    const kinds = value
-      .split(',')
-      .map(s => s.trim())
-      .filter((s): s is SearchKind => (ALL_KINDS as string[]).includes(s));
+    const raw: unknown[] = Array.isArray(value)
+      ? value
+      : typeof value === 'string'
+        ? value.split(',')
+        : [];
+    const kinds = raw
+      .map(s => String(s).trim())
+      .filter((s): s is SearchKind => (SEARCH_KINDS as readonly string[]).includes(s));
     return kinds.length ? kinds : undefined;
   })
   types?: SearchKind[];

@@ -7,7 +7,7 @@ const categories = [
     href: '/srd/search',
     title: 'Search',
     description:
-      'Find spells, feats, items, and class/race/background features in one place. Filter by class, level, school, category, rarity, prerequisite, or source.',
+      'Find spells, feats, items, classes, and class/race/background features in one place. Filter by class, level, school, category, rarity, prerequisite, or source.',
   },
   {
     href: '/srd/monsters',
