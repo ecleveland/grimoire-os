@@ -304,6 +304,8 @@ export interface SrdRace {
   age?: string;
   alignment?: string;
   sizeDescription?: string;
+  /** Present on the detail GET, which includes the race's subraces; the list omits them. */
+  subraces?: SrdSubrace[];
   source: string;
 }
 
@@ -327,11 +329,6 @@ export interface SrdSubrace {
   source: string;
 }
 
-export interface SrdBackgroundAbilityScores {
-  choose: number;
-  options: string[];
-}
-
 /** A minimal id+name pointer to another SRD entity (e.g. a linked feat). */
 export interface SrdReference {
   id: string;
@@ -346,7 +343,8 @@ export interface SrdBackground extends ContentOwnership {
   toolProficiencies: string[];
   languages: number;
   equipment?: string;
-  feature?: BackgroundFeature | null;
+  /** Feature rows, included by both the list and detail GETs. */
+  features?: BackgroundFeature[];
   /**
    * Canonical SRD origin feat, linked by FK at seed (VEG-429). `originFeatOption`
    * carries the chosen parameter for repeatable feats (e.g. Magic Initiate
@@ -354,7 +352,6 @@ export interface SrdBackground extends ContentOwnership {
    */
   originFeat?: SrdReference | null;
   originFeatOption?: string | null;
-  abilityScores?: SrdBackgroundAbilityScores;
   personalityTraits: string[];
   ideals: string[];
   bonds: string[];

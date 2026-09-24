@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApiQuery, invalidateApiPath } from '@/lib/query';
 import Collapsible from '@/components/Collapsible';
+import BackgroundDetail, { BackgroundSubtitle } from '@/components/BackgroundDetail';
 import SrdCardFooter from '@/components/SrdCardFooter';
 import PrintToggle from '@/components/PrintToggle';
 import CreateEntityLink from '@/components/CreateEntityLink';
@@ -77,16 +78,7 @@ export default function BackgroundListPage() {
                       </Badge>
                     )}
                   </h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Skills: {bg.skillProficiencies.join(', ')}
-                    {bg.originFeat && (
-                      <>
-                        {' '}
-                        &middot; Feat: {bg.originFeat.name}
-                        {bg.originFeatOption && <> ({bg.originFeatOption})</>}
-                      </>
-                    )}
-                  </p>
+                  <BackgroundSubtitle background={bg} />
                 </div>
               }
               headerAside={
@@ -98,29 +90,7 @@ export default function BackgroundListPage() {
                 />
               }
             >
-              {bg.description && (
-                <p className="text-gray-600 dark:text-gray-400 text-sm">{bg.description}</p>
-              )}
-              {bg.abilityScores && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Ability Scores
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Choose {bg.abilityScores.choose} from: {bg.abilityScores.options.join(', ')}
-                  </p>
-                </div>
-              )}
-              {bg.toolProficiencies.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Tool Proficiencies
-                  </h3>
-                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                    {bg.toolProficiencies.join(', ')}
-                  </p>
-                </div>
-              )}
+              <BackgroundDetail background={bg} />
               <SrdCardFooter
                 href={`/srd/backgrounds/${bg.id}`}
                 kind="background"

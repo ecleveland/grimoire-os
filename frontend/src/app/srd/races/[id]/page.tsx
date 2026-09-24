@@ -2,20 +2,16 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
+import RaceDetail from '@/components/RaceDetail';
 import { useApiQuery } from '@/lib/query';
-import type { SrdRace, SrdSubrace } from '@/lib/types';
+import type { SrdRace } from '@/lib/types';
 
-/** The detail GET includes the race's subraces, which the list payload leaves out. */
-type RaceWithSubraces = SrdRace & { subraces?: SrdSubrace[] };
-
-const sectionHeadingClass = 'text-sm font-medium text-gray-700 dark:text-gray-300';
 const bodyTextClass = 'text-sm text-gray-600 dark:text-gray-400';
 
 export default function RaceDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const query = useApiQuery<RaceWithSubraces | null>(`/srd/races/${id}`, {
+  const query = useApiQuery<SrdRace | null>(`/srd/races/${id}`, {
     errorToast: { message: 'Failed to load race', id: 'load-race' },
   });
 
@@ -80,9 +76,6 @@ export default function RaceDetailPage() {
     );
   }
 
-  // Seeded SRD 5.2.1 species persist no ability bonuses at all, so the column
-  // arrives as null however the type reads.
-  const abilityBonuses = Object.entries(race.abilityBonuses ?? {});
   const subraces = race.subraces ?? [];
 
   return (
@@ -98,65 +91,9 @@ export default function RaceDetailPage() {
         <PrintToggle type="race" id={race.id} name={race.name} className="shrink-0" />
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-4">
-        {race.description && (
-          <p className="text-gray-600 dark:text-gray-400 text-sm">{race.description}</p>
-        )}
-        {abilityBonuses.length > 0 && (
-          <div>
-            <h2 className={sectionHeadingClass}>Ability Bonuses</h2>
-            <div className="flex gap-2 mt-1">
-              {abilityBonuses.map(([ability, bonus]) => (
-                <span
-                  key={ability}
-                  className="text-xs px-2 py-0.5 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded"
-                >
-                  {ability} +{bonus}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-        {race.traits.length > 0 && (
-          <div>
-            <h2 className={sectionHeadingClass}>Traits</h2>
-            <div className="mt-1 space-y-2">
-              {race.traits.map(t => (
-                <div key={t.id ?? t.name}>
-                  <span className="inline-flex items-center gap-1">
-                    <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
-                      {t.name}.
-                    </span>
-                    {t.id && <PrintToggle type="feature" id={t.id} name={t.name} />}
-                  </span>{' '}
-                  {t.description && <Markdown className="mt-0.5">{t.description}</Markdown>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div>
-          <h2 className={sectionHeadingClass}>Languages</h2>
-          <p className={bodyTextClass}>{race.languages.join(', ')}</p>
-        </div>
-        {race.age && (
-          <div>
-            <h2 className={sectionHeadingClass}>Age</h2>
-            <p className={bodyTextClass}>{race.age}</p>
-          </div>
-        )}
-        {race.alignment && (
-          <div>
-            <h2 className={sectionHeadingClass}>Alignment</h2>
-            <p className={bodyTextClass}>{race.alignment}</p>
-          </div>
-        )}
-        {race.sizeDescription && (
-          <div>
-            <h2 className={sectionHeadingClass}>Size</h2>
-            <p className={bodyTextClass}>{race.sizeDescription}</p>
-          </div>
-        )}
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        {/* Only the page h1 sits above the body, and Subraces below is an h2. */}
+        <RaceDetail race={race} headingLevel={2} />
       </div>
 
       {subraces.length > 0 && (

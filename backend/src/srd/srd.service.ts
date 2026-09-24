@@ -698,7 +698,13 @@ export class SrdService {
     return this.prisma.background.findMany({
       where,
       orderBy: { name: 'asc' },
-      include: { originFeat: { select: { id: true, name: true } } },
+      // The list cards render the same body as the background page, so this
+      // include matches findBackground's. Feature rows are a handful per
+      // background across a small closed catalog.
+      include: {
+        features: { orderBy: NAME_ORDER },
+        originFeat: { select: { id: true, name: true } },
+      },
     });
   }
 

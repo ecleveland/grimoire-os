@@ -1220,7 +1220,10 @@ describe('SrdService', () => {
       expect(prisma.background.findMany).toHaveBeenCalledWith({
         where: { ...GLOBAL_WHERE },
         orderBy: { name: 'asc' },
-        include: { originFeat: { select: { id: true, name: true } } },
+        include: {
+          features: { orderBy: { name: 'asc' } },
+          originFeat: { select: { id: true, name: true } },
+        },
       });
     });
 
@@ -1266,6 +1269,23 @@ describe('SrdService', () => {
           originFeatId: 'feat-mi',
           originFeatOption: 'Cleric',
           originFeat: { id: 'feat-mi', name: 'Magic Initiate' },
+        },
+      ];
+      prisma.background.findMany.mockResolvedValue(rows);
+
+      const result = await service.searchBackgrounds();
+
+      expect(result).toEqual(rows);
+    });
+
+    // The list cards render the same body as the background page, so the list
+    // has to carry the feature rows the page gets from findBackground.
+    it('carries the feature rows for every background', async () => {
+      const rows = [
+        {
+          id: '1',
+          name: 'Acolyte',
+          features: [{ name: 'Shelter of the Faithful', description: 'You are welcome.' }],
         },
       ];
       prisma.background.findMany.mockResolvedValue(rows);

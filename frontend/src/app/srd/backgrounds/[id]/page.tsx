@@ -6,18 +6,13 @@ import { useParams, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Badge from '@/components/Badge';
+import BackgroundDetail, { BackgroundSubtitle } from '@/components/BackgroundDetail';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import PrintToggle from '@/components/PrintToggle';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { apiQueryKey, invalidateApiPath, useApiQuery } from '@/lib/query';
-import type { BackgroundFeature, SrdBackground } from '@/lib/types';
-
-const SECTION_HEADING = 'text-sm font-medium text-gray-700 dark:text-gray-300';
-const BODY_TEXT = 'text-sm text-gray-600 dark:text-gray-400';
-
-/** The detail GET includes the background's features, which the list payload leaves out. */
-type BackgroundWithFeatures = SrdBackground & { features?: BackgroundFeature[] };
+import type { SrdBackground } from '@/lib/types';
 
 export default function BackgroundDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -25,7 +20,7 @@ export default function BackgroundDetailPage() {
   const queryClient = useQueryClient();
   const { isAdmin, user } = useAuth();
   const [deleted, setDeleted] = useState(false);
-  const query = useApiQuery<BackgroundWithFeatures | null>(`/srd/backgrounds/${id}`, {
+  const query = useApiQuery<SrdBackground | null>(`/srd/backgrounds/${id}`, {
     errorToast: { message: 'Failed to load background', id: 'load-background' },
     enabled: !deleted,
   });
@@ -107,8 +102,6 @@ export default function BackgroundDetailPage() {
     (bg.contentSource === 'homebrew' && bg.createdById === user?.userId) ||
     (bg.contentSource === 'shared' && isAdmin);
 
-  const features = bg.features ?? [];
-
   const handleDelete = async () => {
     try {
       await apiFetch(`/srd/backgrounds/${id}`, { method: 'DELETE' });
@@ -139,16 +132,7 @@ export default function BackgroundDetailPage() {
               </Badge>
             )}
           </h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Skills: {bg.skillProficiencies.join(', ')}
-            {bg.originFeat && (
-              <>
-                {' '}
-                &middot; Feat: {bg.originFeat.name}
-                {bg.originFeatOption && <> ({bg.originFeatOption})</>}
-              </>
-            )}
-          </p>
+          <BackgroundSubtitle background={bg} className="mt-1" />
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <PrintToggle type="background" id={bg.id} name={bg.name} />
@@ -172,52 +156,8 @@ export default function BackgroundDetailPage() {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-4">
-        {bg.description && <p className={BODY_TEXT}>{bg.description}</p>}
-
-        {bg.toolProficiencies.length > 0 && (
-          <div>
-            <h2 className={SECTION_HEADING}>Tool Proficiencies</h2>
-            <p className={BODY_TEXT}>{bg.toolProficiencies.join(', ')}</p>
-          </div>
-        )}
-
-        {bg.languages > 0 && (
-          <div>
-            <h2 className={SECTION_HEADING}>Languages</h2>
-            <p className={BODY_TEXT}>
-              {bg.languages} additional language{bg.languages === 1 ? '' : 's'}
-            </p>
-          </div>
-        )}
-
-        {bg.equipment && (
-          <div>
-            <h2 className={SECTION_HEADING}>Equipment</h2>
-            <p className={BODY_TEXT}>{bg.equipment}</p>
-          </div>
-        )}
-
-        {features.length > 0 && (
-          <div>
-            <h2 className={SECTION_HEADING}>Features</h2>
-            <div className="mt-1 space-y-2">
-              {features.map(feature => (
-                <div key={feature.name}>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                    {feature.name}
-                  </h3>
-                  <p className={BODY_TEXT}>{feature.description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <RoleplayList heading="Personality Traits" entries={bg.personalityTraits} />
-        <RoleplayList heading="Ideals" entries={bg.ideals} />
-        <RoleplayList heading="Bonds" entries={bg.bonds} />
-        <RoleplayList heading="Flaws" entries={bg.flaws} />
+      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+        <BackgroundDetail background={bg} headingLevel={2} />
       </div>
 
       <ConfirmDialog
@@ -229,21 +169,6 @@ export default function BackgroundDetailPage() {
         variant="danger"
         onConfirm={handleDelete}
       />
-    </div>
-  );
-}
-
-/** One of the four roleplay tables. Renders nothing when the background has no entries. */
-function RoleplayList({ heading, entries }: { heading: string; entries: string[] }) {
-  if (entries.length === 0) return null;
-  return (
-    <div>
-      <h2 className={SECTION_HEADING}>{heading}</h2>
-      <ul className={`${BODY_TEXT} list-disc list-inside space-y-0.5`}>
-        {entries.map(entry => (
-          <li key={entry}>{entry}</li>
-        ))}
-      </ul>
     </div>
   );
 }
