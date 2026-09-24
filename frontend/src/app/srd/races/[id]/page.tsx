@@ -104,7 +104,7 @@ export default function RaceDetailPage() {
         )}
         {abilityBonuses.length > 0 && (
           <div>
-            <h3 className={sectionHeadingClass}>Ability Bonuses</h3>
+            <h2 className={sectionHeadingClass}>Ability Bonuses</h2>
             <div className="flex gap-2 mt-1">
               {abilityBonuses.map(([ability, bonus]) => (
                 <span
@@ -119,7 +119,7 @@ export default function RaceDetailPage() {
         )}
         {race.traits.length > 0 && (
           <div>
-            <h3 className={sectionHeadingClass}>Traits</h3>
+            <h2 className={sectionHeadingClass}>Traits</h2>
             <div className="mt-1 space-y-2">
               {race.traits.map(t => (
                 <div key={t.id ?? t.name}>
@@ -136,24 +136,24 @@ export default function RaceDetailPage() {
           </div>
         )}
         <div>
-          <h3 className={sectionHeadingClass}>Languages</h3>
+          <h2 className={sectionHeadingClass}>Languages</h2>
           <p className={bodyTextClass}>{race.languages.join(', ')}</p>
         </div>
         {race.age && (
           <div>
-            <h3 className={sectionHeadingClass}>Age</h3>
+            <h2 className={sectionHeadingClass}>Age</h2>
             <p className={bodyTextClass}>{race.age}</p>
           </div>
         )}
         {race.alignment && (
           <div>
-            <h3 className={sectionHeadingClass}>Alignment</h3>
+            <h2 className={sectionHeadingClass}>Alignment</h2>
             <p className={bodyTextClass}>{race.alignment}</p>
           </div>
         )}
         {race.sizeDescription && (
           <div>
-            <h3 className={sectionHeadingClass}>Size</h3>
+            <h2 className={sectionHeadingClass}>Size</h2>
             <p className={bodyTextClass}>{race.sizeDescription}</p>
           </div>
         )}
