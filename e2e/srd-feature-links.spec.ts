@@ -100,7 +100,7 @@ test.describe('Feature search links (VEG-558)', () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
 
-    await page.getByRole('link', { name: 'Open race page' }).first().click();
+    await page.getByRole('link', { name: 'Open race page (Dragonborn)' }).click();
 
     await expect(page).toHaveURL(/\/srd\/races\/[^/]+$/);
     await expect(page.getByRole('heading', { level: 1, name: /^Dragonborn/ })).toBeVisible({
@@ -119,7 +119,7 @@ test.describe('Feature search links (VEG-558)', () => {
     await expect(card).toBeVisible({ timeout: 10_000 });
     await card.click();
 
-    await page.getByRole('link', { name: 'Open background page' }).first().click();
+    await page.getByRole('link', { name: 'Open background page (Acolyte)' }).click();
 
     await expect(page).toHaveURL(/\/srd\/backgrounds\/[^/]+$/);
     await expect(page.getByRole('heading', { level: 1, name: /^Acolyte/ })).toBeVisible({

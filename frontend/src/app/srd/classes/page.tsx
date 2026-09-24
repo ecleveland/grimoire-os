@@ -8,6 +8,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApiQuery, invalidateApiPath } from '@/lib/query';
 import Collapsible from '@/components/Collapsible';
+import SrdCardFooter from '@/components/SrdCardFooter';
 import ClassDetail from '@/components/ClassDetail';
 import CreateEntityLink from '@/components/CreateEntityLink';
 import ConfirmDialog from '@/components/ConfirmDialog';
@@ -97,32 +98,31 @@ export default function ClassListPage() {
               }
             >
               <ClassDetail cls={cls} />
-              {/* The summary is a button, so the page link lives in the card body. */}
-              <div className="flex items-center gap-2 pt-2">
-                <Link
-                  href={`/srd/classes/${cls.id}`}
-                  className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  Open class page
-                </Link>
-                {canManage(cls) && (
-                  <div className="ml-auto flex items-center gap-2">
-                    <Link
-                      href={`/srd/classes/${cls.id}/edit`}
-                      className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                    >
-                      Edit
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setPendingDelete(cls)}
-                      className="px-3 py-1.5 text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                )}
-              </div>
+              <SrdCardFooter
+                href={`/srd/classes/${cls.id}`}
+                kind="class"
+                name={cls.name}
+                homebrew={cls.contentSource === 'homebrew'}
+                actions={
+                  canManage(cls) && (
+                    <>
+                      <Link
+                        href={`/srd/classes/${cls.id}/edit`}
+                        className="px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      >
+                        Edit
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => setPendingDelete(cls)}
+                        className="px-3 py-1.5 text-sm text-red-600 dark:text-red-400 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )
+                }
+              />
             </Collapsible>
           ))}
         </div>

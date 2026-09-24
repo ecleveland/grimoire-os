@@ -82,7 +82,9 @@ test.describe('Homebrew class pages (VEG-508)', () => {
 
     // ── Detail page ────────────────────────────────────────────────────────
     await summary.click();
-    await page.getByRole('link', { name: 'Open class page', exact: true }).click();
+    await page
+      .getByRole('link', { name: `Open class page (${name}, homebrew)`, exact: true })
+      .click();
     await expect(page.getByRole('heading', { level: 1, name: exact(name) })).toBeVisible({
       timeout: 10_000,
     });
