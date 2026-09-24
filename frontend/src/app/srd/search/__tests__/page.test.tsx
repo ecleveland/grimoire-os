@@ -57,6 +57,14 @@ const sneakAttackFeature: UnifiedFeatureData = {
   parent: { kind: 'class', id: 'cls-1', name: 'Rogue' },
 };
 
+const combatSuperiorityFeature: UnifiedFeatureData = {
+  id: 'scf-1',
+  name: 'Combat Superiority',
+  level: 3,
+  description: 'You have a pool of superiority dice you spend on maneuvers.',
+  parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
+};
+
 const blessSpell: SrdSpell = {
   id: 'sp-2',
   name: 'Bless',
@@ -150,6 +158,10 @@ const detectMagic: UnifiedSearchHit = { kind: 'spell', data: detectMagicSpell };
 const sharpshooter: UnifiedSearchHit = { kind: 'feat', data: sharpshooterFeat };
 const tough: UnifiedSearchHit = { kind: 'feat', data: toughFeat };
 const sneakAttack: UnifiedSearchHit = { kind: 'feature', data: sneakAttackFeature };
+const combatSuperiority: UnifiedSearchHit = {
+  kind: 'feature',
+  data: combatSuperiorityFeature,
+};
 const skirmisher: UnifiedSearchHit = { kind: 'class', data: skirmisherClass };
 
 function paginated(hits: UnifiedSearchHit[]): PaginatedResponse<UnifiedSearchHit> {
@@ -353,6 +365,20 @@ describe('SrdSearchPage', () => {
       expect(screen.getByText(/Once per turn, deal extra damage/)).toBeInTheDocument();
       const drilldown = screen.getByRole('link', { name: /Open Rogue/i });
       expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1');
+    });
+
+    // A subclass renders as an anchored card on its class page, not a page of
+    // its own, so the drilldown needs both ids (VEG-558).
+    it('points a subclass feature at its card on the class page', async () => {
+      mockApiFetch.mockResolvedValue(paginated([combatSuperiority]));
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Combat Superiority')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Combat Superiority'));
+
+      const drilldown = screen.getByRole('link', { name: /Open Battle Master Subclass/i });
+      expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1#sc-1');
     });
   });
 

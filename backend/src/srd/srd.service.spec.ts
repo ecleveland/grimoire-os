@@ -1801,6 +1801,33 @@ describe('SrdService', () => {
       expect(result.total).toBe(1);
     });
 
+    it('carries the class id on a subclass row’s parent (VEG-558)', async () => {
+      prisma.subclassFeature.findMany.mockResolvedValue([
+        {
+          id: 'scf-1',
+          name: 'Combat Superiority',
+          level: 3,
+          description: 'Maneuvers.',
+          subclassId: 'sc-1',
+          subclass: { id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
+        },
+      ]);
+      prisma.subclassFeature.count.mockResolvedValue(1);
+
+      const result = await service.searchFeatures({ parentType: 'subclass' });
+
+      expect(prisma.subclassFeature.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { subclass: { select: { id: true, name: true, classId: true } } },
+        })
+      );
+      expect(result.data[0]).toMatchObject({
+        kind: 'subclass',
+        id: 'scf-1',
+        parent: { id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
+      });
+    });
+
     it('paginates by combined total across all tables', async () => {
       prisma.classFeature.count.mockResolvedValue(3);
       prisma.subclassFeature.count.mockResolvedValue(2);
@@ -2185,6 +2212,37 @@ describe('SrdService', () => {
       });
     });
 
+    it('hydrates subclass-feature hits with the parent class id (VEG-558)', async () => {
+      mockUnifiedQueryResults([{ source: 'feature:subclass', id: 'scf-1' }], 1);
+      prisma.subclassFeature.findMany.mockResolvedValue([
+        {
+          id: 'scf-1',
+          name: 'Combat Superiority',
+          level: 3,
+          description: 'Maneuvers.',
+          subclassId: 'sc-1',
+          subclass: { id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
+        },
+      ]);
+
+      const result = await service.search({ types: ['feature'], parentType: 'subclass' });
+
+      expect(prisma.subclassFeature.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['scf-1'] } },
+        include: { subclass: { select: { id: true, name: true, classId: true } } },
+      });
+      expect(result.data[0]).toEqual({
+        kind: 'feature',
+        data: {
+          id: 'scf-1',
+          name: 'Combat Superiority',
+          level: 3,
+          description: 'Maneuvers.',
+          parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
+        },
+      });
+    });
+
     it('returns total from the SQL count query (not from row counts)', async () => {
       mockUnifiedQueryResults([{ source: 'spell', id: 'sp-1' }], 42);
       prisma.spell.findMany.mockResolvedValue([
@@ -2319,7 +2377,7 @@ describe('SrdService', () => {
           level: 3,
           description: 'Maneuvers.',
           subclassId: 'sc-1',
-          subclass: { id: 'sc-1', name: 'Battle Master' },
+          subclass: { id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
         },
       ]);
       prisma.raceTrait.findMany.mockResolvedValue([
@@ -2357,6 +2415,14 @@ describe('SrdService', () => {
         );
       }
 
+      // The subclass parent carries its own class id so a hit can link to the
+      // class page the subclass card lives on (VEG-558).
+      expect(prisma.subclassFeature.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: { subclass: { select: { id: true, name: true, classId: true } } },
+        })
+      );
+
       expect(result).toEqual([
         {
           id: 'cf-1',
@@ -2370,7 +2436,7 @@ describe('SrdService', () => {
           name: 'Combat Superiority',
           level: 3,
           description: 'Maneuvers.',
-          parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master' },
+          parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
         },
         {
           id: 'rt-1',

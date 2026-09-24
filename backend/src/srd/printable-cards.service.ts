@@ -328,7 +328,10 @@ export class PrintableCardsService {
       type: 'feature' as const,
       id: feature.id,
       name: feature.name,
-      parent: feature.parent,
+      // Copied field by field rather than passed through: a search parent also
+      // carries the class id a subclass drilldown links to, which a printed
+      // card has no use for and PrintableFeatureParent does not declare.
+      parent: { kind: feature.parent.kind, id: feature.parent.id, name: feature.parent.name },
       ...(feature.level !== undefined ? { level: feature.level } : {}),
       description: flattenCardText(feature.description),
     }));

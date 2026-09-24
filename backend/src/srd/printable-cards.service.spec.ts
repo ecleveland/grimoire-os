@@ -346,6 +346,26 @@ describe('PrintableCardsService', () => {
 
       expect(result.groups[0].cards[0]).not.toHaveProperty('level');
     });
+
+    // A subclass parent carries the class id its page lives on, for the search
+    // drilldown link (VEG-558). A print card is text on paper with nothing to
+    // click, so the card keeps the three fields PrintableFeatureParent declares
+    // and drops the rest.
+    it('keeps a subclass parent to kind, id and name', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([
+        {
+          ...FEATURE_DATA,
+          parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master', classId: 'cls-1' },
+        },
+      ]);
+
+      const result = await service.hydrate([{ type: 'feature', ids: ['feat-1'] }]);
+
+      expect(result.groups[0].cards[0]).toMatchObject({
+        parent: { kind: 'subclass', id: 'sc-1', name: 'Battle Master' },
+      });
+      expect(result.groups[0].cards[0]).not.toHaveProperty('parent.classId');
+    });
   });
 
   describe('markdown flattening (VEG-276)', () => {
