@@ -214,6 +214,22 @@ describe('ShopsService', () => {
       );
     });
 
+    it('escapes LIKE metacharacters in the search term [VEG-529]', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.findMany.mockResolvedValue([]);
+      prisma.shop.count.mockResolvedValue(0);
+
+      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID, { search: 'apoth_cary' });
+
+      expect(prisma.shop.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            name: { contains: 'apoth\\_cary', mode: 'insensitive' },
+          }),
+        })
+      );
+    });
+
     it('throws ForbiddenException when a non-member lists', async () => {
       campaignAuth.assertCampaignMember.mockRejectedValue(
         new ForbiddenException('You are not a member of this campaign')

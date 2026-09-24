@@ -9,6 +9,7 @@ import { CreateShopDto, ShopLineItemDto } from './dto/create-shop.dto';
 import { UpdateShopDto } from './dto/update-shop.dto';
 import { ShopFilterDto } from './dto/shop-query.dto';
 import { ShopDto, ShopListItemDto } from './dto/shop-response.dto';
+import { containsInsensitive } from '../common/helpers/like';
 
 const ZERO_CURRENCY = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 } as const;
 
@@ -73,7 +74,7 @@ export class ShopsService {
     const limit = query.limit ?? 20;
     const where: Prisma.ShopWhereInput = { campaignId };
     if (query.theme) where.theme = query.theme;
-    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    if (query.search) where.name = containsInsensitive(query.search);
     // Non-owner members only ever see open shops; a closed shop may hide spoilers
     // or a secret vendor. The owner (DM) sees all. (VEG-442)
     if (campaign.ownerId !== userId) where.isOpen = true;

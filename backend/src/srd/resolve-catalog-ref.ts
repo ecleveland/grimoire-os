@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { equalsInsensitive } from '../common/helpers/like';
 
 /** Minimal shape resolveCatalogRef keys on — an id plus a display name. */
 export interface IdNamed {
@@ -22,36 +22,19 @@ export interface CatalogSelection {
 }
 
 /**
- * Escape the LIKE metacharacters Postgres honours in a value bound to ILIKE.
- * Backslash first, or it would re-escape the escapes it just added.
- *
- * Exported because it is only correct if there is exactly one copy. It lives
- * beside the resolver because the two are halves of one rule: this narrows in
- * SQL, `resolveByUniqueName` decides in code.
- */
-export const escapeLike = (value: string) =>
-  value.replace(/[\\%_]/g, character => `\\${character}`);
-
-/**
  * Prisma `where` fragment matching a catalog row's name, case-insensitively and
  * literally.
  *
- * THE ESCAPING IS LOAD-BEARING. Prisma compiles `mode: 'insensitive'` to
- * `name ILIKE $1` and binds the value as a *pattern*, not a string. Measured
- * against the dev database on Prisma 6.19.2: `equals: 'Fighte_'` returned the SRD
- * Fighter, `equals: 'Wiz%'` returned Wizard, and `equals: '%'` returned every
- * class. A character free-typed as "Wizar_" would have had the SRD Wizard's id
- * derived and written to `classId` permanently, granting a real class's spell
- * slots to a class that does not exist. A name ending in a backslash is worse
- * still: unescaped, Postgres raises 22025 ("LIKE pattern must not end with escape
- * character") mid-scan, which surfaces as a 500 on every read of that sheet.
+ * THE ESCAPING IS LOAD-BEARING: `mode: 'insensitive'` compiles to ILIKE, which
+ * binds its argument as a pattern, so an unescaped name is a wildcard
+ * expression. common/helpers/like.ts holds the measurements and the full
+ * account; the cost here is that "Wizar_" resolves to the SRD Wizard and writes
+ * its id to `classId` permanently.
  *
  * Callers must still decide with `resolveByUniqueName`, so a future change to the
  * emitted SQL can only widen what is fetched, never what resolves.
  */
-export const catalogNameWhere = (name: string) => ({
-  name: { equals: escapeLike(name), mode: Prisma.QueryMode.insensitive },
-});
+export const catalogNameWhere = (name: string) => ({ name: equalsInsensitive(name) });
 
 /**
  * The backend's single catalog-reference resolver, and the twin of the frontend's

@@ -254,6 +254,25 @@ describe('NpcsService', () => {
       });
     });
 
+    it('escapes LIKE metacharacters in the search term [VEG-529]', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.npc.findMany.mockResolvedValue([]);
+      prisma.npc.count.mockResolvedValue(0);
+
+      await service.findAllForCampaign(CAMPAIGN_ID, USER_ID, { search: 'mae_lin' });
+
+      // Unescaped, the underscore is a single-character wildcard and "Maelin"
+      // matches a search for "mae_lin".
+      expect(prisma.npc.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            campaignId: CAMPAIGN_ID,
+            name: { contains: 'mae\\_lin', mode: 'insensitive' },
+          },
+        })
+      );
+    });
+
     it('throws ForbiddenException when non-DM lists', async () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')

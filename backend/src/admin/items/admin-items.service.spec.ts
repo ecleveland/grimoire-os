@@ -49,6 +49,22 @@ describe('AdminItemsService', () => {
       expect(res).toEqual({ data: [{ id: 'i1', name: 'A' }], total: 1, page: 2, lastPage: 1 });
     });
 
+    it('escapes LIKE metacharacters in the q filter [VEG-529]', async () => {
+      prisma.item.findMany.mockResolvedValue([]);
+      prisma.item.count.mockResolvedValue(0);
+
+      await service.list({ q: 'sil_k' });
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            contentSource: 'shared',
+            name: { contains: 'sil\\_k', mode: 'insensitive' },
+          },
+        })
+      );
+    });
+
     it('defaults to page 1 / limit 20 and omits optional filters', async () => {
       prisma.item.findMany.mockResolvedValue([]);
       prisma.item.count.mockResolvedValue(0);

@@ -23,6 +23,7 @@ import {
 import { NpcGeneratorService } from './generator/npc-generator.service';
 import { GeneratedNpc, NpcGenerationConstraints } from './generator/npc-generator.types';
 import { NpcDto, NpcListItemDto, NpcRelationDto } from './dto/npc-response.dto';
+import { containsInsensitive } from '../common/helpers/like';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 
 const JSON_FIELDS = ['statBlock', 'loot', 'lootOverrides', 'generationParams'] as const;
@@ -87,7 +88,7 @@ export class NpcsService {
     const where: Prisma.NpcWhereInput = { campaignId };
     if (query.race) where.race = query.race;
     if (query.profession) where.profession = query.profession;
-    if (query.search) where.name = { contains: query.search, mode: 'insensitive' };
+    if (query.search) where.name = containsInsensitive(query.search);
 
     const [data, total] = await Promise.all([
       this.prisma.npc.findMany({

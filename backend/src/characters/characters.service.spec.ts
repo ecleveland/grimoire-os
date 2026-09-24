@@ -10,6 +10,7 @@ import { UpdateCharacterDto } from './dto/update-character.dto';
 import { createMockPrismaService, MockPrismaService } from '../test/prisma-mock.factory';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { ContentAccessService } from '../srd/content-access.service';
+import { catalogNameWhere } from '../srd/resolve-catalog-ref';
 import {
   USER_ID,
   USER_ID_2,
@@ -38,13 +39,11 @@ const classSelect = {
   weaponProficiencies: true,
 };
 
-// Case-insensitive since VEG-528, so this resolver and the frontend's
-// `resolveByIdThenUniqueName` fold case identically. The value is LIKE-escaped
-// because Prisma compiles `mode: 'insensitive'` to ILIKE and binds it as a
-// pattern — unescaped, a class named "Fighte_" matched the SRD Fighter.
-const classNameWhere = (name: string) => ({
-  name: { equals: name, mode: 'insensitive' },
-});
+// The production filter, not a local copy of its shape. A copy that omitted the
+// escaping passed every fixture here, since none carries a metacharacter, while
+// claiming to prove the escaping. Importing it means these assertions pin what
+// the service really builds.
+const classNameWhere = catalogNameWhere;
 
 // The catalog row the default mocks stand for, and therefore the id every write
 // path derives for the fixture's "Fighter" (VEG-528).
@@ -1047,7 +1046,7 @@ describe('CharactersService', () => {
         await service.findOne(CHARACTER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual(classWhere('Fighte\\_'));
+        expect(args.where).toEqual(classWhere('Fighte_'));
       });
 
       it('escapes the percent wildcard too', async () => {
@@ -1060,7 +1059,7 @@ describe('CharactersService', () => {
         await service.findOne(CHARACTER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual(classWhere('\\%'));
+        expect(args.where).toEqual(classWhere('%'));
       });
 
       // Belt and braces: even if the SQL widened, the resolver decides on
@@ -1505,13 +1504,12 @@ describe('CharactersService', () => {
         );
       });
 
-      // The backslash case, which is worse than the other two metacharacters and
-      // had no test: `%` and `_` merely match the wrong row, but a name ending in
-      // a backslash makes Postgres raise 22025 ("LIKE pattern must not end with
-      // escape character") during the scan. Unescaped that is a 500 on every read
-      // of the sheet AND on the derivation, not a wrong answer. `class` carries
-      // only @IsOptional() @IsString(), so the name is accepted.
-      it('escapes a trailing backslash, which Postgres would otherwise reject', async () => {
+      // The backslash case, the third metacharacter and the one that had no test.
+      // Unescaped, a trailing backslash is a dangling LIKE escape. Measured on
+      // Postgres 16 it does not raise 22025 as once believed, it silently fails
+      // to match, so the class would never resolve rather than error. `class`
+      // carries only @IsOptional() @IsString(), so the name is accepted.
+      it('escapes a trailing backslash so the name can still match', async () => {
         prisma.character.findUnique.mockResolvedValue({
           ...mockCharacter,
           class: 'Fighter\\',
@@ -1521,7 +1519,7 @@ describe('CharactersService', () => {
         await service.findOne(CHARACTER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
-        expect(args.where).toEqual(classWhere('Fighter\\\\'));
+        expect(args.where).toEqual(classWhere('Fighter\\'));
       });
 
       // A wildcard name must not derive a key on the write path either. This is
