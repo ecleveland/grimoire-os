@@ -113,12 +113,20 @@ const SPELL_FUZZY_THRESHOLD = 0.2;
 const MONSTER_FUZZY_THRESHOLD = 0.2;
 const ITEM_FUZZY_THRESHOLD = 0.2;
 
+// A feature hit links to the page its parent lives on. Three of the four
+// parents have a page of their own, so id and name are enough. A subclass has
+// no page: it renders as a card on its class page, so the link needs the class
+// id as well as the subclass id for the anchor.
+export type UnifiedFeatureParent =
+  | { kind: Exclude<FeatureParentType, 'subclass'>; id: string; name: string }
+  | { kind: 'subclass'; id: string; name: string; classId: string };
+
 export type UnifiedFeatureData = {
   id: string;
   name: string;
   level?: number;
   description: string;
-  parent: { kind: FeatureParentType; id: string; name: string };
+  parent: UnifiedFeatureParent;
 };
 
 // The columns a class search card renders. The rest of the row is the
@@ -165,14 +173,18 @@ const TIERED_NAME_ORDER = [
   { id: 'asc' as const },
 ];
 
+// The parent-typed variant of a feature hit: `kind` names the parent table, so
+// the parent itself carries no kind. It splits on the same rule as
+// UnifiedFeatureParent: a subclass parent adds the class id its page lives on.
 type FeatureSearchHit = {
-  kind: FeatureParentType;
   id: string;
   name: string;
   description: string;
   level?: number;
-  parent: { id: string; name: string };
-};
+} & (
+  | { kind: Exclude<FeatureParentType, 'subclass'>; parent: { id: string; name: string } }
+  | { kind: 'subclass'; parent: { id: string; name: string; classId: string } }
+);
 
 // One source per kind, except `feature`, which fans out to one source per
 // parent table. Derived from SEARCH_KINDS rather than restated: a sixth kind
@@ -847,7 +859,7 @@ export class SrdService {
       const [rows, total] = await Promise.all([
         this.prisma.subclassFeature.findMany({
           where,
-          include: { subclass: { select: { id: true, name: true } } },
+          include: { subclass: { select: { id: true, name: true, classId: true } } },
         }),
         this.prisma.subclassFeature.count({ where }),
       ]);
@@ -859,7 +871,11 @@ export class SrdService {
           name: r.name,
           description: r.description,
           level: r.level,
-          parent: { id: r.subclass.id, name: r.subclass.name },
+          parent: {
+            id: r.subclass.id,
+            name: r.subclass.name,
+            classId: r.subclass.classId,
+          },
         })),
       };
     }
@@ -938,7 +954,7 @@ export class SrdService {
       }),
       this.prisma.subclassFeature.findMany({
         where: { ...byId, ...this.visibleFeatureParentWhere('subclass', userId) },
-        include: { subclass: { select: { id: true, name: true } } },
+        include: { subclass: { select: { id: true, name: true, classId: true } } },
       }),
       this.prisma.raceTrait.findMany({
         where: { ...byId, ...this.visibleFeatureParentWhere('race', userId) },
@@ -963,7 +979,12 @@ export class SrdService {
         name: r.name,
         level: r.level,
         description: r.description,
-        parent: { kind: 'subclass' as const, id: r.subclass.id, name: r.subclass.name },
+        parent: {
+          kind: 'subclass' as const,
+          id: r.subclass.id,
+          name: r.subclass.name,
+          classId: r.subclass.classId,
+        },
       })),
       ...raceTraits.map(r => ({
         id: r.id,
@@ -1305,7 +1326,7 @@ export class SrdService {
       idsBySource['feature:subclass'].length
         ? this.prisma.subclassFeature.findMany({
             where: { id: { in: idsBySource['feature:subclass'] } },
-            include: { subclass: { select: { id: true, name: true } } },
+            include: { subclass: { select: { id: true, name: true, classId: true } } },
           })
         : Promise.resolve([]),
       idsBySource['feature:race'].length
@@ -1383,7 +1404,12 @@ export class SrdService {
                 name: r.name,
                 level: r.level,
                 description: r.description,
-                parent: { kind: 'subclass', id: r.subclass.id, name: r.subclass.name },
+                parent: {
+                  kind: 'subclass',
+                  id: r.subclass.id,
+                  name: r.subclass.name,
+                  classId: r.subclass.classId,
+                },
               },
             });
           }
