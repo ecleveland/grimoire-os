@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import Collapsible from '@/components/Collapsible';
+import SrdCardFooter from '@/components/SrdCardFooter';
 import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
 import { fetchSrdList } from '@/lib/srd-server';
@@ -97,15 +97,7 @@ export default async function RaceListPage() {
                 {race.languages.join(', ')}
               </p>
             </div>
-            {/* The summary is a button, so the page link lives in the card body. */}
-            <div className="flex items-center gap-2 pt-2">
-              <Link
-                href={`/srd/races/${race.id}`}
-                className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
-              >
-                Open race page
-              </Link>
-            </div>
+            <SrdCardFooter href={`/srd/races/${race.id}`} kind="race" name={race.name} />
           </Collapsible>
         ))}
       </div>

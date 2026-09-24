@@ -196,7 +196,7 @@ describe('ClassListPage', () => {
       renderPage();
       await user.click(screen.getByRole('button', { name: /Fighter/, expanded: false }));
 
-      expect(screen.getByRole('link', { name: 'Open class page' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: 'Open Fighter class page' })).toHaveAttribute(
         'href',
         '/srd/classes/class-1'
       );
@@ -245,7 +245,7 @@ describe('ClassListPage', () => {
         '/srd/classes/class-hb/edit'
       );
       expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Open class page' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: 'Open Gunslinger class page' })).toHaveAttribute(
         'href',
         '/srd/classes/class-hb'
       );

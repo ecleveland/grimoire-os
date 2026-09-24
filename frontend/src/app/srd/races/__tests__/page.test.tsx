@@ -104,10 +104,15 @@ describe('RaceListPage', () => {
       await user.click(screen.getByRole('button', { name: /^Elf/ }));
       await user.click(screen.getByRole('button', { name: /^Dwarf/ }));
 
-      // In render order, so each href belongs to the card above it.
-      expect(
-        screen.getAllByRole('link', { name: 'Open race page' }).map(a => a.getAttribute('href'))
-      ).toEqual(['/srd/races/race-1', '/srd/races/race-2']);
+      // Each link names its own race, so the pairing needs no render order.
+      expect(screen.getByRole('link', { name: 'Open Elf race page' })).toHaveAttribute(
+        'href',
+        '/srd/races/race-1'
+      );
+      expect(screen.getByRole('link', { name: 'Open Dwarf race page' })).toHaveAttribute(
+        'href',
+        '/srd/races/race-2'
+      );
     });
   });
 
