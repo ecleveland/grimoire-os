@@ -174,6 +174,19 @@ describe('BackgroundListPage', () => {
       expect(screen.queryByText(/Alert \(/)).not.toBeInTheDocument();
     });
 
+    it('links each card to its background page, for anonymous visitors too', async () => {
+      const user = userEvent.setup();
+
+      renderPage();
+      // The card body is hidden while collapsed, so expand it first.
+      await user.click(screen.getByRole('button', { name: /Acolyte/, expanded: false }));
+
+      expect(screen.getByRole('link', { name: 'Open background page' })).toHaveAttribute(
+        'href',
+        '/srd/backgrounds/bg-1'
+      );
+    });
+
     it('omits the feat line when a background has no origin feat', () => {
       mockUseApiQuery.mockReturnValue(
         queryResult({ data: [makeBackground({ originFeat: null, originFeatOption: null })] })
@@ -239,6 +252,8 @@ describe('BackgroundListPage', () => {
 
       expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+      // The row is unmanageable, but it still opens.
+      expect(screen.getByRole('link', { name: 'Open background page' })).toBeInTheDocument();
     });
 
     it("shows no Edit/Delete on another user's homebrew", async () => {

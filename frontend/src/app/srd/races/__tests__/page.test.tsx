@@ -93,6 +93,22 @@ describe('RaceListPage', () => {
       expect(screen.getByText(/Failed to load races/)).toBeInTheDocument();
       errorSpy.mockRestore();
     });
+
+    it('links each card to its own race page', async () => {
+      mockFetchSrdList.mockResolvedValue([makeRace(), makeRace({ id: 'race-2', name: 'Dwarf' })]);
+      const user = userEvent.setup();
+      await renderPage();
+
+      // The card body is hidden while collapsed, so its link sits outside the
+      // accessibility tree the role query walks.
+      await user.click(screen.getByRole('button', { name: /^Elf/ }));
+      await user.click(screen.getByRole('button', { name: /^Dwarf/ }));
+
+      // In render order, so each href belongs to the card above it.
+      expect(
+        screen.getAllByRole('link', { name: 'Open race page' }).map(a => a.getAttribute('href'))
+      ).toEqual(['/srd/races/race-1', '/srd/races/race-2']);
+    });
   });
 
   describe('print set selection', () => {

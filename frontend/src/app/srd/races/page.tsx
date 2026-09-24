@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import Collapsible from '@/components/Collapsible';
 import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
@@ -95,6 +96,15 @@ export default async function RaceListPage() {
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 {race.languages.join(', ')}
               </p>
+            </div>
+            {/* The summary is a button, so the page link lives in the card body. */}
+            <div className="flex items-center gap-2 pt-2">
+              <Link
+                href={`/srd/races/${race.id}`}
+                className="text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                Open race page
+              </Link>
             </div>
           </Collapsible>
         ))}
