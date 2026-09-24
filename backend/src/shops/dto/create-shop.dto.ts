@@ -56,7 +56,12 @@ class CurrencyDto {
  * stock, otherwise a non-negative integer (0 = sold out).
  */
 export class ShopLineItemDto {
-  @ApiPropertyOptional({ description: 'Optional link to the Item catalog row' })
+  @ApiPropertyOptional({
+    description:
+      'Optional link to an SRD or shared catalog item. Homebrew items are refused, ' +
+      'because a buyer would end up holding an id they cannot read. Sell a private ' +
+      'thing as a custom line instead, with no itemId.',
+  })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)
   @IsUUID()

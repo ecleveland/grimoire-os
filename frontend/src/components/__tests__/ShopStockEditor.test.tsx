@@ -90,6 +90,21 @@ describe('ShopStockEditor', () => {
     ).toHaveLength(1);
   });
 
+  it("searches the global tier only, so the caller's homebrew is never offered (VEG-556)", async () => {
+    // Requested server-side so a page of the caller's homebrew cannot hide catalog rows.
+    mockApiFetch.mockResolvedValue(makeResponse([potion]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'pot');
+
+    await waitFor(() => {
+      const call = mockApiFetch.mock.calls.find(([url]) => String(url).startsWith('/srd/items?'));
+      expect(call).toBeDefined();
+      expect(new URLSearchParams(String(call![0]).split('?')[1]).get('tier')).toBe('global');
+    });
+  });
+
   it('adds a catalog item with price defaulted from its cost and unlimited stock', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([potion]));
     const user = userEvent.setup();

@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ShopsService } from './shops.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
@@ -16,6 +17,8 @@ describe('ShopsService', () => {
   };
 
   const SHOP_ID = 'shop-1111-2222-3333-444444444444';
+  const CATALOG_ITEM_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
+  const HOMEBREW_ITEM_ID = 'f6a7b8c9-d0e1-2345-fabc-456789012345';
 
   const lineItem = {
     itemId: null,
@@ -66,6 +69,7 @@ describe('ShopsService', () => {
         ShopsService,
         prismaMockProvider(),
         { provide: CampaignAuthService, useValue: campaignAuth },
+        ContentAccessService,
       ],
     }).compile();
 
@@ -150,6 +154,53 @@ describe('ShopsService', () => {
           notes: undefined,
         },
       ]);
+    });
+
+    it('stocks a line whose itemId resolves to the global catalog [VEG-556]', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
+      prisma.shop.create.mockResolvedValue(mockShop);
+
+      await service.create(USER_ID, {
+        ...createDto,
+        items: [{ ...lineItem, itemId: CATALOG_ITEM_ID }],
+      });
+
+      // Only srd + shared rows count as catalog, so the tier filter has to reach
+      // the query, not just the id list.
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: { contentSource: { in: ['srd', 'shared'] }, id: { in: [CATALOG_ITEM_ID] } },
+        select: { id: true },
+      });
+      expect(prisma.shop.create).toHaveBeenCalled();
+    });
+
+    it('refuses a line whose itemId is homebrew or unknown, naming the line [VEG-556]', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.item.findMany.mockResolvedValue([]);
+      const dto = { ...createDto, items: [{ ...lineItem, itemId: HOMEBREW_ITEM_ID }] };
+
+      await expect(service.create(USER_ID, dto)).rejects.toThrow(BadRequestException);
+      // The DM edits stock by name and never sees an id, so the id alone would
+      // not tell them which line to fix.
+      await expect(service.create(USER_ID, dto)).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: [
+            'Line "Potion of Healing" links an item that is not in the SRD or shared catalog',
+            expect.stringContaining('homebrew items are not eligible'),
+          ],
+        }),
+      });
+      expect(prisma.shop.create).not.toHaveBeenCalled();
+    });
+
+    it('skips the catalog query when no line links an item [VEG-556]', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.create.mockResolvedValue(mockShop);
+
+      await service.create(USER_ID, createDto);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
     });
   });
 
@@ -346,9 +397,10 @@ describe('ShopsService', () => {
 
       const result = await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items } as never);
 
+      // `items` is read back so ids the row already stores can be grandfathered.
       expect(prisma.shop.findUnique).toHaveBeenCalledWith({
         where: { id: SHOP_ID },
-        select: { id: true, campaignId: true },
+        select: { id: true, campaignId: true, items: true },
       });
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
       expect(prisma.shop.update).toHaveBeenCalledWith({
@@ -407,6 +459,97 @@ describe('ShopsService', () => {
       await expect(service.update(SHOP_ID, USER_ID_2, { name: 'x' } as never)).rejects.toThrow(
         ForbiddenException
       );
+      expect(prisma.shop.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a patched line whose itemId is homebrew or unknown [VEG-556]', async () => {
+      prisma.shop.findUnique.mockResolvedValue({ id: SHOP_ID, campaignId: CAMPAIGN_ID });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.item.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.update(SHOP_ID, USER_ID, {
+          items: [{ ...lineItem, itemId: HOMEBREW_ITEM_ID }],
+        } as never)
+      ).rejects.toThrow(BadRequestException);
+      expect(prisma.shop.update).not.toHaveBeenCalled();
+    });
+
+    it('keeps a patched line whose itemId resolves to the global catalog [VEG-556]', async () => {
+      prisma.shop.findUnique.mockResolvedValue({ id: SHOP_ID, campaignId: CAMPAIGN_ID });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
+      prisma.shop.update.mockResolvedValue(mockShop);
+
+      await service.update(SHOP_ID, USER_ID, {
+        items: [{ ...lineItem, itemId: CATALOG_ITEM_ID }],
+      } as never);
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: { contentSource: { in: ['srd', 'shared'] }, id: { in: [CATALOG_ITEM_ID] } },
+        select: { id: true },
+      });
+      expect(prisma.shop.update.mock.calls[0][0].data.items).toEqual([
+        { ...lineItem, itemId: CATALOG_ITEM_ID, notes: undefined },
+      ]);
+    });
+
+    it('skips the catalog query when the patch omits items [VEG-556]', async () => {
+      prisma.shop.findUnique.mockResolvedValue({ id: SHOP_ID, campaignId: CAMPAIGN_ID });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.update.mockResolvedValue(mockShop);
+
+      await service.update(SHOP_ID, USER_ID, { name: 'Renamed' } as never);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+    });
+
+    it('lets a rename through when a stored homebrew line is resent unchanged [VEG-556]', async () => {
+      // The edit form always resends the whole stock, so validating ids the row
+      // already carries would make a pre-rule shop permanently unsaveable.
+      const stored = { ...lineItem, itemId: HOMEBREW_ITEM_ID };
+      prisma.shop.findUnique.mockResolvedValue({
+        id: SHOP_ID,
+        campaignId: CAMPAIGN_ID,
+        items: [stored],
+      });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.shop.update.mockResolvedValue(mockShop);
+
+      await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items: [stored] } as never);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+      expect(prisma.shop.update.mock.calls[0][0].data.items).toEqual([
+        { ...stored, notes: undefined },
+      ]);
+    });
+
+    it('names only the newly added line when a stored one is grandfathered [VEG-556]', async () => {
+      const stored = { ...lineItem, itemId: HOMEBREW_ITEM_ID };
+      const added = { ...lineItem, itemId: CATALOG_ITEM_ID, name: 'Smuggled Draught' };
+      prisma.shop.findUnique.mockResolvedValue({
+        id: SHOP_ID,
+        campaignId: CAMPAIGN_ID,
+        items: [stored],
+      });
+      campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
+      prisma.item.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.update(SHOP_ID, USER_ID, { items: [stored, added] } as never)
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: [
+            'Line "Smuggled Draught" links an item that is not in the SRD or shared catalog',
+            expect.stringContaining('homebrew items are not eligible'),
+          ],
+        }),
+      });
+      // Only the unknown id is queried; the grandfathered one never reaches the DB.
+      expect(prisma.item.findMany).toHaveBeenCalledWith({
+        where: { contentSource: { in: ['srd', 'shared'] }, id: { in: [CATALOG_ITEM_ID] } },
+        select: { id: true },
+      });
       expect(prisma.shop.update).not.toHaveBeenCalled();
     });
   });

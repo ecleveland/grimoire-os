@@ -81,7 +81,14 @@ export default function ShopStockEditor({ value, onChange }: Props) {
     // Stale guard: a slow response for an old query must not overwrite the
     // newer query's results or end its loading state.
     let stale = false;
-    const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
+    // Shop lines are validated against the SRD and shared catalog, so ask for
+    // that tier rather than offering the caller homebrew the save will refuse.
+    const params = new URLSearchParams({
+      q: query,
+      page: '1',
+      limit: String(LIMIT),
+      tier: 'global',
+    });
     apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
       .then(res => {
         if (!stale) setResults(res.data);
