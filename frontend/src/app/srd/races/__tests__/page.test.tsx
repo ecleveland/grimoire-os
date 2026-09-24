@@ -156,6 +156,8 @@ describe('RaceListPage', () => {
     });
 
     it('renders no trait toggle when the trait has no id', async () => {
+      // RaceDetail logs the broken contract; the card path is what's under test.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mockFetchSrdList.mockResolvedValue([
         makeRace({ traits: [{ name: 'Keen Senses', description: 'Proficiency in Perception.' }] }),
       ]);
@@ -168,101 +170,17 @@ describe('RaceListPage', () => {
       expect(
         screen.queryByRole('button', { name: 'Add Keen Senses to print set' })
       ).not.toBeInTheDocument();
-    });
-  });
-
-  // An id-less trait can't be a print toggle. On real API data this never
-  // happens (the endpoint includes trait row ids), so its appearance signals
-  // a broken backend contract that would otherwise silently drop print toggles.
-  describe('inert-chip invariant logging (VEG-274)', () => {
-    it('logs a contract-violation error when a trait is rendered without an id', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      mockFetchSrdList.mockResolvedValue([
-        makeRace({
-          traits: [
-            { id: 'trait-fey-ancestry', name: 'Fey Ancestry', description: 'Advantage vs charm.' },
-            { name: 'Keen Senses', description: 'Proficiency in Perception.' },
-          ],
-        }),
-      ]);
-
-      await renderPage();
-
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('race traits rendered without an id'),
-        ['Keen Senses']
-      );
-      errorSpy.mockRestore();
-    });
-
-    it('does not log the invariant when every trait carries an id', async () => {
-      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-      mockFetchSrdList.mockResolvedValue([elfWithLineage]);
-
-      await renderPage();
-
-      expect(errorSpy).not.toHaveBeenCalledWith(
-        expect.stringContaining('without an id'),
-        expect.anything()
-      );
       errorSpy.mockRestore();
     });
   });
 
-  describe('trait detail rendering', () => {
-    it('keeps trait descriptions hidden until the race is expanded', async () => {
-      mockFetchSrdList.mockResolvedValue([elfWithLineage]);
-      await renderPage();
+  it('keeps trait descriptions hidden until the race is expanded', async () => {
+    mockFetchSrdList.mockResolvedValue([elfWithLineage]);
+    await renderPage();
 
-      // Present in the SSR HTML (crawlable) but not visible while collapsed; the
-      // table lives in the hidden subtree, so the accessibility-aware role query skips it.
-      expect(screen.getByText('Elven Lineage.')).not.toBeVisible();
-      expect(screen.queryByRole('table')).not.toBeInTheDocument();
-    });
-
-    it('renders trait descriptions and the reconstructed lineage table when expanded', async () => {
-      mockFetchSrdList.mockResolvedValue([elfWithLineage]);
-      const user = userEvent.setup();
-      await renderPage();
-
-      await user.click(screen.getByRole('button', { name: /^Elf/ }));
-
-      // Trait name + prose render.
-      expect(screen.getByText('Elven Lineage.')).toBeVisible();
-      expect(
-        screen.getByText(
-          /You have Advantage on saving throws to avoid or end the Charmed condition\./
-        )
-      ).toBeInTheDocument();
-
-      // The GFM table renders as a real <table>, not literal pipes.
-      expect(screen.getByRole('table')).toBeInTheDocument();
-      expect(screen.getByRole('columnheader', { name: 'Level 3' })).toBeInTheDocument();
-      expect(screen.getByRole('cell', { name: 'Faerie Fire' })).toBeInTheDocument();
-    });
-
-    it('renders ability-bonus chips when the race grants them', async () => {
-      mockFetchSrdList.mockResolvedValue([makeRace({ abilityBonuses: { DEX: 2, CON: 1 } })]);
-      const user = userEvent.setup();
-      await renderPage();
-
-      await user.click(screen.getByRole('button', { name: /^Elf/ }));
-      expect(screen.getByText('Ability Bonuses')).toBeInTheDocument();
-      expect(screen.getByText('DEX +2')).toBeInTheDocument();
-      expect(screen.getByText('CON +1')).toBeInTheDocument();
-    });
-
-    it('omits the Ability Bonuses section when bonuses are null', async () => {
-      // Real seeded SRD races have a SQL NULL abilityBonuses — the page must not throw
-      // on Object.entries(null) (regression guard for the races page crash).
-      mockFetchSrdList.mockResolvedValue([
-        makeRace({ abilityBonuses: null as unknown as SrdRace['abilityBonuses'] }),
-      ]);
-      const user = userEvent.setup();
-      await renderPage();
-
-      await user.click(screen.getByRole('button', { name: /^Elf/ }));
-      expect(screen.queryByText('Ability Bonuses')).not.toBeInTheDocument();
-    });
+    // Present in the SSR HTML (crawlable) but not visible while collapsed; the
+    // table lives in the hidden subtree, so the accessibility-aware role query skips it.
+    expect(screen.getByText('Elven Lineage.')).not.toBeVisible();
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
   });
 });

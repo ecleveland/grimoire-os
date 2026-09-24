@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BackgroundDetailPage from '../page';
 import { PrintTrayProvider } from '@/lib/print-tray-context';
-import type { BackgroundFeature, SrdBackground } from '@/lib/types';
+import type { SrdBackground } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -49,10 +49,7 @@ vi.mock('next/navigation', () => ({
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-/** The detail GET includes the background's features, which the list payload leaves out. */
-type BackgroundWithFeatures = SrdBackground & { features?: BackgroundFeature[] };
-
-function makeBackground(over: Partial<BackgroundWithFeatures> = {}): BackgroundWithFeatures {
+function makeBackground(over: Partial<SrdBackground> = {}): SrdBackground {
   return {
     id: 'bg-1',
     name: 'Gravedigger',
@@ -77,19 +74,6 @@ function makeBackground(over: Partial<BackgroundWithFeatures> = {}): BackgroundW
     ...over,
   };
 }
-
-/** A background with every optional section left out. */
-const BARE = makeBackground({
-  description: undefined,
-  toolProficiencies: [],
-  languages: 0,
-  equipment: undefined,
-  features: [],
-  personalityTraits: [],
-  ideals: [],
-  bonds: [],
-  flaws: [],
-});
 
 function anon() {
   mockUseAuth.mockReturnValue({
@@ -271,6 +255,7 @@ describe('BackgroundDetailPage', () => {
       expect(screen.queryByText('Homebrew')).not.toBeInTheDocument();
     });
 
+    // BackgroundSubtitle's own spec covers the feat-less and option-less lines.
     it('lists the skills, the origin feat and its chosen option in the subtitle', () => {
       renderPage();
 
@@ -278,133 +263,15 @@ describe('BackgroundDetailPage', () => {
         screen.getByText('Skills: Insight, Religion · Feat: Magic Initiate (Cleric)')
       ).toBeInTheDocument();
     });
-
-    it('drops the option from the subtitle when the origin feat takes none', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({ data: makeBackground({ originFeatOption: null }) })
-      );
-
-      renderPage();
-
-      expect(
-        screen.getByText('Skills: Insight, Religion · Feat: Magic Initiate')
-      ).toBeInTheDocument();
-    });
-
-    it('shows skills alone when the background has no origin feat', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({ data: makeBackground({ originFeat: null, originFeatOption: null }) })
-      );
-
-      renderPage();
-
-      expect(screen.getByText('Skills: Insight, Religion')).toBeInTheDocument();
-      expect(screen.queryByText(/Feat:/)).not.toBeInTheDocument();
-    });
   });
 
-  describe('body sections', () => {
-    it('renders every section a fully populated background has', () => {
-      renderPage();
+  // BackgroundDetail's own spec covers which sections render; the page only has
+  // to hand it the background it loaded.
+  it('renders the background body under the page heading', () => {
+    renderPage();
 
-      expect(screen.getByText('You turned the earth over the parish dead.')).toBeInTheDocument();
-
-      expect(screen.getByRole('heading', { name: 'Tool Proficiencies' })).toBeInTheDocument();
-      expect(screen.getByText("Mason's tools")).toBeInTheDocument();
-
-      expect(screen.getByRole('heading', { name: 'Languages' })).toBeInTheDocument();
-      expect(screen.getByText('2 additional languages')).toBeInTheDocument();
-
-      expect(screen.getByRole('heading', { name: 'Equipment' })).toBeInTheDocument();
-      expect(screen.getByText('Shovel, holy symbol, 10 GP')).toBeInTheDocument();
-
-      expect(screen.getByRole('heading', { level: 2, name: 'Features' })).toBeInTheDocument();
-      expect(
-        screen.getByRole('heading', { level: 3, name: 'Grave Knowledge' })
-      ).toBeInTheDocument();
-      expect(screen.getByText('You know who is buried where.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 3, name: 'Quiet Company' })).toBeInTheDocument();
-      expect(screen.getByText('The night shift never questions you.')).toBeInTheDocument();
-
-      expect(screen.getByRole('heading', { name: 'Personality Traits' })).toBeInTheDocument();
-      expect(screen.getByText('I speak softly around strangers.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Ideals' })).toBeInTheDocument();
-      expect(screen.getByText('Rest. Everyone has earned it.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Bonds' })).toBeInTheDocument();
-      expect(screen.getByText('The parish I served.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Flaws' })).toBeInTheDocument();
-      expect(screen.getByText('I answer the dead out loud.')).toBeInTheDocument();
-    });
-
-    it('gives every roleplay entry its own list item', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({ data: makeBackground({ ideals: ['Rest.', 'Dignity.'] }) })
-      );
-
-      renderPage();
-
-      expect(screen.getAllByRole('listitem').map(li => li.textContent)).toEqual(
-        expect.arrayContaining([
-          'Rest.',
-          'Dignity.',
-          'I speak softly around strangers.',
-          'The parish I served.',
-          'I answer the dead out loud.',
-        ])
-      );
-    });
-
-    it('omits every optional section when the background has none of them', () => {
-      mockUseApiQuery.mockReturnValue(queryResult({ data: BARE }));
-
-      renderPage();
-
-      for (const heading of [
-        'Tool Proficiencies',
-        'Languages',
-        'Equipment',
-        'Features',
-        'Personality Traits',
-        'Ideals',
-        'Bonds',
-        'Flaws',
-      ]) {
-        expect(screen.queryByRole('heading', { name: heading })).not.toBeInTheDocument();
-      }
-      expect(
-        screen.queryByText('You turned the earth over the parish dead.')
-      ).not.toBeInTheDocument();
-      // The header still stands on its own.
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Gravedigger');
-    });
-
-    it('writes a single extra language in the singular', () => {
-      mockUseApiQuery.mockReturnValue(queryResult({ data: makeBackground({ languages: 1 }) }));
-
-      renderPage();
-
-      expect(screen.getByText('1 additional language')).toBeInTheDocument();
-    });
-
-    it('drops the features section when the background has an empty feature list', () => {
-      mockUseApiQuery.mockReturnValue(queryResult({ data: makeBackground({ features: [] }) }));
-
-      renderPage();
-
-      expect(screen.queryByRole('heading', { name: 'Features' })).not.toBeInTheDocument();
-      expect(screen.queryByText('You know who is buried where.')).not.toBeInTheDocument();
-    });
-
-    it('drops the features section when the payload carries no features at all', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({ data: makeBackground({ features: undefined }) })
-      );
-
-      renderPage();
-
-      expect(screen.queryByRole('heading', { name: 'Features' })).not.toBeInTheDocument();
-      expect(screen.queryByText('You know who is buried where.')).not.toBeInTheDocument();
-    });
+    expect(screen.getByRole('heading', { level: 2, name: 'Features' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: 'Grave Knowledge' })).toBeInTheDocument();
   });
 
   describe('manage controls', () => {

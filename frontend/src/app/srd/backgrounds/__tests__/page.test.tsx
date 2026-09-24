@@ -155,25 +155,6 @@ describe('BackgroundListPage', () => {
       expect(screen.getByText(/Failed to load backgrounds/)).toBeInTheDocument();
     });
 
-    it('renders the feat name without an option suffix when originFeatOption is null', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({
-          data: [
-            makeBackground({
-              name: 'Criminal',
-              originFeat: { id: 'feat-alert', name: 'Alert' },
-              originFeatOption: null,
-            }),
-          ],
-        })
-      );
-
-      renderPage();
-
-      expect(screen.getByText(/Feat: Alert/)).toBeInTheDocument();
-      expect(screen.queryByText(/Alert \(/)).not.toBeInTheDocument();
-    });
-
     it('links each card to its background page, for anonymous visitors too', async () => {
       const user = userEvent.setup();
 
@@ -187,14 +168,22 @@ describe('BackgroundListPage', () => {
       );
     });
 
-    it('omits the feat line when a background has no origin feat', () => {
+    // BackgroundDetail's own spec covers what the body renders; this case only
+    // checks the card wires it up behind the toggle.
+    it('renders the background body inside the expanded card', async () => {
       mockUseApiQuery.mockReturnValue(
-        queryResult({ data: [makeBackground({ originFeat: null, originFeatOption: null })] })
+        queryResult({ data: [makeBackground({ toolProficiencies: ['Gaming set'] })] })
       );
+      const user = userEvent.setup();
 
       renderPage();
+      await user.click(screen.getByRole('button', { name: /Acolyte/, expanded: false }));
 
-      expect(screen.queryByText(/Feat:/)).not.toBeInTheDocument();
+      // Level 3, one below the card's own h2 name.
+      expect(
+        screen.getByRole('heading', { level: 3, name: 'Tool Proficiencies' })
+      ).toBeInTheDocument();
+      expect(screen.getByText('Gaming set')).toBeInTheDocument();
     });
   });
 

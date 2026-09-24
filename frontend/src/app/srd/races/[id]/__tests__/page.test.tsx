@@ -20,8 +20,6 @@ vi.mock('next/navigation', () => ({
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
-type RaceWithSubraces = SrdRace & { subraces?: SrdSubrace[] };
-
 const HIGH_ELF: SrdSubrace = {
   id: 'subrace-high',
   name: 'High Elf',
@@ -30,7 +28,7 @@ const HIGH_ELF: SrdSubrace = {
   source: 'SRD 5.2.1',
 };
 
-function makeRace(over: Partial<RaceWithSubraces> = {}): RaceWithSubraces {
+function makeRace(over: Partial<SrdRace> = {}): SrdRace {
   return {
     id: 'race-1',
     name: 'Elf',
@@ -43,13 +41,7 @@ function makeRace(over: Partial<RaceWithSubraces> = {}): RaceWithSubraces {
       {
         id: 'trait-darkvision',
         name: 'Darkvision',
-        description: [
-          'You can see in dim light within 60 feet.',
-          '',
-          '| Range | Effect |',
-          '| --- | --- |',
-          '| 60 feet | Dim light counts as bright light. |',
-        ].join('\n'),
+        description: 'You can see in dim light within 60 feet.',
       },
     ],
     age: 'Elves reach adulthood around 100.',
@@ -160,41 +152,16 @@ describe('RaceDetailPage', () => {
   });
 
   describe('loaded race', () => {
-    it('renders the back link, the header and the race sections', () => {
+    it('renders the back link, the header and the race body', () => {
       renderPage();
 
       expect(screen.getByRole('link', { name: '← Races' })).toHaveAttribute('href', '/srd/races');
       expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Elf');
       expect(screen.getByText('Speed: 30 ft · Size: Medium')).toBeInTheDocument();
-      expect(screen.getByText('A graceful people of the ancient woods.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Ability Bonuses' })).toBeInTheDocument();
-      expect(screen.getByText('DEX +2')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Traits' })).toBeInTheDocument();
-      expect(screen.getByText('Darkvision.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Languages' })).toBeInTheDocument();
+      // One body section stands in for the rest; RaceDetail's own spec covers them.
+      // It sits at level 2, directly under the page h1 and level with Subraces.
+      expect(screen.getByRole('heading', { level: 2, name: 'Languages' })).toBeInTheDocument();
       expect(screen.getByText('Common, Elvish')).toBeInTheDocument();
-    });
-
-    it('renders the flavour paragraphs under their own headings', () => {
-      renderPage();
-
-      expect(screen.getByRole('heading', { name: 'Age' })).toBeInTheDocument();
-      expect(screen.getByText('Elves reach adulthood around 100.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Alignment' })).toBeInTheDocument();
-      expect(screen.getByText('Elves lean toward chaotic good.')).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: 'Size' })).toBeInTheDocument();
-      expect(screen.getByText('Elves stand between 5 and 6 feet tall.')).toBeInTheDocument();
-    });
-
-    it('renders a trait description as markdown', () => {
-      renderPage();
-
-      expect(screen.getByText(/You can see in dim light within 60 feet\./)).toBeInTheDocument();
-      expect(screen.getByRole('table')).toBeInTheDocument();
-      expect(screen.getByRole('columnheader', { name: 'Effect' })).toBeInTheDocument();
-      expect(
-        screen.getByRole('cell', { name: 'Dim light counts as bright light.' })
-      ).toBeInTheDocument();
     });
 
     it('offers print toggles for the race and for each trait', () => {
@@ -206,14 +173,6 @@ describe('RaceDetailPage', () => {
       ).toBeInTheDocument();
     });
 
-    it('renders the subraces with their descriptions', () => {
-      renderPage();
-
-      expect(screen.getByRole('heading', { level: 2, name: 'Subraces' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 3, name: 'High Elf' })).toBeInTheDocument();
-      expect(screen.getByText('A scholarly elf with a knack for cantrips.')).toBeInTheDocument();
-    });
-
     it('shows no manage controls, since races have no homebrew tier', () => {
       renderPage();
 
@@ -222,90 +181,13 @@ describe('RaceDetailPage', () => {
     });
   });
 
-  describe('empty and absent fields', () => {
-    it('omits the Ability Bonuses section when the race grants none', () => {
-      mockUseApiQuery.mockReturnValue(queryResult({ data: makeRace({ abilityBonuses: {} }) }));
-
+  describe('subraces', () => {
+    it('renders the subraces with their descriptions', () => {
       renderPage();
 
-      expect(screen.queryByRole('heading', { name: 'Ability Bonuses' })).not.toBeInTheDocument();
-    });
-
-    it('omits the Ability Bonuses section when bonuses are null', () => {
-      // Seeded SRD 5.2.1 species persist abilityBonuses as a SQL NULL, so the page
-      // must not throw on Object.entries(null).
-      mockUseApiQuery.mockReturnValue(
-        queryResult({
-          data: makeRace({ abilityBonuses: null as unknown as SrdRace['abilityBonuses'] }),
-        })
-      );
-
-      renderPage();
-
-      expect(screen.queryByRole('heading', { name: 'Ability Bonuses' })).not.toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Elf');
-    });
-
-    it('omits the description when the race has none', () => {
-      mockUseApiQuery.mockReturnValue(queryResult({ data: makeRace({ description: undefined }) }));
-
-      renderPage();
-
-      expect(screen.queryByText('A graceful people of the ancient woods.')).not.toBeInTheDocument();
-    });
-
-    it('omits the Traits section when the race has none', () => {
-      mockUseApiQuery.mockReturnValue(queryResult({ data: makeRace({ traits: [] }) }));
-
-      renderPage();
-
-      expect(screen.queryByRole('heading', { name: 'Traits' })).not.toBeInTheDocument();
-    });
-
-    it('renders a trait without a print toggle when it carries no id', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({
-          data: makeRace({
-            traits: [{ name: 'Keen Senses', description: 'Proficiency in Perception.' }],
-          }),
-        })
-      );
-
-      renderPage();
-
-      expect(screen.getByText('Keen Senses.')).toBeInTheDocument();
-      expect(
-        screen.queryByRole('button', { name: 'Add Keen Senses to print set' })
-      ).not.toBeInTheDocument();
-    });
-
-    it('renders a trait with no description', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({
-          data: makeRace({ traits: [{ id: 'trait-bare', name: 'Trance' }] }),
-        })
-      );
-
-      renderPage();
-
-      expect(screen.getByText('Trance.')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Add Trance to print set' })).toBeInTheDocument();
-    });
-
-    it('omits the Age, Alignment and Size headings when those fields are absent', () => {
-      mockUseApiQuery.mockReturnValue(
-        queryResult({
-          data: makeRace({ age: undefined, alignment: undefined, sizeDescription: undefined }),
-        })
-      );
-
-      renderPage();
-
-      expect(screen.queryByRole('heading', { name: 'Age' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { name: 'Alignment' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('heading', { name: 'Size' })).not.toBeInTheDocument();
-      // The size still shows in the subtitle.
-      expect(screen.getByText('Speed: 30 ft · Size: Medium')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Subraces' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: 'High Elf' })).toBeInTheDocument();
+      expect(screen.getByText('A scholarly elf with a knack for cantrips.')).toBeInTheDocument();
     });
 
     it('omits the Subraces section when the race has an empty list', () => {
