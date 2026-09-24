@@ -27,14 +27,50 @@ describe('SrdCardFooter', () => {
       </>
     );
 
-    expect(screen.getByRole('link', { name: 'Open Dragonborn race page' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Open race page (Dragonborn)' })).toHaveAttribute(
       'href',
       '/srd/races/race-1'
     );
-    expect(screen.getByRole('link', { name: 'Open Dwarf race page' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Open race page (Dwarf)' })).toHaveAttribute(
       'href',
       '/srd/races/race-2'
     );
+  });
+
+  // WCAG 2.5.3 Label in Name: someone saying "click Open race page" to a voice
+  // control matches only if the visible phrase opens the accessible name.
+  it('keeps the visible text at the start of the accessible name', () => {
+    render(<SrdCardFooter href="/srd/races/race-1" kind="race" name="Dragonborn" />);
+
+    const link = screen.getByRole('link', { name: 'Open race page (Dragonborn)' });
+    expect(link.textContent?.startsWith('Open race page')).toBe(true);
+  });
+
+  // Chrome inserts a space where jsdom trims one at an element boundary, so a
+  // visible run plus a hidden span computes two different names. One string
+  // gives every engine the same answer.
+  it('computes the accessible name from a single string', () => {
+    render(<SrdCardFooter href="/srd/races/race-1" kind="race" name="Dragonborn" />);
+
+    const link = screen.getByRole('link', { name: 'Open race page (Dragonborn)' });
+    expect(link).toHaveAccessibleName('Open race page (Dragonborn)');
+    expect(link.textContent).toBe('Open race page');
+  });
+
+  // A homebrew row may copy an SRD row's name, leaving two identical links.
+  it('marks a homebrew row in the accessible name', () => {
+    render(<SrdCardFooter href="/srd/classes/class-hb" kind="class" name="Fighter" homebrew />);
+
+    expect(
+      screen.getByRole('link', { name: 'Open class page (Fighter, homebrew)' })
+    ).toBeInTheDocument();
+  });
+
+  it('leaves the homebrew marker off a catalog row', () => {
+    render(<SrdCardFooter href="/srd/classes/class-1" kind="class" name="Fighter" />);
+
+    expect(screen.getByRole('link', { name: 'Open class page (Fighter)' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /homebrew/ })).not.toBeInTheDocument();
   });
 
   it('renders actions beside the link, right-aligned', () => {

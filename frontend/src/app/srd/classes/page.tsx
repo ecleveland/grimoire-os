@@ -102,6 +102,7 @@ export default function ClassListPage() {
                 href={`/srd/classes/${cls.id}`}
                 kind="class"
                 name={cls.name}
+                homebrew={cls.contentSource === 'homebrew'}
                 actions={
                   canManage(cls) && (
                     <>

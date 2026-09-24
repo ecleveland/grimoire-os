@@ -181,7 +181,7 @@ describe('BackgroundListPage', () => {
       // The card body is hidden while collapsed, so expand it first.
       await user.click(screen.getByRole('button', { name: /Acolyte/, expanded: false }));
 
-      expect(screen.getByRole('link', { name: 'Open Acolyte background page' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: 'Open background page (Acolyte)' })).toHaveAttribute(
         'href',
         '/srd/backgrounds/bg-1'
       );
@@ -254,7 +254,7 @@ describe('BackgroundListPage', () => {
       expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
       // The row is unmanageable, but it still opens.
       expect(
-        screen.getByRole('link', { name: 'Open Acolyte background page' })
+        screen.getByRole('link', { name: 'Open background page (Acolyte)' })
       ).toBeInTheDocument();
     });
 

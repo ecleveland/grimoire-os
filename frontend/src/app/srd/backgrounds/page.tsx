@@ -125,6 +125,7 @@ export default function BackgroundListPage() {
                 href={`/srd/backgrounds/${bg.id}`}
                 kind="background"
                 name={bg.name}
+                homebrew={bg.contentSource === 'homebrew'}
                 actions={
                   canManage(bg) && (
                     <>
