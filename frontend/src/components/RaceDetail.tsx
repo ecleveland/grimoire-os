@@ -5,7 +5,7 @@ import type { SrdRace } from '@/lib/types';
 const headingClass = 'text-sm font-medium text-gray-700 dark:text-gray-300';
 const bodyTextClass = 'text-sm text-gray-600 dark:text-gray-400';
 
-/** Races already reported for the id-less-trait invariant, keyed by race id. */
+/** Races already reported for the id-less-trait invariant in this tab, by race id. */
 const reportedIdlessTraits = new Set<string>();
 
 /**
@@ -33,11 +33,15 @@ export default function RaceDetail({
   // chip. Nothing about the rendered card gives that away, so say it loudly.
   //
   // The check runs in the render body because the list page renders this as a
-  // server component, where no effect ever runs. The set keeps a client
-  // re-render, such as the race page's query resolving, from repeating the line.
+  // server component, where no effect ever runs. The server logs once per
+  // request, as the list page always did, since its module state outlives the
+  // request and deduping there would silence every request after the first. The
+  // set only stops a client re-render, such as the race page's query resolving,
+  // from repeating the line.
+  const inBrowser = typeof window !== 'undefined';
   const idless = traits.filter(t => !t.id);
-  if (idless.length > 0 && !reportedIdlessTraits.has(race.id)) {
-    reportedIdlessTraits.add(race.id);
+  if (idless.length > 0 && !(inBrowser && reportedIdlessTraits.has(race.id))) {
+    if (inBrowser) reportedIdlessTraits.add(race.id);
     console.error(
       'RaceDetail: race traits rendered without an id, print toggle unavailable (backend contract regression):',
       idless.map(t => t.name)

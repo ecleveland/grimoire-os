@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import userEvent from '@testing-library/user-event';
 import RaceDetail from '../RaceDetail';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -250,6 +251,29 @@ describe('RaceDetail', () => {
 
       renderDetail(makeRace({ id: 'race-idless-first', traits: [{ name: 'Keen Senses' }] }));
       renderDetail(makeRace({ id: 'race-idless-second', traits: [{ name: 'Stonecunning' }] }));
+
+      expect(idlessLogs(errorSpy)).toHaveLength(2);
+      errorSpy.mockRestore();
+    });
+
+    // The races list is a force-dynamic server component, so module state there
+    // outlives the request. Deduping on the server would silence every request
+    // after the first, which is how the list page used to report this.
+    it('logs on every server render, where the dedupe would outlive the request', () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const race = makeRace({
+        id: 'race-idless-server',
+        traits: [{ name: 'Keen Senses', description: 'Proficiency in Perception.' }],
+      });
+
+      // An id-less trait renders no print toggle, so this tree needs no provider.
+      vi.stubGlobal('window', undefined);
+      try {
+        renderToStaticMarkup(<RaceDetail race={race} />);
+        renderToStaticMarkup(<RaceDetail race={race} />);
+      } finally {
+        vi.unstubAllGlobals();
+      }
 
       expect(idlessLogs(errorSpy)).toHaveLength(2);
       errorSpy.mockRestore();
