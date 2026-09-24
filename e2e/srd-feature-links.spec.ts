@@ -92,6 +92,41 @@ test.describe('Feature search links (VEG-558)', () => {
     await expect(page.getByRole('link', { name: '← Backgrounds' })).toBeVisible();
   });
 
+  test('a race list card opens the race page', async ({ page }) => {
+    await page.goto('/srd/races');
+
+    // Anchored, so the card's print toggle ("Add Dragonborn to print set") cannot match.
+    const card = page.getByRole('button', { name: /^Dragonborn/ });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+
+    await page.getByRole('link', { name: 'Open race page' }).first().click();
+
+    await expect(page).toHaveURL(/\/srd\/races\/[^/]+$/);
+    await expect(page.getByRole('heading', { level: 1, name: /^Dragonborn/ })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test('a background list card opens the background page', async ({ page }) => {
+    await page.goto('/srd/backgrounds');
+    // The list is fetched client-side, so wait for the page before hunting a card.
+    await expect(page.getByRole('heading', { name: 'Backgrounds' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const card = page.getByRole('button', { name: /^Acolyte/ });
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await card.click();
+
+    await page.getByRole('link', { name: 'Open background page' }).first().click();
+
+    await expect(page).toHaveURL(/\/srd\/backgrounds\/[^/]+$/);
+    await expect(page.getByRole('heading', { level: 1, name: /^Acolyte/ })).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test('an unknown race or background id says so instead of erroring', async ({ page }) => {
     await page.goto('/srd/races/does-not-exist');
     await expect(page.getByText('Race not found.')).toBeVisible({ timeout: 10_000 });
