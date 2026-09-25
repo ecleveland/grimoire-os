@@ -3,8 +3,11 @@
 // and nothing more. Whether a homebrew row actually fails to resolve is a
 // property of the where clause against real rows, and only a database tests a
 // where clause. Two homebrew items exist here on purpose: the DM's own and a
-// stranger's. A DM stocking their own homebrew is the tempting case, and it is
-// refused for the same reason as the stranger's, because the buyer is neither.
+// stranger's. The write boundary refuses both, because whoever buys the line
+// later may not be the item's owner. The purchase path is scoped to the actual
+// buyer instead, so it keeps an id that buyer can read and drops one they
+// cannot. That is why the DM's own homebrew is refused on write yet survives a
+// purchase the DM makes themselves.
 import type { Prisma } from '@prisma/client';
 import type { Currency, InventoryItem, ShopLineItem } from '@grimoire-os/shared';
 import {
@@ -315,6 +318,26 @@ describe('catalog-only shop lines on a real DB (VEG-556)', () => {
       const bought = await ctx.prisma.character.findUniqueOrThrow({ where: { id: character.id } });
       const inventory = bought.inventory as unknown as InventoryItem[];
       expect(inventory[0]).toMatchObject({ name: 'Elixir of Health', itemId: srdItemId });
+    });
+
+    it('keeps the id when the buyer owns the homebrew item', async () => {
+      // The DM buying from their own shop can read their own homebrew, so the
+      // link is good on their sheet and dropping it would lose real information.
+      const shop = await insertShop([
+        line({ itemId: dmHomebrewId, name: "Maelin's Own Brew", price: gp(1), stock: null }),
+      ]);
+      const character = await insertBuyer();
+
+      const receipt = await purchase.purchase(dmId, shop.id, {
+        characterId: character.id,
+        itemIndex: 0,
+        quantity: 1,
+      });
+
+      expect(receipt.item.itemId).toBe(dmHomebrewId);
+      const bought = await ctx.prisma.character.findUniqueOrThrow({ where: { id: character.id } });
+      const inventory = bought.inventory as unknown as InventoryItem[];
+      expect(inventory[0]).toMatchObject({ name: "Maelin's Own Brew", itemId: dmHomebrewId });
     });
   });
 });

@@ -303,13 +303,21 @@ describe('ShopPurchaseService', () => {
   describe('catalog link on the bought goods [VEG-556]', () => {
     const linked = () => buildShop({ items: [lineItem({ itemId: 'cat-1' })] });
 
-    it('keeps the id when the line still resolves to the global catalog', async () => {
+    it('keeps the id when the buyer can read the item', async () => {
       prisma.shop.findUnique.mockResolvedValue(linked());
 
       const receipt = await service.purchase(USER_ID_2, SHOP_ID, dto());
 
+      // Scoped to the buyer, not the global catalog: the buyer's own homebrew is
+      // readable by them, so its id is safe on their sheet. AND rather than a
+      // spread, because visibleTo carries its own OR.
       expect(prisma.item.findFirst).toHaveBeenCalledWith({
-        where: { contentSource: { in: ['srd', 'shared'] }, id: 'cat-1' },
+        where: {
+          AND: [
+            { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID_2 }] },
+            { id: 'cat-1' },
+          ],
+        },
         select: { id: true },
       });
       expect(prisma.character.updateMany.mock.calls[0][0].data.inventory).toEqual([

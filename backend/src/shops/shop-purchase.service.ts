@@ -74,17 +74,20 @@ export class ShopPurchaseService {
     );
     if (!priced) throw new BadRequestException('Not enough coin for this purchase');
 
-    // Only a global catalog id goes into the buyer's inventory. Shop lines are
-    // written catalog-only, but a stored line predating that rule may still name
-    // homebrew, and an id its owner alone can read would dangle on the sheet. The
-    // goods still change hands; the link is what drops.
+    // The line keeps its id when the buyer can read the item: the global catalog,
+    // or the buyer's own homebrew. An id only someone else can read is dropped,
+    // because a stored line predating the catalog-only write rule may still name
+    // foreign homebrew and that id would dangle on the sheet. The goods change
+    // hands either way; the link is what drops. Ownership of the character is
+    // already proven above, so `userId` is the reader. AND rather than a spread,
+    // because visibleTo carries its own OR.
     let inventoryItemId: string | null = null;
     if (line.itemId) {
-      const catalogRow = await this.prisma.item.findFirst({
-        where: { ...this.contentAccess.globalWhere(), id: line.itemId },
+      const readableRow = await this.prisma.item.findFirst({
+        where: { AND: [this.contentAccess.visibleTo(userId), { id: line.itemId }] },
         select: { id: true },
       });
-      inventoryItemId = catalogRow ? line.itemId : null;
+      inventoryItemId = readableRow ? line.itemId : null;
     }
 
     const newInventory = mergeInventory(character.inventory as unknown as InventoryItem[] | null, {
