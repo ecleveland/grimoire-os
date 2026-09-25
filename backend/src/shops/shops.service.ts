@@ -1,8 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { ShopLineItem } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import { CreateShopDto, ShopLineItemDto } from './dto/create-shop.dto';
@@ -52,12 +53,57 @@ const shopListSelect = {
 export class ShopsService {
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService
+    private campaignAuth: CampaignAuthService,
+    private contentAccess: ContentAccessService
   ) {}
+
+  /**
+   * A linked shop line may only name the global catalog: an SRD or shared item.
+   * Homebrew is refused here, at the write boundary, because a purchase copies
+   * the line's `itemId` into the buyer's inventory and the write cannot know who
+   * will buy; only the owner can read a homebrew row. A DM selling something
+   * private uses a custom line instead (no `itemId`), which carries its own name
+   * and price.
+   *
+   * Ids in `knownIds` (already stored on the row being patched) are grandfathered.
+   * The edit form resends the whole stock on every save, so validating what the
+   * row already holds would leave a shop stocked before this rule permanently
+   * unsaveable. A DM could not even rename it. Such a line still sells: the
+   * purchase path drops the unreadable id at the point of sale.
+   *
+   * The message names the offending line, because the DM edits stock by name and
+   * never sees an item id.
+   */
+  private async assertLinesReferenceCatalog(
+    items: ShopLineItemDto[] | null | undefined,
+    knownIds: ReadonlySet<string> = new Set()
+  ): Promise<void> {
+    const lines = items ?? [];
+    const ids = [...new Set(lines.map(i => i.itemId).filter((id): id is string => !!id))].filter(
+      id => !knownIds.has(id)
+    );
+    if (ids.length === 0) return;
+    const found = await this.prisma.item.findMany({
+      where: { ...this.contentAccess.globalWhere(), id: { in: ids } },
+      select: { id: true },
+    });
+    const resolved = new Set(found.map(i => i.id));
+    const unresolved = ids.filter(id => !resolved.has(id));
+    if (unresolved.length > 0) {
+      const nameOf = (id: string) => lines.find(i => i.itemId === id)?.name ?? id;
+      throw new BadRequestException([
+        ...unresolved.map(
+          id => `Line "${nameOf(id)}" links an item that is not in the SRD or shared catalog`
+        ),
+        'Shop lines may link SRD or shared catalog items only, and homebrew items are not eligible',
+      ]);
+    }
+  }
 
   async create(userId: string, dto: CreateShopDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
     const { items, ...rest } = dto;
+    await this.assertLinesReferenceCatalog(items);
     const shop = await this.prisma.shop.create({
       data: {
         ...rest,
@@ -110,7 +156,7 @@ export class ShopsService {
   async update(id: string, userId: string, dto: UpdateShopDto) {
     const shop = await this.prisma.shop.findUnique({
       where: { id },
-      select: { id: true, campaignId: true },
+      select: { id: true, campaignId: true, items: true },
     });
     if (!shop) throw new NotFoundException(`Shop "${id}" not found`);
     await this.campaignAuth.assertCampaignOwner(shop.campaignId, userId);
@@ -122,6 +168,11 @@ export class ShopsService {
     // Only touch `items` when the patch includes it; an explicit null clears the
     // stock to [] rather than writing a contract-violating null column.
     if (items !== undefined) {
+      const storedLines = (shop.items as unknown as ShopLineItem[] | null) ?? [];
+      const knownIds = new Set(
+        storedLines.map(l => l.itemId).filter((itemId): itemId is string => !!itemId)
+      );
+      await this.assertLinesReferenceCatalog(items, knownIds);
       data.items = normalizeLineItems(items) as unknown as Prisma.InputJsonValue;
     }
     const updated = await this.prisma.shop.update({ where: { id }, data });

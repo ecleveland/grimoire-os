@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import type { Currency, InventoryItem, ShopLineItem } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { toDto } from '../common/serialization/to-dto';
 import { PurchaseDto } from './dto/purchase.dto';
 import { PurchaseReceiptDto } from './dto/purchase-receipt.dto';
@@ -32,7 +33,8 @@ const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 export class ShopPurchaseService {
   constructor(
     private prisma: PrismaService,
-    private campaignAuth: CampaignAuthService
+    private campaignAuth: CampaignAuthService,
+    private contentAccess: ContentAccessService
   ) {}
 
   async purchase(userId: string, shopId: string, dto: PurchaseDto): Promise<PurchaseReceiptDto> {
@@ -72,9 +74,25 @@ export class ShopPurchaseService {
     );
     if (!priced) throw new BadRequestException('Not enough coin for this purchase');
 
+    // The line keeps its id when the buyer can read the item: the global catalog,
+    // or the buyer's own homebrew. An id only someone else can read is dropped,
+    // because a stored line predating the catalog-only write rule may still name
+    // foreign homebrew and that id would dangle on the sheet. The goods change
+    // hands either way; the link is what drops. Ownership of the character is
+    // already proven above, so `userId` is the reader. AND rather than a spread,
+    // because visibleTo carries its own OR.
+    let inventoryItemId: string | null = null;
+    if (line.itemId) {
+      const readableRow = await this.prisma.item.findFirst({
+        where: { AND: [this.contentAccess.visibleTo(userId), { id: line.itemId }] },
+        select: { id: true },
+      });
+      inventoryItemId = readableRow ? line.itemId : null;
+    }
+
     const newInventory = mergeInventory(character.inventory as unknown as InventoryItem[] | null, {
       name: line.name,
-      itemId: line.itemId,
+      itemId: inventoryItemId,
       quantity: dto.quantity,
     });
     const newItems = applyStockDecrement(items, dto.itemIndex, dto.quantity);
@@ -114,7 +132,7 @@ export class ShopPurchaseService {
 
     return toDto(PurchaseReceiptDto, {
       characterId: dto.characterId,
-      item: { name: line.name, itemId: line.itemId ?? null, quantity: dto.quantity },
+      item: { name: line.name, itemId: inventoryItemId, quantity: dto.quantity },
       totalPaid: priced.total,
       newBalance: priced.newBalance,
       remainingStock: newItems[dto.itemIndex].stock,

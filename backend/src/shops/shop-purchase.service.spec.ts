@@ -8,6 +8,7 @@ import {
 import { toCopper } from '@grimoire-os/shared';
 import { ShopPurchaseService } from './shop-purchase.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
+import { ContentAccessService } from '../srd/content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
@@ -74,6 +75,7 @@ describe('ShopPurchaseService', () => {
         ShopPurchaseService,
         prismaMockProvider(),
         { provide: CampaignAuthService, useValue: campaignAuth },
+        ContentAccessService,
       ],
     }).compile();
 
@@ -86,6 +88,8 @@ describe('ShopPurchaseService', () => {
     prisma.character.findUnique.mockResolvedValue(buildCharacter());
     prisma.shop.updateMany.mockResolvedValue({ count: 1 });
     prisma.character.updateMany.mockResolvedValue({ count: 1 });
+    // A linked line resolves to the catalog unless a test says otherwise.
+    prisma.item.findFirst.mockResolvedValue({ id: 'cat-1' });
   });
 
   describe('happy path', () => {
@@ -293,6 +297,71 @@ describe('ShopPurchaseService', () => {
     it('throws ConflictException when the character version moved', async () => {
       prisma.character.updateMany.mockResolvedValue({ count: 0 });
       await expect(service.purchase(USER_ID_2, SHOP_ID, dto())).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('catalog link on the bought goods [VEG-556]', () => {
+    const linked = () => buildShop({ items: [lineItem({ itemId: 'cat-1' })] });
+
+    it('keeps the id when the buyer can read the item', async () => {
+      prisma.shop.findUnique.mockResolvedValue(linked());
+
+      const receipt = await service.purchase(USER_ID_2, SHOP_ID, dto());
+
+      // Scoped to the buyer, not the global catalog: the buyer's own homebrew is
+      // readable by them, so its id is safe on their sheet. AND rather than a
+      // spread, because visibleTo carries its own OR.
+      expect(prisma.item.findFirst).toHaveBeenCalledWith({
+        where: {
+          AND: [
+            { OR: [{ contentSource: { in: ['srd', 'shared'] } }, { createdById: USER_ID_2 }] },
+            { id: 'cat-1' },
+          ],
+        },
+        select: { id: true },
+      });
+      expect(prisma.character.updateMany.mock.calls[0][0].data.inventory).toEqual([
+        { name: 'Potion of Healing', quantity: 1, equipped: false, itemId: 'cat-1' },
+      ]);
+      expect(receipt.item.itemId).toBe('cat-1');
+    });
+
+    it('drops an id the buyer cannot read, keeping the name and quantity', async () => {
+      prisma.shop.findUnique.mockResolvedValue(linked());
+      prisma.item.findFirst.mockResolvedValue(null);
+
+      const receipt = await service.purchase(USER_ID_2, SHOP_ID, dto({ quantity: 2 }));
+
+      const inventory = prisma.character.updateMany.mock.calls[0][0].data.inventory as Array<
+        Record<string, unknown>
+      >;
+      expect(inventory).toEqual([{ name: 'Potion of Healing', quantity: 2, equipped: false }]);
+      expect(inventory[0].itemId).toBeUndefined();
+      expect(receipt.item).toMatchObject({ name: 'Potion of Healing', itemId: null, quantity: 2 });
+    });
+
+    it('never merges a dropped id into an existing catalog line', async () => {
+      prisma.shop.findUnique.mockResolvedValue(linked());
+      prisma.item.findFirst.mockResolvedValue(null);
+      prisma.character.findUnique.mockResolvedValue(
+        buildCharacter({
+          inventory: [{ name: 'Potion of Healing', quantity: 2, equipped: true, itemId: 'cat-1' }],
+        })
+      );
+
+      await service.purchase(USER_ID_2, SHOP_ID, dto());
+
+      expect(prisma.character.updateMany.mock.calls[0][0].data.inventory).toEqual([
+        { name: 'Potion of Healing', quantity: 2, equipped: true, itemId: 'cat-1' },
+        { name: 'Potion of Healing', quantity: 1, equipped: false },
+      ]);
+    });
+
+    it('does not query the catalog for a custom line with no itemId', async () => {
+      const receipt = await service.purchase(USER_ID_2, SHOP_ID, dto());
+
+      expect(prisma.item.findFirst).not.toHaveBeenCalled();
+      expect(receipt.item.itemId).toBeNull();
     });
   });
 });
