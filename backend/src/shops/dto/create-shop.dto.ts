@@ -58,9 +58,9 @@ class CurrencyDto {
 export class ShopLineItemDto {
   @ApiPropertyOptional({
     description:
-      'Optional link to an SRD or shared catalog item. Homebrew items are refused, ' +
-      'because a buyer would end up holding an id they cannot read. Sell a private ' +
-      'thing as a custom line instead, with no itemId.',
+      'Optional link to an SRD or shared catalog item. The API refuses a new homebrew ' +
+      'link, because only its owner can read that item and any campaign member may ' +
+      'buy the line. Sell a private thing as a custom line instead, with no itemId.',
   })
   @IsOptional()
   @ValidateIf((_o, v) => v !== null)

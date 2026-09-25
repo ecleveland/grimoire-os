@@ -59,10 +59,11 @@ export class ShopsService {
 
   /**
    * A linked shop line may only name the global catalog: an SRD or shared item.
-   * Anything a buyer cannot read is refused here, at the write boundary, because
-   * a purchase copies the line's `itemId` into the buyer's inventory and the
-   * buyer is not the item's owner. A DM selling something private uses a custom
-   * line instead (no `itemId`), which carries its own name and price.
+   * Homebrew is refused here, at the write boundary, because a purchase copies
+   * the line's `itemId` into the buyer's inventory and the write cannot know who
+   * will buy; only the owner can read a homebrew row. A DM selling something
+   * private uses a custom line instead (no `itemId`), which carries its own name
+   * and price.
    *
    * Ids in `knownIds` (already stored on the row being patched) are grandfathered.
    * The edit form resends the whole stock on every save, so validating what the
