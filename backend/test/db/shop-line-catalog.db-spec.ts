@@ -7,7 +7,11 @@
 // later may not be the item's owner. The purchase path is scoped to the actual
 // buyer instead, so it keeps an id that buyer can read and drops one they
 // cannot. That is why the DM's own homebrew is refused on write yet survives a
-// purchase the DM makes themselves.
+// purchase the DM makes themselves. No stored pre-rule id survives to reach
+// either path, because the VEG-564 backfill nulled them, and
+// shop-line-backfill.db-spec covers it. The retired-item update cases and the
+// purchase cases below write the id straight through Prisma to model one that
+// changed under a stocked line, such as a deleted item.
 import type { Prisma } from '@prisma/client';
 import type { Currency, InventoryItem, ShopLineItem } from '@grimoire-os/shared';
 import {
@@ -50,8 +54,8 @@ describe('catalog-only shop lines on a real DB (VEG-556)', () => {
   });
 
   // A shop that goes in through Prisma directly. The service refuses a homebrew
-  // line now, so writing the row the way the old code would have is the only way
-  // to get a pre-rule shop to test against.
+  // line, so writing the row outside the API is the only way to get a stored id
+  // that dangles or that the buyer cannot read.
   const insertShop = (items: ShopLineItem[]) =>
     ctx.prisma.shop.create({
       data: {
@@ -219,46 +223,41 @@ describe('catalog-only shop lines on a real DB (VEG-556)', () => {
       expect(items).toHaveLength(1);
       expect(items[0].itemId).toBe(srdItemId);
     });
-
-    it('still saves a shop whose stored line predates the rule', async () => {
-      const legacy = line({
-        itemId: strangerHomebrewId,
-        name: 'Smuggled Draught',
-        price: gp(1),
+    // An item can leave the catalog after a shop stocked it: an admin deletes a
+    // shared item, or a re-seed retires an SRD one. The edit form resends every
+    // line, so the dangling id must not block later saves of the shop.
+    const stockThenRetire = async () => {
+      const retired = await ctx.prisma.item.create({
+        data: { name: 'Retired Tonic', category: 'Potion', cost: '9 GP', contentSource: 'shared' },
       });
-      const shop = await insertShop([legacy]);
+      const shop = await insertShop([
+        line({ itemId: retired.id, name: 'Retired Tonic', price: gp(9) }),
+      ]);
+      await ctx.prisma.item.delete({ where: { id: retired.id } });
+      return { shop, retiredId: retired.id };
+    };
+
+    it('still saves a shop whose stored line names an item that left the catalog', async () => {
+      const { shop, retiredId } = await stockThenRetire();
 
       const renamed = await shops.update(shop.id, dmId, {
         name: 'Renamed',
-        items: [
-          {
-            itemId: strangerHomebrewId,
-            name: 'Smuggled Draught',
-            category: 'Potion',
-            price: gp(1),
-          },
-        ],
+        items: [{ itemId: retiredId, name: 'Retired Tonic', category: 'Potion', price: gp(9) }],
       });
 
       expect(renamed.name).toBe('Renamed');
       const stored = await ctx.prisma.shop.findUniqueOrThrow({ where: { id: shop.id } });
       const items = stored.items as unknown as ShopLineItem[];
-      expect(items[0].itemId).toBe(strangerHomebrewId);
+      expect(items[0].itemId).toBe(retiredId);
     });
 
     it('still refuses a new homebrew line added to that same shop', async () => {
-      const legacy = line({ itemId: strangerHomebrewId, name: 'Smuggled Draught', price: gp(1) });
-      const shop = await insertShop([legacy]);
+      const { shop, retiredId } = await stockThenRetire();
 
       await expect(
         shops.update(shop.id, dmId, {
           items: [
-            {
-              itemId: strangerHomebrewId,
-              name: 'Smuggled Draught',
-              category: 'Potion',
-              price: gp(1),
-            },
+            { itemId: retiredId, name: 'Retired Tonic', category: 'Potion', price: gp(9) },
             {
               itemId: dmHomebrewId,
               name: "Maelin's Own Brew",
@@ -278,7 +277,7 @@ describe('catalog-only shop lines on a real DB (VEG-556)', () => {
     });
   });
 
-  describe('purchase of a line written before the rule', () => {
+  describe('purchase of a line whose id was written outside the API', () => {
     const insertBuyer = () =>
       ctx.prisma.character.create({
         data: { name: 'Buyer', userId: dmId, campaignId, currency: asJson(gp(10)), inventory: [] },

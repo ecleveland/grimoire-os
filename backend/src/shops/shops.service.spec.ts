@@ -19,6 +19,7 @@ describe('ShopsService', () => {
   const SHOP_ID = 'shop-1111-2222-3333-444444444444';
   const CATALOG_ITEM_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
   const HOMEBREW_ITEM_ID = 'f6a7b8c9-d0e1-2345-fabc-456789012345';
+  const DANGLING_ITEM_ID = '00000000-0000-4000-8000-000000000000';
 
   const lineItem = {
     itemId: null,
@@ -397,7 +398,7 @@ describe('ShopsService', () => {
 
       const result = await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items } as never);
 
-      // `items` is read back so ids the row already stores can be grandfathered.
+      // `items` is read back so ids the row already stores are exempt.
       expect(prisma.shop.findUnique).toHaveBeenCalledWith({
         where: { id: SHOP_ID },
         select: { id: true, campaignId: true, items: true },
@@ -504,10 +505,11 @@ describe('ShopsService', () => {
       expect(prisma.item.findMany).not.toHaveBeenCalled();
     });
 
-    it('lets a rename through when a stored homebrew line is resent unchanged [VEG-556]', async () => {
-      // The edit form always resends the whole stock, so validating ids the row
-      // already carries would make a pre-rule shop permanently unsaveable.
-      const stored = { ...lineItem, itemId: HOMEBREW_ITEM_ID };
+    it("lets a rename through when a stored line's item has left the catalog [VEG-564]", async () => {
+      // The edit form always resends the whole stock, and an item can leave the
+      // catalog after the line was stocked. Validating the stored id would then
+      // block every later save of the shop.
+      const stored = { ...lineItem, itemId: DANGLING_ITEM_ID };
       prisma.shop.findUnique.mockResolvedValue({
         id: SHOP_ID,
         campaignId: CAMPAIGN_ID,
@@ -524,9 +526,9 @@ describe('ShopsService', () => {
       ]);
     });
 
-    it('names only the newly added line when a stored one is grandfathered [VEG-556]', async () => {
-      const stored = { ...lineItem, itemId: HOMEBREW_ITEM_ID };
-      const added = { ...lineItem, itemId: CATALOG_ITEM_ID, name: 'Smuggled Draught' };
+    it('names only the newly added line when a stored dangling id is resent [VEG-564]', async () => {
+      const stored = { ...lineItem, itemId: DANGLING_ITEM_ID };
+      const added = { ...lineItem, itemId: HOMEBREW_ITEM_ID, name: 'Smuggled Draught' };
       prisma.shop.findUnique.mockResolvedValue({
         id: SHOP_ID,
         campaignId: CAMPAIGN_ID,
@@ -545,9 +547,9 @@ describe('ShopsService', () => {
           ],
         }),
       });
-      // Only the unknown id is queried; the grandfathered one never reaches the DB.
+      // Only the new id is queried; the stored one never reaches the DB.
       expect(prisma.item.findMany).toHaveBeenCalledWith({
-        where: { contentSource: { in: ['srd', 'shared'] }, id: { in: [CATALOG_ITEM_ID] } },
+        where: { contentSource: { in: ['srd', 'shared'] }, id: { in: [HOMEBREW_ITEM_ID] } },
         select: { id: true },
       });
       expect(prisma.shop.update).not.toHaveBeenCalled();
