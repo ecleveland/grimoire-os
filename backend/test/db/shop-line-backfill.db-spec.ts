@@ -36,11 +36,16 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
   let mixedId: string;
   let cleanId: string;
   let emptyId: string;
+  let customId: string;
+  let scalarId: string;
+  let sharedItemId: string;
   let mixedLines: ShopLineItem[];
   let cleanBefore: unknown;
   let emptyBefore: unknown;
+  let customBefore: unknown;
   let cleanXmin: string;
   let emptyXmin: string;
+  let customXmin: string;
 
   // Prisma sets `updatedAt` client-side, so a raw UPDATE leaves it alone and a
   // rewrite that writes back equal JSON would look untouched. `xmin` is the id
@@ -119,6 +124,13 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
         stock: 3,
       },
       {
+        itemId: sharedItem.id,
+        name: 'Tonic of Vigour',
+        category: 'Potion',
+        price: gp(75),
+        stock: 2,
+      },
+      {
         itemId: strangerHomebrew.id,
         name: 'Smuggled Draught',
         category: 'Potion',
@@ -130,7 +142,8 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
       { itemId: null, name: 'Rumour', category: 'Service', price: gp(0), stock: null },
     ];
 
-    const [mixed, clean, empty] = await Promise.all([
+    sharedItemId = sharedItem.id;
+    const [mixed, clean, empty, custom] = await Promise.all([
       insertShop('Mixed', mixedLines),
       insertShop('Clean', [
         {
@@ -149,14 +162,32 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
         },
       ]),
       insertShop('Empty', []),
+      insertShop('Custom', [
+        { itemId: null, name: 'Rumour', category: 'Service', price: gp(0), stock: null },
+      ]),
     ]);
     mixedId = mixed.id;
     cleanId = clean.id;
     emptyId = empty.id;
+    customId = custom.id;
     cleanBefore = await prisma.shop.findUniqueOrThrow({ where: { id: cleanId } });
     emptyBefore = await prisma.shop.findUniqueOrThrow({ where: { id: emptyId } });
+    customBefore = await prisma.shop.findUniqueOrThrow({ where: { id: customId } });
     cleanXmin = await xminOf(cleanId);
     emptyXmin = await xminOf(emptyId);
+    customXmin = await xminOf(customId);
+
+    // A JSON scalar in the items column. Prisma will not write one, but the
+    // column is plain JSONB, so raw SQL or a hand edit can. Expanding a scalar
+    // as an array raises an error, so without the jsonb_typeof guard this row
+    // would abort the whole migration.
+    const [scalar] = await prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO "shops" ("id", "campaignId", "createdById", "name", "theme", "items",
+                           "isOpen", "version", "createdAt", "updatedAt")
+      VALUES (gen_random_uuid()::text, ${campaign.id}, ${dmId}, 'Scalar', 'alchemist',
+              '"oops"'::jsonb, true, 0, now(), now())
+      RETURNING "id"`;
+    scalarId = scalar.id;
 
     // The stored row holds the non-catalog ids before the migration runs, so a
     // failure below cannot be mistaken for bad setup.
@@ -172,10 +203,16 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
   it('nulls the homebrew and dangling ids and keeps every other field', async () => {
     expect(await readItems(mixedId)).toEqual([
       mixedLines[0],
-      { ...mixedLines[1], itemId: null },
+      mixedLines[1],
       { ...mixedLines[2], itemId: null },
-      mixedLines[3],
+      { ...mixedLines[3], itemId: null },
+      mixedLines[4],
     ]);
+  });
+
+  it('keeps a shared id on a shop that also needed the backfill', async () => {
+    const items = await readItems(mixedId);
+    expect(items[1].itemId).toBe(sharedItemId);
   });
 
   it('leaves a catalog-only shop byte-identical', async () => {
@@ -190,6 +227,20 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
       emptyBefore
     );
     expect(await xminOf(emptyId)).toBe(emptyXmin);
+  });
+
+  it('leaves a custom-only stock untouched', async () => {
+    expect(await ctx.prisma.shop.findUniqueOrThrow({ where: { id: customId } })).toEqual(
+      customBefore
+    );
+    expect(await xminOf(customId)).toBe(customXmin);
+  });
+
+  // Reaching this test at all means the migration ran without throwing, because
+  // beforeAll applies it after inserting the scalar row.
+  it('skips a shop whose items column holds a JSON scalar', async () => {
+    const row = await ctx.prisma.shop.findUniqueOrThrow({ where: { id: scalarId } });
+    expect(row.items).toBe('oops');
   });
 
   // Migrations get replayed against restored snapshots and stale environments.
@@ -213,7 +264,12 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
 
     expect(renamed.name).toBe('Renamed');
     const items = await readItems(mixedId);
-    expect(items[1].itemId).toBeNull();
-    expect(items[2].itemId).toBeNull();
+    expect(items.map(l => l.itemId)).toEqual([
+      mixedLines[0].itemId,
+      sharedItemId,
+      null,
+      null,
+      null,
+    ]);
   });
 });

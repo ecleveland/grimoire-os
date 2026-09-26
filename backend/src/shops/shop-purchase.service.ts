@@ -76,11 +76,11 @@ export class ShopPurchaseService {
 
     // The line keeps its id when the buyer can read the item and drops it when the
     // id dangles. The write rule only admits catalog ids, but an admin can delete
-    // or unpublish a shared item after the line was stocked, and a dangling id on
-    // the sheet is worse than a plain name. The goods change hands either way; the
-    // link is what drops. Ownership of the character is already proven above, so
-    // `userId` is the reader. AND rather than a spread, because visibleTo carries
-    // its own OR.
+    // a shared item, or a re-seed can retire an SRD one, after the line was
+    // stocked, and a dangling id on the sheet is worse than a plain name. The
+    // goods change hands either way; the link is what drops. Ownership of the
+    // character is already proven above, so `userId` is the reader. AND rather
+    // than a spread, because visibleTo carries its own OR.
     let inventoryItemId: string | null = null;
     if (line.itemId) {
       const readableRow = await this.prisma.item.findFirst({
