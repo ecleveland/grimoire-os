@@ -74,13 +74,13 @@ export class ShopPurchaseService {
     );
     if (!priced) throw new BadRequestException('Not enough coin for this purchase');
 
-    // The line keeps its id when the buyer can read the item: the global catalog,
-    // or the buyer's own homebrew. An id only someone else can read is dropped,
-    // because a stored line predating the catalog-only write rule may still name
-    // foreign homebrew and that id would dangle on the sheet. The goods change
-    // hands either way; the link is what drops. Ownership of the character is
-    // already proven above, so `userId` is the reader. AND rather than a spread,
-    // because visibleTo carries its own OR.
+    // The line keeps its id when the buyer can read the item and drops it when the
+    // id dangles. The write rule only admits catalog ids, but an admin can delete
+    // or unpublish a shared item after the line was stocked, and a dangling id on
+    // the sheet is worse than a plain name. The goods change hands either way; the
+    // link is what drops. Ownership of the character is already proven above, so
+    // `userId` is the reader. AND rather than a spread, because visibleTo carries
+    // its own OR.
     let inventoryItemId: string | null = null;
     if (line.itemId) {
       const readableRow = await this.prisma.item.findFirst({

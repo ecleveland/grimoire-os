@@ -65,11 +65,14 @@ export class ShopsService {
    * private uses a custom line instead (no `itemId`), which carries its own name
    * and price.
    *
-   * Ids in `knownIds` (already stored on the row being patched) are grandfathered.
-   * The edit form resends the whole stock on every save, so validating what the
-   * row already holds would leave a shop stocked before this rule permanently
-   * unsaveable. A DM could not even rename it. Such a line still sells: the
-   * purchase path drops the unreadable id at the point of sale.
+   * Ids in `knownIds` (already stored on the row being patched) are exempt,
+   * because an item can leave the catalog after the line was stocked: an admin
+   * deletes a shared item, or a re-seed retires an SRD one. The edit form
+   * resends the whole stock on every save, so a dangling id must not block every
+   * later save of the shop, a rename included. A backfill nulled every stored
+   * homebrew id, so the exemption can no longer carry another user's homebrew.
+   * A resent id is either a catalog id or a dangling one, and the purchase path
+   * drops a dangling id at the point of sale.
    *
    * The message names the offending line, because the DM edits stock by name and
    * never sees an item id.
