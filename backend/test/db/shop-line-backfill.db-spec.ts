@@ -250,8 +250,8 @@ describe('shop lines that link non-catalog items, backfilled on a real DB (VEG-5
     expect(await ctx.prisma.shop.findUniqueOrThrow({ where: { id: mixedId } })).toEqual(afterFirst);
   });
 
-  // The point of the backfill: the edit form resends the whole stock, so the
-  // stored ids have to be ones the boundary accepts without an exemption.
+  // The edit form resends the whole stock, so after the backfill the stored
+  // ids must be ones the boundary accepts on a plain resend.
   it('lets the DM rename the backfilled shop by resending its lines', async () => {
     const shops = new ShopsService(
       ctx.prisma,

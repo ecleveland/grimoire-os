@@ -8,10 +8,10 @@
 // buyer instead, so it keeps an id that buyer can read and drops one they
 // cannot. That is why the DM's own homebrew is refused on write yet survives a
 // purchase the DM makes themselves. No stored pre-rule id survives to reach
-// either path: the VEG-564 backfill nulled them, and shop-line-backfill.db-spec
-// covers it. The retired-item update cases and the purchase cases below write
-// the id straight through Prisma to model one that changed under a stocked
-// line, such as a deleted item.
+// either path, because the VEG-564 backfill nulled them, and
+// shop-line-backfill.db-spec covers it. The retired-item update cases and the
+// purchase cases below write the id straight through Prisma to model one that
+// changed under a stocked line, such as a deleted item.
 import type { Prisma } from '@prisma/client';
 import type { Currency, InventoryItem, ShopLineItem } from '@grimoire-os/shared';
 import {
