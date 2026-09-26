@@ -91,9 +91,58 @@ export class EncountersService {
     }
   }
 
+  /**
+   * A loot entry may only link the global catalog: an SRD or shared item.
+   * Homebrew is refused, the DM's own included, because every campaign member
+   * reads the encounter and only the owner can read a homebrew item. The loot
+   * roller draws from the global catalog for the same reason. A DM handing out
+   * something private uses a flavor entry instead, with a null `itemId`.
+   *
+   * Ids in `knownIds` (already stored on the encounter being patched) are
+   * grandfathered. The tracker resends every combatant on each save, so
+   * validating what the row already holds would leave an encounter written
+   * before this rule permanently unsaveable.
+   *
+   * The message names the offending entry and its combatant, because the DM
+   * edits loot by name and never sees an item id.
+   */
+  private async assertLootItemReferences(
+    combatants: CreateEncounterDto['combatants'],
+    knownIds: ReadonlySet<string> = new Set()
+  ): Promise<void> {
+    if (!combatants) return;
+    const entries = combatants.flatMap(c =>
+      (c.loot?.items ?? []).map(item => ({ combatant: c.name, item }))
+    );
+    const ids = [
+      ...new Set(
+        entries.map(e => e.item.itemId).filter((id): id is string => typeof id === 'string')
+      ),
+    ].filter(id => !knownIds.has(id));
+    if (ids.length === 0) return;
+    const found = await this.prisma.item.findMany({
+      where: { ...this.contentAccess.globalWhere(), id: { in: ids } },
+      select: { id: true },
+    });
+    const resolved = new Set(found.map(i => i.id));
+    const unresolved = ids.filter(id => !resolved.has(id));
+    if (unresolved.length > 0) {
+      throw new BadRequestException([
+        ...entries
+          .filter(e => e.item.itemId !== null && unresolved.includes(e.item.itemId))
+          .map(
+            e =>
+              `Loot "${e.item.name}" on combatant "${e.combatant}" links an item that is not in the SRD or shared catalog`
+          ),
+        'Encounter loot may link SRD or shared catalog items only, and homebrew items are not eligible',
+      ]);
+    }
+  }
+
   async create(userId: string, dto: CreateEncounterDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
     await this.assertMonsterReferences(dto.combatants, userId);
+    await this.assertLootItemReferences(dto.combatants);
     const { combatants, ...rest } = dto;
     const encounter = await this.prisma.encounter.create({
       data: {
@@ -156,6 +205,13 @@ export class EncountersService {
       storedCombatants.map(c => c.monsterId).filter((mid): mid is string => mid !== undefined)
     );
     await this.assertMonsterReferences(dto.combatants, userId, knownIds);
+    const knownItemIds = new Set(
+      storedCombatants
+        .flatMap(c => c.loot?.items ?? [])
+        .map(i => i.itemId)
+        .filter((iid): iid is string => typeof iid === 'string')
+    );
+    await this.assertLootItemReferences(dto.combatants, knownItemIds);
     const { combatants, expectedVersion, ...rest } = dto;
     const data = {
       ...rest,

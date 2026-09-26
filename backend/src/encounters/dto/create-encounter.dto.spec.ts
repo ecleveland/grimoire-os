@@ -25,7 +25,12 @@ const lootCombatant = () => ({
     coinage: { gp: 0, sp: 1, cp: 5 },
     items: [
       { itemId: null, name: 'Wolf pelt', quantity: 1, source: 'monster' },
-      { itemId: 'item-1', name: 'Dagger', quantity: 2, source: 'magic-item' },
+      {
+        itemId: '11111111-1111-4111-8111-111111111111',
+        name: 'Dagger',
+        quantity: 2,
+        source: 'magic-item',
+      },
     ],
     rolledAt: '2026-06-10T00:00:00.000Z',
   },
@@ -69,6 +74,20 @@ describe('CombatantDto loot round-trip (global validator strictness)', () => {
     combatant.loot.extra = 'nope';
     const instance = plainToInstance(UpdateEncounterDto, { combatants: [combatant] });
     expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).not.toEqual([]);
+  });
+
+  it('rejects a non-uuid loot itemId', () => {
+    const combatant = lootCombatant() as { loot: { items: { itemId: string | null }[] } };
+    combatant.loot.items[1].itemId = 'item-1';
+    const instance = plainToInstance(UpdateEncounterDto, { combatants: [combatant] });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).not.toEqual([]);
+  });
+
+  it('accepts a null loot itemId', () => {
+    const combatant = lootCombatant();
+    expect(combatant.loot.items[0].itemId).toBeNull();
+    const instance = plainToInstance(UpdateEncounterDto, { combatants: [combatant] });
+    expect(flatten(validateSync(instance, VALIDATOR_STRICTNESS))).toEqual([]);
   });
 
   it('rejects negative coinage', () => {
