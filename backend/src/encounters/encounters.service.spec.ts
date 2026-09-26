@@ -554,6 +554,52 @@ describe('EncountersService', () => {
       expect(prisma.encounter.update).not.toHaveBeenCalled();
     });
 
+    it('refuses a homebrew loot itemId on a later combatant, not only the first', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaign: campaignAuthShape,
+      });
+      prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
+
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID, {
+          combatants: [
+            lootCombatant(lootEntry(CATALOG_ITEM_ID)),
+            { ...lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol')), name: 'Bandit' },
+          ],
+        } as never)
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: [
+            'Loot "Cursed Idol" on combatant "Bandit" links an item that is not in the SRD or shared catalog',
+            expect.stringContaining('homebrew items are not eligible'),
+          ],
+        }),
+      });
+      expect(prisma.item.findMany).toHaveBeenCalledWith(
+        catalogItemQuery([CATALOG_ITEM_ID, HOMEBREW_ITEM_ID])
+      );
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+    });
+
+    it('grandfathers a stored loot itemId on any combatant, not only the first', async () => {
+      const combatants = [
+        lootCombatant(lootEntry(null, 'Wolf pelt')),
+        { ...lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol')), name: 'Bandit' },
+      ];
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        combatants,
+        campaign: campaignAuthShape,
+      });
+      prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
+
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).toHaveBeenCalled();
+    });
+
     it('rejects update when a combatant references an unknown monsterId', async () => {
       prisma.encounter.findUnique.mockResolvedValue({
         id: ENCOUNTER_ID,
