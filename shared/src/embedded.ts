@@ -243,8 +243,9 @@ export type LootItemSource = 'profession' | 'trinket' | 'magic-item' | 'monster'
 
 export interface CombatantLootItem {
   /**
-   * Resolved catalog item id (the Item table spans srd/shared/homebrew
-   * tiers), or null for flavor entries with no catalog match.
+   * Resolved catalog item id, or null for flavor entries with no catalog
+   * match. A new write may link SRD or shared items only; a homebrew id
+   * survives here only on an encounter saved before that rule.
    */
   itemId: string | null;
   name: string;

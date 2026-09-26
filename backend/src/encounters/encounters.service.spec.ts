@@ -30,6 +30,25 @@ describe('EncountersService', () => {
 
   const ENCOUNTER_ID = 'enc-1111-2222-3333-444444444444';
   const MONSTER_ID = 'mon-1111-2222-3333-444444444444';
+  const CATALOG_ITEM_ID = 'item-1111-2222-3333-444444444444';
+  const HOMEBREW_ITEM_ID = 'item-9999-8888-7777-666666666666';
+  const NEW_HOMEBREW_ITEM_ID = 'item-5555-4444-3333-222222222222';
+
+  const lootEntry = (itemId: string | null, name = 'Dagger') => ({
+    itemId,
+    name,
+    quantity: 1,
+    source: 'monster',
+  });
+  const lootCombatant = (...items: ReturnType<typeof lootEntry>[]) => ({
+    name: 'Goblin',
+    isNpc: true,
+    loot: { coinage: { gp: 0, sp: 0, cp: 0 }, items },
+  });
+  const catalogItemQuery = (ids: string[]) => ({
+    where: { contentSource: { in: ['srd', 'shared'] }, id: { in: ids } },
+    select: { id: true },
+  });
 
   const mockCampaignOwned = {
     id: CAMPAIGN_ID,
@@ -208,6 +227,64 @@ describe('EncountersService', () => {
       };
 
       await expect(service.create(USER_ID, dto as never)).rejects.toThrow(BadRequestException);
+      expect(prisma.encounter.create).not.toHaveBeenCalled();
+    });
+    it('persists loot whose itemId resolves to the global catalog', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
+      const combatants = [lootCombatant(lootEntry(CATALOG_ITEM_ID))];
+      prisma.encounter.create.mockResolvedValue({ ...mockEncounter, combatants });
+
+      await service.create(USER_ID, {
+        campaignId: CAMPAIGN_ID,
+        name: 'Goblin Ambush',
+        combatants,
+      } as never);
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith(catalogItemQuery([CATALOG_ITEM_ID]));
+      expect(prisma.encounter.create).toHaveBeenCalledWith({
+        data: {
+          campaignId: CAMPAIGN_ID,
+          name: 'Goblin Ambush',
+          createdById: USER_ID,
+          combatants,
+        },
+      });
+    });
+
+    it('does not query items when loot entries carry no itemId', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      prisma.encounter.create.mockResolvedValue(mockEncounter);
+
+      await service.create(USER_ID, {
+        campaignId: CAMPAIGN_ID,
+        name: 'Goblin Ambush',
+        combatants: [lootCombatant(lootEntry(null, 'Wolf pelt')), { name: 'Bandit' }],
+      } as never);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.create).toHaveBeenCalled();
+    });
+
+    it('refuses a loot entry whose itemId is homebrew or unknown, naming the entry', async () => {
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      prisma.item.findMany.mockResolvedValue([]);
+
+      const attempt = service.create(USER_ID, {
+        campaignId: CAMPAIGN_ID,
+        name: 'Goblin Ambush',
+        combatants: [lootCombatant(lootEntry(HOMEBREW_ITEM_ID))],
+      } as never);
+
+      await expect(attempt).rejects.toThrow(BadRequestException);
+      await expect(attempt).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: [
+            'Loot "Dagger" on combatant "Goblin" links an item that is not in the SRD or shared catalog',
+            expect.stringContaining('homebrew items are not eligible'),
+          ],
+        }),
+      });
       expect(prisma.encounter.create).not.toHaveBeenCalled();
     });
   });
@@ -412,6 +489,114 @@ describe('EncountersService', () => {
       // The dangling id was already present, so no validation query runs and
       // the save succeeds.
       expect(prisma.monster.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).toHaveBeenCalled();
+    });
+
+    it('validates loot itemId references against the global catalog when updating combatants', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaign: campaignAuthShape,
+      });
+      prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
+      const combatants = [lootCombatant(lootEntry(CATALOG_ITEM_ID))];
+      prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
+
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+
+      expect(prisma.item.findMany).toHaveBeenCalledWith(catalogItemQuery([CATALOG_ITEM_ID]));
+      expect(prisma.encounter.update).toHaveBeenCalledWith({
+        where: { id: ENCOUNTER_ID },
+        data: { combatants },
+      });
+    });
+
+    it('grandfathers loot itemIds already on the stored encounter', async () => {
+      const combatants = [lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol'))];
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        combatants,
+        campaign: campaignAuthShape,
+      });
+      prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
+
+      await service.update(ENCOUNTER_ID, USER_ID, { name: 'Renamed', combatants } as never);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).toHaveBeenCalled();
+    });
+
+    it('still refuses a new homebrew loot itemId on an encounter that holds a grandfathered one', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        combatants: [lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol'))],
+        campaign: campaignAuthShape,
+      });
+      prisma.item.findMany.mockResolvedValue([]);
+
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID, {
+          combatants: [
+            lootCombatant(
+              lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol'),
+              lootEntry(NEW_HOMEBREW_ITEM_ID, 'Secret Blade')
+            ),
+          ],
+        } as never)
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: [
+            'Loot "Secret Blade" on combatant "Goblin" links an item that is not in the SRD or shared catalog',
+            expect.stringContaining('homebrew items are not eligible'),
+          ],
+        }),
+      });
+      expect(prisma.item.findMany).toHaveBeenCalledWith(catalogItemQuery([NEW_HOMEBREW_ITEM_ID]));
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+    });
+
+    it('refuses a homebrew loot itemId on a later combatant, not only the first', async () => {
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaign: campaignAuthShape,
+      });
+      prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
+
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID, {
+          combatants: [
+            lootCombatant(lootEntry(CATALOG_ITEM_ID)),
+            { ...lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol')), name: 'Bandit' },
+          ],
+        } as never)
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          message: [
+            'Loot "Cursed Idol" on combatant "Bandit" links an item that is not in the SRD or shared catalog',
+            expect.stringContaining('homebrew items are not eligible'),
+          ],
+        }),
+      });
+      expect(prisma.item.findMany).toHaveBeenCalledWith(
+        catalogItemQuery([CATALOG_ITEM_ID, HOMEBREW_ITEM_ID])
+      );
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+    });
+
+    it('grandfathers a stored loot itemId on any combatant, not only the first', async () => {
+      const combatants = [
+        lootCombatant(lootEntry(null, 'Wolf pelt')),
+        { ...lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol')), name: 'Bandit' },
+      ];
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        combatants,
+        campaign: campaignAuthShape,
+      });
+      prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
+
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+
+      expect(prisma.item.findMany).not.toHaveBeenCalled();
       expect(prisma.encounter.update).toHaveBeenCalled();
     });
 

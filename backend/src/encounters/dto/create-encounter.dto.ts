@@ -5,6 +5,7 @@ import {
   IsIn,
   IsInt,
   IsNumber,
+  IsUUID,
   Max,
   Min,
   ValidateIf,
@@ -46,10 +47,16 @@ class CombatantLootCoinageDto {
 }
 
 class CombatantLootItemDto {
-  /** Catalog item id; null for flavor entries with no catalog match. */
-  @ApiProperty({ nullable: true, type: String })
+  @ApiProperty({
+    nullable: true,
+    type: String,
+    description:
+      'Link to an SRD or shared catalog item. The API refuses a new homebrew link, ' +
+      'because only its owner can read that item and every campaign member reads the ' +
+      'encounter. Null marks a flavor entry with no catalog match.',
+  })
   @ValidateIf(o => o.itemId !== null)
-  @IsString()
+  @IsUUID()
   itemId!: string | null;
 
   @ApiProperty()
