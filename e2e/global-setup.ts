@@ -28,9 +28,19 @@ const APP_DATA_TABLES = [
   'campaigns',
 ];
 
+// playwright.config.ts sets E2E_DB_NAME and COMPOSE_PROJECT_NAME for this
+// checkout's stack before global setup runs.
 const E2E_DB_NAME = process.env.E2E_DB_NAME ?? 'grimoire_os_e2e';
 
 export default async function globalSetup(): Promise<void> {
+  // This wipes every user in the target database, so refuse anything that is
+  // not an e2e database or is not a plain identifier safe to splice into SQL.
+  if (!/^grimoire_os_e2e(_[a-z0-9_]+)?$/.test(E2E_DB_NAME)) {
+    throw new Error(
+      `E2E global-setup refuses to truncate '${E2E_DB_NAME}'. ` +
+        `E2E_DB_NAME must be grimoire_os_e2e or grimoire_os_e2e_<stack>, using lowercase letters, digits and underscores.`
+    );
+  }
   const repoRoot = path.resolve(__dirname, '..');
   const tables = APP_DATA_TABLES.join(', ');
   // Truncate the app tables that reference users first (clears the children),

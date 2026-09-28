@@ -84,6 +84,8 @@ jobs:
         with:
           node-version: 22
       - run: node --test scripts/lib/*.test.mjs
+      - name: Test e2e stack naming rules
+        run: bash e2e/stack-env.test.sh
 
   backend-db:
     name: Backend — seed DB regression tests

@@ -15,6 +15,9 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "==> Testing SRD extraction lib (node --test scripts/lib)"
 cd "$ROOT_DIR" && node --test scripts/lib/*.test.mjs
 
+echo "==> Testing e2e stack naming rules (e2e/stack-env.test.sh)"
+cd "$ROOT_DIR" && bash e2e/stack-env.test.sh
+
 echo "==> Building @grimoire-os/shared"
 cd "$ROOT_DIR/shared" && npm run build
 

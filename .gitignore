@@ -36,3 +36,6 @@ frontend/next-env.d.ts
 
 # Large binary — left untracked pending a Git LFS decision
 resources/DnD_2024_Character-Sheet.pdf
+
+# Per-stack pidfiles written by dev-e2e.sh
+.e2e/

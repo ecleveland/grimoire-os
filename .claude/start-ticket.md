@@ -42,13 +42,14 @@ For UI tickets, also draft a Playwright spec under `e2e/<feature>.spec.ts` cover
 
 ## Verification gate
 
-Run both steps below with Bash `run_in_background: true` — `verify.sh` is eight serial stages (SRD lib tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
+Run both steps below with Bash `run_in_background: true` — `verify.sh` is nine serial stages (SRD lib tests → e2e stack-naming tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
 
 1. `./verify.sh` from the repo root — mirrors CI exactly (backend + frontend lint, unit tests with coverage thresholds, SRD extraction-lib tests, production builds). Do not substitute plain `npm test`/`npm run build`. (Backend's `prettier.spec.ts` runs `format:check` on the frontend — prettier-format new frontend files first.)
 2. **E2E (Playwright)** — `cd e2e && npm run e2e -- <specs>`, as the last step (there is no root `package.json`).
-   - The suite provisions its own stack via `dev-e2e.sh`: dedicated ports 3010/3011 and a dedicated `grimoire_os_e2e` database. Only Postgres needs to be up beforehand.
-   - **`./dev.sh` must be stopped first.** Next 16 takes a `frontend/.next/dev/lock`, so the e2e stack's `next dev` can't start while the dev server runs — the webServer step times out after 120 s. Stop dev (`./stop.sh`), run e2e, restart dev.
-   - `E2E_NO_WEBSERVER=1` does **not** point the suite at the 3000/3001 dev servers — it assumes an already-running `dev-e2e.sh` stack on 3010/3011. Using it with only `./dev.sh` up fails every spec, including smoke.
+   - The suite provisions its own stack via `dev-e2e.sh`. The main checkout gets ports 3010/3011 and the `grimoire_os_e2e` database. A linked git worktree gets a private database (`grimoire_os_e2e_<worktree>`) and a port pair in 3100-3499, so parallel worktrees can each run `npm run e2e` with no extra setup. `bash e2e/stack-env.sh` prints what a checkout resolves to. Only Postgres needs to be up beforehand.
+   - **`./dev.sh` must be stopped first when it runs from the same checkout.** Next 16 takes a `frontend/.next/dev/lock`, so the e2e stack's `next dev` can't start while the dev server runs in that checkout, and the webServer step times out after 120 s. Stop dev (`./stop.sh`), run e2e, restart dev. A worktree has its own `frontend/.next`, so dev in the main checkout does not block e2e in a worktree.
+   - `E2E_NO_WEBSERVER=1` does **not** point the suite at the 3000/3001 dev servers. It assumes an already-running `dev-e2e.sh` stack for this checkout. Using it with only `./dev.sh` up fails every spec, including smoke.
+   - To pin a stack by hand (fixed ports for a parallel run), set `E2E_STACK`, `E2E_BACKEND_PORT` and `E2E_FRONTEND_PORT` for both `./dev-e2e.sh --drop` and the Playwright run. `--drop` removes the stack's database on exit. `e2e/README.md` has the recipe.
    - Run only the spec(s) relevant to this ticket plus `smoke.spec.ts`. Full suite runs in CI.
    - Skip E2E only when the ticket touches no user-visible behavior (pure refactor, docs, backend-only internals with no API contract change) — state explicitly when skipping and why.
 
