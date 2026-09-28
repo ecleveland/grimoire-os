@@ -12,4 +12,11 @@ test.describe('smoke', () => {
     const response = await request.get(`${apiUrl}/api/docs`);
     expect(response.status()).toBeLessThan(500);
   });
+
+  test('health endpoint reports the database reachable', async ({ request }) => {
+    const apiUrl = test.info().config.metadata?.backendUrl ?? 'http://localhost:3001';
+    const response = await request.get(`${apiUrl}/api/health`);
+    expect(response.status()).toBe(200);
+    expect(await response.json()).toEqual({ status: 'ok' });
+  });
 });

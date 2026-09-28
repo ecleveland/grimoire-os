@@ -31,6 +31,20 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # The alpine image has node but no curl, so the probe uses node's fetch.
+    # start_period covers `prisma migrate deploy`, which runs before the server.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3001/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
@@ -49,7 +63,20 @@ services:
       # it uses the compose service name on the internal network instead.
       - INTERNAL_API_URL=http://backend:3001/api
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
