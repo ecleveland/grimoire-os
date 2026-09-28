@@ -1,8 +1,11 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { cookieExtractor, JwtStrategy } from './jwt.strategy';
 import { AUTH_COOKIE_NAME } from '../auth-cookie.config';
 import { Role } from '../../common/enums';
+import { PrismaService } from '../../prisma/prisma.service';
+import { createMockPrismaService, MockPrismaService } from '../../test/prisma-mock.factory';
 
 describe('JwtStrategy', () => {
   describe('constructor', () => {
@@ -11,7 +14,7 @@ describe('JwtStrategy', () => {
         get: jest.fn().mockReturnValue(undefined),
       } as unknown as ConfigService;
 
-      expect(() => new JwtStrategy(configService)).toThrow(
+      expect(() => new JwtStrategy(configService, {} as PrismaService)).toThrow(
         'JWT_SECRET environment variable is not set'
       );
     });
@@ -21,48 +24,66 @@ describe('JwtStrategy', () => {
         get: jest.fn().mockReturnValue('test-secret'),
       } as unknown as ConfigService;
 
-      const strategy = new JwtStrategy(configService);
+      const strategy = new JwtStrategy(configService, {} as PrismaService);
       expect(strategy).toBeDefined();
     });
   });
 
   describe('validate', () => {
     let strategy: JwtStrategy;
+    let prisma: MockPrismaService;
 
     beforeEach(() => {
       const configService = {
         get: jest.fn().mockReturnValue('test-secret'),
       } as unknown as ConfigService;
-      strategy = new JwtStrategy(configService);
+      prisma = createMockPrismaService();
+      strategy = new JwtStrategy(configService, prisma as unknown as PrismaService);
     });
 
-    it('should transform JWT payload into JwtUser object', () => {
-      const payload = {
+    it('returns a JwtUser built from the user row when the user still exists', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'user-123',
+        username: 'testuser',
+        role: Role.PLAYER,
+      });
+
+      const result = await strategy.validate({
         sub: 'user-123',
         username: 'testuser',
         role: Role.PLAYER,
-      };
+      });
 
-      const result = strategy.validate(payload);
-
-      expect(result).toEqual({
-        userId: 'user-123',
-        username: 'testuser',
-        role: 'player',
+      expect(result).toEqual({ userId: 'user-123', username: 'testuser', role: 'player' });
+      expect(result).not.toHaveProperty('sub');
+      expect(prisma.user.findUnique).toHaveBeenCalledWith({
+        where: { id: 'user-123' },
+        select: { id: true, username: true, role: true },
       });
     });
 
-    it('should map sub to userId', () => {
-      const payload = {
+    it('rejects a token whose user has been deleted with a 401', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        strategy.validate({ sub: 'gone-user', username: 'ghost', role: Role.PLAYER })
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('takes the role from the user row so a role change applies before the token expires', async () => {
+      prisma.user.findUnique.mockResolvedValue({
+        id: 'abc-def',
+        username: 'demoted',
+        role: Role.PLAYER,
+      });
+
+      const result = await strategy.validate({
         sub: 'abc-def',
-        username: 'admin',
+        username: 'demoted',
         role: Role.ADMIN,
-      };
+      });
 
-      const result = strategy.validate(payload);
-
-      expect(result.userId).toBe('abc-def');
-      expect(result).not.toHaveProperty('sub');
+      expect(result.role).toBe(Role.PLAYER);
     });
   });
 

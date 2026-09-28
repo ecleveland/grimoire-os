@@ -200,4 +200,51 @@ test.describe('Cascade deletes (VEG-312)', () => {
     });
     expect(ghostLogin.status()).toBe(401);
   });
+  test("a deleted user's still-valid access cookie is rejected on reads and writes", async ({
+    page,
+    browser,
+  }) => {
+    const adminName = await register(page, 'admin');
+
+    // The victim's context keeps its cookies across the delete, standing in
+    // for a browser tab that stays open while an admin removes the account.
+    const victimCtx = await browser.newContext();
+    try {
+      const victimPage = await victimCtx.newPage();
+      await register(victimPage, 'ghost');
+      const victimHeaders = await csrfHeaders(victimPage);
+      const me = await victimPage.request.get(`${BACKEND}/api/users/me`);
+      const victimId = (await me.json()).id as string;
+
+      // The cookie authenticates before the delete.
+      const before = await victimPage.request.get(`${BACKEND}/api/campaigns`);
+      expect(before.status()).toBe(200);
+
+      sql(`UPDATE users SET role = 'admin' WHERE username = '${adminName}'`);
+      const login = await page.request.post(`${BACKEND}/api/auth/login`, {
+        data: { username: adminName, password: PASSWORD },
+      });
+      expect(login.ok(), `admin re-login failed: ${login.status()}`).toBeTruthy();
+      const del = await page.request.delete(`${BACKEND}/api/admin/users/${victimId}`, {
+        headers: await csrfHeaders(page),
+      });
+      expect(del.status()).toBe(204);
+
+      // The access token is unexpired and correctly signed, but its user is
+      // gone. A read used to keep returning 200, and a write that inserts a
+      // row keyed to the user used to fail as a 400 carrying the raw Prisma
+      // FK message.
+      const ghostRead = await victimPage.request.get(`${BACKEND}/api/campaigns`);
+      expect(ghostRead.status()).toBe(401);
+
+      const ghostWrite = await victimPage.request.post(`${BACKEND}/api/characters`, {
+        data: { name: 'Posthumous Pete' },
+        headers: victimHeaders,
+      });
+      expect(ghostWrite.status()).toBe(401);
+      expect(await ghostWrite.text()).not.toMatch(/foreign key|prisma/i);
+    } finally {
+      await victimCtx.close();
+    }
+  });
 });
