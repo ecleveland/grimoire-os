@@ -20,7 +20,11 @@ import { computeCharacterStats, isKnownAbilityName } from './compute/compute-sta
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { autoEquipStartingArmor } from './inventory/auto-equip';
 import { ContentAccessService } from '../srd/content-access.service';
-import { catalogNameWhere, resolveByUniqueName } from '../srd/resolve-catalog-ref';
+import {
+  catalogNameWhere,
+  resolveByUniqueName,
+  resolveCatalogRef,
+} from '../srd/resolve-catalog-ref';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -202,16 +206,35 @@ export class CharactersService {
    * Returns the row rather than the bare id since VEG-530: `create` seeds the
    * hit-dice pool from `hitDie`, and that column is free in a query that was
    * already running and already discarding everything but the id.
+   *
+   * VEG-531 adds the verify half. A client-supplied id joins the same query as
+   * an `OR` branch, under the same visibility fragment, and `resolveCatalogRef`
+   * decides: an id naming a visible row wins, and anything else (junk, a deleted
+   * row, a stranger's homebrew) degrades to the unambiguous-name path, the same
+   * rule the read path applies. A stranger's id is filtered out by the scope
+   * before it can match, so it produces the same rows as a junk id and the
+   * caller learns nothing about whether it exists.
+   *
+   * The merged `OR` is fine here, unlike on the read path: the name branch is an
+   * ILIKE that already forces a sequential scan, so adding the id branch costs
+   * no index this query was using.
    */
   private async deriveClass(
     className: string,
-    ownerId: string
+    ownerId: string,
+    suppliedId: string | null = null
   ): Promise<{ id: string; hitDie: string } | null> {
+    const nameWhere = catalogNameWhere(className);
     const candidates = await this.prisma.srdClass.findMany({
-      where: { AND: [catalogNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
+      where: {
+        AND: [
+          suppliedId ? { OR: [{ id: suppliedId }, nameWhere] } : nameWhere,
+          this.contentAccess.visibleTo(ownerId),
+        ],
+      },
       select: { id: true, name: true, hitDie: true },
     });
-    return resolveByUniqueName(candidates, className) ?? null;
+    return resolveCatalogRef(candidates, { id: suppliedId, name: className }) ?? null;
   }
 
   /**
@@ -233,26 +256,18 @@ export class CharactersService {
    * vocabulary, and a d100 pool seeded here would feed +51 a level into a
    * permanent HP maximum. An unusable die leaves the column null, which is a
    * handled state: the level-up picker asks the player.
+   *
+   * `resolved` is the row `deriveClass` already fetched. Since VEG-531 a
+   * client-supplied id is resolved in that same query, so the row is in hand on
+   * every path and the pool needs no read of its own.
    */
-  private async seedHitDice(
+  private seedHitDice(
     resolved: { hitDie: string } | null,
-    classId: string | null,
-    ownerId: string,
     level: number | undefined
-  ): Promise<HitDice | undefined> {
-    // `resolved` is the row already in hand, which `create` has whenever the id
-    // was derived from the name. A client-supplied id skipped derivation, so its
-    // die has to be read — scoped, because the id has no FK behind it and an
-    // unscoped read would seed this character from a stranger's homebrew class.
-    const row =
-      resolved ??
-      (classId
-        ? await this.prisma.srdClass.findFirst({
-            where: { AND: [{ id: classId }, this.contentAccess.visibleTo(ownerId)] },
-            select: { hitDie: true },
-          })
-        : null);
-    return row && isHitDie(row.hitDie) ? hitDicePoolFor(row.hitDie, level) : undefined;
+  ): HitDice | undefined {
+    return resolved && isHitDie(resolved.hitDie)
+      ? hitDicePoolFor(resolved.hitDie, level)
+      : undefined;
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -329,8 +344,10 @@ export class CharactersService {
 
     // Pin the resolution key when the client sent only a display name (VEG-528).
     // Every API create used to land here with a null classId and never acquire
-    // one. A supplied id is left alone: the picker already said which row it
-    // meant, and overriding it would break picking a duplicate-named class.
+    // one. A supplied id that names a row the creator can see is kept: the
+    // picker already said which row it meant, and overriding it would break
+    // picking a duplicate-named class. Any other supplied id is discarded and
+    // the name derives instead (VEG-531), so junk never persists as a key.
     // `||` rather than `??` on purpose: `''` is legal under `@IsOptional()
     // @IsString()` and means "no row", not "this row", so it falls through to
     // derivation and is normalised away instead of being stored as a key that
@@ -340,11 +357,10 @@ export class CharactersService {
     // is an incoherent one: loadClassData would grant that class's spell slots
     // and weapon proficiencies to a sheet showing no class at all. update()
     // already nulls the id when the name is cleared; this is the create half.
-    const resolvedClass =
-      persisted.class && !persisted.classId
-        ? await this.deriveClass(persisted.class, userId)
-        : null;
-    const classId = persisted.class ? persisted.classId || resolvedClass?.id || null : null;
+    const resolvedClass = persisted.class
+      ? await this.deriveClass(persisted.class, userId, persisted.classId || null)
+      : null;
+    const classId = resolvedClass?.id ?? null;
 
     // Seed the hit-dice pool from that same class (VEG-530). Gated on the DTO
     // *omitting* the field rather than on it being falsy: an explicit null means
@@ -352,12 +368,10 @@ export class CharactersService {
     // invention this ticket removes, just from the other direction. Gating here
     // also keeps the read off creates that already carry a pool, which is the
     // guided builder and any classic-editor save where the player clicked
-    // "Apply <Class> traits". A classic-editor create that only picked a class
-    // from the combobox sends `classId` with no pool, so it does pay for the
-    // lookup by id below.
+    // "Apply <Class> traits".
     const hitDice =
       persisted.hitDice === undefined
-        ? await this.seedHitDice(resolvedClass, classId, userId, persisted.level)
+        ? this.seedHitDice(resolvedClass, persisted.level)
         : undefined;
 
     const character = await this.prisma.character.create({
@@ -468,7 +482,14 @@ export class CharactersService {
     // that was pinning their character to the right row.
     const healsAbsentKey =
       changes.class !== undefined && changes.classId === undefined && !existing.classId;
-    if (renamedWithoutKey || clearedKey || healsAbsentKey) {
+    // A supplied key is checked, not trusted (VEG-531). It is the key for the
+    // name this PATCH leaves on the row, so it is resolved against that name in
+    // one scoped query. A visible id survives as sent; junk, a deleted row, or a
+    // stranger's homebrew degrades to deriving from the name, exactly as if the
+    // key had been cleared. Before this, such a key was stored as-is and none of
+    // the three branches above could ever reach it again.
+    const suppliedKey = changes.classId ? changes.classId : null;
+    if (renamedWithoutKey || clearedKey || healsAbsentKey || suppliedKey) {
       // `!== undefined`, not `??`. @IsOptional() skips validation for null as
       // well as undefined, so `class: null` arrives as a real value meaning
       // "this character has no class" — and `??` would have read straight past
@@ -476,7 +497,9 @@ export class CharactersService {
       // loadClassData resolves a present id first, so the character would have
       // gone on computing its old class's spell slots forever.
       const name = changes.class !== undefined ? changes.class : existing.class;
-      changes.classId = name ? ((await this.deriveClass(name, userId))?.id ?? null) : null;
+      changes.classId = name
+        ? ((await this.deriveClass(name, userId, suppliedKey))?.id ?? null)
+        : null;
     }
     // Cast needed for JSON field compatibility (see create method comment).
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
