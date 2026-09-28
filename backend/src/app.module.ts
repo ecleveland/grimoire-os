@@ -20,6 +20,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
 import { AuditLogInterceptor } from './audit-log/audit-log.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { WebsocketModule } from './websocket/websocket.module';
+import { HealthModule } from './health/health.module';
 import { CsrfGuard } from './auth/guards/csrf.guard';
 import { RateLimitGuard } from './common/guards/rate-limit.guard';
 
@@ -70,6 +71,7 @@ const RUNTIME_DEFAULT_LIMIT = parseInt(process.env.THROTTLE_AUTHED_LIMIT ?? '120
     AdminModule,
     AuditLogModule,
     WebsocketModule,
+    HealthModule,
   ],
   providers: [
     {

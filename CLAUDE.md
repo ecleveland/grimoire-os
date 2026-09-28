@@ -92,6 +92,8 @@ Before invoking `./dev.sh`:
 
 Base images are pinned to immutable SHA256 digests in `backend/Dockerfile`, `frontend/Dockerfile`, and `docker-compose.yml`. The combined `tag@sha256:<digest>` form is used so the human-readable tag is preserved alongside the digest.
 
+Every compose service has a healthcheck, and each one starts only after its dependency reports healthy (postgres, then backend, then frontend). The backend probe calls `GET /api/health`, which runs `SELECT 1` and answers 503 when the database is unreachable. The probes use `node -e "fetch(...)"` because the alpine images ship no curl. `docker compose ps` shows the health state.
+
 Currently pinned (resolved 2026-05-08):
 
 | Image | Tag | Digest |
