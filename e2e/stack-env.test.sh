@@ -65,6 +65,13 @@ git init -q "$TMP/My.Grimoire_OS"
 out=$(derive "$TMP/My.Grimoire_OS")
 expect "odd main name: compose project" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "mygrimoire_os"
 
+# A checkout whose .git lives elsewhere still names the project after the
+# checkout, as compose does.
+git init -q --separate-git-dir "$TMP/elsewhere.git" "$TMP/sepdir"
+out=$(derive "$TMP/sepdir")
+expect "separate git dir: compose project" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "sepdir"
+expect "separate git dir: stack" "$(value_of "$out" E2E_STACK)" "default"
+
 # A linked worktree derives a private stack from its directory name.
 out=$(derive "$TMP/Feat-X.1")
 expect "worktree: stack" "$(value_of "$out" E2E_STACK)" "feat_x_1"

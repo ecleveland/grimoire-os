@@ -35,12 +35,16 @@ _e2e_worktree_name() {
 # only letters, digits, dashes and underscores. A worktree shares the main
 # checkout's container, so it resolves to the main checkout's name too.
 _e2e_compose_project() {
-  local root="$1" common_dir main_dir
-  if common_dir=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    main_dir=$(dirname "$common_dir")
+  local root="$1" main_dir=""
+  if [ -n "$(_e2e_worktree_name "$root")" ]; then
+    # A linked worktree: the first worktree listed is the main checkout.
+    main_dir=$(git -C "$root" worktree list --porcelain | sed -n '1s/^worktree //p')
   else
-    main_dir="$root"
+    # The top level holds even when .git lives elsewhere (a submodule or
+    # --separate-git-dir); empty outside git.
+    main_dir=$(git -C "$root" rev-parse --show-toplevel 2>/dev/null) || true
   fi
+  main_dir="${main_dir:-$root}"
   basename "$main_dir" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//'
 }
 
