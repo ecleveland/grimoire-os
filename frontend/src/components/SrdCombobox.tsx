@@ -27,6 +27,8 @@ interface SrdComboboxProps {
   required?: boolean;
   placeholder?: string;
   helperText?: string;
+  /** Inline validation message, announced and linked to the input when set. */
+  error?: string;
 }
 
 const inputClasses =
@@ -52,9 +54,11 @@ export default function SrdCombobox({
   required = false,
   placeholder,
   helperText,
+  error,
 }: SrdComboboxProps) {
   const inputId = useId();
   const listId = useId();
+  const errorId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
@@ -131,6 +135,8 @@ export default function SrdCombobox({
           aria-controls={listId}
           aria-activedescendant={activeId}
           aria-autocomplete="list"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
           autoComplete="off"
           disabled={disabled}
           required={required}
@@ -189,6 +195,11 @@ export default function SrdCombobox({
             ))
           )}
         </ul>
+      )}
+      {error && (
+        <p id={errorId} role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+          {error}
+        </p>
       )}
       {helperText && <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{helperText}</p>}
     </div>

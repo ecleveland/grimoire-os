@@ -5,7 +5,11 @@ import { hitDicePoolFor } from '@grimoire-os/shared';
 import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
-import { sourceLabelledOptions } from '@/lib/content-selection';
+import {
+  ambiguousSelectionMessage,
+  sourceLabelledOptions,
+  useTypedSelectionId,
+} from '@/lib/content-selection';
 import { useDraftGrants } from '../useCharacterDraft';
 import {
   classOptions,
@@ -28,7 +32,12 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
   const classes = classesQuery.data ?? [];
   // id-first (VEG-524): a homebrew class may share an SRD name, and the hit die
   // and grants folded into the draft below must follow the exact row picked.
-  const selectedClass = resolveClass(classes, { id: value.classId, name: value.class });
+  const selection = { id: value.classId, name: value.class };
+  const selectedClass = resolveClass(classes, selection);
+  // Set when two catalog classes share the typed name and no id picks one. The
+  // step reports itself incomplete until the user picks from the list.
+  const ambiguousMessage = ambiguousSelectionMessage(classes, selection, 'class');
+  const typedClassId = useTypedSelectionId(classes, value.classId);
   // Memoized so re-typing in the combobox doesn't rebuild the collision map.
   const classOpts = useMemo(() => classOptions(classes), [classes]);
 
@@ -106,12 +115,15 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
   }, [selectedClass?.id, reconcileSource, onChange]);
 
   // The class-name gate lives in the step def's isValid; this reports the extra
-  // SRD-derived rule: an unrecognized class has no pool (count trivially met),
-  // a recognized one needs exactly requiredPicks picks.
+  // catalog-derived rules. An unrecognized class has no pool (count trivially
+  // met), a recognized one needs exactly requiredPicks picks, and an ambiguous
+  // name is never complete: it resolves to no class, so it would otherwise pass
+  // with no saves, armor, or skill gate at all.
   const skillsComplete = requiredPicks === 0 || chosenPoolSkills.length === requiredPicks;
+  const stepComplete = skillsComplete && !ambiguousMessage;
   useEffect(() => {
-    onValidChange?.(skillsComplete);
-  }, [skillsComplete, onValidChange]);
+    onValidChange?.(stepComplete);
+  }, [stepComplete, onValidChange]);
 
   const toggleSkill = (next: string[]) => {
     const picks = next.filter(s => skillPool.includes(s));
@@ -130,16 +142,18 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
         label="Class"
         required
         value={value.class}
-        // Typing sets the name and clears the id so a stale one can't linger and
-        // silently resolve to the wrong duplicate-named class (VEG-524); picking
-        // captures it. Either way the effect above reconciles the grants once
-        // the selection resolves to (or away from) a catalog class.
-        onChange={v => onChange({ class: v, classId: '' })}
+        // Typing sets the name and drops the id unless the text still names the
+        // row last picked, so a stale id can't linger and silently resolve to the
+        // wrong duplicate-named class; picking captures it. Either way the effect
+        // above reconciles the grants once the selection resolves to (or away
+        // from) a catalog class.
+        onChange={v => onChange({ class: v, classId: typedClassId(v) })}
         onSelect={opt => onChange({ classId: opt.id })}
         options={classOpts}
         loading={classesQuery.isLoading}
         placeholder="Search classes…"
         helperText="Pick your class — its hit die, saves, and proficiencies fill in automatically."
+        error={ambiguousMessage}
       />
 
       {selectedClass && (

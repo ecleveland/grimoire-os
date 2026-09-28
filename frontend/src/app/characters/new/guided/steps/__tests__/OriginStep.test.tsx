@@ -80,11 +80,11 @@ function routeApiFetch(races: SrdRace[], backgrounds: SrdBackground[]) {
 // Drive the real useCharacterDraft hook (the production store) so tests exercise
 // the real source-tagged compile/reconcile path. `grants` seeds source slices
 // (e.g. a class skill pick) that other steps would have written.
-function Harness({ seed }: { seed?: Seed }) {
+function Harness({ seed, onValid }: { seed?: Seed; onValid: (valid: boolean) => void }) {
   const api = useCharacterDraft(seed);
   return (
     <DraftProvider api={api}>
-      <OriginStep value={api.draft} onChange={api.onChange} />
+      <OriginStep value={api.draft} onChange={api.onChange} onValidChange={onValid} />
       <div data-testid="race">{api.draft.race}</div>
       <div data-testid="background">{api.draft.background}</div>
       <div data-testid="backgroundId">{api.draft.backgroundId}</div>
@@ -109,7 +109,9 @@ function renderStep(races: SrdRace[], backgrounds: SrdBackground[], seed?: Seed)
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  render(<Harness seed={seed} />, { wrapper });
+  const onValid = vi.fn();
+  render(<Harness seed={seed} onValid={onValid} />, { wrapper });
+  return { onValid };
 }
 
 async function pickFrom(user: ReturnType<typeof userEvent.setup>, label: RegExp, name: string) {
@@ -300,7 +302,9 @@ describe('OriginStep — background + species', () => {
     expect(screen.getByTestId('backgroundId')).toHaveTextContent('bg-hb');
   });
 
-  it('grants nothing (not the wrong duplicate) when a picked name is edited back into a collision (VEG-473)', async () => {
+  // A colliding name the user never picked must resolve to nothing rather than
+  // silently swapping to the other tier's grants, and the step says why.
+  it('grants nothing and flags the name when an edit leaves it ambiguous', async () => {
     const user = userEvent.setup();
     const homebrew = makeBackground({
       id: 'bg-hb',
@@ -311,20 +315,50 @@ describe('OriginStep — background + species', () => {
       originFeat: null,
       originFeatOption: null,
     });
-    renderStep([], [homebrew, makeBackground()]);
+    const { onValid } = renderStep([], [homebrew, makeBackground(), SOLDIER]);
 
     await user.type(screen.getByRole('combobox', { name: /background/i }), 'Acolyte');
     await user.click(await screen.findByRole('option', { name: 'Acolyte (Homebrew)' }));
     await waitFor(() => expect(screen.getByTestId('skills')).toHaveTextContent('Deception'));
+    await pickBackground(user, 'Soldier');
+    await waitFor(() => expect(screen.getByTestId('backgroundId')).toHaveTextContent('soldier'));
 
-    // Re-type the name so it once again collides with the SRD Acolyte but has no
-    // id. The fallback must NOT silently swap to the SRD Acolyte's grants — it
-    // resolves to nothing, so the grant is cleared rather than made wrong.
     await user.clear(screen.getByRole('combobox', { name: /background/i }));
     await user.type(screen.getByRole('combobox', { name: /background/i }), 'Acolyte');
     await waitFor(() => expect(screen.getByTestId('backgroundId')).toBeEmptyDOMElement());
     expect(screen.getByTestId('skills')).not.toHaveTextContent('Deception');
     expect(screen.getByTestId('skills')).not.toHaveTextContent('Religion');
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'More than one background is named "Acolyte". Pick one from the list.'
+    );
+    await waitFor(() => expect(onValid).toHaveBeenLastCalledWith(false));
+  });
+
+  it('keeps the picked background when its name is typed over with the same name', async () => {
+    const user = userEvent.setup();
+    const homebrew = makeBackground({
+      id: 'bg-hb',
+      name: 'Acolyte',
+      contentSource: 'homebrew',
+      createdById: 'u1',
+      skillProficiencies: ['Deception'],
+      originFeat: null,
+      originFeatOption: null,
+    });
+    const { onValid } = renderStep([], [homebrew, makeBackground()]);
+
+    const input = screen.getByRole('combobox', { name: /background/i });
+    await user.type(input, 'Acolyte');
+    await user.click(await screen.findByRole('option', { name: 'Acolyte (Homebrew)' }));
+    await waitFor(() => expect(screen.getByTestId('backgroundId')).toHaveTextContent('bg-hb'));
+
+    await user.clear(input);
+    await user.type(input, 'acolyte');
+
+    await waitFor(() => expect(screen.getByTestId('backgroundId')).toHaveTextContent('bg-hb'));
+    expect(screen.getByTestId('skills')).toHaveTextContent('Deception');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onValid).toHaveBeenLastCalledWith(true);
   });
 
   it('clears the captured background id (and grants) when the name is edited (VEG-473)', async () => {

@@ -49,7 +49,11 @@ import {
   resolveClass,
   uniqueSkillPool,
 } from '@/lib/class-selection';
-import { sourceLabelledOptions } from '@/lib/content-selection';
+import {
+  ambiguousSelectionMessage,
+  sourceLabelledOptions,
+  useTypedSelectionId,
+} from '@/lib/content-selection';
 import ToggleChips from '@/components/ToggleChips';
 import TokenListEditor from '@/components/TokenListEditor';
 import WeaponsEditor from '@/components/WeaponsEditor';
@@ -716,6 +720,21 @@ export default function CharacterEditorForm({
     id: values.backgroundId,
     name: values.background,
   });
+  // Retyping the stored name keeps the stored id, so an incidental edit can't
+  // wipe the key and leave the sheet ambiguous again. A name that is ambiguous
+  // with no id gets an inline prompt to pick from the list.
+  const typedClassId = useTypedSelectionId(classes, values.classId);
+  const typedBackgroundId = useTypedSelectionId(backgrounds, values.backgroundId);
+  const ambiguousClass = ambiguousSelectionMessage(
+    classes,
+    { id: values.classId, name: values.class },
+    'class'
+  );
+  const ambiguousBackground = ambiguousSelectionMessage(
+    backgrounds,
+    { id: values.backgroundId, name: values.background },
+    'background'
+  );
 
   // Recommended primary abilities for the selected class (VEG-447) — purely
   // informational; resolves to none for a free-typed/homebrew class.
@@ -789,13 +808,15 @@ export default function CharacterEditorForm({
             label="Class"
             value={values.class}
             options={classOpts}
-            // Typing clears the id so a stale one can't linger and silently
-            // resolve to the wrong duplicate-named class (VEG-524).
-            onChange={v => setValues(prev => ({ ...prev, class: v, classId: '' }))}
+            // Typing drops the id unless the text still names the row last
+            // picked, so a stale one can't linger and silently resolve to the
+            // wrong duplicate-named class (VEG-524).
+            onChange={v => setValues(prev => ({ ...prev, class: v, classId: typedClassId(v) }))}
             // Picking captures the id, and invalidates any chosen subclass
             // (subclasses are scoped to the class) to avoid a mismatched pair.
             onSelect={opt => setValues(prev => ({ ...prev, classId: opt.id, subclass: '' }))}
             helperText="Pick from the SRD or type a custom class."
+            error={ambiguousClass}
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -821,10 +842,14 @@ export default function CharacterEditorForm({
             value={values.background}
             options={bgOptions}
             // Picking captures the id (unambiguous even for a duplicate name);
-            // any typed edit clears it so a stale id can't linger (VEG-473).
-            onChange={v => setValues(prev => ({ ...prev, background: v, backgroundId: '' }))}
+            // a typed edit drops it unless the text still names the row last
+            // picked, so a stale id can't linger (VEG-473).
+            onChange={v =>
+              setValues(prev => ({ ...prev, background: v, backgroundId: typedBackgroundId(v) }))
+            }
             onSelect={opt => set('backgroundId', opt.id)}
             helperText="Pick from the SRD or type a custom background."
+            error={ambiguousBackground}
           />
           <FormField
             label="Alignment"
