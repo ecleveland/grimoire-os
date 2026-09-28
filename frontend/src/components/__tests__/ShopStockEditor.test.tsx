@@ -105,6 +105,18 @@ describe('ShopStockEditor', () => {
     });
   });
 
+  it('explains that homebrew cannot be stocked when the search finds nothing', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeResponse([]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'Smuggled');
+
+    await screen.findByText(/no matching items for/i);
+    expect(screen.getByText(/homebrew items cannot be stocked/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add custom line/i })).toBeInTheDocument();
+  });
+
   it('adds a catalog item with price defaulted from its cost and unlimited stock', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([potion]));
     const user = userEvent.setup();

@@ -1,19 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { BACKEND, registerAndLogin, csrfHeaders } from './helpers';
+import { BACKEND, registerAndLogin, csrfHeaders, createCampaign } from './helpers';
 
 // VEG-354 — DM shop builder golden path: create a shop with a custom line item
 // through the UI, then confirm it renders on the themed storefront.
 test.describe('Shop builder', () => {
   test('DM creates a shop with a custom line and sees it on the storefront', async ({ page }) => {
     await registerAndLogin(page, 'shop-builder-dm');
-    const headers = await csrfHeaders(page);
-
-    const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
-      data: { name: `Builder Camp ${Date.now()}` },
-      headers,
-    });
-    expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
-    const campaignId = (await campRes.json()).id as string;
+    const campaignId = await createCampaign(page, 'Builder Camp');
 
     // Open the builder from the storefront's New Shop affordance.
     await page.goto(`/campaigns/${campaignId}/shops/new`);
@@ -43,14 +36,7 @@ test.describe('Shop builder', () => {
   // pre-fills the editor with catalog-derived lines the DM then saves.
   test('DM creates a shop from suggested theme stock', async ({ page }) => {
     await registerAndLogin(page, 'shop-theme-dm');
-    const headers = await csrfHeaders(page);
-
-    const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
-      data: { name: `Theme Camp ${Date.now()}` },
-      headers,
-    });
-    expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
-    const campaignId = (await campRes.json()).id as string;
+    const campaignId = await createCampaign(page, 'Theme Camp');
 
     await page.goto(`/campaigns/${campaignId}/shops/new`);
     await expect(page.getByRole('heading', { name: /new shop/i })).toBeVisible();
@@ -76,14 +62,8 @@ test.describe('Shop builder', () => {
   // when the DM owns it, so a line can never point at a row a buyer cannot read.
   test('DM cannot stock their own homebrew item', async ({ page }) => {
     await registerAndLogin(page, 'shop-homebrew-dm');
+    const campaignId = await createCampaign(page, 'Homebrew Camp');
     const headers = await csrfHeaders(page);
-
-    const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
-      data: { name: `Homebrew Camp ${Date.now()}` },
-      headers,
-    });
-    expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
-    const campaignId = (await campRes.json()).id as string;
 
     const itemName = `Smuggled Draught ${Date.now()}`;
     const itemRes = await page.request.post(`${BACKEND}/api/srd/items`, {
@@ -103,8 +83,18 @@ test.describe('Shop builder', () => {
     await page.goto(`/campaigns/${campaignId}/shops/new`);
     await expect(page.getByRole('heading', { name: /new shop/i })).toBeVisible();
 
+    // The empty state also renders when the search request fails, so first
+    // prove the picker returns catalog results (VEG-566). "Potions of Healing"
+    // is the seeded equipment row's exact name, and an exact name match ranks
+    // first in the fuzzy search, so it is inside the picker's eight results.
+    await page.getByLabel(/search items/i).fill('Potions of Healing');
+    await expect(
+      page.getByRole('button', { name: 'Add Potions of Healing', exact: true })
+    ).toBeVisible();
+
     await page.getByLabel(/search items/i).fill(itemName);
     await expect(page.getByText(/no matching items/i)).toBeVisible();
+    await expect(page.getByText(/homebrew items cannot be stocked/i)).toBeVisible();
 
     // And the server refuses the id outright, so a hand-rolled request cannot
     // route around the picker.

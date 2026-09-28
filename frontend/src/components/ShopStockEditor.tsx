@@ -265,9 +265,15 @@ export default function ShopStockEditor({ value, onChange }: Props) {
           (loading ? (
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Searching…</p>
           ) : pickable.length === 0 ? (
-            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-              No matching items for &ldquo;{query}&rdquo;.
-            </p>
+            <>
+              <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                No matching items for &ldquo;{query}&rdquo;.
+              </p>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Homebrew items cannot be stocked. To sell one, use Add custom line and name it
+                yourself.
+              </p>
+            </>
           ) : (
             <ul className="mt-2 space-y-1">
               {pickable.map(item => (

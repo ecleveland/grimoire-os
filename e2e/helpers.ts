@@ -28,20 +28,26 @@ export async function csrfHeaders(page: Page): Promise<Record<string, string>> {
   return { 'x-csrf-token': csrf!.value };
 }
 
+// Create a campaign for the logged-in DM and return its id.
+export async function createCampaign(page: Page, namePrefix = 'Camp'): Promise<string> {
+  const headers = await csrfHeaders(page);
+
+  const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
+    data: { name: `${namePrefix} ${Date.now()}` },
+    headers,
+  });
+  expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
+  return (await campRes.json()).id as string;
+}
+
 // Create a campaign plus a "Goblin Ambush" encounter with a single Hero
 // combatant — the shared fixture for the encounter-tracker specs.
 export async function createEncounter(
   page: Page,
   campaignPrefix = 'Camp'
 ): Promise<{ campaignId: string; encounterId: string }> {
+  const campaignId = await createCampaign(page, campaignPrefix);
   const headers = await csrfHeaders(page);
-
-  const campRes = await page.request.post(`${BACKEND}/api/campaigns`, {
-    data: { name: `${campaignPrefix} ${Date.now()}` },
-    headers,
-  });
-  expect(campRes.ok(), `campaign create failed: ${campRes.status()}`).toBeTruthy();
-  const campaignId = (await campRes.json()).id as string;
 
   const encRes = await page.request.post(`${BACKEND}/api/encounters`, {
     data: {
