@@ -49,6 +49,7 @@ export default function ShopStockEditor({ value, onChange }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SrdItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable per-line React keys. Custom lines have no itemId, so an index key
@@ -74,10 +75,12 @@ export default function ShopStockEditor({ value, onChange }: Props) {
   useEffect(() => {
     if (!query) {
       setResults([]);
+      setSearchFailed(false);
       setLoading(false);
       return;
     }
     setLoading(true);
+    setSearchFailed(false);
     // Stale guard: a slow response for an old query must not overwrite the
     // newer query's results or end its loading state.
     let stale = false;
@@ -97,6 +100,7 @@ export default function ShopStockEditor({ value, onChange }: Props) {
         if (stale) return;
         console.error('Item search failed:', err);
         setResults([]);
+        setSearchFailed(true);
         toast.error(err instanceof Error ? err.message : 'Failed to search items');
       })
       .finally(() => {
@@ -265,15 +269,23 @@ export default function ShopStockEditor({ value, onChange }: Props) {
           (loading ? (
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Searching…</p>
           ) : pickable.length === 0 ? (
-            <>
+            results.length > 0 ? (
               <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
-                No matching items for &ldquo;{query}&rdquo;.
+                Every match shown is already in stock. Try a more specific search.
               </p>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Homebrew items cannot be stocked. To sell one, use Add custom line and name it
-                yourself.
-              </p>
-            </>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                  No matching items for &ldquo;{query}&rdquo;.
+                </p>
+                {!searchFailed && (
+                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Homebrew items cannot be stocked. To sell one, use Add custom line and name it
+                    yourself.
+                  </p>
+                )}
+              </>
+            )
           ) : (
             <ul className="mt-2 space-y-1">
               {pickable.map(item => (

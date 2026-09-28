@@ -85,8 +85,8 @@ test.describe('Shop builder', () => {
 
     // The empty state also renders when the search request fails, so first
     // prove the picker returns catalog results (VEG-566). "Potions of Healing"
-    // is the seeded equipment row's exact name, and an exact name match ranks
-    // first in the fuzzy search, so it is inside the picker's eight results.
+    // is a seeded magic item's exact name, and an exact name match ranks first
+    // in the fuzzy search, so it is inside the picker's eight results.
     await page.getByLabel(/search items/i).fill('Potions of Healing');
     await expect(
       page.getByRole('button', { name: 'Add Potions of Healing', exact: true })

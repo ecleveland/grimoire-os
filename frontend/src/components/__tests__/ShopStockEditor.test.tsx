@@ -59,6 +59,7 @@ function lastChange(onChange: ReturnType<typeof vi.fn>) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mockApiFetch.mockReset();
 });
 
@@ -115,6 +116,32 @@ describe('ShopStockEditor', () => {
     await screen.findByText(/no matching items for/i);
     expect(screen.getByText(/homebrew items cannot be stocked/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /add custom line/i })).toBeInTheDocument();
+  });
+
+  it('says every match shown is already in stock when results are all stocked', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeResponse([potion]));
+    const user = userEvent.setup();
+    setup([
+      { itemId: potion.id, name: 'Potion of Healing', price: { ...zero, gp: 50 }, stock: null },
+    ]);
+
+    await user.type(screen.getByLabelText(/search items/i), 'pot');
+
+    expect(await screen.findByText(/every match shown is already in stock/i)).toBeInTheDocument();
+    expect(screen.queryByText(/homebrew items cannot be stocked/i)).toBeNull();
+  });
+
+  it('does not blame homebrew when the search request fails', async () => {
+    const { toast } = await import('sonner');
+    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'pot');
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    expect(await screen.findByText(/no matching items for/i)).toBeInTheDocument();
+    expect(screen.queryByText(/homebrew items cannot be stocked/i)).toBeNull();
   });
 
   it('adds a catalog item with price defaulted from its cost and unlimited stock', async () => {
