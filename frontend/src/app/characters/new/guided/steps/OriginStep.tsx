@@ -10,6 +10,7 @@ import {
 } from '@/lib/types';
 import SrdCombobox from '@/components/SrdCombobox';
 import { backgroundOptions, resolveBackground } from '@/lib/background-selection';
+import { ambiguousSelectionMessage, useTypedSelectionId } from '@/lib/content-selection';
 import { useDraftGrants } from '../useCharacterDraft';
 import type { WizardStepProps } from './types';
 
@@ -40,7 +41,7 @@ const summaryCard =
  * Abilities step owns "+ background increases", VEG-381), starting equipment
  * (VEG-382), and personality suggestions.
  */
-export default function OriginStep({ value, onChange }: WizardStepProps) {
+export default function OriginStep({ value, onChange, onValidChange }: WizardStepProps) {
   const { reconcileSource } = useDraftGrants();
   const racesQuery = useApiQuery<SrdRace[]>('/srd/races');
   const backgroundsQuery = useApiQuery<SrdBackground[]>('/srd/backgrounds');
@@ -52,10 +53,20 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
   const selectedRace = races.find(r => r.name === value.race);
   // Resolve by id, not name: a homebrew background may share an SRD name, and
   // grants (skills/tools/origin feat) must follow the exact selection (VEG-473).
-  const selectedBackground = resolveBackground(backgrounds, {
-    id: value.backgroundId,
-    name: value.background,
-  });
+  const backgroundSelection = { id: value.backgroundId, name: value.background };
+  const selectedBackground = resolveBackground(backgrounds, backgroundSelection);
+  const ambiguousBackground = ambiguousSelectionMessage(
+    backgrounds,
+    backgroundSelection,
+    'background'
+  );
+  const typedBackgroundId = useTypedSelectionId(backgrounds, value.backgroundId);
+
+  // The step is optional, so this only withholds its progress checkmark; the
+  // inline message on the picker is what tells the user to choose a row.
+  useEffect(() => {
+    onValidChange?.(!ambiguousBackground);
+  }, [ambiguousBackground, onValidChange]);
 
   // Species reconciliation. Languages are a source slice; the species' traits are
   // single-source features reconciled by their `source` tag (drop every
@@ -144,14 +155,16 @@ export default function OriginStep({ value, onChange }: WizardStepProps) {
       <SrdCombobox
         label="Background"
         value={value.background}
-        // Picking captures the id; typing clears it so a stale id can't linger and
-        // silently grant the wrong background (VEG-473).
-        onChange={v => onChange({ background: v, backgroundId: '' })}
+        // Picking captures the id. Typing drops it unless the text still names
+        // the row last picked, so a stale id can't linger and silently grant
+        // the wrong background.
+        onChange={v => onChange({ background: v, backgroundId: typedBackgroundId(v) })}
         onSelect={opt => onChange({ backgroundId: opt.id })}
         options={bgOptions}
         loading={backgroundsQuery.isLoading}
         placeholder="Search backgrounds…"
         helperText="Grants skill and tool proficiencies."
+        error={ambiguousBackground}
       />
       {selectedBackground && (
         <fieldset className={summaryCard} aria-label="Background grants">

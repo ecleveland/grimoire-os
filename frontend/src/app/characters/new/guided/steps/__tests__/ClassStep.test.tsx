@@ -510,9 +510,9 @@ describe('ClassStep — duplicate class names (VEG-524)', () => {
     await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
   });
 
-  // The safety property: re-typing a name back into a collision must resolve to
-  // nothing rather than silently swapping to the other tier's grants.
-  it('grants nothing when a picked name is edited back into a collision', async () => {
+  // Clearing the field and typing the same name back names the row the user
+  // picked, so the id comes back with it rather than leaving the name ambiguous.
+  it('restores the picked row when the name is cleared and typed back', async () => {
     const user = userEvent.setup();
     renderStep([homebrewFighter, makeClass()]);
 
@@ -526,9 +526,117 @@ describe('ClassStep — duplicate class names (VEG-524)', () => {
     await user.clear(input);
     await user.type(input, 'Fighter');
 
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-classId')).toHaveTextContent('cls-hb-fighter')
+    );
+    const summary = await screen.findByRole('group', { name: /class grants/i });
+    expect(within(summary).getByText(/d12/)).toBeInTheDocument();
+  });
+
+  // The safety property: a colliding name the user never picked must resolve to
+  // nothing rather than silently choosing one tier's grants.
+  it('grants nothing when a different pick is edited into a collision', async () => {
+    const user = userEvent.setup();
+    renderStep([homebrewFighter, makeClass(), WIZARD]);
+
+    await pickClass(user, 'Wizard');
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toHaveTextContent('wizard'));
+
+    const input = screen.getByRole('combobox', { name: /^class/i });
+    await user.clear(input);
+    await user.type(input, 'Fighter');
+
     await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
-    // No grants summary at all — the name is ambiguous, so nothing resolved.
     expect(screen.queryByRole('group', { name: /class grants/i })).toBeNull();
+  });
+});
+
+describe('ClassStep retyping and ambiguous names', () => {
+  // No skill picks, so the step's validity turns on the name alone.
+  const srdFighter = makeClass({ numSkillChoices: 0 });
+  const homebrewFighter = makeClass({
+    id: 'cls-hb-fighter',
+    name: 'Fighter',
+    contentSource: 'homebrew',
+    createdById: 'u1',
+    hitDie: 'd12',
+    savingThrows: ['Dexterity', 'Charisma'],
+    numSkillChoices: 0,
+  });
+
+  async function pickHomebrew(user: ReturnType<typeof userEvent.setup>) {
+    const input = screen.getByRole('combobox', { name: /^class/i });
+    await user.type(input, 'Fighter');
+    await user.click(await screen.findByRole('option', { name: 'Fighter (Homebrew)' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-classId')).toHaveTextContent('cls-hb-fighter')
+    );
+    return input;
+  }
+
+  it('keeps the id and grants when a stray key is typed and then deleted', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([homebrewFighter, srdFighter]);
+
+    const input = await pickHomebrew(user);
+    await user.type(input, 'x');
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
+    await user.type(input, '{Backspace}');
+
+    await waitFor(() =>
+      expect(screen.getByTestId('draft-classId')).toHaveTextContent('cls-hb-fighter')
+    );
+    const summary = await screen.findByRole('group', { name: /class grants/i });
+    expect(within(summary).getByText(/d12/)).toBeInTheDocument();
+    expect(within(summary).getByText('Dexterity, Charisma')).toBeInTheDocument();
+    expect(draftHitDice()).toEqual({ dieType: 'd12', total: 1, spent: 0 });
+    expect(onValid).toHaveBeenLastCalledWith(true);
+  });
+
+  it('reports the step invalid and says why when a typed name is ambiguous', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([homebrewFighter, srdFighter]);
+
+    await user.type(screen.getByRole('combobox', { name: /^class/i }), 'Fighter');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'More than one class is named "Fighter". Pick one from the list.'
+    );
+    await waitFor(() => expect(onValid).toHaveBeenLastCalledWith(false));
+
+    await user.click(await screen.findByRole('option', { name: 'Fighter (SRD)' }));
+    await waitFor(() => expect(onValid).toHaveBeenLastCalledWith(true));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows no message for a unique or custom name', async () => {
+    const user = userEvent.setup();
+    const { onValid } = renderStep([homebrewFighter, srdFighter]);
+
+    await user.type(screen.getByRole('combobox', { name: /^class/i }), 'Bloodbinder');
+
+    await waitFor(() => expect(onValid).toHaveBeenLastCalledWith(true));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // The d12 must go with the rest of the homebrew grants, or the draft keeps a
+  // die from a class it no longer names.
+  it('resets the hit die when an edit leaves the name ambiguous', async () => {
+    const user = userEvent.setup();
+    renderStep([homebrewFighter, srdFighter, WIZARD]);
+
+    await pickHomebrew(user);
+    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd12', total: 1, spent: 0 }));
+    await pickClass(user, 'Wizard');
+    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd6', total: 1, spent: 0 }));
+
+    const input = screen.getByRole('combobox', { name: /^class/i });
+    await user.clear(input);
+    await user.type(input, 'Fighter');
+
+    await waitFor(() => expect(screen.getByTestId('draft-classId')).toBeEmptyDOMElement());
+    await waitFor(() => expect(draftHitDice()).toBeNull());
+    expect(screen.getByTestId('draft-spell')).toBeEmptyDOMElement();
   });
 });
 

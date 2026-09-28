@@ -932,6 +932,64 @@ describe('CharacterEditorForm autofill', () => {
     expect(submitted.classId).toBe('');
   });
 
+  // An owner editing an unrelated field may click into Class and retype the same
+  // name without opening the list. The stored key must survive that, or the
+  // sheet goes back to an ambiguous name with no hit die to level up with.
+  it('keeps a loaded classId when the same name is typed back in', async () => {
+    const homebrewFighter: SrdClass = {
+      ...srdClasses[0],
+      id: 'cls-fighter-hb',
+      contentSource: 'homebrew',
+      hitDie: 'd12',
+    };
+    srdClasses.push(homebrewFighter);
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.name = 'Hero';
+      initial.class = 'Fighter';
+      initial.classId = 'cls-fighter-hb';
+      const { onSubmit } = renderForm({ initialValues: initial });
+      const user = userEvent.setup();
+
+      const input = screen.getByLabelText(/^class/i);
+      // Wait for the catalog, which is what the retained id is checked against.
+      await screen.findByRole('button', { name: /apply fighter traits/i });
+      await user.clear(input);
+      await user.type(input, 'Fighter');
+      expect(screen.queryByRole('alert')).toBeNull();
+      await user.click(screen.getByRole('button', { name: /create character/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.class).toBe('Fighter');
+      expect(submitted.classId).toBe('cls-fighter-hb');
+    } finally {
+      srdClasses.pop();
+    }
+  });
+
+  it('flags a typed class name that matches more than one class', async () => {
+    const homebrewFighter: SrdClass = {
+      ...srdClasses[0],
+      id: 'cls-fighter-hb',
+      contentSource: 'homebrew',
+    };
+    srdClasses.push(homebrewFighter);
+    try {
+      const initial = emptyCharacterFormValues();
+      initial.name = 'Hero';
+      renderForm({ initialValues: initial });
+      const user = userEvent.setup();
+
+      await user.type(screen.getByLabelText(/^class/i), 'Fighter');
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'More than one class is named "Fighter". Pick one from the list.'
+      );
+    } finally {
+      srdClasses.pop();
+    }
+  });
+
   it('re-applying the same grants is a no-op (idempotent + "already applied" toast)', async () => {
     const initial = emptyCharacterFormValues();
     initial.name = 'Hero';

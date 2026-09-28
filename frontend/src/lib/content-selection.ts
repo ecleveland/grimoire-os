@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef } from 'react';
 import type { ContentSource } from '@/lib/types';
 import type { SrdComboboxOption } from '@/components/SrdCombobox';
 
@@ -71,6 +72,80 @@ export function resolveByIdThenUniqueName<T extends IdName>(
   const key = selection.name.toLowerCase();
   const matches = rows.filter(r => r.name.toLowerCase() === key);
   return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * Whether a selection names more than one catalog row and no id picks between
+ * them. This is the case where `resolveByIdThenUniqueName` declines to guess, as
+ * distinct from a custom name that matches nothing. A picker uses it to tell the
+ * user to choose from the list, and a wizard step uses it to report itself
+ * incomplete instead of carrying a name with no grants forward.
+ */
+export function isAmbiguousSelection<T extends IdName>(
+  rows: T[],
+  selection: CatalogSelection
+): boolean {
+  if (!selection.name || resolveByIdThenUniqueName(rows, selection)) return false;
+  const key = selection.name.toLowerCase();
+  return rows.filter(r => r.name.toLowerCase() === key).length > 1;
+}
+
+/**
+ * The inline message for an ambiguous selection, or `undefined` when there is
+ * nothing to say. `noun` is the singular entity name ("class", "background").
+ */
+export function ambiguousSelectionMessage<T extends IdName>(
+  rows: T[],
+  selection: CatalogSelection,
+  noun: string
+): string | undefined {
+  return isAmbiguousSelection(rows, selection)
+    ? `More than one ${noun} is named "${selection.name}". Pick one from the list.`
+    : undefined;
+}
+
+/**
+ * The id a picker should carry after the user types `typedName`.
+ *
+ * Typing normally clears the id so a stale one cannot keep granting a row the
+ * user has edited away from. That rule only needs the id gone while the text
+ * names something else. When the text names the row `rememberedId` points at
+ * (case-insensitively, like the resolver), keeping the id loses nothing and
+ * stops a retype of the same name from turning a picked duplicate back into an
+ * ambiguous one.
+ */
+export function retainedSelectionId<T extends IdName>(
+  rows: T[],
+  rememberedId: string | null | undefined,
+  typedName: string
+): string {
+  if (!rememberedId) return '';
+  const row = rows.find(r => r.id === rememberedId);
+  return row && row.name.toLowerCase() === typedName.toLowerCase() ? row.id : '';
+}
+
+/**
+ * Returns the `onChange` id rule for a catalog picker: given the typed text,
+ * the id to store beside it.
+ *
+ * Keystrokes pass through strings that name nothing ("F", "Fi"), and each of
+ * those clears the id. So the picker remembers the last non-empty id it held
+ * and restores it once the text names that row again, via
+ * `retainedSelectionId`. A pick from the list updates the memory through
+ * `currentId`.
+ */
+export function useTypedSelectionId<T extends IdName>(
+  rows: T[],
+  currentId: string | null | undefined
+): (typedName: string) => string {
+  const remembered = useRef(currentId || '');
+  useEffect(() => {
+    if (currentId) remembered.current = currentId;
+  }, [currentId]);
+  return useCallback(
+    (typedName: string) => retainedSelectionId(rows, remembered.current, typedName),
+    [rows]
+  );
 }
 
 const SOURCE_SUFFIX: Record<ContentSource, string> = {

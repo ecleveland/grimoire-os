@@ -191,4 +191,26 @@ describe('SrdCombobox', () => {
     await userEvent.click(screen.getByText('outside'));
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
+
+  it('announces an error and links it to the input', () => {
+    render(
+      <SrdCombobox
+        label="Class"
+        value="Fighter"
+        options={options}
+        onChange={vi.fn()}
+        error="Pick one from the list."
+      />
+    );
+    const input = screen.getByRole('combobox', { name: /class/i });
+    expect(screen.getByRole('alert')).toHaveTextContent('Pick one from the list.');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription('Pick one from the list.');
+  });
+
+  it('marks nothing invalid without an error', () => {
+    render(<SrdCombobox label="Class" value="Fighter" options={options} onChange={vi.fn()} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('combobox', { name: /class/i })).not.toHaveAttribute('aria-invalid');
+  });
 });
