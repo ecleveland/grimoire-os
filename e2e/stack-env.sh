@@ -9,6 +9,8 @@
 # Rules, first match wins:
 #   - Any of E2E_DB_NAME, E2E_BACKEND_PORT, E2E_FRONTEND_PORT or
 #     COMPOSE_PROJECT_NAME already set in the environment is kept as is.
+#   - COMPOSE_PROJECT_NAME defaults to the main checkout's directory name,
+#     the project dev.sh starts postgres under.
 #   - E2E_STACK names the stack. "default" is the stock stack.
 #   - Otherwise a linked git worktree takes its directory name as the stack.
 #   - Otherwise (the main checkout, CI, no git) the stack is "default".
@@ -26,6 +28,20 @@ _e2e_worktree_name() {
   if [ "$git_dir" != "$common_dir" ]; then
     basename "$(git -C "$root" rev-parse --show-toplevel)"
   fi
+}
+
+# Prints the compose project that dev.sh uses for the postgres container:
+# compose names it after the main checkout's directory, lowercased, keeping
+# only letters, digits, dashes and underscores. A worktree shares the main
+# checkout's container, so it resolves to the main checkout's name too.
+_e2e_compose_project() {
+  local root="$1" common_dir main_dir
+  if common_dir=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+    main_dir=$(dirname "$common_dir")
+  else
+    main_dir="$root"
+  fi
+  basename "$main_dir" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-' | sed 's/^[-_]*//'
 }
 
 # Lowercases $1 and turns every run of other characters into one underscore,
@@ -58,9 +74,9 @@ e2e_stack_env() {
   export E2E_DB_NAME="${E2E_DB_NAME:-$db}"
   export E2E_BACKEND_PORT="${E2E_BACKEND_PORT:-$backend}"
   export E2E_FRONTEND_PORT="${E2E_FRONTEND_PORT:-$((E2E_BACKEND_PORT + 1))}"
-  # A worktree's compose project would otherwise be named after its directory
-  # and miss the running grimoire-os postgres container.
-  export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-grimoire-os}"
+  # A worktree's compose project would otherwise be named after its own
+  # directory and miss the running postgres container.
+  export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(_e2e_compose_project "$root")}"
 }
 
 # Run as a script: print the stack for the checkout at $1 (default: the repo

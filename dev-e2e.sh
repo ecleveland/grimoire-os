@@ -25,7 +25,9 @@
 
 set -e
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The physical path, because group_is_ours matches it against process command
+# lines, which node and npm build from resolved paths.
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 
 DROP_ON_EXIT=0
 for arg in "$@"; do

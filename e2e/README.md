@@ -50,7 +50,7 @@ npm run e2e:ui
 
 ## Parallel stacks
 
-Several checkouts can run e2e at the same time. Each one needs only Postgres up; the stacks share the `grimoire-os` compose project's postgres container and nothing else.
+Several checkouts can run e2e at the same time. Each one needs only Postgres up. The stacks share the main checkout's postgres container and nothing else.
 
 Inside a linked worktree the defaults already give a private stack, so plain `npm run e2e` is enough. To pick names and ports by hand, set these before `./dev-e2e.sh` or `npm run e2e`:
 
@@ -60,11 +60,13 @@ Inside a linked worktree the defaults already give a private stack, so plain `np
 | `E2E_DB_NAME`          | `grimoire_os_e2e_<stack>`              | database for this stack                             |
 | `E2E_BACKEND_PORT`     | hashed from the stack name             | backend port                                        |
 | `E2E_FRONTEND_PORT`    | backend port + 1                       | frontend port                                       |
-| `COMPOSE_PROJECT_NAME` | `grimoire-os`                          | compose project that owns the shared postgres       |
+| `COMPOSE_PROJECT_NAME` | main checkout's directory name         | compose project that owns the shared postgres       |
 | `E2E_BASE_URL`         | `http://localhost:<frontend port>`     | where specs open pages                              |
 | `E2E_API_URL`          | `http://localhost:<backend port>`      | where specs call the API                            |
 
-The stack named `default` keeps the stock values (3010/3011, `grimoire_os_e2e`). A worktree only needs `COMPOSE_PROJECT_NAME` when it runs `docker compose` by hand, because compose otherwise names the project after the worktree directory and cannot find the running container. The scripts set it for you.
+The stack named `default` keeps the stock values (3010/3011, `grimoire_os_e2e`). The scripts set `COMPOSE_PROJECT_NAME` for you. When you run `docker compose` by hand from a worktree, pass `-p <main checkout directory>` (`-p grimoire-os` for the usual clone), because compose otherwise names the project after the worktree directory and cannot find the running container.
+
+Hashed ports can collide between two worktrees. Check with `bash e2e/stack-env.sh` in each, and set `E2E_STACK` or the ports in one of them if they match. Locally Playwright reuses any server already answering on the frontend port, so a collision points one worktree's specs at the other's stack.
 
 Two stacks started by hand, from two worktrees:
 

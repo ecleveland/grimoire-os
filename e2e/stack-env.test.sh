@@ -50,12 +50,20 @@ expect "main: stack" "$(value_of "$out" E2E_STACK)" "default"
 expect "main: db" "$(value_of "$out" E2E_DB_NAME)" "grimoire_os_e2e"
 expect "main: backend port" "$(value_of "$out" E2E_BACKEND_PORT)" "3010"
 expect "main: frontend port" "$(value_of "$out" E2E_FRONTEND_PORT)" "3011"
-expect "main: compose project" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "grimoire-os"
+# The compose project follows the main checkout's directory, as compose names
+# it when dev.sh runs there.
+expect "main: compose project" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "main"
 
 # Outside git (a tarball or docker copy) also falls back to the defaults.
 out=$(derive "$TMP/not-a-repo")
 expect "no git: stack" "$(value_of "$out" E2E_STACK)" "default"
 expect "no git: db" "$(value_of "$out" E2E_DB_NAME)" "grimoire_os_e2e"
+expect "no git: compose project is the directory" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "not-a-repo"
+
+# Compose lowercases the directory name and drops characters it rejects.
+git init -q "$TMP/My.Grimoire_OS"
+out=$(derive "$TMP/My.Grimoire_OS")
+expect "odd main name: compose project" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "mygrimoire_os"
 
 # A linked worktree derives a private stack from its directory name.
 out=$(derive "$TMP/Feat-X.1")
@@ -67,7 +75,7 @@ in_range=no
 if [ "$be" -ge 3100 ] && [ "$be" -le 3498 ] && [ $((be % 2)) -eq 0 ]; then in_range=yes; fi
 expect "worktree: backend port is even and in 3100-3498 (got $be)" "$in_range" "yes"
 expect "worktree: frontend port is backend + 1" "$fe" "$((be + 1))"
-expect "worktree: compose project" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "grimoire-os"
+expect "worktree: compose project is the main checkout's" "$(value_of "$out" COMPOSE_PROJECT_NAME)" "main"
 
 # The derivation is stable across calls.
 again=$(derive "$TMP/Feat-X.1")
@@ -98,7 +106,7 @@ expect "long stack: db fits in 63 bytes (got ${#db})" "$fits" "yes"
 
 # Sourcing exports the same values into the caller's shell.
 sourced=$(env -i PATH="$PATH" HOME="$HOME" E2E_STACK=abc bash -c ". '$STACK_ENV' && e2e_stack_env '$TMP/main' && echo \"\$E2E_DB_NAME \$COMPOSE_PROJECT_NAME\"")
-expect "sourced: exports" "$sourced" "grimoire_os_e2e_abc grimoire-os"
+expect "sourced: exports" "$sourced" "grimoire_os_e2e_abc main"
 
 echo "stack-env.test.sh: $PASSES passed, $FAILS failed"
 [ "$FAILS" -eq 0 ]
