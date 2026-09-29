@@ -53,7 +53,7 @@ Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0
 
 ## CI & pre-merge verification
 
-GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. Docker images are built on pushes to `main`.
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` before tearing down. It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, `backend/tsconfig*.json`, `backend/package.json` or the workflow itself (VEG-570).
 
 Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E and the real-DB seed tests (both need a live Postgres). The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
 
