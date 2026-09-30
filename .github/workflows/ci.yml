@@ -212,14 +212,60 @@ jobs:
           retention-days: 7
 
   docker:
-    name: Docker images build (main)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Docker images build + boot
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       JWT_SECRET: ci-docker-build
+      COMPOSE_PROJECT_NAME: ci-smoke
     steps:
       - uses: actions/checkout@v4
+      # Every push to main runs the whole job. A pull request runs it only when
+      # it touches a file that can break the image without breaking the unit
+      # suites (VEG-570: a missing tsconfig.build.json shipped a backend image
+      # that exited with MODULE_NOT_FOUND while CI stayed green).
+      - name: Decide whether to run
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|backend/tsconfig[^/]*\.json|backend/package\.json|\.github/workflows/ci\.yml)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No image-affecting files changed; skipping the Docker build and boot."
+          fi
       - name: Validate compose config
+        if: steps.changed.outputs.run == 'true'
         run: docker compose config -q
       - name: Build images
+        if: steps.changed.outputs.run == 'true'
         run: docker compose build
+      # --wait exits non-zero when any service misses its healthcheck. The
+      # timeout covers the backend's 60 s start_period plus five 10 s retries,
+      # then the frontend's 30 s start_period plus five retries.
+      - name: Boot the stack and wait for every service to report healthy
+        if: steps.changed.outputs.run == 'true'
+        run: docker compose up -d --wait --wait-timeout 240
+      - name: Probe the running stack
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          docker compose ps
+          body=$(curl -fsS http://localhost:3001/api/health)
+          echo "GET /api/health -> $body"
+          echo "$body" | grep -q '"status":"ok"'
+          # / redirects to /login through the middleware; probe /login directly.
+          curl -fsS -o /dev/null http://localhost:3000/login
+      - name: Show service logs
+        if: failure() && steps.changed.outputs.run == 'true'
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color
+      - name: Tear down
+        if: always() && steps.changed.outputs.run == 'true'
+        run: docker compose down -v --remove-orphans
