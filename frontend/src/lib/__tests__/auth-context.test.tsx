@@ -56,6 +56,29 @@ function TestConsumer() {
       <button onClick={() => auth.register({ username: 'newuser', password: 'password123' })}>
         Register
       </button>
+      <button onClick={() => auth.login('testuser', 'password123', '/campaigns/1?tab=notes')}>
+        Login next
+      </button>
+      <button
+        onClick={() =>
+          auth.register({ username: 'newuser', password: 'password123' }, '/campaigns/1?tab=notes')
+        }
+      >
+        Register next
+      </button>
+      <button onClick={() => auth.login('testuser', 'password123', 'https://evil.com')}>
+        Login evil
+      </button>
+      <button
+        onClick={() =>
+          auth.register({ username: 'newuser', password: 'password123' }, 'https://evil.com')
+        }
+      >
+        Register evil
+      </button>
+      <button onClick={() => auth.login('testuser', 'password123', '/\t/evil.com')}>
+        Login tab
+      </button>
       <button onClick={() => void auth.logout()}>Logout</button>
       <button onClick={auth.refreshProfile}>Refresh</button>
     </div>
@@ -406,6 +429,44 @@ describe('AuthProvider', () => {
       });
     });
 
+    it('navigates to a valid next path on success', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByText('Login next')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Login next'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/campaigns/1?tab=notes');
+      });
+    });
+
+    it('navigates to / when next points off-site', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByText('Login evil')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Login evil'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/');
+      });
+      expect(mockPush).not.toHaveBeenCalledWith('https://evil.com');
+    });
+
+    it('navigates to / when next hides an off-site URL behind a tab', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByText('Login tab')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Login tab'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/');
+      });
+      expect(mockPush).not.toHaveBeenCalledWith('/\t/evil.com');
+    });
+
     it('throws "Invalid credentials" on non-ok response', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)
@@ -486,6 +547,31 @@ describe('AuthProvider', () => {
         expect(screen.getByTestId('username')).toHaveTextContent('testuser');
         expect(mockPush).toHaveBeenCalledWith('/');
       });
+    });
+
+    it('navigates to a valid next path on success', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByText('Register next')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Register next'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/campaigns/1?tab=notes');
+      });
+    });
+
+    it('navigates to / when next points off-site', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByText('Register evil')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Register evil'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/');
+      });
+      expect(mockPush).not.toHaveBeenCalledWith('https://evil.com');
     });
 
     it('throws error message from response body when registration fails', async () => {

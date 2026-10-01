@@ -1,13 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { withNext } from '@/lib/public-paths';
 import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
 import FormField from '@/components/FormField';
 
-export default function RegisterPage() {
+function RegisterForm() {
   const { register } = useAuth();
+  const next = useSearchParams().get('next');
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -30,12 +33,15 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      await register({
-        username,
-        password,
-        displayName: displayName || undefined,
-        email: email || undefined,
-      });
+      await register(
+        {
+          username,
+          password,
+          displayName: displayName || undefined,
+          email: email || undefined,
+        },
+        next
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -99,11 +105,21 @@ export default function RegisterPage() {
         </form>
         <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
           Already have an account?{' '}
-          <Link href="/login" className="text-indigo-600 hover:text-indigo-500">
+          <Link href={withNext('/login', next)} className="text-indigo-600 hover:text-indigo-500">
             Sign in
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+// The form reads search params, which Next only allows inside a Suspense
+// boundary on a prerendered page.
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
   );
 }

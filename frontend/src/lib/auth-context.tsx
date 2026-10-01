@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch, endDeadSession } from './api';
+import { resolveNextPath } from './public-paths';
 import { Role } from './types';
 import type { User } from './types';
 
@@ -49,13 +50,20 @@ interface AuthContextType {
   user: UserInfo | null;
   isAdmin: boolean;
   isDm: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (data: {
-    username: string;
-    password: string;
-    displayName?: string;
-    email?: string;
-  }) => Promise<void>;
+  /**
+   * Both land on `next` after success when it is a same-origin relative path,
+   * and on `/` otherwise.
+   */
+  login: (username: string, password: string, next?: string | null) => Promise<void>;
+  register: (
+    data: {
+      username: string;
+      password: string;
+      displayName?: string;
+      email?: string;
+    },
+    next?: string | null
+  ) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -167,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (username: string, password: string) => {
+    async (username: string, password: string, next?: string | null) => {
       const res = await fetch(`${API_URL}/auth/login`, {
         method: 'POST',
         credentials: 'include',
@@ -182,13 +190,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user: profile } = (await res.json()) as { user: User & { id: string } };
       queryClient.clear();
       setUser(toUserInfo(profile));
-      router.push('/');
+      router.push(resolveNextPath(next));
     },
     [router, queryClient]
   );
 
   const register = useCallback(
-    async (data: { username: string; password: string; displayName?: string; email?: string }) => {
+    async (
+      data: { username: string; password: string; displayName?: string; email?: string },
+      next?: string | null
+    ) => {
       const res = await fetch(`${API_URL}/auth/register`, {
         method: 'POST',
         credentials: 'include',
@@ -204,7 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user: profile } = (await res.json()) as { user: User & { id: string } };
       queryClient.clear();
       setUser(toUserInfo(profile));
-      router.push('/');
+      router.push(resolveNextPath(next));
     },
     [router, queryClient]
   );

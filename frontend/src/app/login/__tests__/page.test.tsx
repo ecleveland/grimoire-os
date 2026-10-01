@@ -13,6 +13,12 @@ vi.mock('@/lib/auth-context', () => ({
   }),
 }));
 
+let mockSearchParams = new URLSearchParams();
+
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => mockSearchParams,
+}));
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Labels in the source don't use htmlFor, so getByLabelText won't work.
@@ -27,6 +33,7 @@ function getInput(labelText: RegExp): HTMLInputElement {
 describe('LoginPage', () => {
   beforeEach(() => {
     mockLogin.mockReset();
+    mockSearchParams = new URLSearchParams();
   });
 
   describe('rendering', () => {
@@ -70,7 +77,7 @@ describe('LoginPage', () => {
       await user.click(screen.getByRole('button', { name: /sign in/i }));
 
       await waitFor(() => {
-        expect(mockLogin).toHaveBeenCalledWith('myuser', 'mypassword');
+        expect(mockLogin).toHaveBeenCalledWith('myuser', 'mypassword', null);
       });
     });
 
@@ -102,6 +109,30 @@ describe('LoginPage', () => {
         expect(screen.getByRole('button')).toHaveTextContent('Sign in');
         expect(screen.getByRole('button')).not.toBeDisabled();
       });
+    });
+  });
+
+  describe('next param', () => {
+    it('passes next through to login', async () => {
+      mockSearchParams = new URLSearchParams('next=/campaigns/1');
+      mockLogin.mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<LoginPage />);
+
+      await user.type(getInput(/^Username$/), 'myuser');
+      await user.type(getInput(/^Password$/), 'mypassword');
+      await user.click(screen.getByRole('button', { name: /sign in/i }));
+
+      await waitFor(() => {
+        expect(mockLogin).toHaveBeenCalledWith('myuser', 'mypassword', '/campaigns/1');
+      });
+    });
+
+    it('carries next onto the register link', () => {
+      mockSearchParams = new URLSearchParams('next=/campaigns/1');
+      render(<LoginPage />);
+      const link = screen.getByRole('link', { name: /register/i });
+      expect(link).toHaveAttribute('href', '/register?next=%2Fcampaigns%2F1');
     });
   });
 

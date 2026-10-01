@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { withNext } from '@/lib/public-paths';
 import FormField from '@/components/FormField';
 
-export default function LoginPage() {
+function LoginForm() {
   const { login } = useAuth();
+  const next = useSearchParams().get('next');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -17,7 +20,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -61,11 +64,24 @@ export default function LoginPage() {
         </form>
         <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-indigo-600 hover:text-indigo-500">
+          <Link
+            href={withNext('/register', next)}
+            className="text-indigo-600 hover:text-indigo-500"
+          >
             Register
           </Link>
         </p>
       </div>
     </div>
+  );
+}
+
+// The form reads search params, which Next only allows inside a Suspense
+// boundary on a prerendered page.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

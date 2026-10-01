@@ -369,6 +369,48 @@ describe('apiFetch', () => {
     });
   });
 
+  describe('dead-session redirect target', () => {
+    function setLocation(pathname: string, search = '') {
+      const loc = window.location as unknown as { pathname: string; search: string };
+      loc.pathname = pathname;
+      loc.search = search;
+    }
+
+    async function endSessionViaTerminal401() {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // request
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+    }
+
+    it('carries the current path and query to /login as next', async () => {
+      setLocation('/campaigns/1', '?tab=notes');
+      await endSessionViaTerminal401();
+      expect(window.location.replace).toHaveBeenCalledWith(
+        '/login?next=%2Fcampaigns%2F1%3Ftab%3Dnotes'
+      );
+    });
+
+    it('lands on a bare /login from the root', async () => {
+      setLocation('/', '');
+      await endSessionViaTerminal401();
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('does not navigate from a public SRD page', async () => {
+      setLocation('/srd/spells');
+      await endSessionViaTerminal401();
+      expect(window.location.replace).not.toHaveBeenCalled();
+    });
+
+    it('navigates from a path that only shares a public prefix', async () => {
+      setLocation('/srdx');
+      await endSessionViaTerminal401();
+      expect(window.location.replace).toHaveBeenCalledWith('/login?next=%2Fsrdx');
+    });
+  });
+
   describe('CSRF recovery (VEG-277)', () => {
     // The csrf_token cookie shares the access cookie's 15-minute maxAge and
     // is rotated by /auth/refresh. After idle expiry the browser has deleted
