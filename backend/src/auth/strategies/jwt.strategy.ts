@@ -36,7 +36,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       // Cookie comes first so browser sessions never accidentally fall back to
       // a stale Authorization header. The Bearer extractor is kept so internal
-      // API clients, supertest, and the websocket gateway can still pass tokens.
+      // API clients and supertest can still pass tokens.
       jwtFromRequest: jwtTokenExtractor,
       ignoreExpiration: false,
       secretOrKey: secret,
