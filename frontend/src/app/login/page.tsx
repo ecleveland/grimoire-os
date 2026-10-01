@@ -3,10 +3,13 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { withNext } from '@/lib/public-paths';
+import { useNextParam } from '@/lib/use-next-param';
 import FormField from '@/components/FormField';
 
 export default function LoginPage() {
   const { login } = useAuth();
+  const next = useNextParam();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -17,7 +20,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -61,7 +64,10 @@ export default function LoginPage() {
         </form>
         <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-indigo-600 hover:text-indigo-500">
+          <Link
+            href={withNext('/register', next)}
+            className="text-indigo-600 hover:text-indigo-500"
+          >
             Register
           </Link>
         </p>

@@ -58,6 +58,7 @@ async function fillRequiredFields(
 describe('RegisterPage', () => {
   beforeEach(() => {
     mockRegister.mockReset();
+    window.history.replaceState({}, '', '/register');
   });
 
   describe('rendering', () => {
@@ -189,12 +190,15 @@ describe('RegisterPage', () => {
       await user.click(screen.getByRole('button', { name: /create account/i }));
 
       await waitFor(() => {
-        expect(mockRegister).toHaveBeenCalledWith({
-          username: 'newuser',
-          password: STRONG_PASSWORD,
-          displayName: 'New User',
-          email: 'new@example.com',
-        });
+        expect(mockRegister).toHaveBeenCalledWith(
+          {
+            username: 'newuser',
+            password: STRONG_PASSWORD,
+            displayName: 'New User',
+            email: 'new@example.com',
+          },
+          null
+        );
       });
     });
 
@@ -207,12 +211,15 @@ describe('RegisterPage', () => {
       await user.click(screen.getByRole('button', { name: /create account/i }));
 
       await waitFor(() => {
-        expect(mockRegister).toHaveBeenCalledWith({
-          username: 'testuser',
-          password: STRONG_PASSWORD,
-          displayName: undefined,
-          email: undefined,
-        });
+        expect(mockRegister).toHaveBeenCalledWith(
+          {
+            username: 'testuser',
+            password: STRONG_PASSWORD,
+            displayName: undefined,
+            email: undefined,
+          },
+          null
+        );
       });
     });
 
@@ -242,6 +249,37 @@ describe('RegisterPage', () => {
         expect(screen.getByRole('button')).toHaveTextContent('Create Account');
         expect(screen.getByRole('button')).not.toBeDisabled();
       });
+    });
+  });
+
+  describe('next param', () => {
+    it('passes next through to register', async () => {
+      window.history.replaceState({}, '', '/register?next=%2Fcampaigns%2F1');
+      mockRegister.mockResolvedValue(undefined);
+      const user = userEvent.setup();
+      render(<RegisterPage />);
+
+      await fillRequiredFields(user);
+      await user.click(screen.getByRole('button', { name: /create account/i }));
+
+      await waitFor(() => {
+        expect(mockRegister).toHaveBeenCalledWith(
+          {
+            username: 'testuser',
+            password: STRONG_PASSWORD,
+            displayName: undefined,
+            email: undefined,
+          },
+          '/campaigns/1'
+        );
+      });
+    });
+
+    it('carries next onto the sign-in link', () => {
+      window.history.replaceState({}, '', '/register?next=%2Fcampaigns%2F1');
+      render(<RegisterPage />);
+      const link = screen.getByRole('link', { name: /sign in/i });
+      expect(link).toHaveAttribute('href', '/login?next=%2Fcampaigns%2F1');
     });
   });
 

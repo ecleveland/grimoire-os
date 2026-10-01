@@ -1,4 +1,4 @@
-import { PUBLIC_PATH_PREFIXES } from './public-paths';
+import { isPublicPath, loginPathFor } from './public-paths';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -41,8 +41,7 @@ let inflightEndSession: Promise<void> | null = null;
 
 function isOnPublicPath(): boolean {
   if (typeof window === 'undefined') return false;
-  const { pathname } = window.location;
-  return PUBLIC_PATH_PREFIXES.some(prefix => pathname.startsWith(prefix));
+  return isPublicPath(window.location.pathname);
 }
 
 /**
@@ -51,7 +50,8 @@ function isOnPublicPath(): boolean {
  * The access/refresh cookies are httpOnly, so client JS can't clear them via
  * `document.cookie` — only the server can. We POST `/auth/logout` (which works
  * even with an invalid/absent session and clears all four auth cookies), then
- * navigate to `/login`. Clearing the cookies is the crux: it stops the
+ * navigate to `/login`, carrying the current path and query as `next` so the
+ * user returns there after signing in. Clearing the cookies is the crux: it stops the
  * middleware's presence-only check from disagreeing with the dead session and
  * ping-ponging `/login` ↔ `/`.
  *
@@ -73,7 +73,8 @@ export function endDeadSession(): Promise<void> {
         // Best-effort: navigate even if the logout round-trip fails.
       }
       if (typeof window !== 'undefined' && !isOnPublicPath()) {
-        window.location.replace('/login');
+        const { pathname, search } = window.location;
+        window.location.replace(loginPathFor(pathname + search));
       }
     })().finally(() => {
       inflightEndSession = null;
