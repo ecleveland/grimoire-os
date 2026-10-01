@@ -53,6 +53,7 @@ describe('middleware', () => {
     it.each([
       ['a tab', '%2F%09%2Fevil.com'],
       ['a newline and backslash', '%2F%0A%5Cevil.com'],
+      ['a dot segment that collapses to //', '%2F.%2F%2Fevil.com'],
     ])('sends a signed-in visit to /login whose next hides %s to /', (_label, next) => {
       const res = run(`/login?next=${next}`, AUTHED);
       expect(res.status).toBe(307);

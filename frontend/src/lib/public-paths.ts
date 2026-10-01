@@ -18,7 +18,9 @@ const PLACEHOLDER_ORIGIN = 'http://n';
  * site. Browsers read `/\evil.com` as `//evil.com` and strip tab, LF and CR
  * before parsing, so the cheap checks reject backslashes and control characters,
  * and the final check parses `raw` against a placeholder origin and accepts it
- * only when the origin is unchanged.
+ * only when the origin is unchanged. Parsing collapses dot segments, so
+ * `/.//evil.com` becomes `//evil.com`; the normalised result gets the same
+ * `//` and backslash checks before it is returned.
  */
 export function resolveNextPath(raw: string | null | undefined): string {
   if (
@@ -33,7 +35,8 @@ export function resolveNextPath(raw: string | null | undefined): string {
   try {
     const url = new URL(raw, PLACEHOLDER_ORIGIN);
     if (url.origin !== PLACEHOLDER_ORIGIN) return '/';
-    return url.pathname + url.search + url.hash;
+    const out = url.pathname + url.search + url.hash;
+    return out.startsWith('//') || out.includes('\\') ? '/' : out;
   } catch {
     return '/';
   }

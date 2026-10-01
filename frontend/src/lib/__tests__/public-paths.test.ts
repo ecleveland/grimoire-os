@@ -26,6 +26,9 @@ describe('resolveNextPath', () => {
     ['a javascript URL', 'javascript:alert(1)'],
     ['an empty string', ''],
     ['the root', '/'],
+    ['a dot segment that collapses to //', '/.//evil.com'],
+    ['a parent segment that collapses to //', '/a/..//evil.com'],
+    ['an encoded dot segment that collapses to //', '/%2e//evil.com'],
   ])('falls back to / for %s', (_label, raw) => {
     expect(resolveNextPath(raw)).toBe('/');
   });
@@ -43,8 +46,8 @@ describe('resolveNextPath', () => {
     expect(resolveNextPath(raw)).toBe('/');
   });
 
-  it('returns the query intact after normalising', () => {
-    expect(resolveNextPath('/campaigns/1?tab=notes')).toBe('/campaigns/1?tab=notes');
+  it('normalises dot segments and keeps the hash', () => {
+    expect(resolveNextPath('/a/../campaigns/1#notes')).toBe('/campaigns/1#notes');
   });
 
   it('falls back to / for null and undefined', () => {

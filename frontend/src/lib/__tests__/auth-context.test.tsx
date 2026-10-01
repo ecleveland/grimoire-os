@@ -79,6 +79,9 @@ function TestConsumer() {
       <button onClick={() => auth.login('testuser', 'password123', '/\t/evil.com')}>
         Login tab
       </button>
+      <button onClick={() => auth.login('testuser', 'password123', '/.//evil.com')}>
+        Login dot
+      </button>
       <button onClick={() => void auth.logout()}>Logout</button>
       <button onClick={auth.refreshProfile}>Refresh</button>
     </div>
@@ -465,6 +468,19 @@ describe('AuthProvider', () => {
         expect(mockPush).toHaveBeenCalledWith('/');
       });
       expect(mockPush).not.toHaveBeenCalledWith('/\t/evil.com');
+    });
+
+    it('navigates to / when next collapses to an off-site URL', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByText('Login dot')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Login dot'));
+
+      await waitFor(() => {
+        expect(mockPush).toHaveBeenCalledWith('/');
+      });
+      expect(mockPush).not.toHaveBeenCalledWith('//evil.com');
     });
 
     it('throws "Invalid credentials" on non-ok response', async () => {
