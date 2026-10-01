@@ -1,15 +1,15 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { withNext } from '@/lib/public-paths';
+import { useNextParam } from '@/lib/use-next-param';
 import FormField from '@/components/FormField';
 
-function LoginForm() {
+export default function LoginPage() {
   const { login } = useAuth();
-  const next = useSearchParams().get('next');
+  const next = useNextParam();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -73,15 +73,5 @@ function LoginForm() {
         </p>
       </div>
     </div>
-  );
-}
-
-// The form reads search params, which Next only allows inside a Suspense
-// boundary on a prerendered page.
-export default function LoginPage() {
-  return (
-    <Suspense fallback={null}>
-      <LoginForm />
-    </Suspense>
   );
 }

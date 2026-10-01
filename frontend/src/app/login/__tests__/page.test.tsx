@@ -13,12 +13,6 @@ vi.mock('@/lib/auth-context', () => ({
   }),
 }));
 
-let mockSearchParams = new URLSearchParams();
-
-vi.mock('next/navigation', () => ({
-  useSearchParams: () => mockSearchParams,
-}));
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Labels in the source don't use htmlFor, so getByLabelText won't work.
@@ -33,7 +27,7 @@ function getInput(labelText: RegExp): HTMLInputElement {
 describe('LoginPage', () => {
   beforeEach(() => {
     mockLogin.mockReset();
-    mockSearchParams = new URLSearchParams();
+    window.history.replaceState({}, '', '/login');
   });
 
   describe('rendering', () => {
@@ -114,7 +108,7 @@ describe('LoginPage', () => {
 
   describe('next param', () => {
     it('passes next through to login', async () => {
-      mockSearchParams = new URLSearchParams('next=/campaigns/1');
+      window.history.replaceState({}, '', '/login?next=%2Fcampaigns%2F1');
       mockLogin.mockResolvedValue(undefined);
       const user = userEvent.setup();
       render(<LoginPage />);
@@ -129,7 +123,7 @@ describe('LoginPage', () => {
     });
 
     it('carries next onto the register link', () => {
-      mockSearchParams = new URLSearchParams('next=/campaigns/1');
+      window.history.replaceState({}, '', '/login?next=%2Fcampaigns%2F1');
       render(<LoginPage />);
       const link = screen.getByRole('link', { name: /register/i });
       expect(link).toHaveAttribute('href', '/register?next=%2Fcampaigns%2F1');

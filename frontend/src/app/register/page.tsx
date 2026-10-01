@@ -1,16 +1,16 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { withNext } from '@/lib/public-paths';
+import { useNextParam } from '@/lib/use-next-param';
 import { PASSWORD_REQUIREMENTS_TEXT, validatePassword } from '@/lib/password-validation';
 import FormField from '@/components/FormField';
 
-function RegisterForm() {
+export default function RegisterPage() {
   const { register } = useAuth();
-  const next = useSearchParams().get('next');
+  const next = useNextParam();
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
@@ -111,15 +111,5 @@ function RegisterForm() {
         </p>
       </div>
     </div>
-  );
-}
-
-// The form reads search params, which Next only allows inside a Suspense
-// boundary on a prerendered page.
-export default function RegisterPage() {
-  return (
-    <Suspense fallback={null}>
-      <RegisterForm />
-    </Suspense>
   );
 }

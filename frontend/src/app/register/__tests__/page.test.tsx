@@ -13,12 +13,6 @@ vi.mock('@/lib/auth-context', () => ({
   }),
 }));
 
-let mockSearchParams = new URLSearchParams();
-
-vi.mock('next/navigation', () => ({
-  useSearchParams: () => mockSearchParams,
-}));
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Labels in the source don't use htmlFor, so getByLabelText won't work.
@@ -64,7 +58,7 @@ async function fillRequiredFields(
 describe('RegisterPage', () => {
   beforeEach(() => {
     mockRegister.mockReset();
-    mockSearchParams = new URLSearchParams();
+    window.history.replaceState({}, '', '/register');
   });
 
   describe('rendering', () => {
@@ -260,7 +254,7 @@ describe('RegisterPage', () => {
 
   describe('next param', () => {
     it('passes next through to register', async () => {
-      mockSearchParams = new URLSearchParams('next=/campaigns/1');
+      window.history.replaceState({}, '', '/register?next=%2Fcampaigns%2F1');
       mockRegister.mockResolvedValue(undefined);
       const user = userEvent.setup();
       render(<RegisterPage />);
@@ -282,7 +276,7 @@ describe('RegisterPage', () => {
     });
 
     it('carries next onto the sign-in link', () => {
-      mockSearchParams = new URLSearchParams('next=/campaigns/1');
+      window.history.replaceState({}, '', '/register?next=%2Fcampaigns%2F1');
       render(<RegisterPage />);
       const link = screen.getByRole('link', { name: /sign in/i });
       expect(link).toHaveAttribute('href', '/login?next=%2Fcampaigns%2F1');
