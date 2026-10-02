@@ -47,7 +47,7 @@ describe('CampaignsController', () => {
       const dto = { name: 'New Campaign' };
       service.create.mockResolvedValue(mockCampaign);
 
-      const result = await controller.create(mockReq, dto as any);
+      const result = await controller.create(mockReq, dto);
 
       expect(service.create).toHaveBeenCalledWith(USER_ID, dto);
       expect(result).toEqual(mockCampaign);
@@ -83,7 +83,7 @@ describe('CampaignsController', () => {
       const dto = { name: 'Updated' };
       service.update.mockResolvedValue({ ...mockCampaign, ...dto });
 
-      const result = await controller.update(CAMPAIGN_ID, mockReq, dto as any);
+      const result = await controller.update(CAMPAIGN_ID, mockReq, dto);
 
       expect(service.update).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID, dto);
       expect(result.name).toBe('Updated');

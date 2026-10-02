@@ -50,7 +50,7 @@ describe('SeedService', () => {
     }).compile();
 
     service = module.get<SeedService>(SeedService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
 
     // Silence Nest Logger output during tests (SeedService logs via Logger).
     jest.spyOn(Logger.prototype, 'log').mockImplementation();

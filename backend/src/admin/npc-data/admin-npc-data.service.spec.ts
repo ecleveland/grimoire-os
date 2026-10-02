@@ -104,7 +104,7 @@ describe('AdminNpcDataService', () => {
     });
 
     it('rejects unknown table', async () => {
-      await expect(service.list('bogus' as never)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.list('bogus')).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
@@ -346,9 +346,9 @@ describe('AdminNpcDataService', () => {
     });
 
     it('rejects missing required field', async () => {
-      await expect(
-        service.create('names', USER_ID, { race: 'Elf' } as never)
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.create('names', USER_ID, { race: 'Elf' })).rejects.toBeInstanceOf(
+        BadRequestException
+      );
     });
 
     it('rejects unknown extra fields', async () => {

@@ -6,7 +6,7 @@ import { LootOverridesDto } from './generate-npc.dto';
 
 export class RerollNpcDto {
   @ApiProperty({ enum: REROLL_FIELDS })
-  @IsIn(REROLL_FIELDS as unknown as string[])
+  @IsIn(REROLL_FIELDS)
   field!: RerollField;
 
   @ApiPropertyOptional({

@@ -491,7 +491,7 @@ describe('class features — real DB (VEG-507)', () => {
               { name: 'Ability Score Improvement', level: 4 },
               { name: 'Ability Score Improvement', level: 4 },
             ],
-          } as never,
+          },
           owner
         )
       ).rejects.toThrow(/feature/i);
@@ -531,7 +531,7 @@ describe('class features — real DB (VEG-507)', () => {
             { name: 'Ability Score Improvement', level: 4 },
             { name: 'Ability Score Improvement', level: 8 },
           ],
-        } as never,
+        },
         owner
       );
 

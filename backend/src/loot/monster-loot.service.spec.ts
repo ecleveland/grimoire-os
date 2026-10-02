@@ -52,7 +52,7 @@ describe('MonsterLootService', () => {
     }).compile();
 
     service = module.get<MonsterLootService>(MonsterLootService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
 
     prisma.npcLootTemplate.findMany.mockResolvedValue([templateRow()]);
     prisma.trinket.findMany.mockResolvedValue([]);

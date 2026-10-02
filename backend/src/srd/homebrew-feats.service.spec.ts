@@ -20,7 +20,7 @@ function makeCreateDto(over: Partial<CreateFeatDto> = {}): CreateFeatDto {
     description: 'You use shields not just for protection but also for offense.',
     category: 'General',
     ...over,
-  } as CreateFeatDto;
+  };
 }
 
 describe('HomebrewFeatsService', () => {
@@ -34,7 +34,7 @@ describe('HomebrewFeatsService', () => {
     }).compile();
 
     service = module.get(HomebrewFeatsService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('passes feat columns through to the create', async () => {
@@ -60,7 +60,7 @@ describe('HomebrewFeatsService', () => {
     });
 
     it('normalizes empty-string prerequisite and category to null so the hasPrerequisite filter cannot mis-bucket them', async () => {
-      await service.update('f1', { prerequisite: '  ', category: '' } as never, OWNER);
+      await service.update('f1', { prerequisite: '  ', category: '' }, OWNER);
 
       const data = prisma.feat.update.mock.calls[0][0].data;
       expect(data.prerequisite).toBeNull();

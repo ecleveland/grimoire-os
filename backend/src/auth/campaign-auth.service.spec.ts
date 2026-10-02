@@ -23,7 +23,7 @@ describe('CampaignAuthService', () => {
     }).compile();
 
     service = module.get<CampaignAuthService>(CampaignAuthService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('should be defined', () => {

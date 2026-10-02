@@ -234,8 +234,8 @@ describe.each(CASES)(
         providers: [Service, ContentAccessService, prismaMockProvider()],
       }).compile();
 
-      service = module.get<TieredWriteService>(Service as Type<TieredWriteService>);
-      prisma = module.get<MockPrismaService>(PrismaService as never);
+      service = module.get<TieredWriteService>(Service);
+      prisma = module.get<MockPrismaService>(PrismaService);
       prime?.(prisma);
       delegate = prisma[model];
     });
@@ -641,7 +641,7 @@ describe('skeleton integrity', () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [Service, ContentAccessService, prismaMockProvider()],
       }).compile();
-      const instance = module.get<object>(Service as Type<object>);
+      const instance = module.get<object>(Service);
 
       const shadowed = SKELETON_MEMBERS.filter(member =>
         Object.prototype.hasOwnProperty.call(instance, member)
@@ -737,7 +737,7 @@ describe('update extension points', () => {
     }
 
     protected get delegate(): ContentWriteDelegate<ProbeRow> {
-      return this.prisma[PROBE_MODEL] as unknown as ContentWriteDelegate<ProbeRow>;
+      return this.prisma[PROBE_MODEL];
     }
 
     protected toColumnData(dto: object): ColumnData {

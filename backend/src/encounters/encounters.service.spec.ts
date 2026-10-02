@@ -115,7 +115,7 @@ describe('EncountersService', () => {
     }).compile();
 
     service = module.get<EncountersService>(EncountersService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('should be defined', () => {
@@ -425,7 +425,7 @@ describe('EncountersService', () => {
 
       const result = await service.update(ENCOUNTER_ID, USER_ID, {
         combatants: newCombatants,
-      } as any);
+      });
 
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
@@ -456,7 +456,7 @@ describe('EncountersService', () => {
 
       const result = await service.update(ENCOUNTER_ID, USER_ID, {
         combatants: newCombatants,
-      } as never);
+      });
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
@@ -484,7 +484,7 @@ describe('EncountersService', () => {
       ];
       prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
 
-      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants });
 
       // The dangling id was already present, so no validation query runs and
       // the save succeeds.
@@ -610,7 +610,7 @@ describe('EncountersService', () => {
       await expect(
         service.update(ENCOUNTER_ID, USER_ID, {
           combatants: [{ name: 'X', monsterId: 'nope' }],
-        } as never)
+        })
       ).rejects.toThrow(BadRequestException);
       expect(prisma.encounter.update).not.toHaveBeenCalled();
     });
