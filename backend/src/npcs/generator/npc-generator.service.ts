@@ -129,18 +129,12 @@ export class NpcGeneratorService {
       ideals: next.ideals,
       bonds: next.bonds,
       flaws: next.flaws,
-      statBlock:
-        next.statBlock === null
-          ? Prisma.JsonNull
-          : (next.statBlock as unknown as Prisma.InputJsonValue),
+      statBlock: next.statBlock === null ? Prisma.JsonNull : next.statBlock,
       goldPieces: next.goldPieces,
       silverPieces: next.silverPieces,
       copperPieces: next.copperPieces,
       loot: next.loot as unknown as Prisma.InputJsonValue,
-      lootOverrides:
-        next.lootOverrides === null
-          ? Prisma.JsonNull
-          : (next.lootOverrides as unknown as Prisma.InputJsonValue),
+      lootOverrides: next.lootOverrides === null ? Prisma.JsonNull : next.lootOverrides,
       generationParams: next.generationParams as unknown as Prisma.InputJsonValue,
     };
   }

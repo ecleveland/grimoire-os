@@ -13,12 +13,7 @@ import { LOOT_CR_BUCKETS, MONSTER_LOOT_TYPE_KEYS } from '@grimoire-os/shared';
 import type { LootTemplateCoinage, LootTemplateItemEntry } from '@grimoire-os/shared';
 
 type TableSlug =
-  | 'names'
-  | 'appearance'
-  | 'loot-templates'
-  | 'monster-loot'
-  | 'trinkets'
-  | 'personality';
+  'names' | 'appearance' | 'loot-templates' | 'monster-loot' | 'trinkets' | 'personality';
 
 type AnyRow = {
   id: string;

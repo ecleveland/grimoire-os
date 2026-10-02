@@ -33,7 +33,7 @@ describe('HomebrewMonstersService', () => {
     }).compile();
 
     service = module.get(HomebrewMonstersService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   describe('the non-null actions guarantee (the read-side type requires an array)', () => {
@@ -49,7 +49,7 @@ describe('HomebrewMonstersService', () => {
       prisma.monster.create.mockResolvedValue({ id: 'm1' });
       const actions = [{ name: 'Bite', description: 'Gnaw.' }];
 
-      await service.create(makeCreateDto({ actions } as Partial<CreateMonsterDto>), OWNER);
+      await service.create(makeCreateDto({ actions }), OWNER);
 
       expect(prisma.monster.create.mock.calls[0][0].data.actions).toEqual(actions);
     });

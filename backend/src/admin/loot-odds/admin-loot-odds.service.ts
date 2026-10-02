@@ -42,8 +42,8 @@ export class AdminLootOddsService {
       writes.push(
         this.prisma.gameRule.upsert({
           where: { category_key: { category: LOOT_GAME_RULE_CATEGORY, key } },
-          create: { category: LOOT_GAME_RULE_CATEGORY, key, value: value as Prisma.InputJsonValue },
-          update: { value: value as Prisma.InputJsonValue },
+          create: { category: LOOT_GAME_RULE_CATEGORY, key, value: value },
+          update: { value: value },
         })
       );
     }

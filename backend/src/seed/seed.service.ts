@@ -655,7 +655,7 @@ export class SeedService {
         profession: t.profession,
         crBucket: t.crBucket,
         coinage: t.coinage as unknown as Prisma.InputJsonValue,
-        items: t.items as unknown as Prisma.InputJsonValue,
+        items: t.items,
       }))
     );
     this.logger.log(`  NPC Loot Templates: ${npcLootTemplates.length} entries`);

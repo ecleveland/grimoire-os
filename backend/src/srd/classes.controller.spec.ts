@@ -103,7 +103,7 @@ describe('ClassesController', () => {
     it('creates with the caller as the actor', async () => {
       const dto = { name: 'Warden', hitDie: 'd10' };
 
-      await controller.createClass(dto as never, writeReq);
+      await controller.createClass(dto, writeReq);
 
       expect(homebrewClasses.create).toHaveBeenCalledWith(dto, ACTOR);
     });
@@ -111,7 +111,7 @@ describe('ClassesController', () => {
     it('updates with the caller as the actor', async () => {
       const dto = { description: 'Rewritten.' };
 
-      await controller.updateClass('cls-1', dto as never, writeReq);
+      await controller.updateClass('cls-1', dto, writeReq);
 
       expect(homebrewClasses.update).toHaveBeenCalledWith('cls-1', dto, ACTOR);
     });
@@ -125,7 +125,7 @@ describe('ClassesController', () => {
     it('creates a subclass with the caller as the actor', async () => {
       const dto = { name: 'Path of Ash', classId: 'cls-1' };
 
-      await subclasses.createSubclass(dto as never, writeReq);
+      await subclasses.createSubclass(dto, writeReq);
 
       expect(homebrewSubclasses.create).toHaveBeenCalledWith(dto, ACTOR);
     });
@@ -133,7 +133,7 @@ describe('ClassesController', () => {
     it('updates a subclass with the caller as the actor', async () => {
       const dto = { description: 'Rewritten.' };
 
-      await subclasses.updateSubclass('sub-1', dto as never, writeReq);
+      await subclasses.updateSubclass('sub-1', dto, writeReq);
 
       expect(homebrewSubclasses.update).toHaveBeenCalledWith('sub-1', dto, ACTOR);
     });
@@ -149,7 +149,7 @@ describe('ClassesController', () => {
         user: { userId: 'a1', username: 'admin', role: Role.ADMIN },
       } as AuthenticatedRequest;
 
-      await controller.createClass({ name: 'X', hitDie: 'd6' } as never, adminReq);
+      await controller.createClass({ name: 'X', hitDie: 'd6' }, adminReq);
 
       expect(homebrewClasses.create).toHaveBeenCalledWith(expect.anything(), {
         userId: 'a1',

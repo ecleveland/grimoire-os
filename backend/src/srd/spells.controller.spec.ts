@@ -99,7 +99,7 @@ describe('SpellsController', () => {
     it('delegates id, dto, and actor', async () => {
       homebrewService.update.mockResolvedValue({ id: 'sp1' });
 
-      await controller.updateSpell('sp1', { name: 'Y' } as never, authedReq());
+      await controller.updateSpell('sp1', { name: 'Y' }, authedReq());
 
       expect(homebrewService.update).toHaveBeenCalledWith(
         'sp1',

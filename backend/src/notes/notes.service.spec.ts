@@ -88,7 +88,7 @@ describe('NotesService', () => {
     }).compile();
 
     service = module.get<NotesService>(NotesService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('should be defined', () => {

@@ -500,8 +500,7 @@ describe('MonsterListPage', () => {
       await user.click(await screen.findByRole('button', { name: /add to encounter/i }));
 
       let patchBody:
-        | { combatants: Array<Record<string, unknown>>; expectedVersion: number }
-        | undefined;
+        { combatants: Array<Record<string, unknown>>; expectedVersion: number } | undefined;
       await waitFor(() => {
         const call = mockApiFetch.mock.calls.find(
           ([p, o]) =>

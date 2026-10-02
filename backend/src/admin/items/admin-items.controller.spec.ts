@@ -29,7 +29,7 @@ describe('AdminItemsController', () => {
 
   it('list forwards the query fields', async () => {
     service.list.mockResolvedValue({ data: [] });
-    await controller.list({ q: 'silk', category: 'Trade Goods', page: 2, limit: 10 } as never);
+    await controller.list({ q: 'silk', category: 'Trade Goods', page: 2, limit: 10 });
     expect(service.list).toHaveBeenCalledWith({
       q: 'silk',
       category: 'Trade Goods',
@@ -47,7 +47,7 @@ describe('AdminItemsController', () => {
 
   it('update delegates with id, dto and actor', async () => {
     service.update.mockResolvedValue({ id: 'i1' });
-    await controller.update('i1', { name: 'X' } as never, req);
+    await controller.update('i1', { name: 'X' }, req);
     expect(service.update).toHaveBeenCalledWith('i1', { name: 'X' }, expectedActor);
   });
 

@@ -187,7 +187,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
   describe('which classes an author may hang a subclass off', () => {
     it('accepts an SRD class, stamping the homebrew tier and the author', async () => {
       const created = await service.create(
-        { name: `Veg509 Path of Ash ${RUN}`, classId: srdClassId } as never,
+        { name: `Veg509 Path of Ash ${RUN}`, classId: srdClassId },
         owner
       );
 
@@ -200,7 +200,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
 
     it("accepts the author's own homebrew class", async () => {
       const created = await service.create(
-        { name: `Veg509 Path of Loam ${RUN}`, classId: ownClassId } as never,
+        { name: `Veg509 Path of Loam ${RUN}`, classId: ownClassId },
         owner
       );
 
@@ -209,7 +209,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
 
     it('accepts a shared class, which is globally visible like SRD', async () => {
       const created = await service.create(
-        { name: `Veg509 Path of Bells ${RUN}`, classId: sharedClassId } as never,
+        { name: `Veg509 Path of Bells ${RUN}`, classId: sharedClassId },
         owner
       );
 
@@ -222,14 +222,14 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     // is an oracle for whether a given id belongs to somebody.
     it("refuses another user's homebrew class exactly as it refuses a nonexistent one", async () => {
       const foreign = await service
-        .create({ name: `Veg509 Stolen ${RUN}`, classId: strangerClassId } as never, owner)
+        .create({ name: `Veg509 Stolen ${RUN}`, classId: strangerClassId }, owner)
         .catch((err: BadRequestException) => err);
       const missing = await service
         .create(
           {
             name: `Veg509 Missing ${RUN}`,
             classId: '00000000-0000-4000-8000-000000000000',
-          } as never,
+          },
           owner
         )
         .catch((err: BadRequestException) => err);
@@ -276,7 +276,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           name: `Veg509 Private Path ${RUN}`,
           classId: srdClassId,
           features: [{ name: 'Ashen Step', level: 3, description: 'Step through cinders.' }],
-        } as never,
+        },
         owner
       );
       subclassId = created.id;
@@ -288,9 +288,9 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
     });
 
     it("refuses the stranger's update and delete as not found, never as forbidden", async () => {
-      await expect(
-        service.update(subclassId, { description: 'x' } as never, stranger)
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.update(subclassId, { description: 'x' }, stranger)).rejects.toThrow(
+        NotFoundException
+      );
       await expect(service.remove(subclassId, stranger)).rejects.toThrow(NotFoundException);
     });
 
@@ -320,7 +320,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
         },
       });
       const sub = await service.create(
-        { name: `Veg509 Doomed Path ${RUN}`, classId: cls.id } as never,
+        { name: `Veg509 Doomed Path ${RUN}`, classId: cls.id },
         owner
       );
 
@@ -375,14 +375,14 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
         }),
       ]);
       const [ownSubOfA, subOfB] = await Promise.all([
+        service.create({ name: `Veg509 A Own Path ${RUN}`, classId: ownClassOfA.id }, actorA),
         service.create(
-          { name: `Veg509 A Own Path ${RUN}`, classId: ownClassOfA.id } as never,
-          actorA
+          { name: `Veg509 B Path ${RUN}`, classId: sharedClass.id },
+          {
+            userId: authorB.id,
+            isAdmin: false,
+          }
         ),
-        service.create({ name: `Veg509 B Path ${RUN}`, classId: sharedClass.id } as never, {
-          userId: authorB.id,
-          isAdmin: false,
-        }),
       ]);
 
       await users.remove(authorA.id);
@@ -414,7 +414,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
         data: { username: `veg559-check-${RUN}`, passwordHash: 'x', displayName: 'C' },
       });
       const sub = await service.create(
-        { name: `Veg559 Check Path ${RUN}`, classId: srdClassId } as never,
+        { name: `Veg559 Check Path ${RUN}`, classId: srdClassId },
         { userId: author.id, isAdmin: false }
       );
 
@@ -456,7 +456,7 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
           name: `Veg509 Contended Path ${RUN}`,
           classId: srdClassId,
           features: [{ name: 'Veg509 Original', level: 3 }],
-        } as never,
+        },
         owner
       );
       const listA = [
@@ -475,14 +475,14 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
       });
       const first = new HomebrewSubclassesService(pausing, new ContentAccessService());
 
-      const t1 = first.update(sub.id, { features: listA } as never, owner);
+      const t1 = first.update(sub.id, { features: listA }, owner);
       // Surface a T1 failure instead of waiting forever for a pause it never reached.
       await Promise.race([
         firstHasWritten,
         t1.then(() => Promise.reject(new Error('The first update finished without pausing'))),
       ]);
 
-      const t2 = service.update(sub.id, { features: listB } as never, owner);
+      const t2 = service.update(sub.id, { features: listB }, owner);
       await waitForBlockedSession(ctx.prisma);
       releaseFirst();
 

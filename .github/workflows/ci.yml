@@ -95,7 +95,7 @@ jobs:
     # dedicated database keep it isolated from the Playwright e2e database.
     services:
       postgres:
-        image: postgres:16-alpine@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_USER: grimoire
           POSTGRES_PASSWORD: grimoire
@@ -234,7 +234,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|backend/tsconfig[^/]*\.json|backend/package\.json|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
