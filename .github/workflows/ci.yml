@@ -234,7 +234,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|backend/tsconfig[^/]*\.json|backend/package\.json|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

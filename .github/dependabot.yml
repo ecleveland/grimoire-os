@@ -40,6 +40,9 @@ updates:
 
   # Base-image digests. Each Dockerfile and the compose file pin
   # tag@sha256:<digest>; Dependabot refreshes the digest within the same tag.
+  # The docker ecosystem reads Dockerfiles only, so the compose file has its
+  # own docker-compose entry. The backend-db service image in ci.yml is not
+  # covered by any ecosystem and is refreshed by hand (see CLAUDE.md).
   - package-ecosystem: docker
     directory: /backend
     schedule:
@@ -52,7 +55,7 @@ updates:
       interval: monthly
     open-pull-requests-limit: 5
 
-  - package-ecosystem: docker
+  - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: monthly
