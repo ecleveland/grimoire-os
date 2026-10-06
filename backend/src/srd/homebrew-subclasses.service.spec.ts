@@ -22,7 +22,7 @@ const CLASS_ID = 'c1';
 const VISIBLE_CLASS = { id: CLASS_ID, contentSource: 'srd', createdById: null };
 
 function makeCreateDto(over: Partial<CreateSubclassDto> = {}): CreateSubclassDto {
-  return { name: 'Path of Ash', classId: CLASS_ID, ...over } as CreateSubclassDto;
+  return { name: 'Path of Ash', classId: CLASS_ID, ...over };
 }
 
 function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
@@ -49,7 +49,7 @@ describe('HomebrewSubclassesService', () => {
     }).compile();
 
     service = module.get(HomebrewSubclassesService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
     prisma.srdClass.findFirst.mockResolvedValue(VISIBLE_CLASS);
   });
 
@@ -183,7 +183,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('normalizes a blank description to null', async () => {
-      await service.update('sc1', { description: '   ' } as never, OWNER);
+      await service.update('sc1', { description: '   ' }, OWNER);
 
       const { data } = prisma.subclass.update.mock.calls[0][0] as {
         data: Record<string, unknown>;
@@ -320,7 +320,7 @@ describe('HomebrewSubclassesService', () => {
     it('replaces the whole list: delete every row, then insert the payload', async () => {
       await service.update(
         'sc1',
-        { features: [{ name: 'Ashen Step', level: 3, description: 'Rewritten.' }] } as never,
+        { features: [{ name: 'Ashen Step', level: 3, description: 'Rewritten.' }] },
         OWNER
       );
 
@@ -336,7 +336,7 @@ describe('HomebrewSubclassesService', () => {
     // runs as a SELECT that locks nothing. Without the row lock first, two
     // overlapping replacements merge their lists instead of one replacing the other.
     it('locks the parent row inside the transaction before touching it', async () => {
-      await service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] } as never, OWNER);
+      await service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] }, OWNER);
 
       expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
       const [query] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
@@ -353,13 +353,13 @@ describe('HomebrewSubclassesService', () => {
     // The lock belongs to the replacement. A scalar-only PATCH runs a real UPDATE,
     // which locks the row itself, and opens no transaction to hold another one.
     it('takes no lock when the body omits features', async () => {
-      await service.update('sc1', { description: 'New prose.' } as never, OWNER);
+      await service.update('sc1', { description: 'New prose.' }, OWNER);
 
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('runs the parent update and both child writes inside one transaction', async () => {
-      await service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] } as never, OWNER);
+      await service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] }, OWNER);
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       const order = [
@@ -371,7 +371,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('leaves the existing rows alone when the body omits features', async () => {
-      await service.update('sc1', { description: 'New prose.' } as never, OWNER);
+      await service.update('sc1', { description: 'New prose.' }, OWNER);
 
       expect(prisma.subclassFeature.deleteMany).not.toHaveBeenCalled();
       expect(prisma.subclassFeature.createMany).not.toHaveBeenCalled();
@@ -379,7 +379,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('clears every row for an empty array, without an empty insert', async () => {
-      await service.update('sc1', { features: [] } as never, OWNER);
+      await service.update('sc1', { features: [] }, OWNER);
 
       expect(prisma.subclassFeature.deleteMany).toHaveBeenCalledWith({
         where: { subclassId: 'sc1' },
@@ -388,7 +388,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('clears every row for a null, matching the null-clear convention', async () => {
-      await service.update('sc1', { features: null } as never, OWNER);
+      await service.update('sc1', { features: null }, OWNER);
 
       expect(prisma.subclassFeature.deleteMany).toHaveBeenCalledWith({
         where: { subclassId: 'sc1' },
@@ -419,7 +419,7 @@ describe('HomebrewSubclassesService', () => {
     it('resolves to the subclass row without its features', async () => {
       const result = await service.update(
         'sc1',
-        { features: [{ name: 'Ashen Step', level: 3 }] } as never,
+        { features: [{ name: 'Ashen Step', level: 3 }] },
         OWNER
       );
 
@@ -430,7 +430,7 @@ describe('HomebrewSubclassesService', () => {
     it('keeps features out of the parent column data', async () => {
       await service.update(
         'sc1',
-        { description: 'New prose.', features: [{ name: 'Ashen Step', level: 3 }] } as never,
+        { description: 'New prose.', features: [{ name: 'Ashen Step', level: 3 }] },
         OWNER
       );
 
@@ -444,14 +444,14 @@ describe('HomebrewSubclassesService', () => {
       prisma.subclassFeature.createMany.mockRejectedValue(p2002(['subclassId', 'name', 'level']));
 
       await expect(
-        service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] } as never, OWNER)
+        service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] }, OWNER)
       ).rejects.toThrow(/feature/i);
     });
 
     it('still maps a duplicate subclass name to the subclass-level conflict copy', async () => {
       prisma.subclass.update.mockRejectedValue(p2002(['name', 'createdById', 'classId']));
 
-      await expect(service.update('sc1', { name: 'Berserker' } as never, OWNER)).rejects.toThrow(
+      await expect(service.update('sc1', { name: 'Berserker' }, OWNER)).rejects.toThrow(
         /subclass with this name/i
       );
     });

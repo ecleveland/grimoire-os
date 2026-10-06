@@ -83,7 +83,7 @@ describe('ItemsController', () => {
       homebrewService.create.mockResolvedValue({ id: 'i1' });
       const dto = { name: 'Cloak of Whispers', category: 'Wondrous Item' };
 
-      await controller.createItem(dto as never, authedReq());
+      await controller.createItem(dto, authedReq());
 
       expect(homebrewService.create).toHaveBeenCalledWith(dto, {
         userId: 'u1',
@@ -94,7 +94,7 @@ describe('ItemsController', () => {
     it('marks admins as such in the actor', async () => {
       homebrewService.create.mockResolvedValue({ id: 'i1' });
 
-      await controller.createItem({ name: 'X', category: 'Ring' } as never, authedReq(ADMIN_USER));
+      await controller.createItem({ name: 'X', category: 'Ring' }, authedReq(ADMIN_USER));
 
       expect(homebrewService.create).toHaveBeenCalledWith(expect.anything(), {
         userId: 'a1',
@@ -107,7 +107,7 @@ describe('ItemsController', () => {
     it('delegates id, dto, and actor', async () => {
       homebrewService.update.mockResolvedValue({ id: 'i1' });
 
-      await controller.updateItem('i1', { name: 'Y' } as never, authedReq());
+      await controller.updateItem('i1', { name: 'Y' }, authedReq());
 
       expect(homebrewService.update).toHaveBeenCalledWith(
         'i1',

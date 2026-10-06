@@ -206,7 +206,7 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
   });
 
   describe('unified search', () => {
-    const search = (q: string, userId?: string) => srd.search({ q } as QuerySearchDto, userId);
+    const search = (q: string, userId?: string) => srd.search({ q }, userId);
 
     it('matches a plain query for every caller', async () => {
       for (const userId of [undefined, userAId, userBId]) {
@@ -297,10 +297,10 @@ describe('SRD search LIKE escaping on a real DB [VEG-529]', () => {
       // 1 SRD spell + 4 items + 2 feats + 1 class + 2 class features, plus user
       // A's own homebrew spell. Backgrounds are not a search kind; their
       // features would be, and these hang off a class.
-      expect((await srd.search({ q: '' } as QuerySearchDto, userAId)).total).toBe(11);
-      expect((await srd.search({} as QuerySearchDto, userAId)).total).toBe(11);
-      expect((await srd.search({} as QuerySearchDto, userBId)).total).toBe(10);
-      expect((await srd.search({} as QuerySearchDto)).total).toBe(10);
+      expect((await srd.search({ q: '' }, userAId)).total).toBe(11);
+      expect((await srd.search({}, userAId)).total).toBe(11);
+      expect((await srd.search({}, userBId)).total).toBe(10);
+      expect((await srd.search({})).total).toBe(10);
     });
   });
 

@@ -72,8 +72,7 @@ export function applyStockDecrement(
 }
 
 export type LineResolution =
-  | { ok: true; line: ShopLineItem }
-  | { ok: false; reason: 'not-found' | 'out-of-stock' };
+  { ok: true; line: ShopLineItem } | { ok: false; reason: 'not-found' | 'out-of-stock' };
 
 /**
  * Locate a purchasable line by index and validate the requested quantity against

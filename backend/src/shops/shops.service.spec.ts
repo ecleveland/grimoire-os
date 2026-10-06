@@ -143,7 +143,7 @@ describe('ShopsService', () => {
         name: 'Smithy',
         theme: 'armorer',
         items: [{ name: 'Longsword', price: { gp: 15 } }],
-      } as never);
+      });
 
       expect(prisma.shop.create.mock.calls[0][0].data.items).toEqual([
         {
@@ -396,7 +396,7 @@ describe('ShopsService', () => {
       const updated = { ...mockShop, name: 'Renamed', items };
       prisma.shop.update.mockResolvedValue(updated);
 
-      const result = await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items } as never);
+      const result = await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items });
 
       // `items` is read back so ids the row already stores are exempt.
       expect(prisma.shop.findUnique).toHaveBeenCalledWith({
@@ -416,7 +416,7 @@ describe('ShopsService', () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
       prisma.shop.update.mockResolvedValue({ ...mockShop, isOpen: false });
 
-      await service.update(SHOP_ID, USER_ID, { isOpen: false } as never);
+      await service.update(SHOP_ID, USER_ID, { isOpen: false });
 
       expect(prisma.shop.update).toHaveBeenCalledWith({
         where: { id: SHOP_ID },
@@ -430,7 +430,7 @@ describe('ShopsService', () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
       prisma.shop.update.mockResolvedValue({ ...mockShop, name: 'Renamed' });
 
-      await service.update(SHOP_ID, USER_ID, { name: 'Renamed' } as never);
+      await service.update(SHOP_ID, USER_ID, { name: 'Renamed' });
 
       expect(prisma.shop.update.mock.calls[0][0].data.version).toEqual({ increment: 1 });
     });
@@ -447,7 +447,7 @@ describe('ShopsService', () => {
 
     it('throws NotFoundException when the shop is missing', async () => {
       prisma.shop.findUnique.mockResolvedValue(null);
-      await expect(service.update(SHOP_ID, USER_ID, { name: 'x' } as never)).rejects.toThrow(
+      await expect(service.update(SHOP_ID, USER_ID, { name: 'x' })).rejects.toThrow(
         NotFoundException
       );
     });
@@ -457,7 +457,7 @@ describe('ShopsService', () => {
       campaignAuth.assertCampaignOwner.mockRejectedValue(
         new ForbiddenException('Only the campaign owner can perform this action')
       );
-      await expect(service.update(SHOP_ID, USER_ID_2, { name: 'x' } as never)).rejects.toThrow(
+      await expect(service.update(SHOP_ID, USER_ID_2, { name: 'x' })).rejects.toThrow(
         ForbiddenException
       );
       expect(prisma.shop.update).not.toHaveBeenCalled();
@@ -471,7 +471,7 @@ describe('ShopsService', () => {
       await expect(
         service.update(SHOP_ID, USER_ID, {
           items: [{ ...lineItem, itemId: HOMEBREW_ITEM_ID }],
-        } as never)
+        })
       ).rejects.toThrow(BadRequestException);
       expect(prisma.shop.update).not.toHaveBeenCalled();
     });
@@ -484,7 +484,7 @@ describe('ShopsService', () => {
 
       await service.update(SHOP_ID, USER_ID, {
         items: [{ ...lineItem, itemId: CATALOG_ITEM_ID }],
-      } as never);
+      });
 
       expect(prisma.item.findMany).toHaveBeenCalledWith({
         where: { contentSource: { in: ['srd', 'shared'] }, id: { in: [CATALOG_ITEM_ID] } },
@@ -500,7 +500,7 @@ describe('ShopsService', () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
       prisma.shop.update.mockResolvedValue(mockShop);
 
-      await service.update(SHOP_ID, USER_ID, { name: 'Renamed' } as never);
+      await service.update(SHOP_ID, USER_ID, { name: 'Renamed' });
 
       expect(prisma.item.findMany).not.toHaveBeenCalled();
     });
@@ -518,7 +518,7 @@ describe('ShopsService', () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
       prisma.shop.update.mockResolvedValue(mockShop);
 
-      await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items: [stored] } as never);
+      await service.update(SHOP_ID, USER_ID, { name: 'Renamed', items: [stored] });
 
       expect(prisma.item.findMany).not.toHaveBeenCalled();
       expect(prisma.shop.update.mock.calls[0][0].data.items).toEqual([
@@ -538,7 +538,7 @@ describe('ShopsService', () => {
       prisma.item.findMany.mockResolvedValue([]);
 
       await expect(
-        service.update(SHOP_ID, USER_ID, { items: [stored, added] } as never)
+        service.update(SHOP_ID, USER_ID, { items: [stored, added] })
       ).rejects.toMatchObject({
         response: expect.objectContaining({
           message: [

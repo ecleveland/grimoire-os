@@ -27,7 +27,7 @@ describe('SrdService', () => {
     }).compile();
 
     service = module.get<SrdService>(SrdService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('should be defined', () => {

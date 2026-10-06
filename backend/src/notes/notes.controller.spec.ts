@@ -42,7 +42,7 @@ describe('NotesController', () => {
       const dto = { title: 'Session Log', campaignId: CAMPAIGN_ID, content: 'We fought a dragon.' };
       service.create.mockResolvedValue(mockNote);
 
-      const result = await controller.create(mockReq, dto as any);
+      const result = await controller.create(mockReq, dto);
 
       expect(service.create).toHaveBeenCalledWith(USER_ID, dto);
       expect(result).toEqual(mockNote);
@@ -55,7 +55,7 @@ describe('NotesController', () => {
       const paginated = { data: [mockNote], total: 1, page: 1, lastPage: 1 };
       service.findAllForCampaign.mockResolvedValue(paginated);
 
-      const result = await controller.findAll(query as any, mockReq);
+      const result = await controller.findAll(query, mockReq);
 
       expect(service.findAllForCampaign).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID, query);
       expect(result).toEqual(paginated);
@@ -78,7 +78,7 @@ describe('NotesController', () => {
       const dto = { title: 'Updated Log' };
       service.update.mockResolvedValue({ ...mockNote, ...dto });
 
-      const result = await controller.update('note-1', mockReq, dto as any);
+      const result = await controller.update('note-1', mockReq, dto);
 
       expect(service.update).toHaveBeenCalledWith('note-1', USER_ID, dto);
       expect(result.title).toBe('Updated Log');

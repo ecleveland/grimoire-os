@@ -1,0 +1,14 @@
+{
+  // The production build type-checks shipped code only. Specs stay under
+  // tsconfig.json for the editor; Vitest runs them without type-checking.
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "src/test-utils/**",
+    "vitest.config.ts",
+    "vitest.setup.ts"
+  ]
+}

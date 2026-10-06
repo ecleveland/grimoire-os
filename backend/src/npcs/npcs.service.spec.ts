@@ -136,7 +136,7 @@ describe('NpcsService', () => {
         loot,
         lootOverrides,
         generationParams,
-      } as Parameters<typeof service.create>[1]);
+      });
 
       const arg = prisma.npc.create.mock.calls[0][0].data;
       expect(arg.statBlock).toEqual(statBlock);
@@ -343,7 +343,7 @@ describe('NpcsService', () => {
       const updated = { ...mockNpc, lockedFields, lootOverrides };
       prisma.npc.update.mockResolvedValue(updated);
 
-      const result = await service.update(NPC_ID, USER_ID, { lockedFields, lootOverrides } as any);
+      const result = await service.update(NPC_ID, USER_ID, { lockedFields, lootOverrides });
 
       expect(prisma.npc.findUnique).toHaveBeenCalledWith({
         where: { id: NPC_ID },
@@ -379,7 +379,7 @@ describe('NpcsService', () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue({ id: CAMPAIGN_ID, ownerId: USER_ID });
       prisma.npc.update.mockResolvedValue({ ...mockNpc, statBlock: null });
 
-      await service.update(NPC_ID, USER_ID, { statBlock: null } as any);
+      await service.update(NPC_ID, USER_ID, { statBlock: null });
 
       const callArgs = prisma.npc.update.mock.calls[0][0];
       expect(callArgs.data.statBlock).toBe(Prisma.JsonNull);

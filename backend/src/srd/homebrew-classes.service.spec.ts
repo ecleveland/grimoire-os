@@ -21,7 +21,7 @@ import { UpdateClassDto } from './dto/update-class.dto';
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
 function makeCreateDto(over: Partial<CreateClassDto> = {}): CreateClassDto {
-  return { name: 'Warden', hitDie: 'd10', ...over } as CreateClassDto;
+  return { name: 'Warden', hitDie: 'd10', ...over };
 }
 
 function p2003(): Prisma.PrismaClientKnownRequestError {
@@ -50,7 +50,7 @@ describe('HomebrewClassesService', () => {
     }).compile();
 
     service = module.get(HomebrewClassesService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('passes class columns through to the create', async () => {
@@ -70,7 +70,7 @@ describe('HomebrewClassesService', () => {
     });
 
     const updateWith = async (patch: Record<string, unknown>) => {
-      await service.update('c1', patch as never, OWNER);
+      await service.update('c1', patch, OWNER);
       return (prisma.srdClass.update.mock.calls[0][0] as { data: Record<string, unknown> }).data;
     };
 
@@ -289,7 +289,7 @@ describe('HomebrewClassesService', () => {
               { name: 'Ability Score Improvement', level: 4 },
               { name: 'Ability Score Improvement', level: 4 },
             ],
-          } as Partial<CreateClassDto>),
+          }),
           OWNER
         )
       ).rejects.toThrow(/feature/i);
@@ -306,7 +306,7 @@ describe('HomebrewClassesService', () => {
             { name: 'Ability Score Improvement', level: 4 },
             { name: 'Ability Score Improvement', level: 8 },
           ],
-        } as Partial<CreateClassDto>),
+        }),
         OWNER
       );
 
@@ -336,7 +336,7 @@ describe('HomebrewClassesService', () => {
     it('replaces the whole list: delete every row, then insert the payload', async () => {
       await service.update(
         'c1',
-        { features: [{ name: 'Rage', level: 1, description: 'Rewritten.' }] } as never,
+        { features: [{ name: 'Rage', level: 1, description: 'Rewritten.' }] },
         OWNER
       );
 
@@ -349,7 +349,7 @@ describe('HomebrewClassesService', () => {
     it('keeps features out of the parent column data', async () => {
       await service.update(
         'c1',
-        { description: 'New prose.', features: [{ name: 'Rage', level: 1 }] } as never,
+        { description: 'New prose.', features: [{ name: 'Rage', level: 1 }] },
         OWNER
       );
 
@@ -361,21 +361,21 @@ describe('HomebrewClassesService', () => {
     });
 
     it('leaves the existing rows alone when the body omits features', async () => {
-      await service.update('c1', { description: 'New prose.' } as never, OWNER);
+      await service.update('c1', { description: 'New prose.' }, OWNER);
 
       expect(prisma.classFeature.deleteMany).not.toHaveBeenCalled();
       expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
     });
 
     it('clears every row for an empty array, without an empty insert', async () => {
-      await service.update('c1', { features: [] } as never, OWNER);
+      await service.update('c1', { features: [] }, OWNER);
 
       expect(prisma.classFeature.deleteMany).toHaveBeenCalledWith({ where: { classId: 'c1' } });
       expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
     });
 
     it('clears every row for a null, matching the null-clear convention', async () => {
-      await service.update('c1', { features: null } as never, OWNER);
+      await service.update('c1', { features: null }, OWNER);
 
       expect(prisma.classFeature.deleteMany).toHaveBeenCalledWith({ where: { classId: 'c1' } });
       expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
@@ -404,7 +404,7 @@ describe('HomebrewClassesService', () => {
     // The NOT NULL column's default on the update path. Create already pins it;
     // update went through a different helper call and did not.
     it('defaults a missing description to the empty string on the update path', async () => {
-      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER);
 
       const { data } = prisma.classFeature.createMany.mock.calls[0][0] as {
         data: { description: string }[];
@@ -416,7 +416,7 @@ describe('HomebrewClassesService', () => {
     // asked to update with an empty object. It works, but until now only the
     // E2E proved that — the slowest gate in the project for a one-line fact.
     it('still issues the parent update when only features changed', async () => {
-      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER);
 
       expect(prisma.srdClass.update).toHaveBeenCalledWith({ where: { id: 'c1' }, data: {} });
     });
@@ -425,7 +425,7 @@ describe('HomebrewClassesService', () => {
     // runs as a SELECT that locks nothing. Without the row lock first, two
     // overlapping replacements merge their lists instead of one replacing the other.
     it('locks the parent row inside the transaction before touching it', async () => {
-      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER);
 
       expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
       const [query] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
@@ -442,13 +442,13 @@ describe('HomebrewClassesService', () => {
     // The lock belongs to the replacement. A scalar-only PATCH runs a real UPDATE,
     // which locks the row itself, and opens no transaction to hold another one.
     it('takes no lock when the body omits features', async () => {
-      await service.update('c1', { description: 'New prose.' } as never, OWNER);
+      await service.update('c1', { description: 'New prose.' }, OWNER);
 
       expect(prisma.$queryRaw).not.toHaveBeenCalled();
     });
 
     it('runs the parent update and both child writes inside one transaction', async () => {
-      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER);
+      await service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER);
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       // A failure part-way through must not leave the parent updated and the
@@ -465,11 +465,7 @@ describe('HomebrewClassesService', () => {
     // because the write skeleton hands this value straight back as the response
     // body, and POST cannot include features, so PATCH must not either.
     it('resolves to the class row without its features', async () => {
-      const result = await service.update(
-        'c1',
-        { features: [{ name: 'Rage', level: 1 }] } as never,
-        OWNER
-      );
+      const result = await service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER);
 
       expect(result).toEqual(homebrewRow);
       expect(result).not.toHaveProperty('features');
@@ -479,23 +475,23 @@ describe('HomebrewClassesService', () => {
       const written = { ...homebrewRow, description: 'Rewritten.' };
       prisma.srdClass.update.mockResolvedValue(written);
 
-      await expect(
-        service.update('c1', { description: 'Rewritten.' } as never, OWNER)
-      ).resolves.toEqual(written);
+      await expect(service.update('c1', { description: 'Rewritten.' }, OWNER)).resolves.toEqual(
+        written
+      );
     });
 
     it('reports a duplicate feature as a feature conflict, not a duplicate class name', async () => {
       prisma.classFeature.createMany.mockRejectedValue(p2002(['classId', 'name', 'level']));
 
       await expect(
-        service.update('c1', { features: [{ name: 'Rage', level: 1 }] } as never, OWNER)
+        service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER)
       ).rejects.toThrow(/feature/i);
     });
 
     it('still maps a duplicate class name to the class-level conflict copy', async () => {
       prisma.srdClass.update.mockRejectedValue(p2002(['name']));
 
-      await expect(service.update('c1', { name: 'Fighter' } as never, OWNER)).rejects.toThrow(
+      await expect(service.update('c1', { name: 'Fighter' }, OWNER)).rejects.toThrow(
         /class with this name/i
       );
     });

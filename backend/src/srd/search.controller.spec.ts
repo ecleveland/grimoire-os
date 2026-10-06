@@ -25,12 +25,9 @@ describe('SearchController', () => {
     srdService.search.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
     const query = { q: 'fire', types: ['spell'] as 'spell'[] };
 
-    await controller.search(
-      query as never,
-      {
-        user: { userId: 'u1', username: 'dm', role: Role.DUNGEON_MASTER },
-      } as AuthenticatedRequest
-    );
+    await controller.search(query, {
+      user: { userId: 'u1', username: 'dm', role: Role.DUNGEON_MASTER },
+    } as AuthenticatedRequest);
 
     expect(srdService.search).toHaveBeenCalledWith(query, 'u1');
   });
@@ -38,7 +35,7 @@ describe('SearchController', () => {
   it('passes undefined userId for anonymous callers', async () => {
     srdService.search.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
 
-    await controller.search({} as never, {} as AuthenticatedRequest);
+    await controller.search({}, {} as AuthenticatedRequest);
 
     expect(srdService.search).toHaveBeenCalledWith({}, undefined);
   });

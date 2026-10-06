@@ -34,7 +34,7 @@ describe('HomebrewSpellsService', () => {
     }).compile();
 
     service = module.get(HomebrewSpellsService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('passes spell columns through to the create', async () => {

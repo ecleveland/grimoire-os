@@ -75,7 +75,7 @@ describe('BackgroundsController', () => {
       homebrewService.create.mockResolvedValue({ id: 'bg1' });
       const dto = { name: 'Gravedigger' };
 
-      await controller.createBackground(dto as never, authedReq());
+      await controller.createBackground(dto, authedReq());
 
       expect(homebrewService.create).toHaveBeenCalledWith(dto, {
         userId: 'u1',
@@ -86,7 +86,7 @@ describe('BackgroundsController', () => {
     it('marks admins as such in the actor', async () => {
       homebrewService.create.mockResolvedValue({ id: 'bg1' });
 
-      await controller.createBackground({ name: 'X' } as never, authedReq(ADMIN_USER));
+      await controller.createBackground({ name: 'X' }, authedReq(ADMIN_USER));
 
       expect(homebrewService.create).toHaveBeenCalledWith(expect.anything(), {
         userId: 'a1',
@@ -99,7 +99,7 @@ describe('BackgroundsController', () => {
     it('delegates id, dto, and actor', async () => {
       homebrewService.update.mockResolvedValue({ id: 'bg1' });
 
-      await controller.updateBackground('bg1', { name: 'Y' } as never, authedReq());
+      await controller.updateBackground('bg1', { name: 'Y' }, authedReq());
 
       expect(homebrewService.update).toHaveBeenCalledWith(
         'bg1',

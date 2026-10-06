@@ -26,7 +26,7 @@ describe('AdminItemsService', () => {
     }).compile();
 
     service = module.get(AdminItemsService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   describe('list', () => {

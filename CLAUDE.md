@@ -53,7 +53,7 @@ Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0
 
 ## CI & pre-merge verification
 
-GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` before tearing down. It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, `backend/tsconfig*.json`, `backend/package.json` or the workflow itself (VEG-570).
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` before tearing down. It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, or the workflow itself (VEG-570).
 
 Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E and the real-DB seed tests (both need a live Postgres). The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
 
@@ -76,6 +76,12 @@ Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs l
 
 `CACHE_TTL_MS` / `CACHE_LRU_SIZE` tune the global in-memory response cache (`backend/src/config/cache.config.ts`, VEG-340). The cache is LRU-bounded so high-cardinality anonymous traffic (e.g. `/srd/search?q=<unique>`) can't accrete unbounded 24h entries and OOM a small self-host; raise `CACHE_LRU_SIZE` on instances with more heap, or lower `CACHE_TTL_MS` for a shorter staleness window.
 
+## Dependency overrides
+
+`backend/package.json` overrides `deepmerge-ts` to `^8.0.2`. Every Prisma 6.x release pins `@prisma/config` to `deepmerge-ts@7.1.5`, which carries a high-severity stack-exhaustion advisory (GHSA-ggr8-5vv4-36mx) in config loading. The override is what keeps `npm audit --omit=dev` at zero high on the backend. Remove it once the installed Prisma depends on deepmerge-ts 8 or later (the advisory's fixed range begins at Prisma 8.1), and re-check `prisma validate`, `prisma generate` and `prisma migrate status` whenever Prisma moves.
+
+Dependabot (`.github/dependabot.yml`) opens monthly grouped minor-and-patch PRs per package directory, separate PRs for majors, and digest refreshes for the Docker base images.
+
 ## API Docs
 
 Swagger UI available at http://localhost:3001/api/docs when backend is running.
@@ -94,12 +100,12 @@ Base images are pinned to immutable SHA256 digests in `backend/Dockerfile`, `fro
 
 Every compose service has a healthcheck, and each one starts only after its dependency reports healthy (postgres, then backend, then frontend). The backend probe calls `GET /api/health`, which runs `SELECT 1` and answers 503 when the database is unreachable. The probes use `node -e "fetch(...)"` because the alpine images ship no curl. `docker compose ps` shows the health state.
 
-Currently pinned (resolved 2026-05-08):
+Currently pinned (resolved 2026-10-02):
 
 | Image | Tag | Digest |
 |-------|-----|--------|
-| node | 22-alpine | sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f |
-| postgres | 16-alpine | sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50 |
+| node | 22-alpine | sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 |
+| postgres | 16-alpine | sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea |
 
 ### Updating pinned image digests
 
@@ -120,6 +126,7 @@ Then update each occurrence:
 - `backend/Dockerfile` — three `FROM node:22-alpine@sha256:...` stages
 - `frontend/Dockerfile` — three `FROM node:22-alpine@sha256:...` stages
 - `docker-compose.yml` — `image: postgres:16-alpine@sha256:...`
+- `.github/workflows/ci.yml` — the `backend-db` job's `services.postgres.image`
 
 After updating, verify:
 

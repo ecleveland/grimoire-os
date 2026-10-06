@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { DECORATORS } from '@nestjs/swagger/dist/constants';
+import { DECORATORS } from '@nestjs/swagger';
 import { CreateClassDto } from './create-class.dto';
 import { CreateSubclassDto } from './create-subclass.dto';
 import { UpdateClassDto } from './update-class.dto';
@@ -18,8 +18,7 @@ import { UpdateSubclassDto } from './update-subclass.dto';
 describe('the features property schema', () => {
   const schemaOf = (proto: object) =>
     Reflect.getMetadata(DECORATORS.API_MODEL_PROPERTIES, proto, 'features') as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
 
   // The Update DTOs are here because they carry the rule by inheritance through
   // `PartialType`, which is a claim worth pinning rather than assuming.

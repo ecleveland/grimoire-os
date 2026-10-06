@@ -17,7 +17,7 @@ function makeCreateDto(over: Partial<CreateBackgroundDto> = {}): CreateBackgroun
     description: 'You spent years tending the resting places of the dead.',
     skillProficiencies: ['Insight', 'Religion'],
     ...over,
-  } as CreateBackgroundDto;
+  };
 }
 
 describe('HomebrewBackgroundsService', () => {
@@ -30,7 +30,7 @@ describe('HomebrewBackgroundsService', () => {
     }).compile();
 
     service = module.get(HomebrewBackgroundsService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   describe('create', () => {
@@ -176,7 +176,7 @@ describe('HomebrewBackgroundsService', () => {
       prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: null });
       prisma.background.update.mockResolvedValue(homebrewRow);
 
-      await service.update('bg1', { originFeatOption: 'Cleric' } as never, OWNER);
+      await service.update('bg1', { originFeatOption: 'Cleric' }, OWNER);
 
       const data = prisma.background.update.mock.calls[0][0].data;
       expect(data.originFeatOption).toBeNull();
@@ -190,7 +190,7 @@ describe('HomebrewBackgroundsService', () => {
       prisma.feat.findFirst.mockResolvedValue(SRD_FEAT);
       prisma.background.update.mockResolvedValue(homebrewRow);
 
-      await service.update('bg1', { originFeatId: 'feat-srd' } as never, OWNER);
+      await service.update('bg1', { originFeatId: 'feat-srd' }, OWNER);
 
       const data = prisma.background.update.mock.calls[0][0].data;
       expect(data.originFeatId).toBe('feat-srd');
@@ -202,11 +202,7 @@ describe('HomebrewBackgroundsService', () => {
       prisma.feat.findFirst.mockResolvedValue(SRD_FEAT);
       prisma.background.update.mockResolvedValue(homebrewRow);
 
-      await service.update(
-        'bg1',
-        { originFeatId: 'feat-srd', originFeatOption: 'Wizard' } as never,
-        OWNER
-      );
+      await service.update('bg1', { originFeatId: 'feat-srd', originFeatOption: 'Wizard' }, OWNER);
 
       const data = prisma.background.update.mock.calls[0][0].data;
       expect(data.originFeatOption).toBe('Wizard');
@@ -216,7 +212,7 @@ describe('HomebrewBackgroundsService', () => {
       prisma.background.findUnique.mockResolvedValue({ ...homebrewRow, originFeatId: 'feat-srd' });
       prisma.background.update.mockResolvedValue(homebrewRow);
 
-      await service.update('bg1', { originFeatOption: 'Wizard' } as never, OWNER);
+      await service.update('bg1', { originFeatOption: 'Wizard' }, OWNER);
 
       const data = prisma.background.update.mock.calls[0][0].data;
       expect(data.originFeatOption).toBe('Wizard');
@@ -264,7 +260,7 @@ describe('HomebrewBackgroundsService', () => {
 
       await service.update(
         'bg1',
-        { equipment: '   ', description: '', originFeatOption: ' ' } as never,
+        { equipment: '   ', description: '', originFeatOption: ' ' },
         OWNER
       );
 

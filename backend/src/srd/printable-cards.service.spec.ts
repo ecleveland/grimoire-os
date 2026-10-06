@@ -110,7 +110,7 @@ describe('PrintableCardsService', () => {
     }).compile();
 
     service = module.get<PrintableCardsService>(PrintableCardsService);
-    prisma = module.get<MockPrismaService>(PrismaService as any);
+    prisma = module.get<MockPrismaService>(PrismaService);
 
     prisma.monster.findMany.mockResolvedValue([]);
     prisma.spell.findMany.mockResolvedValue([]);

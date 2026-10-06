@@ -44,7 +44,7 @@ describe('UsersController', () => {
       const dto = { displayName: 'New Name' };
       service.update.mockResolvedValue({ ...mockUserPublic, ...dto });
 
-      const result = await controller.updateProfile(mockReq, dto as any);
+      const result = await controller.updateProfile(mockReq, dto);
 
       expect(service.update).toHaveBeenCalledWith(USER_ID, dto);
       expect(result.displayName).toBe('New Name');
@@ -56,7 +56,7 @@ describe('UsersController', () => {
       const dto = { currentPassword: 'oldpass', newPassword: 'newpass' };
       service.changePassword.mockResolvedValue(undefined);
 
-      await controller.changePassword(mockReq, dto as any);
+      await controller.changePassword(mockReq, dto);
 
       expect(service.changePassword).toHaveBeenCalledWith(USER_ID, 'oldpass', 'newpass');
     });

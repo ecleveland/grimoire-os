@@ -14,7 +14,7 @@ import { CreateItemDto } from './dto/create-item.dto';
 const OWNER = { userId: 'owner-1', isAdmin: false };
 
 function makeCreateDto(over: Partial<CreateItemDto> = {}): CreateItemDto {
-  return { name: 'Sunblade', category: 'Weapon', ...over } as CreateItemDto;
+  return { name: 'Sunblade', category: 'Weapon', ...over };
 }
 
 describe('HomebrewItemsService', () => {
@@ -28,7 +28,7 @@ describe('HomebrewItemsService', () => {
     }).compile();
 
     service = module.get(HomebrewItemsService);
-    prisma = module.get<MockPrismaService>(PrismaService as never);
+    prisma = module.get<MockPrismaService>(PrismaService);
   });
 
   it('passes item columns through to the create', async () => {
@@ -73,7 +73,7 @@ describe('HomebrewItemsService', () => {
     prisma.item.findUnique.mockResolvedValue(homebrewRow);
     prisma.item.update.mockResolvedValue(homebrewRow);
 
-    await service.update('i1', { rarity: '   ' } as never, OWNER);
+    await service.update('i1', { rarity: '   ' }, OWNER);
 
     expect(prisma.item.update.mock.calls[0][0].data.rarity).toBeNull();
   });

@@ -42,7 +42,7 @@ function extractJsonFields<T extends Partial<Record<NpcJsonField, unknown>>>(
   if (loot !== undefined) jsonData.loot = toJsonValue(loot);
   if (lootOverrides !== undefined) jsonData.lootOverrides = toJsonValue(lootOverrides);
   if (generationParams !== undefined) jsonData.generationParams = toJsonValue(generationParams);
-  return { rest: rest as Omit<T, NpcJsonField>, jsonData };
+  return { rest: rest, jsonData };
 }
 
 function toJsonValue(v: unknown): NpcJsonValue {
@@ -260,7 +260,7 @@ export class NpcsService {
       ...generated,
       name: finalName,
       age: finalAge,
-      generationParams: finalGenerationParams as GeneratedNpc['generationParams'],
+      generationParams: finalGenerationParams,
     };
 
     const npc = await this.prisma.$transaction(async tx => {
@@ -295,18 +295,12 @@ export class NpcsService {
       ideals: payload.ideals,
       bonds: payload.bonds,
       flaws: payload.flaws,
-      statBlock:
-        payload.statBlock === null
-          ? Prisma.JsonNull
-          : (payload.statBlock as unknown as Prisma.InputJsonValue),
+      statBlock: payload.statBlock === null ? Prisma.JsonNull : payload.statBlock,
       goldPieces: payload.goldPieces,
       silverPieces: payload.silverPieces,
       copperPieces: payload.copperPieces,
       loot: payload.loot as unknown as Prisma.InputJsonValue,
-      lootOverrides:
-        payload.lootOverrides === null
-          ? Prisma.JsonNull
-          : (payload.lootOverrides as unknown as Prisma.InputJsonValue),
+      lootOverrides: payload.lootOverrides === null ? Prisma.JsonNull : payload.lootOverrides,
       generationParams: payload.generationParams as unknown as Prisma.InputJsonValue,
     };
   }

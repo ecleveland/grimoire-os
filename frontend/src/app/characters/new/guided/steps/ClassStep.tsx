@@ -29,7 +29,7 @@ import type { WizardStepProps } from './types';
 export default function ClassStep({ value, onChange, onValidChange }: WizardStepProps) {
   const { grants, reconcileSource, setSourceField } = useDraftGrants();
   const classesQuery = useApiQuery<SrdClass[]>('/srd/classes');
-  const classes = classesQuery.data ?? [];
+  const classes = useMemo(() => classesQuery.data ?? [], [classesQuery.data]);
   // id-first (VEG-524): a homebrew class may share an SRD name, and the hit die
   // and grants folded into the draft below must follow the exact row picked.
   const selection = { id: value.classId, name: value.class };
