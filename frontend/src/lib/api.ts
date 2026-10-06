@@ -32,7 +32,7 @@ const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 // In-flight refresh promise — when a burst of requests all 401 simultaneously,
 // they share one refresh round-trip instead of each kicking off their own.
-let inflightRefresh: Promise<boolean> | null = null;
+let inflightRefresh: Promise<RefreshOutcome> | null = null;
 
 // In-flight dead-session teardown — same dedup idea as inflightRefresh: a burst
 // of terminal 401s must collapse into a single logout + navigation, not a
@@ -94,24 +94,40 @@ function readCookie(name: string): string | null {
   return null;
 }
 
-async function refreshAccessToken(): Promise<boolean> {
+/**
+ * How a refresh ended: the server issued new cookies, the server answered
+ * with an error (expired, revoked, throttled), or the request never got an
+ * answer at all.
+ */
+export type RefreshOutcome = 'refreshed' | 'rejected' | 'unreachable';
+
+/**
+ * POST /auth/refresh through the tab's one in-flight request. The backend
+ * rotates the refresh token on first use and revokes the whole session when
+ * the same token comes back, so every refresh in a tab must share this.
+ */
+export function refreshSession(): Promise<RefreshOutcome> {
   if (!inflightRefresh) {
-    inflightRefresh = (async () => {
+    inflightRefresh = (async (): Promise<RefreshOutcome> => {
       try {
         const res = await fetch(`${API_URL}${REFRESH_PATH}`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
         });
-        return res.ok;
+        return res.ok ? 'refreshed' : 'rejected';
       } catch {
-        return false;
+        return 'unreachable';
       }
     })().finally(() => {
       inflightRefresh = null;
     });
   }
   return inflightRefresh;
+}
+
+export async function refreshAccessToken(): Promise<boolean> {
+  return (await refreshSession()) === 'refreshed';
 }
 
 // The CsrfGuard's rejection message (backend/src/auth/guards/csrf.guard.ts).

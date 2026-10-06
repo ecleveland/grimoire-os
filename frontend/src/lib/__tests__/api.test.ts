@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiFetch, ApiError } from '../api';
+import { apiFetch, ApiError, refreshAccessToken } from '../api';
 
 const API_URL = 'http://localhost:3001/api';
 
@@ -347,6 +347,46 @@ describe('apiFetch', () => {
       const logoutCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
       expect(logoutCalls).toHaveLength(1);
       expect(window.location.replace).toHaveBeenCalledTimes(1);
+    });
+
+    it('shares one /auth/refresh between refreshAccessToken and a concurrent apiFetch 401 (VEG-578)', async () => {
+      // The backend rotates the refresh token on first use and revokes the
+      // whole session when it sees the same token again, so a second refresh
+      // from this tab would log the user out.
+      let releaseRefresh: () => void = () => {};
+      const refreshGate = new Promise<void>(resolve => {
+        releaseRefresh = resolve;
+      });
+      let refreshed = false;
+      let refreshCount = 0;
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockImplementation(async (url: string | URL | Request) => {
+        if (url === `${API_URL}/auth/refresh`) {
+          refreshCount += 1;
+          await refreshGate;
+          if (refreshCount > 1) return mockResponse(401) as unknown as Response;
+          refreshed = true;
+          return mockResponse(200) as unknown as Response;
+        }
+        return (refreshed
+          ? mockResponse(200, { ok: true })
+          : mockResponse(401)) as unknown as Response;
+      });
+
+      const refresh = refreshAccessToken();
+      const request = apiFetch('/test');
+      await vi.waitFor(() => {
+        expect(fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/test`)).toHaveLength(1);
+      });
+      // Let apiFetch read its 401 and reach the refresh before it settles.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      releaseRefresh();
+
+      await expect(refresh).resolves.toBe(true);
+      await expect(request).resolves.toEqual({ ok: true });
+      const refreshCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/refresh`);
+      expect(refreshCalls).toHaveLength(1);
+      expect(window.location.replace).not.toHaveBeenCalled();
     });
 
     it('clears the dead session but does NOT navigate when already on a public path', async () => {
