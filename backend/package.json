@@ -33,7 +33,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.2.6",
     "@nestjs/throttler": "^6.5.0",
-    "@prisma/client": "^6.5.0",
+    "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3",
     "cache-manager": "^6.4.3",
     "cacheable": "^2.3.5",
