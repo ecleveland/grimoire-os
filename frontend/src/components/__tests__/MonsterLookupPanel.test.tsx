@@ -41,6 +41,7 @@ const goblin: SrdMonster = {
   challengeRating: 0.25,
   actions: [],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const goblinDetail: SrdMonster = {

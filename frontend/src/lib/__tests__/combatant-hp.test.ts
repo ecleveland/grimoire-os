@@ -73,7 +73,8 @@ describe('applyHeal', () => {
   });
 
   it('does not touch temp HP', () => {
-    expect(applyHeal({ hp: 5, maxHp: 20, tempHp: 4 }, 6)).toEqual({ hp: 11 });
+    const combatant: Pick<Combatant, 'hp' | 'maxHp' | 'tempHp'> = { hp: 5, maxHp: 20, tempHp: 4 };
+    expect(applyHeal(combatant, 6)).toEqual({ hp: 11 });
   });
 
   it('ignores non-positive amounts', () => {

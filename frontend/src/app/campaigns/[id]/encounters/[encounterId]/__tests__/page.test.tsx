@@ -65,6 +65,7 @@ const goblinMonster: SrdMonster = {
   actions: [{ name: 'Scimitar', description: 'Melee: +4 to hit, 1d6+2 slashing.' }],
   specialAbilities: [{ name: 'Nimble Escape', description: 'Disengage as a bonus action.' }],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 function makeLoot(over: Partial<CombatantLoot> = {}): CombatantLoot {

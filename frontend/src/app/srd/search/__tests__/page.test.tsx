@@ -36,6 +36,7 @@ const fireballSpell: SrdSpell = {
   material: 'A tiny ball of bat guano and sulfur',
   higherLevels: 'When cast with a higher slot, damage increases by 1d6.',
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const sharpshooterFeat: SrdFeat = {
@@ -47,6 +48,7 @@ const sharpshooterFeat: SrdFeat = {
   category: 'General',
   repeatable: false,
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const sneakAttackFeature: UnifiedFeatureData = {
@@ -80,6 +82,7 @@ const blessSpell: SrdSpell = {
   concentration: true,
   material: 'A sprinkling of holy water',
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const detectMagicSpell: SrdSpell = {
@@ -96,6 +99,7 @@ const detectMagicSpell: SrdSpell = {
   ritual: true,
   concentration: false,
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const toughFeat: SrdFeat = {
@@ -107,6 +111,7 @@ const toughFeat: SrdFeat = {
   category: 'General',
   repeatable: false,
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const bagOfTricksItem: SrdItem = {
@@ -120,6 +125,7 @@ const bagOfTricksItem: SrdItem = {
   requiresAttunement: true,
   isMagic: true,
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 // Only the columns the endpoint selects, so a page reading anything else fails

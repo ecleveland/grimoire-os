@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import LootOddsAdvanced from '../LootOddsAdvanced';
+import type { NpcLootOverrides } from '@/lib/types';
 
 describe('LootOddsAdvanced', () => {
-  let onChange: ReturnType<typeof vi.fn>;
+  let onChange: Mock<(value: NpcLootOverrides | null) => void>;
 
   beforeEach(() => {
     onChange = vi.fn();

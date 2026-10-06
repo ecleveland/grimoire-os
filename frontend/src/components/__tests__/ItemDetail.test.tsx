@@ -21,7 +21,7 @@ describe('ItemDetail', () => {
       <ItemDetail
         item={makeItem({
           cost: '75 gp',
-          weight: 55 as unknown as string,
+          weight: 55,
           damage: '1d8',
           damageType: 'Slashing',
           armorClass: '16',

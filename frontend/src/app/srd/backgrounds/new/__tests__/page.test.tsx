@@ -73,8 +73,8 @@ describe('NewBackgroundPage', () => {
     render(<NewBackgroundPage />);
     fillRequired();
     // Skills are a controlled toggle group now (VEG-474).
-    await user.click(screen.getByRole('button', { name: 'Insight', exact: true }));
-    await user.click(screen.getByRole('button', { name: 'Religion', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Insight' }));
+    await user.click(screen.getByRole('button', { name: 'Religion' }));
     await user.click(screen.getByRole('button', { name: 'Create background' }));
 
     await waitFor(() => {

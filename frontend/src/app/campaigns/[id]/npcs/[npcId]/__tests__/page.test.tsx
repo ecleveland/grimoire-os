@@ -216,10 +216,18 @@ describe('NpcDetailPage', () => {
     it('rerolls loot via the Loot card button and updates the displayed loot in place', async () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValueOnce(
-        makeNpc({ loot: [{ name: 'Hemp Rope', quantity: 1 }], goldPieces: 1 })
+        makeNpc({
+          loot: [
+            { itemId: 'item-hemp-rope', name: 'Hemp Rope', quantity: 1, source: 'profession' },
+          ],
+          goldPieces: 1,
+        })
       );
       mockApiFetch.mockResolvedValueOnce(
-        makeNpc({ loot: [{ name: 'Ruby Pendant', quantity: 2 }], goldPieces: 7 })
+        makeNpc({
+          loot: [{ itemId: null, name: 'Ruby Pendant', quantity: 2, source: 'trinket' }],
+          goldPieces: 7,
+        })
       );
       render(<NpcDetailPage />);
       await waitFor(() => expect(screen.getByText('1× Hemp Rope')).toBeInTheDocument());
@@ -346,9 +354,18 @@ describe('NpcDetailPage', () => {
 
     it('selecting Generous makes the reroll send the generous preset and updates the loot', async () => {
       const user = userEvent.setup();
-      await renderWithNpc(makeNpc({ loot: [{ name: 'Hemp Rope', quantity: 1 }] }));
+      await renderWithNpc(
+        makeNpc({
+          loot: [
+            { itemId: 'item-hemp-rope', name: 'Hemp Rope', quantity: 1, source: 'profession' },
+          ],
+        })
+      );
       mockApiFetch.mockResolvedValueOnce(
-        makeNpc({ loot: [{ name: 'Ruby Pendant', quantity: 2 }], goldPieces: 20 })
+        makeNpc({
+          loot: [{ itemId: null, name: 'Ruby Pendant', quantity: 2, source: 'trinket' }],
+          goldPieces: 20,
+        })
       );
       await user.click(screen.getByRole('button', { name: /generous/i }));
       await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));

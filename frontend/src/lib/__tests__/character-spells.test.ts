@@ -28,6 +28,7 @@ const srdFireball: SrdSpell = {
   concentration: false,
   material: 'a tiny ball of bat guano and sulfur',
   source: 'SRD',
+  contentSource: 'srd',
 };
 
 describe('toSpellEntry (shared mapper, re-exported by guided spell-rules)', () => {

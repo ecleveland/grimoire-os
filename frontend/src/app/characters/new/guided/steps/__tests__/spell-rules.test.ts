@@ -183,6 +183,7 @@ describe('toSpellEntry', () => {
     ritual: false,
     concentration: false,
     source: 'SRD',
+    contentSource: 'srd',
   };
   const web: SrdSpell = {
     id: '22222222-2222-2222-2222-222222222222',
@@ -199,6 +200,7 @@ describe('toSpellEntry', () => {
     concentration: true,
     material: 'a bit of spiderweb',
     source: 'SRD',
+    contentSource: 'srd',
   };
 
   it('maps catalog metadata and links the spell id; cantrips are prepared:false', () => {

@@ -32,6 +32,7 @@ cd backend && npm run seed        # Seed SRD data
 cd frontend && npm run dev        # Dev server
 cd frontend && npm test           # Unit tests
 cd frontend && npm run test:cov   # Unit tests + coverage (enforces thresholds)
+cd frontend && npm run typecheck  # tsc --noEmit over src, spec files included
 ```
 
 > **Run tests from the right subdirectory.** Every command above is scoped to `backend/` or `frontend/`; the shell cwd does **not** persist between separate tool calls. A sudden Jest/Vitest "cannot find module" or "no test files found" error is almost always cwd drift (e.g. running a frontend spec from the repo root or `backend/`), not a real import bug — check the working directory before investigating the code.
@@ -53,9 +54,11 @@ Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0
 
 ## CI & pre-merge verification
 
-GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` before tearing down. It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, or the workflow itself (VEG-570).
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + typecheck + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` before tearing down. It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, or the workflow itself (VEG-570).
 
 Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E and the real-DB seed tests (both need a live Postgres). The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
+
+In `frontend/`, `npm run typecheck` type-checks the spec files too. Vitest strips types without checking them, and the production build excludes specs through `tsconfig.build.json`, so this is the only step that catches a stale test fixture.
 
 **Real-DB tests (`backend/test/db/`, VEG-484).** The default backend Jest suite runs without Postgres and can only mock Prisma, so seed/DB-round-trip properties (id stability across re-seed, child FK survival, edit propagation) live in a separate `*.db-spec.ts` suite run by `npm run test:db` against a disposable `grimoire_os_seedtest` database (auto-created + migrated by the jest `globalSetup`). It's isolated from the coverage-gated unit run (outside `src/`, non-matching suffix, own jest config) and runs as the dedicated `backend-db` CI job. `db-harness.ts` (`createSeedContext`/`truncateAll`) is the reusable seam for future real-DB regression tests. A destructive-op guard refuses any database whose name doesn't contain `test`.
 

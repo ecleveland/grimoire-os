@@ -63,6 +63,7 @@ function makeShop(over: Partial<Shop> = {}): Shop {
       },
     ],
     isOpen: true,
+    version: 1,
     createdAt: '',
     updatedAt: '',
     ...over,

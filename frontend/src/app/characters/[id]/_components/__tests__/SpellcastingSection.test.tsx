@@ -41,6 +41,10 @@ vi.mock('@/components/SrdSpellSearch', () => ({
   ),
 }));
 
+// The API sends `class: null` for a classless row, while the shared type only
+// allows undefined.
+const classless = { class: null, classId: null } as unknown as Partial<Character>;
+
 const baseCharacter = makeCharacter({
   class: 'Wizard',
   abilityScores: {
@@ -170,9 +174,7 @@ describe('SpellcastingSection', () => {
       // note reads: "" doesn't match exactly one class in your catalog.
       it('says nothing for a character with no class at all', () => {
         mockUseApiQuery.mockReturnValue({ data: catalog });
-        render(
-          <SpellcastingSection character={{ ...baseCharacter, class: null, classId: null }} />
-        );
+        render(<SpellcastingSection character={{ ...baseCharacter, ...classless }} />);
         expect(screen.queryByTestId('class-unresolved-note')).toBeNull();
       });
 
@@ -707,6 +709,7 @@ describe('SpellcastingSection', () => {
           character={{ ...baseCharacter, spells: [{ level: 1, name: 'Shield', prepared: true }] }}
           editable
           onPatch={vi.fn()}
+          isSaving={false}
         />
       );
 

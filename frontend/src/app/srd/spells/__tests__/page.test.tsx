@@ -48,6 +48,7 @@ const fireball: SrdSpell = {
   material: 'A tiny ball of bat guano and sulfur',
   higherLevels: 'Damage increases by 1d6 per slot above 3rd.',
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const lightCantrip: SrdSpell = {
@@ -64,6 +65,7 @@ const lightCantrip: SrdSpell = {
   ritual: false,
   concentration: false,
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 function makeResponse(spells: SrdSpell[]): PaginatedResponse<SrdSpell> {
