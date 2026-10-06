@@ -1,0 +1,10 @@
+{
+  // `npm run typecheck` uses this config. It covers everything tsconfig.json
+  // does except the generated `.next/types` files: those are rebuilt by
+  // `next build` and `next dev`, so between a page rename and the next build
+  // they import paths that no longer exist, and tsc would fail on code nobody
+  // wrote. `next build` still checks them, from a fresh copy, every time.
+  "extends": "./tsconfig.json",
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "**/*.mts"],
+  "exclude": ["node_modules", ".next"]
+}
