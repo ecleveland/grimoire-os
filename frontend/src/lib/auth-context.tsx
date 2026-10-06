@@ -13,7 +13,7 @@ import {
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { apiFetch, endDeadSession } from './api';
+import { apiFetch, endDeadSession, refreshSession } from './api';
 import { resolveNextPath } from './public-paths';
 import { Role } from './types';
 import type { User } from './types';
@@ -134,19 +134,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // valid session. Use raw fetch (not apiFetch) so a 401 here does NOT trigger
   // apiFetch's redirect-to-login — public pages should remain reachable. If
   // /users/me 401s, try /auth/refresh once: the user may still have a valid
-  // refresh cookie even though the 15-minute access token has expired.
+  // refresh cookie even though the 15-minute access token has expired. The
+  // refresh goes through the same in-flight promise apiFetch uses, so two
+  // hydration runs (StrictMode in dev), or a hydration run and a concurrent
+  // apiFetch 401, send one POST /auth/refresh. The backend revokes the whole
+  // session when it sees a refresh token presented twice.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         let res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
         if (res.status === 401) {
-          const refreshed = await fetch(`${API_URL}/auth/refresh`, {
-            method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-          });
-          if (refreshed.ok) {
+          const outcome = await refreshSession();
+          // No answer from the server says nothing about the session, so
+          // stay logged out without ending it.
+          if (outcome === 'unreachable') return;
+          if (outcome === 'refreshed') {
             res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
           }
         }

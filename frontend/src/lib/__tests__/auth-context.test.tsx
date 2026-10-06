@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { StrictMode } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { AuthProvider, useAuth } from '../auth-context';
 import { useApiQuery } from '../query';
@@ -13,10 +14,16 @@ vi.mock('next/navigation', () => ({
 
 const mockApiFetch = vi.fn();
 const mockEndDeadSession = vi.fn();
-vi.mock('@/lib/api', () => ({
-  apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-  endDeadSession: (...args: unknown[]) => mockEndDeadSession(...args),
-}));
+// The refresh helpers stay real, so hydration's POST /auth/refresh reaches the
+// stubbed global fetch and the in-flight dedupe under test is the real one.
+vi.mock('@/lib/api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
+  return {
+    ...actual,
+    apiFetch: (...args: unknown[]) => mockApiFetch(...args),
+    endDeadSession: (...args: unknown[]) => mockEndDeadSession(...args),
+  };
+});
 
 const mockToastError = vi.fn();
 vi.mock('sonner', () => ({
@@ -376,6 +383,68 @@ describe('AuthProvider', () => {
         });
         expect(mockEndDeadSession).not.toHaveBeenCalled();
       });
+
+      it('does NOT end the session when the refresh request fails at the network level', async () => {
+        // An unreachable backend says nothing about the session, so hydration
+        // stays logged out without tearing the cookies down.
+        document.cookie = 'session_present=1';
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
+          .mockRejectedValueOnce(new Error('network')); // /auth/refresh
+
+        renderWithProvider();
+
+        await waitFor(() => {
+          expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+        });
+        expect(mockEndDeadSession).not.toHaveBeenCalled();
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+    });
+
+    it('sends one /auth/refresh when StrictMode runs hydration twice (VEG-578)', async () => {
+      // The backend revokes every refresh token the user has when it sees one
+      // presented twice, so a second refresh would log the user out.
+      document.cookie = 'session_present=1';
+      let refreshed = false;
+      let refreshCount = 0;
+      vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+        const href = String(url);
+        if (href.endsWith('/auth/refresh')) {
+          refreshCount += 1;
+          if (refreshCount > 1) return mockFetchResponse(401);
+          refreshed = true;
+          return mockFetchResponse(200);
+        }
+        if (href.endsWith('/users/me')) {
+          return refreshed ? mockFetchResponse(200, TEST_PROFILE) : mockFetchResponse(401);
+        }
+        throw new Error(`unexpected fetch ${href}`);
+      });
+
+      // StrictMode goes at the root, as Next puts it: React 19 only replays
+      // mount effects for a StrictMode that wraps the whole tree, so one nested
+      // inside a render wrapper would run hydration once.
+      render(
+        <StrictMode>
+          <QueryClientProvider client={new QueryClient()}>
+            <AuthProvider>
+              <TestConsumer />
+            </AuthProvider>
+          </QueryClientProvider>
+        </StrictMode>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+      });
+      const refreshCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(c => String(c[0]).match(/\/auth\/refresh$/));
+      expect(refreshCalls).toHaveLength(1);
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+      expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+      expect(mockEndDeadSession).not.toHaveBeenCalled();
     });
   });
 
