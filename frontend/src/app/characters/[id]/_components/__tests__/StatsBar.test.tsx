@@ -317,7 +317,10 @@ describe('StatsBar', () => {
       const base = makeCharacter({ speed: 25 });
       const char = {
         ...base,
-        computed: { ...base.computed, speed: { base: 45, penalty: 0, effective: 45 } },
+        computed: {
+          ...base.computed,
+          speed: { ...base.computed.speed, base: 45, penalty: 0, effective: 45 },
+        },
       };
       render(<StatsBar character={char} />);
       expect(within(screen.getByTestId('stat-speed')).getByText('45 ft')).toBeInTheDocument();

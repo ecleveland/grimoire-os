@@ -85,9 +85,9 @@ describe('NpcFieldRow', () => {
   it('hides dice button when reroll is disabled', () => {
     render(
       <NpcFieldRow
-        field="age"
-        label="Age"
-        value="42"
+        field="profession"
+        label="Profession"
+        value="Blacksmith"
         locked={false}
         rerollable={false}
         onReroll={() => {}}

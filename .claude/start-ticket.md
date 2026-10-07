@@ -42,7 +42,7 @@ For UI tickets, also draft a Playwright spec under `e2e/<feature>.spec.ts` cover
 
 ## Verification gate
 
-Run both steps below with Bash `run_in_background: true` — `verify.sh` is nine serial stages (SRD lib tests → e2e stack-naming tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
+Run both steps below with Bash `run_in_background: true` — `verify.sh` is ten serial stages (SRD lib tests → e2e stack-naming tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend typecheck → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
 
 1. `./verify.sh` from the repo root — mirrors CI exactly (backend + frontend lint, unit tests with coverage thresholds, SRD extraction-lib tests, production builds). Do not substitute plain `npm test`/`npm run build`. (Backend's `prettier.spec.ts` runs `format:check` on the frontend — prettier-format new frontend files first.)
 2. **E2E (Playwright)** — `cd e2e && npm run e2e -- <specs>`, as the last step (there is no root `package.json`).

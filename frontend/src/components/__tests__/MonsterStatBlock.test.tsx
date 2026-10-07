@@ -37,6 +37,7 @@ const fullMonster: SrdMonster = {
   legendaryActions: [{ name: 'Move', description: 'The goblin moves up to its speed.' }],
   description: 'Small black-hearted humanoids that live in caves.',
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const sparseMonster: SrdMonster = {
@@ -61,6 +62,7 @@ const sparseMonster: SrdMonster = {
   challengeRating: 0,
   actions: [{ name: 'Club', description: 'Melee attack: +2 to hit, 1d4 bludgeoning.' }],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 describe('MonsterStatBlock', () => {

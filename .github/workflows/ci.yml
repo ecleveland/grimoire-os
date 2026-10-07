@@ -68,6 +68,9 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npm run lint
+      - name: Typecheck (specs included)
+        working-directory: frontend
+        run: npm run typecheck
       - name: Unit tests + coverage thresholds
         working-directory: frontend
         run: npm run test:cov

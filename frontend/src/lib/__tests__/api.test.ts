@@ -604,11 +604,14 @@ describe('apiFetch', () => {
         }) as unknown as Response
       );
 
-      const err = await apiFetch('/encounters/enc-1', { method: 'PATCH' }).catch(e => e);
+      const err: unknown = await apiFetch('/encounters/enc-1', { method: 'PATCH' }).catch(
+        (e: unknown) => e
+      );
       expect(err).toBeInstanceOf(ApiError);
-      expect(err.status).toBe(409);
-      expect(err.message).toMatch(/modified by another request/i);
-      expect((err.body as { currentVersion: number }).currentVersion).toBe(7);
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(409);
+      expect(apiErr.message).toMatch(/modified by another request/i);
+      expect((apiErr.body as { currentVersion: number }).currentVersion).toBe(7);
     });
   });
 });

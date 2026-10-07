@@ -131,7 +131,7 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
 }
 
 function makeListResponse<T>(data: T[]): PaginatedResponse<T> {
-  return { data, total: data.length, page: 1, lastPage: 1, limit: 20 };
+  return { data, total: data.length, page: 1, lastPage: 1 };
 }
 
 function makeShopListItem(over: Partial<ShopListItem> = {}): ShopListItem {
@@ -661,14 +661,13 @@ describe('CampaignDetailPage', () => {
           // Simulate the concurrent shrink the first time page 2 is requested.
           if (page === 2 && !dropped) {
             dropped = true;
-            return Promise.resolve({ data: [], total: 20, page: 2, lastPage: 1, limit: 20 });
+            return Promise.resolve({ data: [], total: 20, page: 2, lastPage: 1 });
           }
           return Promise.resolve({
             data: live.slice((page - 1) * 20, page * 20),
             total,
             page,
             lastPage,
-            limit: 20,
           });
         }
         return Promise.resolve(makeListResponse([]));

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import LevelUpSection from '../LevelUpSection';
 import type { Character, SrdClass } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
+import type { PlayControlProps } from '../useCharacterMutation';
 
 // The dialog fetches /srd/classes for the hit die and per-level features
 // (shared, cached with SpellcastingSection). Mock just useApiQuery, leaving the
@@ -56,11 +57,14 @@ const fighterWithRecurringAsi: SrdClass = {
 };
 
 const onPatch = vi.fn();
+// The API sends `class: null` for a classless row, while the shared type only
+// allows undefined.
+const classless = { class: null } as unknown as Partial<Character>;
 const editable = { editable: true as const, onPatch, isSaving: false };
 
 // makeCharacter defaults: level-5 Fighter, 6,500 XP (band floor), HP 44/32/+5,
 // hit dice d10 8 total 3 spent, no spellcastingAbility.
-function renderSection(over: Partial<Character> = {}, props = editable) {
+function renderSection(over: Partial<Character> = {}, props: PlayControlProps = editable) {
   return render(<LevelUpSection character={makeCharacter(over)} {...props} />);
 }
 
@@ -482,7 +486,7 @@ describe('LevelUpSection', () => {
       it('asks a classless sheet for a die without claiming its class failed to resolve', async () => {
         mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
         const user = userEvent.setup();
-        renderSection({ hitDice: null, class: null });
+        renderSection({ hitDice: null, ...classless });
         const dialog = await openDialog(user);
 
         expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();

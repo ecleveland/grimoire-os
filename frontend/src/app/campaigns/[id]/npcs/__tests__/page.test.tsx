@@ -56,7 +56,7 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
 }
 
 function makeResponse(data: Npc[]): PaginatedResponse<Npc> {
-  return { data, total: data.length, page: 1, lastPage: 1, limit: 20 };
+  return { data, total: data.length, page: 1, lastPage: 1 };
 }
 
 beforeEach(() => {

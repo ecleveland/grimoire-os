@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import InventorySection from '../InventorySection';
-import type { Character } from '@/lib/types';
+import type { AbilityScores, Character, InventoryItem } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
 
 // Stub the catalog picker so these tests don't exercise the debounced network
@@ -84,13 +84,26 @@ vi.mock('@/components/SrdItemSearch', () => ({
   ),
 }));
 
+// Non-null typed copies of the fixture's embedded stats, so tests can spread or
+// index them without null checks. The ability scores match the factory default.
+const baseAbilityScores: AbilityScores = {
+  strength: 16,
+  dexterity: 12,
+  constitution: 14,
+  intelligence: 10,
+  wisdom: 13,
+  charisma: 8,
+};
+const baseInventory: InventoryItem[] = [
+  { name: 'Chain Mail', quantity: 1, weight: 55, equipped: true },
+  { name: 'Longsword', quantity: 1, weight: 3, equipped: true },
+  { name: 'Handaxe', quantity: 2, weight: 2, equipped: false },
+  { name: 'Rope (50ft)', quantity: 1, equipped: false },
+];
+
 const baseCharacter = makeCharacter({
-  inventory: [
-    { name: 'Chain Mail', quantity: 1, weight: 55, equipped: true },
-    { name: 'Longsword', quantity: 1, weight: 3, equipped: true },
-    { name: 'Handaxe', quantity: 2, weight: 2, equipped: false },
-    { name: 'Rope (50ft)', quantity: 1, equipped: false },
-  ],
+  abilityScores: baseAbilityScores,
+  inventory: baseInventory,
   currency: { cp: 10, sp: 25, ep: 0, gp: 150, pp: 5 },
 });
 
@@ -408,7 +421,7 @@ describe('InventorySection', () => {
 
     it('flags over-capacity when carried weight exceeds the limit', () => {
       renderOwner({
-        abilityScores: { ...baseCharacter.abilityScores, strength: 3 }, // capacity 45
+        abilityScores: { ...baseAbilityScores, strength: 3 }, // capacity 45
       });
       expect(screen.getByTestId('carrying-capacity')).toHaveTextContent('over capacity');
     });
@@ -421,7 +434,7 @@ describe('InventorySection', () => {
 
     it('shows the encumbered tier and speed impact (−10 ft) above STR×5', () => {
       // STR 10 → encumbered above 50; carried 62 → encumbered. Speed 25 → 15.
-      renderOwner({ abilityScores: { ...baseCharacter.abilityScores, strength: 10 } });
+      renderOwner({ abilityScores: { ...baseAbilityScores, strength: 10 } });
       const status = screen.getByTestId('encumbrance-status');
       expect(status).toHaveTextContent('Encumbered');
       expect(status).toHaveTextContent('25 → 15 ft');
@@ -431,7 +444,7 @@ describe('InventorySection', () => {
     it('shows the heavily-encumbered tier with −20 ft and a disadvantage note above STR×10', () => {
       // STR 6 → heavily encumbered above 60; carried 62 → heavily encumbered.
       // Speed 25 → 5. Not over capacity (cap 90), so this isolates the tier.
-      renderOwner({ abilityScores: { ...baseCharacter.abilityScores, strength: 6 } });
+      renderOwner({ abilityScores: { ...baseAbilityScores, strength: 6 } });
       const status = screen.getByTestId('encumbrance-status');
       expect(status).toHaveTextContent('Heavily encumbered');
       expect(status).toHaveTextContent('25 → 5 ft');
@@ -441,7 +454,7 @@ describe('InventorySection', () => {
     it('clamps the reduced speed at 0 rather than going negative', () => {
       // STR 6 (heavily encumbered, −20) with a base speed below the penalty.
       renderOwner({
-        abilityScores: { ...baseCharacter.abilityScores, strength: 6 },
+        abilityScores: { ...baseAbilityScores, strength: 6 },
         speed: 15,
       });
       expect(screen.getByTestId('encumbrance-status')).toHaveTextContent('15 → 0 ft');
@@ -466,7 +479,7 @@ describe('InventorySection', () => {
       const { computed: _stale, ...stored } = baseCharacter;
       const base = makeCharacter({
         ...stored,
-        abilityScores: { ...baseCharacter.abilityScores, strength: 6 },
+        abilityScores: { ...baseAbilityScores, strength: 6 },
       });
       expect(base.computed.encumbrance.tier).toBe('heavily-encumbered');
       const legacy = {
@@ -827,7 +840,7 @@ describe('InventorySection', () => {
       // A refetch lands a new version with shifted inventory.
       rerender(
         <InventorySection
-          character={{ ...baseCharacter, version: 2, inventory: [baseCharacter.inventory[1]] }}
+          character={{ ...baseCharacter, version: 2, inventory: [baseInventory[1]] }}
           editable
           onPatch={onPatch}
           isSaving={false}
@@ -929,7 +942,7 @@ describe('null embedded stats (VEG-425)', () => {
     };
     // Editable so the encumbrance math (carryingCapacity/encumbranceStatus, which
     // read abilityScores.strength + speed) actually runs — the null-deref path.
-    render(<InventorySection character={char} editable onPatch={vi.fn()} />);
+    render(<InventorySection character={char} editable onPatch={vi.fn()} isSaving={false} />);
     expect(screen.getByText('Equipment')).toBeInTheDocument();
   });
 });

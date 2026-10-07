@@ -58,6 +58,7 @@ const goblin: SrdMonster = {
   challengeRating: 0.25,
   actions: [],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const dragon: SrdMonster = {
@@ -82,6 +83,7 @@ const dragon: SrdMonster = {
   challengeRating: 24,
   actions: [],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 function makeResponse(monsters: SrdMonster[]): PaginatedResponse<SrdMonster> {

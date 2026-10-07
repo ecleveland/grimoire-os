@@ -33,6 +33,9 @@ cd "$ROOT_DIR/backend" && npm run build
 echo "==> Linting frontend"
 cd "$ROOT_DIR/frontend" && npm run lint
 
+echo "==> Type-checking frontend, specs included (tsc --noEmit)"
+cd "$ROOT_DIR/frontend" && npm run typecheck
+
 echo "==> Frontend unit tests + coverage thresholds"
 cd "$ROOT_DIR/frontend" && npm run test:cov
 

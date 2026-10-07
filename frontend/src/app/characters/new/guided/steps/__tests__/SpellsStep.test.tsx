@@ -73,6 +73,7 @@ function spell(name: string, level: number, over: Partial<SrdSpell> = {}): SrdSp
     ritual: false,
     concentration: false,
     source: 'SRD',
+    contentSource: 'srd',
     ...over,
   };
 }

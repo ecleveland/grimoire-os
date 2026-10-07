@@ -15,6 +15,7 @@ import CharacterEditorForm, {
   type CharacterFormValues,
 } from '../CharacterEditorForm';
 import type { Character, SrdBackground, SrdClass, SrdRace, SrdSubclass } from '@/lib/types';
+import { makeCharacter as makeBaseCharacter } from '@/test-utils/character';
 import { MAX_ARMOR_CLASS, MAX_INITIATIVE_BONUS, MAX_SPEED } from '@grimoire-os/shared';
 
 const mockToastSuccess = vi.fn();
@@ -134,7 +135,7 @@ vi.mock('sonner', () => ({
 }));
 
 function makeCharacter(over: Partial<Character> = {}): Character {
-  return {
+  return makeBaseCharacter({
     id: 'char-1',
     userId: 'user-1',
     name: 'Thora Ironfist',
@@ -174,7 +175,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     createdAt: '',
     updatedAt: '',
     ...over,
-  };
+  });
 }
 
 function renderForm(over: Partial<React.ComponentProps<typeof CharacterEditorForm>> = {}) {

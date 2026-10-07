@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import EditCharacterPage from '../page';
 import { ApiError } from '@/lib/api';
 import type { Character } from '@/lib/types';
+import { makeCharacter as makeBaseCharacter } from '@/test-utils/character';
 
 const mockApiFetch = vi.fn();
 const mockPush = vi.fn();
@@ -47,7 +48,7 @@ function renderPage() {
 }
 
 function makeCharacter(over: Partial<Character> = {}): Character {
-  return {
+  return makeBaseCharacter({
     id: 'char-1',
     userId: 'user-1',
     name: 'Thora Ironfist',
@@ -87,7 +88,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     createdAt: '',
     updatedAt: '',
     ...over,
-  };
+  });
 }
 
 // The editor also fetches SRD catalogs for its pickers; route those to empty

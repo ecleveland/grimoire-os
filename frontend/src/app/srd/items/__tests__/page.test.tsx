@@ -40,6 +40,7 @@ const longsword: SrdItem = {
   damage: '1d8 slashing',
   properties: ['Versatile (1d10)', 'Mastery: Sap'],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 const wandOfTricks: SrdItem = {
@@ -61,6 +62,7 @@ const wandOfTricks: SrdItem = {
   ].join('\n'),
   properties: [],
   source: 'SRD 5.2.1',
+  contentSource: 'srd',
 };
 
 function makeResponse(items: SrdItem[]): PaginatedResponse<SrdItem> {
