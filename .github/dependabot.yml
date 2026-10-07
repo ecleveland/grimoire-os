@@ -19,6 +19,11 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # eslint-config-next's plugins declare peer support up to ESLint 9.
+      # Drop this once Next's config supports ESLint 10.
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /shared
@@ -43,23 +48,35 @@ updates:
   # The docker ecosystem reads Dockerfiles only, so the compose file has its
   # own docker-compose entry. The backend-db service image in ci.yml is not
   # covered by any ecosystem and is refreshed by hand (see CLAUDE.md).
+  #
+  # Majors are ignored: CLAUDE.md keeps node and postgres on their current
+  # major, and a major bump is a ticket of its own.
   - package-ecosystem: docker
     directory: /backend
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: docker
     directory: /frontend
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
