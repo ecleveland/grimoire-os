@@ -43,6 +43,7 @@ export class UsersController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Change current user password' })
   @ApiResponse({ status: 204, description: 'Password changed' })
+  @ApiResponse({ status: 400, description: 'Current password is incorrect' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   changePassword(@Req() req: AuthenticatedRequest, @Body() dto: ChangePasswordDto) {
     return this.usersService.changePassword(req.user.userId, dto.currentPassword, dto.newPassword);

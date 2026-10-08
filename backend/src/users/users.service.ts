@@ -1,8 +1,8 @@
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -157,7 +157,8 @@ export class UsersService {
     const user = await this.findOne(id);
     const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isValid) {
-      throw new UnauthorizedException('Current password is incorrect');
+      // A wrong current password is a validation failure; a 401 would make the client treat the session as expired.
+      throw new BadRequestException('Current password is incorrect');
     }
     const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
     // Revoke every live refresh token alongside the hash rewrite: a stolen
