@@ -18,10 +18,18 @@ JWT_SECRET=your-secret docker compose up --build
 - **Frontend**: Next.js 16 + React 19 + Tailwind v4 — port 3000
 - **Auth**: JWT + Passport + bcryptjs, roles: player / dungeon_master / admin
 
+### Prisma 7
+
+- The CLI reads `backend/prisma.config.ts` for the schema path, migrations, seed command and `DATABASE_URL`. The schema's datasource has no `url`. The config loads `.env` through `dotenv` because the CLI no longer does.
+- `prisma generate` writes the client to `backend/src/generated/prisma/`, which is gitignored and excluded from lint, Prettier and coverage. Import it by relative path (`../generated/prisma/client`), never from `@prisma/client`. `npm install` regenerates it through `postinstall`; after a schema change run `npx prisma generate` yourself, because `migrate dev` no longer does.
+- `PrismaService` connects through the `@prisma/adapter-pg` driver adapter, a `pg` pool of 10 connections with a 5 s connect timeout and 10 s idle timeout, set explicitly to match Prisma 6's engine defaults. PrismaModule loads only `src/config/database.config.ts`, so it boots without `JWT_SECRET`. Constraint errors carry the violated index name under `meta.driverAdapterError.cause`, not `meta.target`; read them with `src/common/helpers/prisma-errors.ts`.
+- `npm run test:db` runs Jest under `--experimental-vm-modules` because the generated client loads its query compiler with a dynamic `import()`.
+
 ## Key Commands
 
 ```bash
 # Backend
+cd backend && npx prisma generate # Regenerate the Prisma client after a schema change
 cd backend && npm run start:dev   # Dev server
 cd backend && npm test            # Unit tests
 cd backend && npm run test:cov    # Unit tests + coverage (enforces thresholds)
@@ -81,7 +89,12 @@ In `frontend/`, `npm run typecheck` type-checks the spec files too. Vitest strip
 
 ## Dependency overrides
 
-`backend/package.json` overrides `deepmerge-ts` to `^8.0.2`. Every Prisma 6.x release pins `@prisma/config` to `deepmerge-ts@7.1.5`, which carries a high-severity stack-exhaustion advisory (GHSA-ggr8-5vv4-36mx) in config loading. The override is what keeps `npm audit --omit=dev` at zero high on the backend. Remove it once the installed Prisma depends on deepmerge-ts 8 or later (the advisory's fixed range begins at Prisma 8.1), and re-check `prisma validate`, `prisma generate` and `prisma migrate status` whenever Prisma moves.
+`backend/package.json` overrides two transitive dependencies of the Prisma CLI. They count toward `npm audit --omit=dev` because `@prisma/client` peer-depends on `prisma`, and the overrides keep that audit at zero high on the backend.
+
+- `deepmerge-ts` to `^8.0.2`. Prisma 7.10 still pins `@prisma/config` to `deepmerge-ts@7.1.5`, which carries a high-severity stack-exhaustion advisory (GHSA-ggr8-5vv4-36mx) in config loading. Remove the override once the installed Prisma depends on deepmerge-ts 8 or later; the advisory's fixed range begins at Prisma 8.1.
+- `mysql2` to `^3.24.5`. The Prisma CLI pins `mysql2@3.15.3` for MySQL introspection, this project never opens a MySQL connection, and the override exists only to keep `npm audit --omit=dev` at zero high (GHSA-3f6p-5ww8-9rcr, GHSA-rgwj-5xj2-c3m3). Remove it once the installed `prisma` depends on mysql2 3.24 or later.
+
+Re-check `prisma validate`, `prisma generate` and `prisma migrate status` whenever Prisma moves. Pin `prisma` and `@prisma/client` to exact versions: npm's `latest` tag for `prisma` can point at a release candidate.
 
 Dependabot (`.github/dependabot.yml`) opens monthly grouped minor-and-patch PRs per package directory, separate PRs for majors, and digest refreshes for the Docker base images.
 

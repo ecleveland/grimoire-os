@@ -5,7 +5,7 @@ import {
   ForbiddenException,
   ConflictException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { AbilityScores, ClassSpellcasting, HitDice, Weapon } from '@grimoire-os/shared';
 import { hitDicePoolFor, inventoryFromJson, isHitDie } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';

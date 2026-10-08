@@ -3,3 +3,4 @@ dist
 .next
 coverage
 prisma/migrations
+backend/src/generated

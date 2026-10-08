@@ -1,9 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import {
-  PrismaClientKnownRequestError,
-  PrismaClientUnknownRequestError,
-} from '@prisma/client/runtime/library';
+import { Prisma } from '../generated/prisma/client';
 import { UsersService } from './users.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
@@ -77,7 +74,7 @@ describe('UsersService', () => {
     it('should throw ConflictException on duplicate username/email (P2002)', async () => {
       (bcrypt.hash as jest.Mock).mockResolvedValue('hashed_pw');
       prisma.user.create.mockRejectedValue(
-        new PrismaClientKnownRequestError('Unique constraint failed', {
+        new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
           clientVersion: '6.0.0',
         })
@@ -355,7 +352,7 @@ describe('UsersService', () => {
   describe('remove', () => {
     it('should throw NotFoundException when user does not exist (P2025)', async () => {
       prisma.user.delete.mockRejectedValue(
-        new PrismaClientKnownRequestError('Record not found', {
+        new Prisma.PrismaClientKnownRequestError('Record not found', {
           code: 'P2025',
           clientVersion: '6.0.0',
         })
@@ -368,7 +365,7 @@ describe('UsersService', () => {
     // a relation missing an onDelete policy, which is the wrong diagnostic and
     // the wrong message for content arriving mid-delete.
     it('answers a persistent FK violation with the race conflict', async () => {
-      const fkError = new PrismaClientKnownRequestError('Foreign key constraint failed', {
+      const fkError = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
         code: 'P2003',
         clientVersion: '6.0.0',
       });
@@ -385,25 +382,30 @@ describe('UsersService', () => {
     // either way the transaction rolls back. A retry of the whole transaction
     // clears it, because the second pass deletes the row the first one missed.
     describe('content added while the user is being deleted [VEG-559]', () => {
+      /** A known request error carrying the cause the pg driver adapter attaches. */
+      const adapterError = (code: string, cause: Record<string, unknown>) =>
+        new Prisma.PrismaClientKnownRequestError('Database error', {
+          code,
+          clientVersion: '7.10.0',
+          meta: { modelName: 'User', driverAdapterError: { name: 'DriverAdapterError', cause } },
+        });
+
       // The meta a live Postgres raises for the class delete, measured rather
       // than assumed.
       const fkViolation = () =>
-        new PrismaClientKnownRequestError('Foreign key constraint violated', {
-          code: 'P2003',
-          clientVersion: '6.0.0',
-          meta: { modelName: 'SrdClass', constraint: 'subclasses_classId_fkey' },
+        adapterError('P2003', {
+          originalCode: '23503',
+          kind: 'ForeignKeyConstraintViolation',
+          constraint: { index: 'subclasses_classId_fkey' },
         });
 
       // A subclass inserted under an SRD or shared class instead trips
       // `subclasses_homebrew_has_creator_check` when the user delete nulls its
-      // creator. Prisma raises SQLSTATE 23514 as this, with no code and no meta,
-      // so the SQLSTATE is only readable in the message. The real text is pinned
-      // in `test/db/subclass-authorization.db-spec.ts`.
+      // creator. The adapter raises SQLSTATE 23514 under a generic code, so the
+      // SQLSTATE is what identifies it. The real shape is pinned in
+      // `test/db/subclass-authorization.db-spec.ts`.
       const checkViolation = () =>
-        new PrismaClientUnknownRequestError(
-          'new row violates check constraint "subclasses_homebrew_has_creator_check" (SQLSTATE 23514)',
-          { clientVersion: '6.0.0' }
-        );
+        adapterError('P2039', { originalCode: '23514', kind: 'postgres', code: '23514' });
 
       it('retries once after an FK violation and succeeds', async () => {
         prisma.$transaction.mockRejectedValueOnce(fkViolation());
@@ -412,7 +414,7 @@ describe('UsersService', () => {
         expect(prisma.$transaction).toHaveBeenCalledTimes(2);
       });
 
-      it('retries once after a CHECK violation, which carries no Prisma code', async () => {
+      it('retries once after a CHECK violation, recognized by its SQLSTATE', async () => {
         prisma.$transaction.mockRejectedValueOnce(checkViolation());
 
         await expect(service.remove(USER_ID)).resolves.toBeUndefined();
@@ -440,7 +442,7 @@ describe('UsersService', () => {
       // The retry is keyed on the code, not on the error class. A unique
       // violation is a real failure to report, not a row that arrived late.
       it('never retries a known Prisma error with an unrelated code (P2002)', async () => {
-        const conflict = new PrismaClientKnownRequestError('Unique constraint failed', {
+        const conflict = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
           code: 'P2002',
           clientVersion: '6.0.0',
         });
@@ -450,14 +452,11 @@ describe('UsersService', () => {
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       });
 
-      // Prisma raises a deadlock, a serialization failure and a statement
-      // timeout as the same class as the CHECK violation. Only the CHECK
-      // violation is a row that arrived late, so the retry reads the SQLSTATE.
-      it('never retries an unknown error that is not the CHECK violation', async () => {
-        const timeout = new PrismaClientUnknownRequestError(
-          'canceling statement due to statement timeout',
-          { clientVersion: '6.0.0' }
-        );
+      // The adapter raises a deadlock, a serialization failure and a statement
+      // timeout under the same generic code as the CHECK violation. Only the
+      // CHECK violation is a row that arrived late, so the retry reads the SQLSTATE.
+      it('never retries a database error that is not the CHECK violation', async () => {
+        const timeout = adapterError('P2039', { originalCode: '57014', kind: 'postgres' });
         prisma.$transaction.mockRejectedValueOnce(timeout);
 
         await expect(service.remove(USER_ID)).rejects.toBe(timeout);
@@ -466,7 +465,7 @@ describe('UsersService', () => {
 
       it('never retries a missing user (P2025)', async () => {
         prisma.$transaction.mockRejectedValueOnce(
-          new PrismaClientKnownRequestError('Record not found', {
+          new Prisma.PrismaClientKnownRequestError('Record not found', {
             code: 'P2025',
             clientVersion: '6.0.0',
           })

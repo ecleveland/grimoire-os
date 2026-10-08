@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
+import { AuditAction, Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { QueryAuditLogDto } from './dto/query-audit-log.dto';

@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { Request, Response } from 'express';
 import { AuthModule } from './auth.module';
 import { AuthService } from './auth.service';

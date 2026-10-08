@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 
 /**
  * Escape the LIKE metacharacters Postgres honours in a value bound to ILIKE.

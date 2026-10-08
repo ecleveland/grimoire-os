@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NoteVisibility } from '../prisma/enums';
 import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';

@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
-import { Prisma, SrdClass } from '@prisma/client';
+import { Prisma, SrdClass } from '../generated/prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import {
   lockFeatureParent,

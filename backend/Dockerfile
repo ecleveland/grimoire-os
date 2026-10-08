@@ -33,6 +33,7 @@ COPY --from=build --chown=nestjs:nestjs /app/backend/dist ./dist
 COPY --from=build --chown=nestjs:nestjs /app/backend/node_modules ./node_modules
 COPY --from=build --chown=nestjs:nestjs /app/backend/package.json ./
 COPY --from=build --chown=nestjs:nestjs /app/backend/prisma ./prisma
+COPY --from=build --chown=nestjs:nestjs /app/backend/prisma.config.ts ./prisma.config.ts
 USER nestjs
 EXPOSE 3001
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]

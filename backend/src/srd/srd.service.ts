@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
-import { Spell, Monster, Item, Feat, SrdClass, Prisma } from '@prisma/client';
+import { Spell, Monster, Item, Feat, SrdClass, Prisma } from '../generated/prisma/client';
 import { SEARCH_KINDS, type SearchClassHitField, type SearchKind } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';

@@ -5,7 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { AbilityScores, Combatant } from '@grimoire-os/shared';
 import {
   abilityModifier,

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Monster, Prisma } from '@prisma/client';
+import { Monster, Prisma } from '../generated/prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateMonsterDto } from './dto/create-monster.dto';
 import { UpdateMonsterDto } from './dto/update-monster.dto';

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { MODULE_METADATA } from '@nestjs/common/constants';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { Type } from '@nestjs/common';
 import { ContentAccessService, ContentActor, OwnedContentRow } from './content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';

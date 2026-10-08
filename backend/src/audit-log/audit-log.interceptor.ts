@@ -1,7 +1,7 @@
 import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
-import { AuditAction } from '@prisma/client';
+import { AuditAction } from '../generated/prisma/client';
 import { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { AuditLogService } from './audit-log.service';
 

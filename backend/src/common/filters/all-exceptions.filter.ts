@@ -6,20 +6,20 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
+import { violatedConstraint } from '../helpers/prisma-errors';
 
 /**
  * The schema object a known request error names, for the server log only.
  *
- * Prisma's error reference documents the key as `field_name`, but the engine
- * this backend runs reports a P2003 under `constraint` instead (measured against
- * a live Postgres, where a subclass insert under a missing class raises
- * `meta.constraint = 'subclasses_classId_fkey'`). Reading `field_name` alone
- * logged "unknown relation" for every real violation.
+ * The pg driver adapter reports a violated constraint in its own cause
+ * (measured against a live Postgres, where a feature insert under a missing
+ * class names `class_features_classId_fkey`). Errors raised before any query
+ * runs, such as P2006, have no cause and name the field under `field_name`.
  */
 function relationOf(exception: Prisma.PrismaClientKnownRequestError): string {
   const meta = exception.meta as { constraint?: unknown; field_name?: unknown } | undefined;
-  const name = meta?.constraint ?? meta?.field_name;
+  const name = violatedConstraint(exception) ?? meta?.constraint ?? meta?.field_name;
   return typeof name === 'string' ? name : 'unknown relation';
 }
 
@@ -74,14 +74,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
           message: 'Record not found',
           error: 'Not Found',
         };
-      case 'P2002': {
-        const target = (exception.meta?.target as string[]) ?? [];
+      case 'P2002':
+        // The adapter names the violated index, which is schema detail, so it
+        // goes to the log and the client gets fixed copy.
+        this.logger.warn(`P2002 rejected a ${method ?? 'write'} via "${relationOf(exception)}"`);
         return {
           statusCode: HttpStatus.CONFLICT,
-          message: `Unique constraint violation on: ${target.join(', ')}`,
+          message: 'A record with these values already exists',
           error: 'Conflict',
         };
-      }
       case 'P2003':
         // Every relation carries an explicit onDelete policy (VEG-312), so an
         // FK violation on a DELETE means a relation was added without one.

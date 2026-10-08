@@ -9,7 +9,7 @@
 // what would let a placeholder line like "Any simple weapon" silently resolve
 // to a real item, so the folding set below is deliberately closed.
 
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import type { GearSourceItem } from '@grimoire-os/shared';
 
 /** The catalog columns name resolution and gear snapshotting need. */

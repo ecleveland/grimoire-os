@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { HomebrewMonstersService } from './homebrew-monsters.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';

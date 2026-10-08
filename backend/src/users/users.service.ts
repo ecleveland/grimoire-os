@@ -4,11 +4,12 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
+import { sqlStateOf } from '../common/helpers/prisma-errors';
 import { Role } from '../common/enums';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -22,7 +23,7 @@ const BCRYPT_ROUNDS = 12;
 /** How many times a user delete is tried. One retry, no backoff; see {@link UsersService.remove}. */
 const USER_DELETE_ATTEMPTS = 2;
 
-/** Postgres's SQLSTATE for a CHECK violation, which Prisma leaves only in the message. */
+/** Postgres's SQLSTATE for a CHECK violation, which Prisma reports under no specific code. */
 const CHECK_VIOLATION_SQLSTATE = '23514';
 
 /**
@@ -31,25 +32,21 @@ const CHECK_VIOLATION_SQLSTATE = '23514';
  *
  * Two shapes reach here. An FK violation arrives as P2003, which is what a
  * homebrew class delete raises while a subclass still points at it. A CHECK
- * violation arrives as `PrismaClientUnknownRequestError`, which is how Prisma
- * surfaces SQLSTATE 23514, raised when the user delete nulls the creator of a
+ * violation arrives under a generic Prisma code with SQLSTATE 23514 in the
+ * driver adapter's cause, raised when the user delete nulls the creator of a
  * homebrew row inserted after that row's table was cleared. That second shape
- * was measured against Postgres 16 through Prisma 6.19.2 in
- * `test/db/subclass-authorization.db-spec.ts`, which pins it. It carries no
- * Prisma error code at all, so it is recognized by its class plus the SQLSTATE,
- * which survives only in the message text. Neither
- * shape is keyed on a constraint name, so every content table is covered rather
- * than the one subclass FK.
+ * was measured against Postgres 16 through the pg driver adapter in
+ * `test/db/subclass-authorization.db-spec.ts`, which pins it. Neither shape is
+ * keyed on a constraint name, so every content table is covered rather than the
+ * one subclass FK.
  *
- * The SQLSTATE is required on that second arm because Prisma raises a deadlock,
- * a serialization failure and a statement timeout as the same class, and none of
- * those is a row that arrived late.
+ * The SQLSTATE is required on that second arm because the adapter raises a
+ * deadlock, a serialization failure and a statement timeout under the same
+ * generic code, and none of those is a row that arrived late.
  */
 export function isConcurrentWriteConflict(error: unknown): boolean {
-  if (error instanceof Prisma.PrismaClientUnknownRequestError) {
-    return error.message.includes(CHECK_VIOLATION_SQLSTATE);
-  }
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003';
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  return error.code === 'P2003' || sqlStateOf(error) === CHECK_VIOLATION_SQLSTATE;
 }
 
 @Injectable()

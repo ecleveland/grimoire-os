@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { NpcGeneratorService } from './npc-generator.service';
 import { CampaignAuthService } from '../../auth/campaign-auth.service';
 import { PrismaService } from '../../prisma/prisma.service';

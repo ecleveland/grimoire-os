@@ -1,8 +1,21 @@
 import { ArgumentsHost, NotFoundException } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { AppModule } from '../../app.module';
 import { AllExceptionsFilter } from './all-exceptions.filter';
+
+/** A known request error carrying the cause the pg driver adapter attaches. */
+function adapterError(
+  code: string,
+  cause: Record<string, unknown>,
+  message = 'Database error'
+): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(message, {
+    code,
+    clientVersion: '7.10.0',
+    meta: { modelName: 'Subclass', driverAdapterError: { name: 'DriverAdapterError', cause } },
+  });
+}
 
 describe('AllExceptionsFilter', () => {
   let filter: AllExceptionsFilter;
@@ -73,22 +86,56 @@ describe('AllExceptionsFilter', () => {
     });
   });
 
-  it('returns 409 for Prisma P2002 unique constraint with conflicting fields', () => {
-    const error = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
-      code: 'P2002',
-      clientVersion: '1.0.0',
-      meta: { target: ['email'] },
+  const P2002_MESSAGE = 'A record with these values already exists';
+
+  function uniqueViolation(): Prisma.PrismaClientKnownRequestError {
+    return adapterError('P2002', {
+      originalCode: '23505',
+      kind: 'UniqueConstraintViolation',
+      constraint: { index: 'users_email_key' },
+      table: 'users',
     });
-    filter.catch(error, createHost());
+  }
+
+  it('returns a fixed 409 for Prisma P2002', () => {
+    jest
+      .spyOn((filter as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+      .mockImplementation(() => undefined);
+    filter.catch(uniqueViolation(), createHost());
 
     expect(mockStatus).toHaveBeenCalledWith(409);
     expect(mockJson).toHaveBeenCalledWith({
       statusCode: 409,
-      message: 'Unique constraint violation on: email',
+      message: P2002_MESSAGE,
       error: 'Conflict',
       timestamp: expect.any(String),
       path: '/api/test',
     });
+  });
+
+  // The index name is schema detail. It goes to the log, not the client.
+  it('logs the constraint server-side and keeps it out of the P2002 body', () => {
+    const warnSpy = jest
+      .spyOn((filter as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+      .mockImplementation(() => undefined);
+    filter.catch(uniqueViolation(), createHost());
+
+    expect(JSON.stringify(mockJson.mock.calls[0][0])).not.toContain('users_email_key');
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('users_email_key'));
+  });
+
+  it('still answers 409 for a P2002 that names no constraint', () => {
+    jest
+      .spyOn((filter as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+      .mockImplementation(() => undefined);
+    const error = new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+      code: 'P2002',
+      clientVersion: '7.10.0',
+    });
+    filter.catch(error, createHost());
+
+    expect(mockStatus).toHaveBeenCalledWith(409);
+    expect(mockJson.mock.calls[0][0]).toMatchObject({ message: P2002_MESSAGE });
   });
 
   // The raw engine message is what a non-DELETE P2003 used to echo. Outside
@@ -101,11 +148,15 @@ describe('AllExceptionsFilter', () => {
     'Foreign key constraint violated on the constraint: `subclasses_classId_fkey`';
 
   function fkViolation(): Prisma.PrismaClientKnownRequestError {
-    return new Prisma.PrismaClientKnownRequestError(RAW_FK_MESSAGE, {
-      code: 'P2003',
-      clientVersion: '1.0.0',
-      meta: { modelName: 'Subclass', constraint: 'subclasses_classId_fkey' },
-    });
+    return adapterError(
+      'P2003',
+      {
+        originalCode: '23503',
+        kind: 'ForeignKeyConstraintViolation',
+        constraint: { index: 'subclasses_classId_fkey' },
+      },
+      RAW_FK_MESSAGE
+    );
   }
 
   it('returns a fixed 400 for Prisma P2003 on writes', () => {
@@ -164,15 +215,47 @@ describe('AllExceptionsFilter', () => {
     expect(mockJson.mock.calls[0][0]).toMatchObject({ statusCode: 400, error: 'Bad Request' });
   });
 
+  // P2006 is a validation error raised before any query, so it carries no
+  // driver adapter cause. The log falls back to the field Prisma names.
+  it('logs the field server-side for a P2006, which has no adapter cause', () => {
+    const logSpy = jest
+      .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
+      .mockImplementation(() => undefined);
+    const error = new Prisma.PrismaClientKnownRequestError('Invalid value', {
+      code: 'P2006',
+      clientVersion: '7.10.0',
+      meta: { field_name: 'passwordHash' },
+    });
+
+    filter.catch(error, createHost());
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('passwordHash'));
+  });
+
+  it('logs a legacy meta.constraint when there is no adapter cause', () => {
+    const logSpy = jest
+      .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
+      .mockImplementation(() => undefined);
+    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
+      code: 'P2003',
+      clientVersion: '7.10.0',
+      meta: { constraint: 'subclasses_classId_fkey' },
+    });
+
+    filter.catch(error, createHost());
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('subclasses_classId_fkey'));
+  });
+
   // VEG-312: every relation now carries an explicit onDelete policy, so a
   // P2003 on a DELETE means a future relation was added without one. Surface
   // a clean 409 to the client and log the schema diagnostic server-side.
   it('returns a sanitized 409 for Prisma P2003 on DELETE requests', () => {
     mockGetRequest.mockReturnValue({ url: '/api/admin/users/u1', method: 'DELETE' });
-    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
-      code: 'P2003',
-      clientVersion: '1.0.0',
-      meta: { field_name: 'widgets_userId_fkey' },
+    const error = adapterError('P2003', {
+      originalCode: '23503',
+      kind: 'ForeignKeyConstraintViolation',
+      constraint: { index: 'widgets_userId_fkey' },
     });
     filter.catch(error, createHost());
 
@@ -191,10 +274,10 @@ describe('AllExceptionsFilter', () => {
       .spyOn((filter as unknown as { logger: { error: jest.Mock } }).logger, 'error')
       .mockImplementation(() => undefined);
     mockGetRequest.mockReturnValue({ url: '/api/admin/users/u1', method: 'DELETE' });
-    const error = new Prisma.PrismaClientKnownRequestError('Foreign key constraint failed', {
-      code: 'P2003',
-      clientVersion: '1.0.0',
-      meta: { field_name: 'widgets_userId_fkey' },
+    const error = adapterError('P2003', {
+      originalCode: '23503',
+      kind: 'ForeignKeyConstraintViolation',
+      constraint: { index: 'widgets_userId_fkey' },
     });
     filter.catch(error, createHost());
 

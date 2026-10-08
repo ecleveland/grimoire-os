@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Background } from '@prisma/client';
+import { Background } from '../generated/prisma/client';
 import { ContentActor } from './content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateBackgroundDto } from './dto/create-background.dto';

@@ -1,5 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import type { ContentSource } from '@grimoire-os/shared';
 import { ContentActor } from './content-access.service';
 import type { JwtUser } from '../auth/interfaces/jwt-payload.interface';
