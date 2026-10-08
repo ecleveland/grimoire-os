@@ -17,6 +17,7 @@ import {
   apiFetch,
   awaitInflightRefresh,
   endDeadSession,
+  REFRESH_FETCH_TIMEOUT_MS,
   refreshSession,
   withRefreshLock,
 } from './api';
@@ -143,8 +144,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // refresh cookie even though the 15-minute access token has expired. The
   // refresh goes through the same in-flight promise apiFetch uses, so two
   // hydration runs (StrictMode in dev), or a hydration run and a concurrent
-  // apiFetch 401, send one POST /auth/refresh. The backend revokes the whole
-  // session when it sees a refresh token presented twice.
+  // apiFetch 401, send one POST /auth/refresh. The backend rotates the token on
+  // each use and revokes the whole session on a replay outside a short grace
+  // window, so one POST per browser is still the rule.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -175,7 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(toUserInfo(profile));
         } else if (res.status === 401 && getSessionCookieSnapshot()) {
           // The access cookie is present-but-invalid and a refresh couldn't
-          // restore it (expired/revoked, or a 429-throttled refresh). The
+          // restore it (expired or revoked). The
           // `session_present` cookie tells us a session existed — so this is a
           // dead session, not an anonymous public-page visitor. Clear the stale
           // httpOnly cookies and land on /login once, instead of leaving the
@@ -254,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         fetch(`${API_URL}/auth/logout`, {
           method: 'POST',
           credentials: 'include',
+          signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS),
         })
       );
       if (!res.ok) throw new Error(`logout failed: ${res.status}`);

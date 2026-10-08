@@ -13,7 +13,7 @@ export interface RotatedRefreshToken {
 type RefreshTokenClient = Pick<PrismaService, 'refreshToken'> | Prisma.TransactionClient;
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const DEFAULT_ROTATION_GRACE_MS = 10_000;
+const DEFAULT_ROTATION_GRACE_MS = 3_000;
 
 /** Thrown inside the rotation transaction when another request already claimed the token. */
 class LostClaim extends Error {}

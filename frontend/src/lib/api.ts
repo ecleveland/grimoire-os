@@ -30,6 +30,11 @@ const CSRF_COOKIE_NAME = 'csrf_token';
 const CSRF_HEADER_NAME = 'x-csrf-token';
 const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// Every fetch made while holding the cross-tab refresh lock carries this
+// timeout. A hung request would otherwise hold the lock and stall refresh and
+// logout in every tab.
+export const REFRESH_FETCH_TIMEOUT_MS = 15_000;
+
 // In-flight refresh promise — when a burst of requests all 401 simultaneously,
 // they share one refresh round-trip instead of each kicking off their own.
 let inflightRefresh: Promise<RefreshOutcome> | null = null;
@@ -71,6 +76,7 @@ export function endDeadSession(): Promise<void> {
           fetch(`${API_URL}/auth/logout`, {
             method: 'POST',
             credentials: 'include',
+            signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS),
           })
         );
       } catch {
@@ -99,9 +105,9 @@ function readCookie(name: string): string | null {
 }
 
 /**
- * How a refresh ended: the server issued new cookies, the server answered
- * with an error (expired, revoked, throttled), or the request never got an
- * answer at all.
+ * How a refresh ended: the server issued new cookies, the server judged the
+ * session dead (expired or revoked), or the request got no verdict on the
+ * session at all (no answer, a throttle, a gateway or server error).
  */
 export type RefreshOutcome = 'refreshed' | 'rejected' | 'unreachable';
 
@@ -143,11 +149,13 @@ async function postRefresh(): Promise<RefreshOutcome> {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS),
     });
     if (res.ok) return 'refreshed';
-    // Expired, revoked or throttled: the server has judged this session.
-    if (res.status === 401 || res.status === 403 || res.status === 429) return 'rejected';
-    // Any other error status gave no verdict on the session.
+    // Expired or revoked: the server has judged this session.
+    if (res.status === 401 || res.status === 403) return 'rejected';
+    // Any other error status, a 429 included, gave no verdict on the session.
+    // A throttle judges this client's request rate, not the session.
     return 'unreachable';
   } catch {
     return 'unreachable';
@@ -158,7 +166,10 @@ async function postRefresh(): Promise<RefreshOutcome> {
 // so a working /users/me means there is nothing left to refresh.
 async function refreshedElsewhere(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+    const res = await fetch(`${API_URL}/users/me`, {
+      credentials: 'include',
+      signal: AbortSignal.timeout(REFRESH_FETCH_TIMEOUT_MS),
+    });
     return res.ok;
   } catch {
     return false;

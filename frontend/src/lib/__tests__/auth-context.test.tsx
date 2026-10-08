@@ -345,18 +345,20 @@ describe('AuthProvider', () => {
         expect(meCalls).toHaveLength(2);
       });
 
-      it('ends the dead session when refresh is throttled (429) — does not wedge', async () => {
+      it('keeps the session when refresh is throttled (429)', async () => {
+        // A throttle judges this client's request rate, not the session.
         document.cookie = 'session_present=1';
         vi.mocked(fetch)
           .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
-          .mockResolvedValueOnce(mockFetchResponse(429)) // /auth/refresh throttled
-          .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession
+          .mockResolvedValueOnce(mockFetchResponse(429)); // /auth/refresh throttled
 
         renderWithProvider();
 
         await waitFor(() => {
-          expect(mockEndDeadSession).toHaveBeenCalledTimes(1);
+          expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
         });
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(mockEndDeadSession).not.toHaveBeenCalled();
         expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
       });
 
@@ -797,6 +799,20 @@ describe('AuthProvider', () => {
           expect.objectContaining({ method: 'POST', credentials: 'include' })
         );
       });
+    });
+
+    it('bounds the /auth/logout request with a timeout signal', async () => {
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+
+      await user.click(screen.getByText('Logout'));
+
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/login'));
+      const logoutCall = vi
+        .mocked(fetch)
+        .mock.calls.find(c => String(c[0]).endsWith('/auth/logout'));
+      expect(logoutCall?.[1]?.signal).toBeInstanceOf(AbortSignal);
     });
 
     it('leaves for /login by a full page load, not a soft navigation', async () => {

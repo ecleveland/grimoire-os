@@ -268,23 +268,18 @@ describe('apiFetch', () => {
       expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
-    it('clears the dead session and lands on /login when /auth/refresh is throttled (429)', async () => {
-      // VEG-419 429 amplifier: a throttled refresh must be treated like any
-      // failed refresh — clear the session and land on /login, never wedge.
+    it('throws NetworkError and leaves the session alone when /auth/refresh is throttled (429)', async () => {
+      // A throttle judges this client's request rate, not the session.
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
-        .mockResolvedValueOnce(mockResponse(429) as unknown as Response) // refresh throttled
-        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /users/me probe
-        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+        .mockResolvedValueOnce(mockResponse(429) as unknown as Response); // refresh throttled
 
-      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+      await expect(apiFetch('/test')).rejects.toBeInstanceOf(NetworkError);
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${API_URL}/auth/logout`,
-        expect.objectContaining({ method: 'POST', credentials: 'include' })
-      );
-      expect(window.location.replace).toHaveBeenCalledWith('/login');
+      const logoutCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
+      expect(logoutCalls).toHaveLength(0);
+      expect(window.location.replace).not.toHaveBeenCalled();
     });
 
     it('throws NetworkError and leaves the session alone when /auth/refresh request itself throws', async () => {
@@ -497,15 +492,47 @@ describe('apiFetch', () => {
     });
   });
 
+  describe('fetch timeouts under the refresh lock', () => {
+    // A hung request would hold the lock and stall every tab, so each fetch
+    // made under it carries a timeout signal.
+    const signalOf = (path: string) => {
+      const call = vi.mocked(fetch).mock.calls.find(c => c[0] === `${API_URL}${path}`);
+      return call?.[1]?.signal;
+    };
+
+    it('bounds the refresh POST and the /users/me probe', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
+
+      await expect(refreshSession()).resolves.toBe('rejected');
+
+      expect(signalOf('/auth/refresh')).toBeInstanceOf(AbortSignal);
+      expect(signalOf('/users/me')).toBeInstanceOf(AbortSignal);
+    });
+
+    it('bounds the dead-session logout', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(204) as unknown as Response);
+
+      await endDeadSession();
+
+      expect(signalOf('/auth/logout')).toBeInstanceOf(AbortSignal);
+    });
+  });
+
   describe('refresh outcome mapping', () => {
-    it.each([401, 403, 429])('maps a %i refresh answer to rejected', async status => {
+    it.each([401, 403])('maps a %i refresh answer to rejected', async status => {
       vi.mocked(fetch).mockResolvedValue(mockResponse(status) as unknown as Response);
 
       await expect(refreshSession()).resolves.toBe('rejected');
     });
 
-    it.each([500, 502, 503])('maps a %i refresh answer to unreachable', async status => {
+    it.each([429, 500, 502, 503])('maps a %i refresh answer to unreachable', async status => {
       vi.mocked(fetch).mockResolvedValue(mockResponse(status) as unknown as Response);
+
+      await expect(refreshSession()).resolves.toBe('unreachable');
+    });
+
+    it('maps a timed-out refresh request to unreachable', async () => {
+      vi.mocked(fetch).mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
 
       await expect(refreshSession()).resolves.toBe('unreachable');
     });
