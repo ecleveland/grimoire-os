@@ -13,6 +13,10 @@ export interface RotatedRefreshToken {
 type RefreshTokenClient = Pick<PrismaService, 'refreshToken'> | Prisma.TransactionClient;
 
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_ROTATION_GRACE_MS = 10_000;
+
+/** Thrown inside the rotation transaction when another request already claimed the token. */
+class LostClaim extends Error {}
 
 @Injectable()
 export class RefreshTokenService {
@@ -62,47 +66,76 @@ export class RefreshTokenService {
 
     // Atomically claim the token: the conditional `updateMany` flips revokedAt
     // null→set in a single locked statement, so concurrent rotations serialize
-    // and exactly one wins. count === 0 means the row was already revoked — a
-    // replay of a stolen token or the loser of a race. Either way it is the
-    // reuse signal, and it must be checked BEFORE expiry so a late replay of a
+    // and exactly one wins. The claim, the new row and the replacedById link
+    // commit together, so a racing loser's claim blocks on the row lock until
+    // the winner commits and its re-read then sees the link. count === 0 means
+    // the row was already revoked, by a replay of a stolen token or by the
+    // loser of a race. That check must run BEFORE expiry so a late replay of a
     // revoked token still trips the defense.
-    //
-    // The reuse revoke-all runs on the root client (NOT inside a transaction
-    // that then throws) so it actually commits — a throw inside an interactive
-    // transaction would roll the revocation back, defeating the response.
-    const claimed = await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    if (claimed.count === 0) {
-      const revoked = await this.revokeAllForUser(existing.userId);
-      this.logger.warn(
-        `Refresh token reuse detected for user ${existing.userId}; revoked ${revoked} live token(s)`
+    try {
+      return await this.prisma.$transaction(async tx => {
+        const claimed = await tx.refreshToken.updateMany({
+          where: { tokenHash, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        if (claimed.count === 0) throw new LostClaim();
+
+        // Reject an expired token. The throw rolls the claim back, which is
+        // harmless because the row stays expired.
+        if (existing.expiresAt.getTime() <= Date.now()) {
+          throw new UnauthorizedException('Refresh token expired');
+        }
+
+        const newToken = this.generateOpaqueToken();
+        const newRow = await tx.refreshToken.create({
+          data: {
+            userId: existing.userId,
+            tokenHash: this.hash(newToken),
+            expiresAt: new Date(Date.now() + this.ttlMs()),
+          },
+        });
+
+        await tx.refreshToken.update({
+          where: { id: existing.id },
+          data: { replacedById: newRow.id },
+        });
+
+        return { token: newToken, userId: existing.userId };
+      });
+    } catch (err) {
+      if (!(err instanceof LostClaim)) throw err;
+      return this.rejectLostClaim(tokenHash, existing.userId);
+    }
+  }
+
+  /**
+   * Handles a lost claim on the root client. The reuse revoke-all must NOT run
+   * inside a transaction that then throws, or the throw would roll the
+   * revocation back and defeat the response.
+   */
+  private async rejectLostClaim(tokenHash: string, userId: string): Promise<never> {
+    // Re-read: the snapshot taken before the claim predates the rotation that
+    // beat us. A replay of a token that was rotated within the grace window is
+    // the same browser racing itself (a second tab, cookie-write lag). It gets
+    // a plain 401 and the family stays alive. A token revoked by logout or by
+    // a revoke-all sweep has no replacedById, so replaying one of those still
+    // revokes everything.
+    const current = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
+    if (
+      current?.replacedById != null &&
+      current.revokedAt != null &&
+      Date.now() - current.revokedAt.getTime() <= this.rotationGraceMs()
+    ) {
+      this.logger.debug(
+        `Refresh token for user ${userId} replayed within the rotation grace window`
       );
-      throw new UnauthorizedException('Refresh token reuse detected');
+      throw new UnauthorizedException('Refresh token already rotated');
     }
-
-    // The presented token is now revoked (claimed above). Reject if it had
-    // already expired — harmless that the claim revoked it in passing.
-    if (existing.expiresAt.getTime() <= Date.now()) {
-      throw new UnauthorizedException('Refresh token expired');
-    }
-
-    const newToken = this.generateOpaqueToken();
-    const newRow = await this.prisma.refreshToken.create({
-      data: {
-        userId: existing.userId,
-        tokenHash: this.hash(newToken),
-        expiresAt: new Date(Date.now() + this.ttlMs()),
-      },
-    });
-
-    await this.prisma.refreshToken.update({
-      where: { id: existing.id },
-      data: { replacedById: newRow.id },
-    });
-
-    return { token: newToken, userId: existing.userId };
+    const revoked = await this.revokeAllForUser(userId);
+    this.logger.warn(
+      `Refresh token reuse detected for user ${userId}; revoked ${revoked} live token(s)`
+    );
+    throw new UnauthorizedException('Refresh token reuse detected');
   }
 
   /**
@@ -137,5 +170,11 @@ export class RefreshTokenService {
 
   private ttlMs(): number {
     return this.configService.get<number>('auth.refreshTokenTtlMs') ?? DEFAULT_TTL_MS;
+  }
+
+  private rotationGraceMs(): number {
+    return (
+      this.configService.get<number>('auth.refreshRotationGraceMs') ?? DEFAULT_ROTATION_GRACE_MS
+    );
   }
 }

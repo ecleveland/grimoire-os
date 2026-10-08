@@ -61,6 +61,36 @@ test.describe('Refresh token flow', () => {
       .toBe(true);
   });
 
+  test('two tabs loading at once after the access cookie expires both stay signed in and share one refresh', async ({
+    page,
+  }) => {
+    await registerPlayer(page);
+
+    const allCookies = await page.context().cookies();
+    const refreshOnly = allCookies.filter(c => c.name !== 'access_token');
+    await page.context().clearCookies();
+    await page.context().addCookies(refreshOnly);
+
+    const page2 = await page.context().newPage();
+    let refreshPosts = 0;
+    for (const p of [page, page2]) {
+      p.on('request', req => {
+        if (req.method() === 'POST' && req.url().endsWith('/api/auth/refresh')) refreshPosts++;
+      });
+    }
+
+    await Promise.all([page.goto('/'), page2.goto('/')]);
+
+    for (const p of [page, page2]) {
+      await expect(p.getByRole('link', { name: 'Refresh User' })).toBeVisible({ timeout: 10_000 });
+    }
+
+    // The tabs share a Web Lock, so the second tab finds fresh cookies and does not post.
+    expect(refreshPosts).toBe(1);
+
+    await page2.close();
+  });
+
   test('refresh endpoint rotates the refresh token (old one is invalid after use)', async ({
     page,
   }) => {

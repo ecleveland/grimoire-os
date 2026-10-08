@@ -13,7 +13,13 @@ import {
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { apiFetch, endDeadSession, refreshSession } from './api';
+import {
+  apiFetch,
+  awaitInflightRefresh,
+  endDeadSession,
+  refreshSession,
+  withRefreshLock,
+} from './api';
 import { resolveNextPath } from './public-paths';
 import { Role } from './types';
 import type { User } from './types';
@@ -146,11 +152,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
         if (res.status === 401) {
           const outcome = await refreshSession();
-          // No answer from the server says nothing about the session, so
-          // stay logged out without ending it.
-          if (outcome === 'unreachable') return;
-          if (outcome === 'refreshed') {
-            res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+          switch (outcome) {
+            case 'unreachable':
+              // No answer from the server says nothing about the session, so
+              // stay logged out without ending it.
+              return;
+            case 'refreshed':
+              res = await fetch(`${API_URL}/users/me`, { credentials: 'include' });
+              break;
+            case 'rejected':
+              // The 401 stands and reaches the dead-session check below.
+              break;
+            default: {
+              const _exhaustive: never = outcome;
+              return _exhaustive;
+            }
           }
         }
         if (cancelled) return;
@@ -228,13 +244,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // refetch with the cookies already gone, which walks apiFetch through a 401,
   // a failed refresh and its dead-session teardown. Reloading throws away the
   // whole client instead, with nothing left to refetch. `replace` matches
-  // `endDeadSession`, so Back can't return to the signed-in page.
+  // `endDeadSession`, so Back can't return to the signed-in page. The logout
+  // waits out any refresh in this tab and holds the cross-tab refresh lock, so
+  // no refresh can land fresh cookies after the server has cleared them.
   const logout = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      await awaitInflightRefresh();
+      const res = await withRefreshLock(() =>
+        fetch(`${API_URL}/auth/logout`, {
+          method: 'POST',
+          credentials: 'include',
+        })
+      );
       if (!res.ok) throw new Error(`logout failed: ${res.status}`);
     } catch {
       // Only the server can clear the httpOnly cookies, so a logout that didn't

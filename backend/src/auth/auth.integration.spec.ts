@@ -316,7 +316,9 @@ describe('Auth Integration', () => {
         userId: USER_ID,
         tokenHash: 'whatever',
         expiresAt: new Date(Date.now() + 60_000),
-        revokedAt: new Date(Date.now() - 1000),
+        // Rotated a minute ago, well outside the rotation grace window, so this
+        // replay is reuse and not a tab racing itself.
+        revokedAt: new Date(Date.now() - 60_000),
         replacedById: 'r-newer',
       });
       prisma.refreshToken.updateMany

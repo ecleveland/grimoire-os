@@ -6,6 +6,7 @@ import { StrictMode } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { AuthProvider, useAuth } from '../auth-context';
 import { useApiQuery } from '../query';
+import { refreshSession } from '../api';
 
 const mockPush = vi.fn();
 vi.mock('next/navigation', () => ({
@@ -293,7 +294,8 @@ describe('AuthProvider', () => {
     it('stays unauthenticated when /auth/refresh also 401s', async () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
-        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession
 
       renderWithProvider();
 
@@ -306,7 +308,8 @@ describe('AuthProvider', () => {
     it('makes at most one /auth/refresh attempt on a failed hydration (no refresh storm)', async () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
-        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession
 
       renderWithProvider();
 
@@ -329,7 +332,8 @@ describe('AuthProvider', () => {
         document.cookie = 'session_present=1';
         vi.mocked(fetch)
           .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access dead
-          .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh — refresh dead
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /auth/refresh — refresh dead
+          .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession — no other tab won
 
         renderWithProvider();
 
@@ -337,13 +341,16 @@ describe('AuthProvider', () => {
           expect(mockEndDeadSession).toHaveBeenCalledTimes(1);
         });
         expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+        const meCalls = vi.mocked(fetch).mock.calls.filter(c => String(c[0]).endsWith('/users/me'));
+        expect(meCalls).toHaveLength(2);
       });
 
       it('ends the dead session when refresh is throttled (429) — does not wedge', async () => {
         document.cookie = 'session_present=1';
         vi.mocked(fetch)
           .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
-          .mockResolvedValueOnce(mockFetchResponse(429)); // /auth/refresh throttled
+          .mockResolvedValueOnce(mockFetchResponse(429)) // /auth/refresh throttled
+          .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession
 
         renderWithProvider();
 
@@ -358,7 +365,8 @@ describe('AuthProvider', () => {
         // must not be logged out or redirected.
         vi.mocked(fetch)
           .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
-          .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh
+          .mockResolvedValueOnce(mockFetchResponse(401)) // /auth/refresh
+          .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession
 
         renderWithProvider();
 
@@ -391,6 +399,26 @@ describe('AuthProvider', () => {
         vi.mocked(fetch)
           .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me
           .mockRejectedValueOnce(new Error('network')); // /auth/refresh
+
+        renderWithProvider();
+
+        await waitFor(() => {
+          expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+        });
+        expect(fetch).toHaveBeenCalledTimes(2);
+        expect(mockEndDeadSession).not.toHaveBeenCalled();
+        expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+      });
+
+      it('does NOT end the session when /auth/refresh answers 502', async () => {
+        // A gateway error is the server saying nothing about the session.
+        document.cookie = 'session_present=1';
+        vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+          const href = String(url);
+          if (href.endsWith('/users/me')) return mockFetchResponse(401);
+          if (href.endsWith('/auth/refresh')) return mockFetchResponse(502);
+          throw new Error(`unexpected fetch ${href}`);
+        });
 
         renderWithProvider();
 
@@ -453,6 +481,7 @@ describe('AuthProvider', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me probe in refreshSession
         .mockResolvedValueOnce(mockFetchResponse(200, { user: TEST_PROFILE })); // login call
     });
 
@@ -557,6 +586,7 @@ describe('AuthProvider', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me probe in refreshSession
         .mockResolvedValueOnce(mockFetchResponse(401)); // login
       const user = userEvent.setup();
 
@@ -598,6 +628,7 @@ describe('AuthProvider', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me probe in refreshSession
         .mockResolvedValueOnce(mockFetchResponse(200, { user: TEST_PROFILE })); // register
     });
 
@@ -664,6 +695,7 @@ describe('AuthProvider', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me probe in refreshSession
         .mockResolvedValueOnce(mockFetchResponse(400, { message: 'Username taken' }));
       const user = userEvent.setup();
 
@@ -704,6 +736,7 @@ describe('AuthProvider', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me probe in refreshSession
         .mockResolvedValueOnce({
           ok: false,
           status: 500,
@@ -801,6 +834,41 @@ describe('AuthProvider', () => {
       expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
     });
 
+    // A refresh that lands after the logout would set fresh cookies on a
+    // session the user just ended.
+    it('waits for an in-flight refresh before posting /auth/logout', async () => {
+      let answerRefresh: (res: Response) => void = () => {};
+      vi.mocked(fetch).mockReset();
+      vi.mocked(fetch).mockImplementation((url: string | URL | Request) => {
+        const href = String(url);
+        if (href.endsWith('/users/me'))
+          return Promise.resolve(mockFetchResponse(200, TEST_PROFILE));
+        if (href.endsWith('/auth/refresh')) {
+          return new Promise<Response>(resolve => {
+            answerRefresh = resolve;
+          });
+        }
+        if (href.endsWith('/auth/logout')) return Promise.resolve(mockFetchResponse(204));
+        return Promise.reject(new Error(`unexpected fetch ${href}`));
+      });
+      const logoutCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(c => String(c[0]).endsWith('/auth/logout'));
+      const user = userEvent.setup();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+
+      const refresh = refreshSession();
+      await user.click(screen.getByText('Logout'));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(logoutCalls()).toHaveLength(0);
+
+      answerRefresh(mockFetchResponse(200));
+      await expect(refresh).resolves.toBe('refreshed');
+
+      await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/login'));
+      expect(logoutCalls()).toHaveLength(1);
+    });
+
     it('stays put and says so when /auth/logout answers 500', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)
@@ -875,6 +943,7 @@ describe('AuthProvider', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me
         .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /auth/refresh
+        .mockResolvedValueOnce(mockFetchResponse(401)) // hydration /users/me probe in refreshSession
         .mockResolvedValueOnce(mockFetchResponse(201, { user: OTHER_PROFILE })); // register
       const client = seededClient();
       const user = userEvent.setup();
@@ -969,7 +1038,8 @@ describe('AuthProvider', () => {
       document.cookie = 'session_present=1';
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(401)) // /users/me — access dead
-        .mockResolvedValueOnce(mockFetchResponse(401)); // /auth/refresh — refresh dead
+        .mockResolvedValueOnce(mockFetchResponse(401)) // /auth/refresh — refresh dead
+        .mockResolvedValueOnce(mockFetchResponse(401)); // /users/me probe in refreshSession
 
       renderWithProvider();
 
