@@ -869,6 +869,39 @@ describe('AuthProvider', () => {
       expect(logoutCalls()).toHaveLength(1);
     });
 
+    // Another tab mid-refresh holds the lock; posting logout under it keeps
+    // that tab's refresh from landing fresh cookies after the server clears them.
+    it('holds /auth/logout until another tab releases the refresh lock', async () => {
+      type LockCallback = (lock: { name: string } | null) => unknown;
+      const waiters: (() => void)[] = [];
+      let held = true;
+      const request = async (name: string, cb: LockCallback) => {
+        if (held) await new Promise<void>(resolve => waiters.push(resolve));
+        return cb({ name });
+      };
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+      const logoutCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(c => String(c[0]).endsWith('/auth/logout'));
+      try {
+        const user = userEvent.setup();
+        renderWithProvider();
+        await waitFor(() => expect(screen.getByTestId('authenticated')).toHaveTextContent('true'));
+
+        await user.click(screen.getByText('Logout'));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(logoutCalls()).toHaveLength(0);
+        expect(mockReplace).not.toHaveBeenCalled();
+
+        held = false;
+        waiters.splice(0).forEach(wake => wake());
+
+        await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/login'));
+        expect(logoutCalls()).toHaveLength(1);
+      } finally {
+        Reflect.deleteProperty(navigator, 'locks');
+      }
+    });
+
     it('stays put and says so when /auth/logout answers 500', async () => {
       vi.mocked(fetch).mockReset();
       vi.mocked(fetch)

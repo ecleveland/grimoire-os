@@ -212,8 +212,25 @@ describe('RefreshTokenService', () => {
       });
       prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.rotate(expiredToken)).rejects.toThrow(UnauthorizedException);
+      const err = await service.rotate(expiredToken).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      expect((err as Error).message).toMatch(/expired/);
       expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+    });
+
+    it('propagates a database error from inside the rotation without revoking the family', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
+      const tx = separateTx();
+      const dbDown = new Error('db down');
+      tx.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+      tx.refreshToken.create.mockRejectedValue(dbDown);
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toBe(dbDown);
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+      expect(tx.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
     });
 
     it('detects reuse before expiry: an expired-and-revoked token still revokes all user tokens', async () => {
