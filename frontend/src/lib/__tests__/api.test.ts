@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { apiFetch, ApiError, refreshAccessToken } from '../api';
+import {
+  apiFetch,
+  ApiError,
+  awaitInflightRefresh,
+  endDeadSession,
+  NetworkError,
+  refreshSession,
+  withRefreshLock,
+} from '../api';
 
 const API_URL = 'http://localhost:3001/api';
 
@@ -248,6 +256,7 @@ describe('apiFetch', () => {
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /users/me probe
         .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
@@ -259,34 +268,49 @@ describe('apiFetch', () => {
       expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
 
-    it('clears the dead session and lands on /login when /auth/refresh is throttled (429)', async () => {
-      // VEG-419 429 amplifier: a throttled refresh must be treated like any
-      // failed refresh — clear the session and land on /login, never wedge.
+    it('throws NetworkError and leaves the session alone when /auth/refresh is throttled (429)', async () => {
+      // A throttle judges this client's request rate, not the session.
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // initial
-        .mockResolvedValueOnce(mockResponse(429) as unknown as Response) // refresh throttled
-        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+        .mockResolvedValueOnce(mockResponse(429) as unknown as Response); // refresh throttled
 
-      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+      await expect(apiFetch('/test')).rejects.toBeInstanceOf(NetworkError);
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${API_URL}/auth/logout`,
-        expect.objectContaining({ method: 'POST', credentials: 'include' })
-      );
-      expect(window.location.replace).toHaveBeenCalledWith('/login');
+      const logoutCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
+      expect(logoutCalls).toHaveLength(0);
+      expect(window.location.replace).not.toHaveBeenCalled();
     });
 
-    it('clears the dead session and lands on /login when /auth/refresh request itself throws', async () => {
+    it('throws NetworkError and leaves the session alone when /auth/refresh request itself throws', async () => {
+      // No answer from the server says nothing about the session, so the
+      // cookies stay and the user stays where they are.
       const fetchMock = vi.mocked(fetch);
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
-        .mockRejectedValueOnce(new Error('network down'))
-        .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
+        .mockRejectedValueOnce(new Error('network down'));
 
-      await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
+      await expect(apiFetch('/test')).rejects.toBeInstanceOf(NetworkError);
 
-      expect(window.location.replace).toHaveBeenCalledWith('/login');
+      const logoutCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
+      expect(logoutCalls).toHaveLength(0);
+      expect(window.location.replace).not.toHaveBeenCalled();
+    });
+
+    it('throws NetworkError and leaves the session alone when /auth/refresh answers 502', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
+        .mockResolvedValueOnce(mockResponse(502) as unknown as Response);
+
+      const err: unknown = await apiFetch('/test').catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(NetworkError);
+      expect((err as NetworkError).message).toBe('Could not reach the server');
+      expect((err as NetworkError).name).toBe('NetworkError');
+      const logoutCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
+      expect(logoutCalls).toHaveLength(0);
+      expect(window.location.replace).not.toHaveBeenCalled();
     });
 
     it('still navigates to /login even when the /auth/logout cleanup call fails', async () => {
@@ -296,6 +320,7 @@ describe('apiFetch', () => {
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /users/me probe
         .mockRejectedValueOnce(new Error('network down')); // logout fails
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
@@ -349,7 +374,7 @@ describe('apiFetch', () => {
       expect(window.location.replace).toHaveBeenCalledTimes(1);
     });
 
-    it('shares one /auth/refresh between refreshAccessToken and a concurrent apiFetch 401 (VEG-578)', async () => {
+    it('shares one /auth/refresh between refreshSession and a concurrent apiFetch 401 (VEG-578)', async () => {
       // The backend rotates the refresh token on first use and revokes the
       // whole session when it sees the same token again, so a second refresh
       // from this tab would log the user out.
@@ -373,7 +398,7 @@ describe('apiFetch', () => {
           : mockResponse(401)) as unknown as Response;
       });
 
-      const refresh = refreshAccessToken();
+      const refresh = refreshSession();
       const request = apiFetch('/test');
       await vi.waitFor(() => {
         expect(fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/test`)).toHaveLength(1);
@@ -382,7 +407,7 @@ describe('apiFetch', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
       releaseRefresh();
 
-      await expect(refresh).resolves.toBe(true);
+      await expect(refresh).resolves.toBe('refreshed');
       await expect(request).resolves.toEqual({ ok: true });
       const refreshCalls = fetchMock.mock.calls.filter(c => c[0] === `${API_URL}/auth/refresh`);
       expect(refreshCalls).toHaveLength(1);
@@ -397,6 +422,7 @@ describe('apiFetch', () => {
       fetchMock
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response)
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /users/me probe
         .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
@@ -406,6 +432,285 @@ describe('apiFetch', () => {
         expect.objectContaining({ method: 'POST' })
       );
       expect(window.location.replace).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('rejected refresh probe', () => {
+    // A tab that loses a refresh race to another tab gets a 401 for the token
+    // the winner just rotated, while the winner's cookies already sit in the
+    // shared jar. One /users/me probe tells the two cases apart.
+    function stubRejectedRefresh(meStatus: number) {
+      vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+        if (url === `${API_URL}/auth/refresh`) return mockResponse(401) as unknown as Response;
+        if (url === `${API_URL}/users/me`) return mockResponse(meStatus) as unknown as Response;
+        throw new Error(`unexpected fetch ${String(url)}`);
+      });
+    }
+
+    it('treats a rejected POST followed by a working /users/me as refreshed', async () => {
+      stubRejectedRefresh(200);
+
+      await expect(refreshSession()).resolves.toBe('refreshed');
+
+      const meCalls = vi.mocked(fetch).mock.calls.filter(c => c[0] === `${API_URL}/users/me`);
+      expect(meCalls).toHaveLength(1);
+      expect(meCalls[0][1]).toEqual(expect.objectContaining({ credentials: 'include' }));
+    });
+
+    it('stays rejected when the probe after a rejected POST also 401s', async () => {
+      stubRejectedRefresh(401);
+
+      await expect(refreshSession()).resolves.toBe('rejected');
+
+      const meCalls = vi.mocked(fetch).mock.calls.filter(c => c[0] === `${API_URL}/users/me`);
+      expect(meCalls).toHaveLength(1);
+    });
+
+    it('retries without logging out when the refresh is rejected but the probe succeeds', async () => {
+      let testCalls = 0;
+      vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+        if (url === `${API_URL}/test`) {
+          testCalls += 1;
+          return (testCalls === 1
+            ? mockResponse(401)
+            : mockResponse(200, { ok: true })) as unknown as Response;
+        }
+        if (url === `${API_URL}/auth/refresh`) return mockResponse(401) as unknown as Response;
+        if (url === `${API_URL}/users/me`) return mockResponse(200) as unknown as Response;
+        if (url === `${API_URL}/auth/logout`) return mockResponse(204) as unknown as Response;
+        throw new Error(`unexpected fetch ${String(url)}`);
+      });
+
+      await expect(apiFetch('/test')).resolves.toEqual({ ok: true });
+
+      expect(testCalls).toBe(2);
+      const logoutCalls = vi
+        .mocked(fetch)
+        .mock.calls.filter(c => c[0] === `${API_URL}/auth/logout`);
+      expect(logoutCalls).toHaveLength(0);
+      expect(window.location.replace).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('fetch timeouts under the refresh lock', () => {
+    // A hung request would hold the lock and stall every tab, so each fetch
+    // made under it carries a timeout signal.
+    const signalOf = (path: string) => {
+      const call = vi.mocked(fetch).mock.calls.find(c => c[0] === `${API_URL}${path}`);
+      return call?.[1]?.signal;
+    };
+
+    it('bounds the refresh POST and the /users/me probe', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(401) as unknown as Response);
+
+      await expect(refreshSession()).resolves.toBe('rejected');
+
+      expect(signalOf('/auth/refresh')).toBeInstanceOf(AbortSignal);
+      expect(signalOf('/users/me')).toBeInstanceOf(AbortSignal);
+    });
+
+    it('bounds the dead-session logout', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(204) as unknown as Response);
+
+      await endDeadSession();
+
+      expect(signalOf('/auth/logout')).toBeInstanceOf(AbortSignal);
+    });
+  });
+
+  describe('refresh outcome mapping', () => {
+    it.each([401, 403])('maps a %i refresh answer to rejected', async status => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(status) as unknown as Response);
+
+      await expect(refreshSession()).resolves.toBe('rejected');
+    });
+
+    it.each([429, 500, 502, 503])('maps a %i refresh answer to unreachable', async status => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(status) as unknown as Response);
+
+      await expect(refreshSession()).resolves.toBe('unreachable');
+    });
+
+    it('maps a timed-out refresh request to unreachable', async () => {
+      vi.mocked(fetch).mockRejectedValue(new DOMException('timed out', 'TimeoutError'));
+
+      await expect(refreshSession()).resolves.toBe('unreachable');
+    });
+
+    it('maps a thrown refresh request to unreachable', async () => {
+      vi.mocked(fetch).mockRejectedValue(new Error('network down'));
+
+      await expect(refreshSession()).resolves.toBe('unreachable');
+    });
+  });
+
+  describe('cross-tab refresh lock', () => {
+    const LOCK_NAME = 'grimoire-os:auth-refresh';
+    type LockCallback = (lock: { name: string } | null) => unknown;
+    interface FakeLocks {
+      held: boolean;
+      requests: { name: string; ifAvailable: boolean }[];
+      release: () => void;
+    }
+
+    // Honors `ifAvailable` (callback gets null while held) and parks a plain
+    // request until `release()`, which is all refreshSession relies on.
+    function installFakeLocks(): FakeLocks {
+      const waiters: (() => void)[] = [];
+      const state: FakeLocks = {
+        held: false,
+        requests: [],
+        release() {
+          state.held = false;
+          waiters.splice(0).forEach(wake => wake());
+        },
+      };
+      const request = async (
+        name: string,
+        optsOrCb: { ifAvailable?: boolean } | LockCallback,
+        maybeCb?: LockCallback
+      ) => {
+        const cb = typeof optsOrCb === 'function' ? optsOrCb : maybeCb;
+        const ifAvailable = typeof optsOrCb === 'function' ? false : Boolean(optsOrCb.ifAvailable);
+        state.requests.push({ name, ifAvailable });
+        if (!cb) throw new Error('lock request without a callback');
+        if (state.held) {
+          if (ifAvailable) return cb(null);
+          await new Promise<void>(resolve => waiters.push(resolve));
+        }
+        return cb({ name });
+      };
+      Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+      return state;
+    }
+
+    function stubByUrl(meStatus: number) {
+      vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+        if (url === `${API_URL}/users/me`) return mockResponse(meStatus) as unknown as Response;
+        if (url === `${API_URL}/auth/refresh`) return mockResponse(200) as unknown as Response;
+        throw new Error(`unexpected fetch ${String(url)}`);
+      });
+    }
+
+    const callsTo = (path: string) =>
+      vi.mocked(fetch).mock.calls.filter(c => c[0] === `${API_URL}${path}`);
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, 'locks');
+    });
+
+    it('posts once under the lock without probing when the lock is free', async () => {
+      const locks = installFakeLocks();
+      stubByUrl(200);
+
+      await expect(refreshSession()).resolves.toBe('refreshed');
+
+      expect(locks.requests).toEqual([{ name: LOCK_NAME, ifAvailable: true }]);
+      expect(callsTo('/auth/refresh')).toHaveLength(1);
+      expect(callsTo('/users/me')).toHaveLength(0);
+    });
+
+    it('waits for the other tab and skips the POST when its cookies already work', async () => {
+      const locks = installFakeLocks();
+      locks.held = true;
+      stubByUrl(200);
+
+      const outcome = refreshSession();
+      await vi.waitFor(() => expect(locks.requests).toHaveLength(2));
+      expect(fetch).not.toHaveBeenCalled();
+      locks.release();
+
+      await expect(outcome).resolves.toBe('refreshed');
+      expect(locks.requests[1]).toEqual({ name: LOCK_NAME, ifAvailable: false });
+      expect(callsTo('/users/me')).toHaveLength(1);
+      expect(callsTo('/users/me')[0][1]).toEqual(
+        expect.objectContaining({ credentials: 'include' })
+      );
+      expect(callsTo('/auth/refresh')).toHaveLength(0);
+    });
+
+    it('posts once after waiting when the probe still 401s', async () => {
+      const locks = installFakeLocks();
+      locks.held = true;
+      stubByUrl(401);
+
+      const outcome = refreshSession();
+      await vi.waitFor(() => expect(locks.requests).toHaveLength(2));
+      locks.release();
+
+      await expect(outcome).resolves.toBe('refreshed');
+      expect(callsTo('/users/me')).toHaveLength(1);
+      expect(callsTo('/auth/refresh')).toHaveLength(1);
+    });
+
+    it('posts directly when the browser has no Web Locks', async () => {
+      expect('locks' in navigator).toBe(false);
+      stubByUrl(200);
+
+      await expect(refreshSession()).resolves.toBe('refreshed');
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(callsTo('/auth/refresh')).toHaveLength(1);
+    });
+
+    it('runs withRefreshLock work only once the lock is released', async () => {
+      const locks = installFakeLocks();
+      locks.held = true;
+      const work = vi.fn(async () => 'done');
+
+      const result = withRefreshLock(work);
+      await vi.waitFor(() => expect(locks.requests).toHaveLength(1));
+      expect(work).not.toHaveBeenCalled();
+      locks.release();
+
+      await expect(result).resolves.toBe('done');
+      expect(locks.requests[0]).toEqual({ name: LOCK_NAME, ifAvailable: false });
+    });
+
+    it('holds the dead-session logout until another tab releases the lock', async () => {
+      const locks = installFakeLocks();
+      locks.held = true;
+      vi.mocked(fetch).mockResolvedValue(mockResponse(204) as unknown as Response);
+
+      const ended = endDeadSession();
+      await vi.waitFor(() => expect(locks.requests).toHaveLength(1));
+      expect(callsTo('/auth/logout')).toHaveLength(0);
+      locks.release();
+
+      await ended;
+      expect(locks.requests[0]).toEqual({ name: LOCK_NAME, ifAvailable: false });
+      expect(callsTo('/auth/logout')).toHaveLength(1);
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('runs withRefreshLock work directly when the browser has no Web Locks', async () => {
+      await expect(withRefreshLock(async () => 'done')).resolves.toBe('done');
+    });
+  });
+
+  describe('awaitInflightRefresh', () => {
+    it('resolves immediately when no refresh is in flight', async () => {
+      await expect(awaitInflightRefresh()).resolves.toBeUndefined();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it('resolves only after the in-flight refresh settles', async () => {
+      let answerRefresh: (res: Response) => void = () => {};
+      vi.mocked(fetch).mockReturnValue(
+        new Promise<Response>(resolve => {
+          answerRefresh = resolve;
+        })
+      );
+      const order: string[] = [];
+
+      const refresh = refreshSession().then(() => order.push('refresh'));
+      const waited = awaitInflightRefresh().then(() => order.push('waited'));
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(order).toEqual([]);
+      answerRefresh(mockResponse(200) as unknown as Response);
+
+      await Promise.all([refresh, waited]);
+      expect(order).toEqual(['refresh', 'waited']);
     });
   });
 
@@ -420,6 +725,7 @@ describe('apiFetch', () => {
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // request
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /users/me probe
         .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
       await expect(apiFetch('/test')).rejects.toThrow('Unauthorized');
     }
@@ -531,6 +837,7 @@ describe('apiFetch', () => {
           mockResponse(403, { message: 'Invalid CSRF token' }) as unknown as Response
         )
         .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // refresh fails
+        .mockResolvedValueOnce(mockResponse(401) as unknown as Response) // /users/me probe
         .mockResolvedValueOnce(mockResponse(204) as unknown as Response); // /auth/logout
 
       await expect(apiFetch('/srd/cards', { method: 'POST', body: '{}' })).rejects.toThrow(

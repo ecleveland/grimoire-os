@@ -98,6 +98,15 @@ describe('RefreshTokenService', () => {
       revokedAt: null,
       replacedById: null,
     });
+    const rotatedRow = (revokedAgoMs: number, replacedById: string | null) => ({
+      ...liveRow(),
+      revokedAt: new Date(Date.now() - revokedAgoMs),
+      replacedById,
+    });
+    const revokeAllCall = {
+      where: { userId: USER_ID, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    };
 
     it('returns a new token + revokes the presented one when valid', async () => {
       prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
@@ -118,21 +127,57 @@ describe('RefreshTokenService', () => {
       });
     });
 
-    it('claims the presented token with a conditional updateMany on the root client', async () => {
+    const separateTx = () => {
+      const tx = {
+        refreshToken: { updateMany: jest.fn(), create: jest.fn(), update: jest.fn() },
+      };
+      prisma.$transaction.mockImplementation((fn: (client: unknown) => unknown) =>
+        Promise.resolve().then(() => fn(tx))
+      );
+      return tx;
+    };
+
+    it('claims, creates and links the new token through one transaction client', async () => {
       prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
-      prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
-      prisma.refreshToken.create.mockResolvedValue({ id: 'new-row' });
-      prisma.refreshToken.update.mockResolvedValue({});
+      const tx = separateTx();
+      tx.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+      tx.refreshToken.create.mockResolvedValue({ id: 'new-row' });
+      tx.refreshToken.update.mockResolvedValue({});
 
       await service.rotate(oldToken);
 
-      // No interactive transaction wraps rotation — a throw inside one would
-      // roll back the reuse revoke-all, defeating it.
-      expect(prisma.$transaction).not.toHaveBeenCalled();
-      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      // The winner holds the row lock until the link commits, so a racing
+      // loser's re-read already sees replacedById.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.refreshToken.updateMany).toHaveBeenCalledWith({
         where: { tokenHash: hash(oldToken), revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
+      expect(tx.refreshToken.create).toHaveBeenCalled();
+      expect(tx.refreshToken.update).toHaveBeenCalledWith({
+        where: { id: 'old-row' },
+        data: { replacedById: 'new-row' },
+      });
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.update).not.toHaveBeenCalled();
+    });
+
+    it('runs the reuse revoke-all on the root client, outside the throwing transaction', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(5_000, 'other-id'));
+      const tx = separateTx();
+      tx.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(/reuse detected/);
+
+      // A throw inside an interactive transaction would roll the revocation
+      // back, so the transaction is entered only for the attempt.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.refreshToken.updateMany).toHaveBeenCalledTimes(1);
+      expect(tx.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(revokeAllCall);
+      expect(tx.refreshToken.create).not.toHaveBeenCalled();
     });
 
     it('treats a lost claim race (count 0 on a live row) as reuse and revokes all user tokens', async () => {
@@ -167,8 +212,25 @@ describe('RefreshTokenService', () => {
       });
       prisma.refreshToken.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.rotate(expiredToken)).rejects.toThrow(UnauthorizedException);
+      const err = await service.rotate(expiredToken).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      expect((err as Error).message).toMatch(/expired/);
       expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+    });
+
+    it('propagates a database error from inside the rotation without revoking the family', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(liveRow());
+      const tx = separateTx();
+      const dbDown = new Error('db down');
+      tx.refreshToken.updateMany.mockResolvedValue({ count: 1 });
+      tx.refreshToken.create.mockRejectedValue(dbDown);
+      prisma.refreshToken.updateMany.mockResolvedValue({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toBe(dbDown);
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+      expect(tx.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
     });
 
     it('detects reuse before expiry: an expired-and-revoked token still revokes all user tokens', async () => {
@@ -180,7 +242,7 @@ describe('RefreshTokenService', () => {
         userId: USER_ID,
         tokenHash: hash(reusedToken),
         expiresAt: new Date(Date.now() - 5000),
-        revokedAt: new Date(Date.now() - 5000),
+        revokedAt: new Date(Date.now() - 5_000),
         replacedById: 'r2',
       });
       prisma.refreshToken.updateMany
@@ -192,6 +254,103 @@ describe('RefreshTokenService', () => {
         where: { userId: USER_ID, revokedAt: null },
         data: { revokedAt: expect.any(Date) },
       });
+    });
+
+    it('rejects a replay of a token rotated within the grace window without revoking the family', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(1_000, 'other-id'));
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 2 });
+      const revokeAll = jest.spyOn(service, 'revokeAllForUser');
+
+      const err = await service.rotate(oldToken).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(UnauthorizedException);
+      expect((err as Error).message).toMatch(/already rotated/);
+      expect(revokeAll).not.toHaveBeenCalled();
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+      expect(prisma.refreshToken.create).not.toHaveBeenCalled();
+    });
+
+    it('treats a replay of a token rotated outside the grace window as reuse', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(5_000, 'other-id'));
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(/reuse detected/);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(revokeAllCall);
+    });
+
+    it('treats a replay of a recently revoked token with no replacement (logout or sweep) as reuse', async () => {
+      prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(1_000, null));
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(/reuse detected/);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(revokeAllCall);
+    });
+
+    it('treats every lost claim as reuse when the grace window is configured to 0', async () => {
+      const config = (service as unknown as { configService: { get: jest.Mock } }).configService;
+      config.get.mockImplementation((key: string) => {
+        if (key === 'auth.refreshTokenTtlMs') return REFRESH_TTL_MS;
+        if (key === 'auth.refreshRotationGraceMs') return 0;
+        return undefined;
+      });
+      prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(1_000, 'other-id'));
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(/reuse detected/);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(revokeAllCall);
+    });
+
+    it('keeps a replay at exactly 3 s inside the grace window and treats 3.001 s as reuse', async () => {
+      const now = Date.now();
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+      try {
+        prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(3_000, 'other-id'));
+        prisma.refreshToken.updateMany.mockResolvedValue({ count: 0 });
+        await expect(service.rotate(oldToken)).rejects.toThrow(/already rotated/);
+        expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+
+        prisma.refreshToken.findUnique.mockResolvedValue(rotatedRow(3_001, 'other-id'));
+        await expect(service.rotate(oldToken)).rejects.toThrow(/reuse detected/);
+        expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(revokeAllCall);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('re-reads the row after a lost claim and spares the family when the winner rotated it moments ago', async () => {
+      // The snapshot read before the claim predates the winning rotation.
+      prisma.refreshToken.findUnique
+        .mockResolvedValueOnce(liveRow())
+        .mockResolvedValueOnce(rotatedRow(1_000, 'winner-row'));
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(/already rotated/);
+      expect(prisma.refreshToken.findUnique).toHaveBeenCalledTimes(2);
+      expect(prisma.refreshToken.updateMany).not.toHaveBeenCalledWith(revokeAllCall);
+    });
+
+    it('re-reads the row after a lost claim and revokes all when it has no replacement', async () => {
+      prisma.refreshToken.findUnique
+        .mockResolvedValueOnce(liveRow())
+        .mockResolvedValueOnce(rotatedRow(1_000, null));
+      prisma.refreshToken.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 2 });
+
+      await expect(service.rotate(oldToken)).rejects.toThrow(/reuse detected/);
+      expect(prisma.refreshToken.findUnique).toHaveBeenCalledTimes(2);
+      expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith(revokeAllCall);
     });
 
     it('looks up the token by its hash, never by raw value', async () => {
