@@ -77,6 +77,14 @@ test.describe('Refresh token flow', () => {
       p.on('request', req => {
         if (req.method() === 'POST' && req.url().endsWith('/api/auth/refresh')) refreshPosts++;
       });
+      // Hold the winning tab's refresh in flight long enough that the other
+      // tab's 401 lands while the lock is held. Without this the slower tab can
+      // see its 401 after the lock is released and rotate the fresh cookie a
+      // second time, which is harmless but makes the count below timing-bound.
+      await p.route('**/api/auth/refresh', async route => {
+        await new Promise(resolve => setTimeout(resolve, 750));
+        await route.continue();
+      });
     }
 
     await Promise.all([page.goto('/'), page2.goto('/')]);

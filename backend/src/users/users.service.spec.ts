@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import {
   PrismaClientKnownRequestError,
   PrismaClientUnknownRequestError,
@@ -251,13 +251,13 @@ describe('UsersService', () => {
   });
 
   describe('changePassword', () => {
-    it('should throw UnauthorizedException when current password is wrong', async () => {
+    it('should throw BadRequestException when current password is wrong', async () => {
       prisma.user.findUnique.mockResolvedValue(mockUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
-      await expect(service.changePassword(USER_ID, 'wrongpassword', 'newpassword')).rejects.toThrow(
-        UnauthorizedException
-      );
+      const result = service.changePassword(USER_ID, 'wrongpassword', 'newpassword');
+      await expect(result).rejects.toThrow(BadRequestException);
+      await expect(result).rejects.toThrow('Current password is incorrect');
     });
 
     it('should hash new password and update when current password is correct', async () => {
@@ -293,7 +293,7 @@ describe('UsersService', () => {
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(service.changePassword(USER_ID, 'wrongpassword', 'newpassword')).rejects.toThrow(
-        UnauthorizedException
+        BadRequestException
       );
       expect(refreshTokens.revokeAllForUser).not.toHaveBeenCalled();
     });
