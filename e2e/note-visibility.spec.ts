@@ -1,5 +1,12 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { BACKEND, createCampaign, csrfHeaders, registerAndLogin } from './helpers';
+import {
+  BACKEND,
+  createCampaign,
+  csrfHeaders,
+  fillField,
+  registerAndLogin,
+  waitForHydration,
+} from './helpers';
 
 type Visibility = 'private' | 'party' | 'dm_only';
 
@@ -14,8 +21,9 @@ async function createNoteViaForm(
   await expect(page.getByRole('heading', { name: 'Create Note' })).toBeVisible({
     timeout: 10_000,
   });
-  await page.getByLabel('Title').fill(title);
-  await page.getByLabel('Content').fill(`Body of ${title}`);
+  await waitForHydration(page);
+  await fillField(page, 'Title', title);
+  await fillField(page, 'Content', `Body of ${title}`);
   await page.getByLabel('Visibility').selectOption({ label: visibility });
   await page.getByRole('button', { name: 'Create Note' }).click();
   await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}/notes/(?!new)[\\w-]+$`), {

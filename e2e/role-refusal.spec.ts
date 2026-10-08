@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { BACKEND, createEncounter, csrfHeaders } from './helpers';
+import { BACKEND, createEncounter, csrfHeaders, waitForHydration } from './helpers';
 
 const E2E_DB_NAME = process.env.E2E_DB_NAME ?? 'grimoire_os_e2e';
 const PASSWORD = 'TestPass1!';
@@ -117,8 +117,8 @@ test.describe('Role refusal (VEG-544)', () => {
     await register(page, 'roleplayer');
 
     await page.goto('/admin/users');
-    await page.waitForURL(/\/$|\/dashboard/, { timeout: 10_000 });
-    await expect(page.getByRole('heading', { name: 'User Management' })).toHaveCount(0);
+    await page.waitForURL(`${new URL(page.url()).origin}/`, { timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: /^Welcome, E2E roleplayer/ })).toBeVisible();
 
     const list = await page.request.get(`${BACKEND}/api/admin/users`);
     expect(list.status()).toBe(403);
@@ -139,10 +139,20 @@ test.describe('Role refusal (VEG-544)', () => {
     await expect(page.getByRole('heading', { name: 'User Management' })).toBeVisible({
       timeout: 10_000,
     });
+    await waitForHydration(page);
 
-    // Users list newest first, so the fresh player is on the first page.
+    // Users list newest first, but parallel specs register users too, so the
+    // player can land past page 1.
     const row = page.getByRole('row').filter({ hasText: username });
-    await expect(row).toBeVisible();
+    for (let pageNo = 1; !(await row.isVisible()); pageNo++) {
+      expect(pageNo, `no row for ${username} in the first 5 pages of /admin/users`).toBeLessThan(5);
+      const nextPage = page.waitForResponse(
+        res => res.url().includes(`/api/admin/users?page=${pageNo + 1}&`) && res.ok()
+      );
+      await page.getByRole('button', { name: 'Next' }).click();
+      const { data } = (await (await nextPage).json()) as { data: { username: string }[] };
+      if (data.some(u => u.username === username)) await expect(row).toBeVisible();
+    }
     await row.getByRole('combobox').selectOption({ label: 'Dungeon Master' });
     await expect(page.getByText('Role updated')).toBeVisible();
 

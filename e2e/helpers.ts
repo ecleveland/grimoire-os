@@ -7,6 +7,21 @@ export function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Form inputs are controlled, so a fill made before React hydrates the document
+// is reset to '' and the submit trips the browser's required check. toHaveURL
+// passes before hydration; networkidle waits for hydration and the
+// AuthProvider's /users/me fetch.
+export async function waitForHydration(page: Page): Promise<void> {
+  await page.waitForLoadState('networkidle');
+}
+
+// Asserting the value makes a hydration reset fail here, not as a later timeout.
+export async function fillField(page: Page, label: string | RegExp, value: string): Promise<void> {
+  const field = page.getByLabel(label);
+  await field.fill(value);
+  await expect(field).toHaveValue(value);
+}
+
 // Register via page.request so the Set-Cookie authenticates later navigations.
 export async function registerAndLogin(
   page: Page,

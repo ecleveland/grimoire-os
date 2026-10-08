@@ -114,7 +114,7 @@ bash e2e/stack-env.test.sh
 ## Conventions
 
 - File naming: `<feature>.spec.ts` (e.g. `npc-generator.spec.ts`)
-- Auth: log in via the API in `beforeEach`, set the JWT cookie, then navigate. Don't drive the login form unless that's what you're testing. `auth-forms.spec.ts`, `campaign-create.spec.ts`, `note-visibility.spec.ts` and `role-refusal.spec.ts` drive the forms on purpose (VEG-544).
+- Auth: log in via the API in `beforeEach`, set the JWT cookie, then navigate. Don't drive the login form unless that's what you're testing. `auth-forms.spec.ts`, `campaign-create.spec.ts`, `note-visibility.spec.ts` and `role-refusal.spec.ts` drive their forms on purpose (register, login, campaign create, note create and the admin role select, VEG-544).
 - Data: create campaign/NPC/etc. fixtures via API. Cleanup between runs is automatic — no need for per-spec `afterEach` teardown.
 - Selectors: prefer `getByRole` and `getByTestId` over CSS selectors.
 

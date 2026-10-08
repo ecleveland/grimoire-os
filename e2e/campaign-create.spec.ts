@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { BACKEND, registerAndLogin } from './helpers';
+import { BACKEND, fillField, registerAndLogin, waitForHydration } from './helpers';
 
 // Drives the create-campaign form on purpose (VEG-544); other specs create
 // campaigns through the API.
@@ -16,9 +16,10 @@ test.describe('Create campaign', () => {
     const name = `Form Campaign ${Date.now()}`;
 
     await page.goto('/campaigns/new');
-    await page.getByLabel(/^Name/).fill(name, { timeout: 10_000 });
-    await page.getByLabel(/^Description/).fill('A campaign made through the form.');
-    await page.getByLabel(/^Setting/).fill('Forgotten Realms');
+    await waitForHydration(page);
+    await fillField(page, /^Name/, name);
+    await fillField(page, /^Description/, 'A campaign made through the form.');
+    await fillField(page, /^Setting/, 'Forgotten Realms');
     await page.getByRole('button', { name: 'Create Campaign', exact: true }).click();
 
     await expect(page.getByText('Campaign created!', { exact: true })).toBeVisible({

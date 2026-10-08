@@ -1,29 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
-import { BACKEND, escapeRegExp } from './helpers';
+import { BACKEND, escapeRegExp, fillField, waitForHydration } from './helpers';
 
-// The one spec that drives the login and register forms on purpose (VEG-544).
-// Every other spec authenticates through the API.
+// Covers the register and login forms end to end (VEG-544). Most specs
+// authenticate through the API instead.
 const PASSWORD = 'TestPass1!';
 const PASSWORD_REQUIREMENTS_TEXT =
   'Must be at least 10 characters and include uppercase, lowercase, a number, and a special character.';
 
 function uniqueUsername(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-// The inputs are controlled, so a fill made before React hydrates the document
-// is reset to '' and the submit trips the browser's required check. toHaveURL
-// passes before hydration; networkidle waits for hydration and the
-// AuthProvider's /users/me fetch.
-async function waitForHydration(page: Page): Promise<void> {
-  await page.waitForLoadState('networkidle');
-}
-
-// Asserting the value makes a hydration reset fail here, not as a URL timeout.
-async function fillField(page: Page, label: RegExp, value: string): Promise<void> {
-  const field = page.getByLabel(label);
-  await field.fill(value);
-  await expect(field).toHaveValue(value);
 }
 
 // Required fields render their label as "Password *", and "Confirm Password *"
