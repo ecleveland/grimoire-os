@@ -1,4 +1,4 @@
-import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/vitest';
 
 // Node 22+ exposes an experimental `localStorage` global that is non-functional
 // unless Node is started with --localstorage-file, and it shadows jsdom's
