@@ -42,6 +42,8 @@ This does two things:
 - **Generates a SQL file** in `prisma/migrations/<timestamp>_<name>/migration.sql`
 - **Applies it** to your dev database
 
+Since Prisma 7 it does not regenerate the client or run the seed. Follow it with `npx prisma generate`, and with `npm run seed` if you need the SRD data.
+
 The key difference from EF: Prisma generates **raw SQL files**, not C# migration classes. You can read and edit the SQL directly. This is actually an advantage — you see exactly what's hitting your database.
 
 ### 3. The Migrations Folder is Append-Only History
@@ -57,7 +59,7 @@ prisma/migrations/
 
 ### 4. Prisma Client = Your Query API
 
-After changing the schema, `prisma generate` regenerates a typed TypeScript client (like how EF generates the DbContext). You query with:
+After changing the schema, `prisma generate` regenerates a typed TypeScript client (like how EF generates the DbContext). The client lands in `src/generated/prisma/`, which is gitignored, and code imports it from there by relative path. You query with:
 
 ```typescript
 const user = await prisma.user.findUnique({ where: { id: 1 } });
@@ -74,7 +76,7 @@ This is analogous to `dbContext.Users.FirstOrDefault(u => u.Id == 1)`.
 | `npx prisma generate` | Regenerate the TypeScript client after schema changes |
 | `npx prisma db push` | Quick prototyping — pushes schema to DB **without** creating a migration file (don't use in production) |
 | `npx prisma studio` | Opens a GUI to browse your database |
-| `npx prisma migrate reset` | **Destructive** — drops DB, re-runs all migrations, re-seeds |
+| `npx prisma migrate reset` | **Destructive.** Drops the DB and re-runs all migrations. Since Prisma 7 it does not seed, so run `npm run seed` afterwards |
 
 ## Important Gotchas Coming from EF
 

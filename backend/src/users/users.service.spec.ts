@@ -452,9 +452,9 @@ describe('UsersService', () => {
         expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       });
 
-      // The adapter raises a deadlock, a serialization failure and a statement
-      // timeout under the same generic code as the CHECK violation. Only the
-      // CHECK violation is a row that arrived late, so the retry reads the SQLSTATE.
+      // The adapter raises a statement timeout, like any SQLSTATE it does not
+      // map, under the same generic code as the CHECK violation. Only the CHECK
+      // violation is a row that arrived late, so the retry reads the SQLSTATE.
       it('never retries a database error that is not the CHECK violation', async () => {
         const timeout = adapterError('P2039', { originalCode: '57014', kind: 'postgres' });
         prisma.$transaction.mockRejectedValueOnce(timeout);

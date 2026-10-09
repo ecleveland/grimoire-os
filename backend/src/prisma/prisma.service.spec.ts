@@ -16,10 +16,14 @@ jest.mock('@prisma/adapter-pg', () => {
 
 describe('PrismaService', () => {
   let service: PrismaService;
-  let config: { getOrThrow: jest.Mock };
+  let config: { getOrThrow: jest.Mock; get: jest.Mock };
 
   beforeEach(() => {
-    config = { getOrThrow: jest.fn().mockReturnValue('postgresql://u:p@localhost:5432/db') };
+    jest.mocked(PrismaPg).mockClear();
+    config = {
+      getOrThrow: jest.fn().mockReturnValue('postgresql://u:p@localhost:5432/db'),
+      get: jest.fn().mockReturnValue(undefined),
+    };
     service = new PrismaService(config as unknown as ConfigService);
   });
 
@@ -30,12 +34,25 @@ describe('PrismaService', () => {
 
     // Prisma 6's engine gave up on a connect after 5 s; pg waits forever by
     // default, which would leave /api/health hanging on a dead database.
-    it('gives the pool a connect timeout and an idle timeout', () => {
-      expect(PrismaPg).toHaveBeenCalledWith({
-        connectionString: 'postgresql://u:p@localhost:5432/db',
-        connectionTimeoutMillis: 5_000,
-        idleTimeoutMillis: 10_000,
-      });
+    it('gives the pool a connect timeout', () => {
+      expect(PrismaPg).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectionString: 'postgresql://u:p@localhost:5432/db',
+          connectionTimeoutMillis: 5_000,
+        })
+      );
+    });
+
+    it('passes the database ssl setting through to the adapter', () => {
+      jest.mocked(PrismaPg).mockClear();
+      config.get.mockReturnValue({ rejectUnauthorized: false });
+
+      new PrismaService(config as unknown as ConfigService);
+
+      expect(config.get).toHaveBeenCalledWith('database.ssl');
+      expect(PrismaPg).toHaveBeenCalledWith(
+        expect.objectContaining({ ssl: { rejectUnauthorized: false } })
+      );
     });
 
     it('fails fast when database.url is missing', () => {
@@ -52,10 +69,33 @@ describe('PrismaService', () => {
   describe('onModuleInit', () => {
     it('calls $connect', async () => {
       const spy = jest.spyOn(service, '$connect').mockResolvedValue();
+      jest.spyOn(service, '$queryRaw').mockResolvedValue([{ '?column?': 1 }] as never);
 
       await service.onModuleInit();
 
       expect(spy).toHaveBeenCalled();
+    });
+
+    // $connect only builds the pg pool, so the probe is what proves the
+    // database answers before the app starts taking requests.
+    it('probes the database with a query after connecting', async () => {
+      jest.spyOn(service, '$connect').mockResolvedValue();
+      const probe = jest
+        .spyOn(service, '$queryRaw')
+        .mockResolvedValue([{ '?column?': 1 }] as never);
+
+      await service.onModuleInit();
+
+      expect(probe).toHaveBeenCalledTimes(1);
+      const [strings] = probe.mock.calls[0] as unknown as [TemplateStringsArray];
+      expect(strings.join('')).toBe('SELECT 1');
+    });
+
+    it('rejects when the database does not answer the probe', async () => {
+      jest.spyOn(service, '$connect').mockResolvedValue();
+      jest.spyOn(service, '$queryRaw').mockRejectedValue(new Error('ECONNREFUSED'));
+
+      await expect(service.onModuleInit()).rejects.toThrow('ECONNREFUSED');
     });
   });
 

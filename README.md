@@ -37,7 +37,7 @@ JWT_SECRET=your-secret docker compose up --build
 
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS v4
 - **Backend**: NestJS 11, TypeScript, Swagger
-- **Database**: PostgreSQL 16 (Dockerized), Prisma 6
+- **Database**: PostgreSQL 16 (Dockerized), Prisma 7 with the `pg` driver adapter
 - **Auth**: JWT + Passport + bcryptjs
 - **Containers**: Docker multi-stage builds (node:22-alpine)
 

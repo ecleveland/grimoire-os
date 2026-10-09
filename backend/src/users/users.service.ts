@@ -40,9 +40,10 @@ const CHECK_VIOLATION_SQLSTATE = '23514';
  * keyed on a constraint name, so every content table is covered rather than the
  * one subclass FK.
  *
- * The SQLSTATE is required on that second arm because the adapter raises a
- * deadlock, a serialization failure and a statement timeout under the same
- * generic code, and none of those is a row that arrived late.
+ * The SQLSTATE is required on that second arm because the adapter raises every
+ * SQLSTATE it has no specific mapping for, a statement timeout among them, under
+ * the same generic code, and none of those is a row that arrived late. Deadlocks
+ * and serialization failures arrive separately, as P2034.
  */
 export function isConcurrentWriteConflict(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
