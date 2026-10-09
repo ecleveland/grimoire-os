@@ -1,94 +1,91 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import { useDeleteMutation, useListQuery } from '@/lib/query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import CreateEntityLink from '@/components/CreateEntityLink';
-import type { SrdItem, PaginatedResponse } from '@/lib/types';
+import type { SrdItem } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
 import Badge from '@/components/Badge';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
 import { ITEM_CATEGORIES } from '@/lib/item-constants';
 
 const LIMIT = 20;
 
 export default function ItemListPage() {
   const { isAdmin, user } = useAuth();
-  const [items, setItems] = useState<SrdItem[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const search = useDebouncedValue(searchInput);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [pendingDelete, setPendingDelete] = useState<SrdItem | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // A committed search resets to page 1 in the same render (React's
+  // adjust-state-while-rendering pattern), so the list fetches once, with
+  // page=1 and the new query, instead of first refetching the old page.
+  const [prevSearch, setPrevSearch] = useState(search);
+  if (search !== prevSearch) {
+    setPrevSearch(search);
+    setPage(1);
+  }
+
+  const list = useListQuery<SrdItem>(
+    '/srd/items',
+    { page, limit: LIMIT, q: search, category: categoryFilter },
+    { errorToast: { message: 'Failed to load items', id: 'load-items' } }
+  );
+  const items = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
+
+  // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank the
+  // list, don't strand the user on an empty out-of-range page.
+  if (
+    list.data &&
+    !list.isPlaceholderData &&
+    list.data.data.length === 0 &&
+    page > Math.max(1, list.data.lastPage)
+  ) {
+    setPage(Math.max(1, list.data.lastPage));
+  }
 
   // The owner may edit/delete their homebrew; admins curate shared content.
   const canManage = (item: SrdItem) =>
     (item.contentSource === 'homebrew' && item.createdById === user?.userId) ||
     (item.contentSource === 'shared' && isAdmin);
 
-  async function handleDeleteItem() {
-    if (!pendingDelete) return;
-    try {
-      await apiFetch(`/srd/items/${pendingDelete.id}`, { method: 'DELETE' });
-      toast.success(`Deleted ${pendingDelete.name}`);
-      // Refetch so the deleted item drops out of the current page, clamping
-      // in case the last row of the final page just went away.
+  const deleteItem = useDeleteMutation({
+    path: '/srd/items',
+    invalidate: '/srd/items?',
+    onDeleted: id => {
+      // Cleared before the refetch, and only if no other delete was armed
+      // while this one was in flight.
+      setPendingDelete(current => (current?.id === id ? null : current));
+      // Clamp in case the last row of the final page just went away.
       const lastPageAfterDelete = Math.max(1, Math.ceil((total - 1) / LIMIT));
       setPage(p => Math.min(p, lastPageAfterDelete));
-      setRefreshKey(k => k + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete item');
-    } finally {
-      setPendingDelete(null);
-    }
+    },
+  });
+
+  function handleDeleteItem() {
+    if (!pendingDelete) return;
+    const { id, name } = pendingDelete;
+    deleteItem.mutate(id, {
+      onSuccess: () => toast.success(`Deleted ${name}`),
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete item');
+        setPendingDelete(current => (current?.id === id ? null : current));
+      },
+    });
   }
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchInput]);
-
-  useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('limit', String(LIMIT));
-    if (search) params.set('q', search);
-    if (categoryFilter) params.set('category', categoryFilter);
-
-    apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
-      .then(res => {
-        setItems(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-        // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank
-        // the list, don't strand the user on an empty out-of-range page.
-        if (res.data.length === 0 && page > Math.max(1, res.lastPage)) {
-          setPage(Math.max(1, res.lastPage));
-        }
-      })
-      .catch(err => {
-        console.error('Failed to load items:', err);
-        toast.error('Failed to load items', { id: 'load-items' });
-      })
-      .finally(() => setLoading(false));
-  }, [page, search, categoryFilter, refreshKey]);
 
   const handleCategoryChange = (value: string) => {
     setCategoryFilter(value);
@@ -127,13 +124,21 @@ export default function ItemListPage() {
         </select>
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        {loading ? 'Loading items…' : `${total} item${total !== 1 ? 's' : ''} found`}
-      </p>
+      {/* A Retry after a failed background refetch keeps status 'error' while it
+          runs, so isFetching (not just isPending) shows the loading line. */}
+      {list.isPending || (list.isError && list.isFetching) ? (
+        <LoadingState label="Loading items…" className="text-sm mb-4" />
+      ) : list.isError ? (
+        <LoadError message="Failed to load items" onRetry={list.refetch} className="mb-4" />
+      ) : (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          {`${total} item${total !== 1 ? 's' : ''} found`}
+        </p>
+      )}
 
       <div
-        className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${loading ? 'opacity-60' : ''}`}
-        aria-busy={loading}
+        className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${list.isFetching ? 'opacity-60' : ''}`}
+        aria-busy={list.isFetching}
       >
         {items.map(item => (
           <ItemCard

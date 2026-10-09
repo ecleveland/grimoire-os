@@ -1,17 +1,20 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import { useApiQuery, useDeleteMutation, useListQuery } from '@/lib/query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import CreateEntityLink from '@/components/CreateEntityLink';
-import type { SrdFeat, PaginatedResponse } from '@/lib/types';
+import type { SrdFeat } from '@/lib/types';
 import Pagination from '@/components/Pagination';
 import Modal from '@/components/Modal';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Badge from '@/components/Badge';
 import FeatDetail from '@/components/FeatDetail';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
 import { FEAT_CATEGORIES } from '@/lib/feat-constants';
 
 const LIMIT = 20;
@@ -24,22 +27,67 @@ function featSubtitle(feat: SrdFeat): string {
 
 export default function FeatListPage() {
   const { isAdmin, user } = useAuth();
-  const [feats, setFeats] = useState<SrdFeat[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const search = useDebouncedValue(searchInput);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [prereqFilter, setPrereqFilter] = useState('');
   const [repeatableFilter, setRepeatableFilter] = useState('');
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detail, setDetail] = useState<SrdFeat | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // A committed search resets to page 1 in the same render (React's
+  // adjust-state-while-rendering pattern), so the list fetches once, with
+  // page=1 and the new query, instead of first refetching the old page.
+  const [prevSearch, setPrevSearch] = useState(search);
+  if (search !== prevSearch) {
+    setPrevSearch(search);
+    setPage(1);
+  }
+
+  const list = useListQuery<SrdFeat>(
+    '/srd/feats',
+    {
+      page,
+      limit: LIMIT,
+      q: search,
+      category: categoryFilter,
+      hasPrerequisite: prereqFilter,
+      repeatable: repeatableFilter,
+    },
+    { errorToast: { message: 'Failed to load feats', id: 'load-feats' } }
+  );
+  const feats = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
+
+  // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank the
+  // list, don't strand the user on an empty out-of-range page.
+  if (
+    list.data &&
+    !list.isPlaceholderData &&
+    list.data.data.length === 0 &&
+    page > Math.max(1, list.data.lastPage)
+  ) {
+    setPage(Math.max(1, list.data.lastPage));
+  }
+
+  const detailQuery = useApiQuery<SrdFeat | null>(`/srd/feats/${detailId}`, {
+    enabled: detailId !== null,
+    errorToast: { message: 'Failed to load feat', id: 'load-feat' },
+  });
+  const detail = detailQuery.data ?? null;
+  // The endpoint resolves 200 null for ids outside the caller's visibility
+  // (deleted, or someone else's homebrew); without this guard the modal
+  // would stick on "Loading feat…" forever.
+  const detailMissing = detailQuery.isError || (detailQuery.isSuccess && detail === null);
+  const detailOpen = detailId !== null && !detailMissing;
+  const { isSuccess: detailLoaded, dataUpdatedAt: detailUpdatedAt } = detailQuery;
+  useEffect(() => {
+    if (detailId !== null && detailLoaded && detail === null) {
+      toast.error('Feat not found', { id: 'load-feat' });
+    }
+  }, [detailId, detailLoaded, detail, detailUpdatedAt]);
 
   // The owner may edit/delete their homebrew; admins curate shared content.
   const canManageDetail =
@@ -47,94 +95,45 @@ export default function FeatListPage() {
     ((detail.contentSource === 'homebrew' && detail.createdById === user?.userId) ||
       (detail.contentSource === 'shared' && isAdmin));
 
-  async function handleDeleteFeat() {
-    if (!detail) return;
-    try {
-      await apiFetch(`/srd/feats/${detail.id}`, { method: 'DELETE' });
-      toast.success(`Deleted ${detail.name}`);
-      setDetailOpen(false);
-      // Refetch so the deleted feat drops out of the current page, clamping
-      // in case the last row of the final page just went away.
+  const deleteFeat = useDeleteMutation({
+    path: '/srd/feats',
+    invalidate: '/srd/feats?',
+    onDeleted: id => {
+      // Close only the deleted feat's modal; another opened while the DELETE
+      // was in flight stays open.
+      setDetailId(current => (current === id ? null : current));
+      // Clamp in case the last row of the final page just went away.
       const lastPageAfterDelete = Math.max(1, Math.ceil((total - 1) / LIMIT));
       setPage(p => Math.min(p, lastPageAfterDelete));
-      setRefreshKey(k => k + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete feat');
-    }
+    },
+  });
+
+  function handleDeleteFeat() {
+    if (!detail) return;
+    // Captured now: by the time the DELETE resolves, `detail` may be another feat.
+    const { id, name } = detail;
+    deleteFeat.mutate(id, {
+      onSuccess: () => toast.success(`Deleted ${name}`),
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete feat');
+      },
+    });
   }
 
   function openFeat(id: string) {
-    setDetail(null);
-    setDetailLoading(true);
-    setDetailOpen(true);
-    apiFetch<SrdFeat | null>(`/srd/feats/${id}`)
-      .then(feat => {
-        // The endpoint resolves 200 null for ids outside the caller's
-        // visibility (deleted, or someone else's homebrew) — without this
-        // guard the modal sticks on "Loading feat…" forever.
-        if (!feat) {
-          toast.error('Feat not found', { id: 'load-feat' });
-          setDetailOpen(false);
-          return;
-        }
-        setDetail(feat);
-      })
-      .catch(err => {
-        console.error('Failed to load feat:', err);
-        toast.error('Failed to load feat', { id: 'load-feat' });
-        setDetailOpen(false);
-      })
-      .finally(() => setDetailLoading(false));
+    // Re-opening the card whose last load came back missing refetches it, so
+    // the click isn't silently swallowed by an unchanged id.
+    if (id === detailId) void detailQuery.refetch();
+    else setDetailId(id);
   }
 
   // Filter changes reset to page 1 in the same commit as the filter itself so
-  // the fetch effect fires exactly once. An effect-based reset would issue a
-  // first fetch still on the old page, then a second one for page 1.
+  // the list fetches exactly once. An effect-based reset would issue a first
+  // fetch still on the old page, then a second one for page 1.
   const applyFilter = (setter: (v: string) => void) => (value: string) => {
     setter(value);
     setPage(1);
   };
-
-  // Debounce search input; the page reset rides along in the same commit.
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setSearch(searchInput);
-      setPage(1);
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchInput]);
-
-  // Fetch feats from API
-  useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('limit', String(LIMIT));
-    if (search) params.set('q', search);
-    if (categoryFilter) params.set('category', categoryFilter);
-    if (prereqFilter) params.set('hasPrerequisite', prereqFilter);
-    if (repeatableFilter) params.set('repeatable', repeatableFilter);
-
-    apiFetch<PaginatedResponse<SrdFeat>>(`/srd/feats?${params.toString()}`)
-      .then(res => {
-        setFeats(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-        // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank
-        // the list, don't strand the user on an empty out-of-range page.
-        if (res.data.length === 0 && page > Math.max(1, res.lastPage)) {
-          setPage(Math.max(1, res.lastPage));
-        }
-      })
-      .catch(err => {
-        console.error('Failed to load feats:', err);
-        toast.error('Failed to load feats', { id: 'load-feats' });
-      })
-      .finally(() => setLoading(false));
-  }, [page, search, categoryFilter, prereqFilter, repeatableFilter, refreshKey]);
 
   const inputClass =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -189,13 +188,21 @@ export default function FeatListPage() {
         </select>
       </div>
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        {loading ? 'Loading feats…' : `${total} feat${total !== 1 ? 's' : ''} found`}
-      </p>
+      {/* A Retry after a failed background refetch keeps status 'error' while it
+          runs, so isFetching (not just isPending) shows the loading line. */}
+      {list.isPending || (list.isError && list.isFetching) ? (
+        <LoadingState label="Loading feats…" className="text-sm mb-4" />
+      ) : list.isError ? (
+        <LoadError message="Failed to load feats" onRetry={list.refetch} className="mb-4" />
+      ) : (
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+          {`${total} feat${total !== 1 ? 's' : ''} found`}
+        </p>
+      )}
 
       <div
-        className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${loading ? 'opacity-60' : ''}`}
-        aria-busy={loading}
+        className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${list.isFetching ? 'opacity-60' : ''}`}
+        aria-busy={list.isFetching}
       >
         {feats.map(f => (
           <button
@@ -218,9 +225,9 @@ export default function FeatListPage() {
         ))}
       </div>
 
-      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} label={detail?.name ?? 'Feat'}>
-        {detailLoading || !detail ? (
-          <p className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">Loading feat…</p>
+      <Modal open={detailOpen} onClose={() => setDetailId(null)} label={detail?.name ?? 'Feat'}>
+        {detailQuery.isPending || !detail ? (
+          <LoadingState label="Loading feat…" className="py-8 text-center text-sm" />
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">

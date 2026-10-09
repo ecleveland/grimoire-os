@@ -6,12 +6,15 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateApiPath } from '@/lib/query';
 import MonsterForm from '@/components/MonsterForm';
 import type { MonsterPayload } from '@/lib/monster-form';
 import type { SrdMonster } from '@/lib/types';
 
 export default function NewMonsterPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,6 +26,9 @@ export default function NewMonsterPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Monster created');
+      // The list holds a 60s staleTime; mark it stale so the list page refetches
+      // on mount and the new monster shows up.
+      await invalidateApiPath(queryClient, '/srd/monsters?');
       router.push('/srd/monsters');
     } catch (err) {
       console.error('Failed to create monster:', err);

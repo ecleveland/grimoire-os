@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, act, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ItemListPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { SrdItem, PaginatedResponse } from '@/lib/types';
@@ -70,10 +71,17 @@ function makeResponse(items: SrdItem[]): PaginatedResponse<SrdItem> {
 }
 
 function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <PrintTrayProvider>
-      <ItemListPage />
-    </PrintTrayProvider>
+    <QueryClientProvider client={client}>
+      <PrintTrayProvider>
+        <ItemListPage />
+      </PrintTrayProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -90,6 +98,47 @@ describe('ItemListPage', () => {
     mockApiFetch.mockReset();
     mockApiFetch.mockResolvedValue(makeResponse([longsword]));
     mockUseAuth.mockReturnValue(ANON);
+  });
+
+  describe('loading and errors', () => {
+    it('shows the shared loading status until the first page arrives', async () => {
+      let resolveList: (v: unknown) => void = () => {};
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation(() => new Promise(r => (resolveList = r)));
+      renderPage();
+
+      expect(screen.getByRole('status')).toHaveTextContent('Loading items…');
+
+      resolveList(makeResponse([longsword]));
+      expect(await screen.findByText('Longsword')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('toasts and shows a load error with a Retry that refetches the list', async () => {
+      mockApiFetch.mockReset();
+      let resolveRetry: (v: unknown) => void = () => {};
+      mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+      mockApiFetch.mockImplementationOnce(() => new Promise(r => (resolveRetry = r)));
+      const user = userEvent.setup();
+      renderPage();
+
+      const loadError = await screen.findByRole('alert');
+      expect(loadError).toHaveTextContent('Failed to load items');
+      const { toast } = await import('sonner');
+      expect(toast.error).toHaveBeenCalledWith('Failed to load items', { id: 'load-items' });
+
+      await user.click(within(loadError).getByRole('button', { name: 'Retry' }));
+
+      // While the retry is in flight the error and its Retry button give way to
+      // the loading status.
+      expect(await screen.findByRole('status')).toHaveTextContent('Loading items…');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      resolveRetry(makeResponse([longsword]));
+      expect(await screen.findByText('Longsword')).toBeInTheDocument();
+      expect(mockApiFetch).toHaveBeenCalledTimes(2);
+      expect(mockApiFetch.mock.calls[1][0]).toBe('/srd/items?limit=20&page=1');
+    });
   });
 
   describe('print set selection', () => {
@@ -337,6 +386,39 @@ describe('ItemListPage', () => {
         c => typeof c[0] === 'string' && c[0].startsWith('/srd/items?')
       );
       expect(listCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('keeps a second pending delete armed while the first delete refetches', async () => {
+      const user = userEvent.setup();
+      mockUseAuth.mockReturnValue(OWNER);
+      const otherItem: SrdItem = { ...ownItem, id: 'hb-2', name: 'Boots of Hush' };
+      let resolveRefetch: (v: unknown) => void = () => {};
+      let listCalls = 0;
+      mockApiFetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') return Promise.resolve(undefined);
+        listCalls += 1;
+        if (listCalls === 2) return new Promise(r => (resolveRefetch = r));
+        return Promise.resolve(makeResponse([ownItem, otherItem]));
+      });
+      renderPage();
+
+      await screen.findByText('Boots of Hush');
+      const [firstDelete] = screen.getAllByRole('button', { name: 'Delete' });
+      await user.click(firstDelete);
+      await user.click(screen.getByRole('button', { name: 'Delete item' }));
+      await waitFor(() => expect(listCalls).toBe(2));
+
+      // Arm a second delete while the post-delete refetch is still in flight.
+      await user.click(screen.getAllByRole('button', { name: 'Delete' })[1]);
+      const confirm = await screen.findByRole('dialog', { name: 'Delete item?' });
+      resolveRefetch(makeResponse([otherItem]));
+      await waitFor(() => expect(screen.queryByText('Cloak of Whispers')).not.toBeInTheDocument());
+
+      expect(confirm).toHaveTextContent('"Boots of Hush" will be permanently deleted.');
+      await user.click(screen.getByRole('button', { name: 'Delete item' }));
+      await waitFor(() => {
+        expect(mockApiFetch).toHaveBeenCalledWith('/srd/items/hb-2', { method: 'DELETE' });
+      });
     });
 
     it('toasts the API error when the delete fails', async () => {

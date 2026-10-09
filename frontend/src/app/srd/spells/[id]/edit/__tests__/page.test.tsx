@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import EditSpellPage from '../page';
 import type { SrdSpell } from '@/lib/types';
@@ -47,6 +49,14 @@ const ownSpell: SrdSpell = {
   createdById: 'u1',
 };
 
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return { client, ...render(<EditSpellPage />, { wrapper }) };
+}
+
 describe('EditSpellPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -69,7 +79,7 @@ describe('EditSpellPage', () => {
     });
     mockApiFetch.mockResolvedValue(ownSpell);
 
-    render(<EditSpellPage />);
+    renderPage();
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
     expect(screen.queryByText(/only edit your own homebrew/i)).not.toBeInTheDocument();
@@ -79,7 +89,7 @@ describe('EditSpellPage', () => {
   it('loads the spell and prefills the form', async () => {
     mockApiFetch.mockResolvedValue(ownSpell);
 
-    render(<EditSpellPage />);
+    renderPage();
 
     expect(await screen.findByLabelText(/^Name/)).toHaveValue('Soul Bonfire');
     expect(mockApiFetch).toHaveBeenCalledWith('/srd/spells/hb-1');
@@ -89,7 +99,7 @@ describe('EditSpellPage', () => {
     mockApiFetch.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(ownSpell);
     const user = userEvent.setup();
 
-    render(<EditSpellPage />);
+    renderPage();
 
     const retry = await screen.findByRole('button', { name: /retry/i });
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -102,7 +112,7 @@ describe('EditSpellPage', () => {
   it('treats a null response (invisible/missing spell) as a failed load', async () => {
     mockApiFetch.mockResolvedValue(null);
 
-    render(<EditSpellPage />);
+    renderPage();
 
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -116,7 +126,7 @@ describe('EditSpellPage', () => {
       source: 'SRD 5.2.1',
     });
 
-    render(<EditSpellPage />);
+    renderPage();
 
     expect(await screen.findByText(/only edit your own homebrew/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -130,7 +140,7 @@ describe('EditSpellPage', () => {
     });
     mockApiFetch.mockResolvedValue({ ...ownSpell, contentSource: 'shared', createdById: 'u1' });
 
-    render(<EditSpellPage />);
+    renderPage();
 
     expect(await screen.findByLabelText(/^Name/)).toHaveValue('Soul Bonfire');
   });
@@ -139,7 +149,7 @@ describe('EditSpellPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(ownSpell).mockResolvedValueOnce({ ...ownSpell });
 
-    render(<EditSpellPage />);
+    renderPage();
     const name = await screen.findByLabelText(/^Name/);
     fireEvent.change(name, { target: { value: 'Ember Storm' } });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -162,7 +172,7 @@ describe('EditSpellPage', () => {
       .mockResolvedValueOnce(ownSpell)
       .mockRejectedValueOnce(new Error('You already have a spell with this name'));
 
-    render(<EditSpellPage />);
+    renderPage();
     await screen.findByLabelText(/^Name/);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -170,5 +180,57 @@ describe('EditSpellPage', () => {
       expect(toast.error).toHaveBeenCalledWith('You already have a spell with this name');
     });
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the cached spell lists after a save', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownSpell);
+
+    const { client } = renderPage();
+    client.setQueryData(['api', '/srd/spells?page=1'], { data: [], total: 0 });
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/spells'));
+    expect(client.getQueryState(['api', '/srd/spells?page=1'])?.isInvalidated).toBe(true);
+  });
+
+  it('keeps Save disabled after a successful save so a second click cannot re-PATCH', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownSpell);
+
+    renderPage();
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/spells'));
+
+    const save = screen.getByRole('button', { name: 'Saving...' });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mockApiFetch.mock.calls.filter(c => c[1]?.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('shows the loading state, not the error, while a retry is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch
+      .mockRejectedValueOnce(new Error('network'))
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the loading state while a retry after a null response is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(null).mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

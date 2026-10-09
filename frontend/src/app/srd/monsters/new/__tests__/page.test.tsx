@@ -8,6 +8,8 @@ const mockApiFetch = vi.fn();
 const mockUseAuth = vi.fn();
 const mockPush = vi.fn();
 const mockBack = vi.fn();
+const mockInvalidateApiPath = vi.fn((..._args: unknown[]) => Promise.resolve());
+const mockQueryClient = {};
 
 vi.mock('@/lib/api', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/api')>();
@@ -20,6 +22,16 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => mockUseAuth(),
+}));
+
+vi.mock('@/lib/query', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/query')>()),
+  invalidateApiPath: (...args: unknown[]) => mockInvalidateApiPath(...args),
+}));
+
+vi.mock('@tanstack/react-query', async importOriginal => ({
+  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
+  useQueryClient: () => mockQueryClient,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -85,6 +97,29 @@ describe('NewMonsterPage', () => {
     );
     expect(toast.success).toHaveBeenCalledWith('Monster created');
     expect(mockPush).toHaveBeenCalledWith('/srd/monsters');
+  });
+
+  it('invalidates the cached monster list before redirecting to it', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue({ id: 'hb-1' });
+    let finishInvalidate: () => void = () => {};
+    mockInvalidateApiPath.mockImplementationOnce(
+      () => new Promise<void>(r => (finishInvalidate = r))
+    );
+
+    render(<NewMonsterPage />);
+    fillRequired();
+    await user.click(screen.getByRole('button', { name: 'Create monster' }));
+
+    await waitFor(() =>
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(mockQueryClient, '/srd/monsters?')
+    );
+    // The list keeps a 60s staleTime, so landing on it before the invalidation
+    // settles would show the cached list without the new monster.
+    expect(mockPush).not.toHaveBeenCalled();
+
+    finishInvalidate();
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/monsters'));
   });
 
   it('toasts the API error message and stays on the page', async () => {

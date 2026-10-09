@@ -146,7 +146,7 @@ describe('EditClassPage', () => {
     await waitFor(() => expect(client.getQueryState(['api', DETAIL])?.status).toBe('success'));
     // Let the query observer hand the loaded class to the page before judging the screen.
     await act(() => new Promise(resolve => setTimeout(resolve, 0)));
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     expect(screen.queryByText(/only edit your own/)).not.toBeInTheDocument();
 
     mockUseAuth.mockReturnValue(OWNER_AUTH);
@@ -358,6 +358,21 @@ describe('EditClassPage', () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to update class'));
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('keeps Save disabled after a successful save so a second click cannot re-PATCH', async () => {
+    routeApi(() => Promise.resolve(makeClass()));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByDisplayValue('Warden');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/classes'));
+
+    const save = screen.getByRole('button', { name: 'Saving...' });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mockApiFetch.mock.calls.filter(c => c[1]?.method === 'PATCH')).toHaveLength(1);
   });
 
   it('shows a disabled Saving... button while the save is still in flight', async () => {

@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import {
   useApiQuery,
   useApiQueryAll,
   useApiMutation,
+  useListQuery,
+  useDeleteMutation,
   apiQueryKey,
   invalidateApiPath,
 } from '../query';
@@ -188,6 +190,133 @@ describe('useApiMutation', () => {
     const data = await result.current.mutateAsync('abc');
     expect(data).toEqual({ ok: true });
     expect(mockApiFetch).toHaveBeenCalledWith('/del/abc', { method: 'DELETE' });
+  });
+});
+
+describe('useListQuery', () => {
+  it('builds the path from sorted params, omitting undefined and empty values', async () => {
+    mockApiFetch.mockResolvedValue(page([{ id: 'a' }], 1, 1));
+    const { result } = renderHook(
+      () =>
+        useListQuery<{ id: string }>('/srd/spells', {
+          school: 'Evocation',
+          page: 2,
+          q: '',
+          class: undefined,
+          level: '0',
+          limit: 20,
+          ritual: false,
+        }),
+      { wrapper: wrapperFor(makeClient()) }
+    );
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/srd/spells?level=0&limit=20&page=2&ritual=false&school=Evocation'
+    );
+    expect(result.current.data?.data).toEqual([{ id: 'a' }]);
+  });
+
+  it('uses the same cache key whatever order the params arrive in', async () => {
+    const client = makeClient();
+    mockApiFetch.mockResolvedValue(page([], 1, 1));
+    const first = renderHook(() => useListQuery('/srd/feats', { page: 1, q: 'alert' }), {
+      wrapper: wrapperFor(client),
+    });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+
+    const second = renderHook(() => useListQuery('/srd/feats', { q: 'alert', page: 1 }), {
+      wrapper: wrapperFor(client),
+    });
+    await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
+
+    expect(client.getQueryData(apiQueryKey('/srd/feats?page=1&q=alert'))).toBeDefined();
+    expect(client.getQueryCache().getAll()).toHaveLength(1);
+  });
+
+  it('keeps the previous page on screen while the next one loads', async () => {
+    let resolveSecond: (v: unknown) => void = () => {};
+    mockApiFetch
+      .mockResolvedValueOnce(page([{ id: 'p1' }], 1, 2))
+      .mockImplementationOnce(() => new Promise(r => (resolveSecond = r)));
+    const { result, rerender } = renderHook(
+      ({ p }) => useListQuery<{ id: string }>('/srd/items', { page: p }),
+      { wrapper: wrapperFor(makeClient()), initialProps: { p: 1 } }
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    rerender({ p: 2 });
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/items?page=2'));
+    expect(result.current.isPlaceholderData).toBe(true);
+    expect(result.current.data?.data).toEqual([{ id: 'p1' }]);
+
+    act(() => resolveSecond(page([{ id: 'p2' }], 2, 2)));
+    await waitFor(() => expect(result.current.data?.data).toEqual([{ id: 'p2' }]));
+  });
+
+  it('builds a bare path when every param is omitted', async () => {
+    mockApiFetch.mockResolvedValue(page([], 1, 1));
+    const { result } = renderHook(() => useListQuery('/srd/items', { q: '' }), {
+      wrapper: wrapperFor(makeClient()),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockApiFetch).toHaveBeenCalledWith('/srd/items');
+  });
+
+  it('passes errorToast through', async () => {
+    mockApiFetch.mockRejectedValue(new Error('boom'));
+    renderHook(
+      () => useListQuery('/srd/spells', { page: 1 }, { errorToast: { message: 'Nope', id: 'x' } }),
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Nope', { id: 'x' }));
+  });
+});
+
+describe('useDeleteMutation', () => {
+  it('DELETEs path/id, invalidates the prefix, then calls onDeleted with the id', async () => {
+    const client = makeClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const onDeleted = vi.fn();
+    mockApiFetch.mockResolvedValue(undefined);
+    const { result } = renderHook(
+      () => useDeleteMutation({ path: '/srd/spells', invalidate: '/srd/spells?', onDeleted }),
+      { wrapper: wrapperFor(client) }
+    );
+
+    await result.current.mutateAsync('hb-1');
+
+    expect(mockApiFetch).toHaveBeenCalledWith('/srd/spells/hb-1', { method: 'DELETE' });
+    expect(onDeleted).toHaveBeenCalledWith('hb-1');
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    const predicate = invalidate.mock.calls[0][0]?.predicate;
+    expect(predicate!({ queryKey: apiQueryKey('/srd/spells?page=1') } as never)).toBe(true);
+    expect(predicate!({ queryKey: apiQueryKey('/srd/spells/hb-1') } as never)).toBe(false);
+  });
+
+  it('neither invalidates nor calls onDeleted when the DELETE fails', async () => {
+    const client = makeClient();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const onDeleted = vi.fn();
+    mockApiFetch.mockRejectedValue(new Error('nope'));
+    const { result } = renderHook(
+      () => useDeleteMutation({ path: '/srd/spells', invalidate: '/srd/spells?', onDeleted }),
+      { wrapper: wrapperFor(client) }
+    );
+
+    await expect(result.current.mutateAsync('hb-1')).rejects.toThrow('nope');
+
+    expect(onDeleted).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('works without an onDeleted callback', async () => {
+    mockApiFetch.mockResolvedValue(undefined);
+    const { result } = renderHook(
+      () => useDeleteMutation({ path: '/srd/feats', invalidate: '/srd/feats?' }),
+      { wrapper: wrapperFor(makeClient()) }
+    );
+    await expect(result.current.mutateAsync('f-1')).resolves.toBeUndefined();
   });
 });
 

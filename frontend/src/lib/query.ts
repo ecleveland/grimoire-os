@@ -2,8 +2,10 @@
 
 import { useEffect, useRef } from 'react';
 import {
+  keepPreviousData,
   useMutation,
   useQuery,
+  useQueryClient,
   type QueryClient,
   type UseMutationOptions,
   type UseMutationResult,
@@ -139,6 +141,64 @@ export function useApiMutation<TData = unknown, TVariables = void>(
   options: Omit<UseMutationOptions<TData, Error, TVariables>, 'mutationFn'> = {}
 ): UseMutationResult<TData, Error, TVariables> {
   return useMutation<TData, Error, TVariables>({ mutationFn, ...options });
+}
+
+/** Query-string params for `useListQuery`; `undefined` and `''` are omitted. */
+export type ListParams = Record<string, string | number | boolean | undefined>;
+
+/**
+ * Paginated list read. Builds `path?<qs>` from `params` with the keys sorted,
+ * so the cache key doesn't depend on the order a page lists its filters, and
+ * drops `undefined`/`''` values (an empty filter means "all"; `'0'` and `0`
+ * are kept). `keepPreviousData` holds the last page's rows on screen while the
+ * next page or filter resolves; `options` can override it.
+ */
+export function useListQuery<T>(
+  path: string,
+  params: ListParams,
+  options: UseApiQueryOptions<PaginatedResponse<T>> = {}
+): UseQueryResult<PaginatedResponse<T>, Error> {
+  const search = new URLSearchParams();
+  for (const key of Object.keys(params).sort()) {
+    const value = params[key];
+    if (value === undefined || value === '') continue;
+    search.set(key, String(value));
+  }
+  const qs = search.toString();
+
+  return useApiQuery<PaginatedResponse<T>>(qs ? `${path}?${qs}` : path, {
+    placeholderData: keepPreviousData,
+    ...options,
+  });
+}
+
+export interface UseDeleteMutationOptions {
+  /** Collection path; the DELETE goes to `${path}/${id}`. */
+  path: string;
+  /** Cache prefix to invalidate on success, e.g. `/srd/spells?` (see `invalidateApiPath`). */
+  invalidate: string;
+  /** Runs after a successful DELETE, before the invalidated queries refetch. */
+  onDeleted?: (id: string) => void;
+}
+
+/**
+ * Delete-by-id mutation for a list page. On success it calls `onDeleted` (close
+ * the modal, toast, step back a page) and then invalidates the list prefix;
+ * `mutateAsync` resolves once the refetch settles. Errors reach the caller's
+ * `mutate`/`mutateAsync` handlers untouched.
+ */
+export function useDeleteMutation({
+  path,
+  invalidate,
+  onDeleted,
+}: UseDeleteMutationOptions): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useApiMutation<void, string>(id => apiFetch<void>(`${path}/${id}`, { method: 'DELETE' }), {
+    onSuccess: (_data, id) => {
+      onDeleted?.(id);
+      return invalidateApiPath(queryClient, invalidate);
+    },
+  });
 }
 
 /**

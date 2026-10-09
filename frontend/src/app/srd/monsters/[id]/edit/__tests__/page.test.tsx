@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import EditMonsterPage from '../page';
 import type { SrdMonster } from '@/lib/types';
@@ -54,6 +56,14 @@ const ownTroll: SrdMonster = {
   createdById: 'u1',
 };
 
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return { client, ...render(<EditMonsterPage />, { wrapper }) };
+}
+
 describe('EditMonsterPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -76,7 +86,7 @@ describe('EditMonsterPage', () => {
     });
     mockApiFetch.mockResolvedValue(ownTroll);
 
-    render(<EditMonsterPage />);
+    renderPage();
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
     expect(screen.queryByText(/only edit your own homebrew/i)).not.toBeInTheDocument();
@@ -86,7 +96,7 @@ describe('EditMonsterPage', () => {
   it('loads the monster and prefills the form', async () => {
     mockApiFetch.mockResolvedValue(ownTroll);
 
-    render(<EditMonsterPage />);
+    renderPage();
 
     expect(await screen.findByLabelText(/^Name/)).toHaveValue('Cave Troll');
     expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/hb-1');
@@ -96,7 +106,7 @@ describe('EditMonsterPage', () => {
     mockApiFetch.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(ownTroll);
     const user = userEvent.setup();
 
-    render(<EditMonsterPage />);
+    renderPage();
 
     const retry = await screen.findByRole('button', { name: /retry/i });
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -109,7 +119,7 @@ describe('EditMonsterPage', () => {
   it('treats a null response (invisible/missing monster) as a failed load', async () => {
     mockApiFetch.mockResolvedValue(null);
 
-    render(<EditMonsterPage />);
+    renderPage();
 
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -123,7 +133,7 @@ describe('EditMonsterPage', () => {
       source: 'SRD 5.2.1',
     });
 
-    render(<EditMonsterPage />);
+    renderPage();
 
     expect(await screen.findByText(/only edit your own homebrew/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -137,7 +147,7 @@ describe('EditMonsterPage', () => {
     });
     mockApiFetch.mockResolvedValue({ ...ownTroll, contentSource: 'shared', createdById: 'u1' });
 
-    render(<EditMonsterPage />);
+    renderPage();
 
     expect(await screen.findByLabelText(/^Name/)).toHaveValue('Cave Troll');
   });
@@ -146,7 +156,7 @@ describe('EditMonsterPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(ownTroll).mockResolvedValueOnce({ ...ownTroll });
 
-    render(<EditMonsterPage />);
+    renderPage();
     const name = await screen.findByLabelText(/^Name/);
     fireEvent.change(name, { target: { value: 'Bridge Troll' } });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -169,7 +179,7 @@ describe('EditMonsterPage', () => {
       .mockResolvedValueOnce(ownTroll)
       .mockRejectedValueOnce(new Error('You already have a monster with this name'));
 
-    render(<EditMonsterPage />);
+    renderPage();
     await screen.findByLabelText(/^Name/);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -177,5 +187,57 @@ describe('EditMonsterPage', () => {
       expect(toast.error).toHaveBeenCalledWith('You already have a monster with this name');
     });
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the cached monster lists after a save', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownTroll);
+
+    const { client } = renderPage();
+    client.setQueryData(['api', '/srd/monsters?page=1'], { data: [], total: 0 });
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/monsters'));
+    expect(client.getQueryState(['api', '/srd/monsters?page=1'])?.isInvalidated).toBe(true);
+  });
+
+  it('keeps Save disabled after a successful save so a second click cannot re-PATCH', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownTroll);
+
+    renderPage();
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/monsters'));
+
+    const save = screen.getByRole('button', { name: 'Saving...' });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mockApiFetch.mock.calls.filter(c => c[1]?.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('shows the loading state, not the error, while a retry is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch
+      .mockRejectedValueOnce(new Error('network'))
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the loading state while a retry after a null response is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(null).mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
