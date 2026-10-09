@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import FeatListPage from '../page';
 import type { SrdFeat, PaginatedResponse } from '@/lib/types';
@@ -58,6 +59,19 @@ function makeResponse(feats: SrdFeat[]): PaginatedResponse<SrdFeat> {
   return { data: feats, total: feats.length, page: 1, lastPage: 1 };
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <FeatListPage />
+    </QueryClientProvider>
+  );
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('FeatListPage', () => {
@@ -71,14 +85,14 @@ describe('FeatListPage', () => {
 
   describe('rendering', () => {
     it('renders the heading "Feats"', async () => {
-      render(<FeatListPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByRole('heading', { name: /^Feats$/i })).toBeInTheDocument();
       });
     });
 
     it('renders feat names after load', async () => {
-      render(<FeatListPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByText('Alert')).toBeInTheDocument();
         expect(screen.getByText('Sharpshooter')).toBeInTheDocument();
@@ -86,14 +100,14 @@ describe('FeatListPage', () => {
     });
 
     it('shows category and prerequisite in the card metadata', async () => {
-      render(<FeatListPage />);
+      renderPage();
       const card = (await screen.findByText('Sharpshooter')).closest('button')!;
       expect(within(card).getByText(/General/)).toBeInTheDocument();
       expect(within(card).getByText(/Level 4\+, Dexterity 13\+/)).toBeInTheDocument();
     });
 
     it('renders the search input', async () => {
-      render(<FeatListPage />);
+      renderPage();
       await waitFor(() => {
         expect(screen.getByPlaceholderText('Search feats...')).toBeInTheDocument();
       });
@@ -102,17 +116,54 @@ describe('FeatListPage', () => {
     it('toasts when the list fetch fails', async () => {
       mockApiFetch.mockReset();
       mockApiFetch.mockRejectedValue(new Error('boom'));
-      render(<FeatListPage />);
+      renderPage();
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalledWith('Failed to load feats', { id: 'load-feats' });
       });
+    });
+
+    it('shows the shared loading status until the first page arrives', async () => {
+      let resolveList: (v: unknown) => void = () => {};
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation(() => new Promise(r => (resolveList = r)));
+      renderPage();
+
+      expect(screen.getByRole('status')).toHaveTextContent('Loading feats…');
+
+      resolveList(makeResponse([alert]));
+      expect(await screen.findByText('Alert')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('shows a load error with a Retry that refetches the list', async () => {
+      mockApiFetch.mockReset();
+      let resolveRetry: (v: unknown) => void = () => {};
+      mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+      mockApiFetch.mockImplementationOnce(() => new Promise(r => (resolveRetry = r)));
+      const user = userEvent.setup();
+      renderPage();
+
+      const loadError = await screen.findByRole('alert');
+      expect(loadError).toHaveTextContent('Failed to load feats');
+
+      await user.click(within(loadError).getByRole('button', { name: 'Retry' }));
+
+      // While the retry is in flight the error and its Retry button give way to
+      // the loading status.
+      expect(await screen.findByRole('status')).toHaveTextContent('Loading feats…');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      resolveRetry(makeResponse([alert]));
+      expect(await screen.findByText('Alert')).toBeInTheDocument();
+      expect(mockApiFetch).toHaveBeenCalledTimes(2);
+      expect(mockApiFetch.mock.calls[1][0]).toBe('/srd/feats?limit=20&page=1');
     });
   });
 
   describe('filters', () => {
     it('sends category, prerequisite, and repeatable filters in the query', async () => {
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
       await screen.findByText('Alert');
       mockApiFetch.mockClear();
 
@@ -140,7 +191,7 @@ describe('FeatListPage', () => {
 
     it('issues exactly one fetch, with page=1, when a filter changes from page 2', async () => {
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
       await goToPage2(user);
 
       await user.selectOptions(screen.getByLabelText('Category'), 'Origin');
@@ -156,7 +207,7 @@ describe('FeatListPage', () => {
 
     it('issues exactly one fetch, with page=1, when the debounced search commits from page 2', async () => {
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
       await goToPage2(user);
 
       fireEvent.change(screen.getByPlaceholderText('Search feats...'), {
@@ -183,7 +234,7 @@ describe('FeatListPage', () => {
     it('fetches and opens the detail when a feat card is clicked', async () => {
       routeApi();
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Alert/i }));
 
@@ -198,7 +249,7 @@ describe('FeatListPage', () => {
     it('renders the Repeatable badge when set', async () => {
       routeApi(() => Promise.resolve({ ...alert, repeatable: true }));
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Alert/i }));
 
@@ -209,7 +260,7 @@ describe('FeatListPage', () => {
     it('omits the Benefits section when absent', async () => {
       routeApi(() => Promise.resolve(sharpshooter));
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Sharpshooter/i }));
 
@@ -220,7 +271,7 @@ describe('FeatListPage', () => {
     it('toasts and closes when the detail resolves to null', async () => {
       routeApi(() => Promise.resolve(null));
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Alert/i }));
 
@@ -234,7 +285,7 @@ describe('FeatListPage', () => {
     it('toasts and closes when the detail fetch rejects', async () => {
       routeApi(() => Promise.reject(new Error('network')));
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Alert/i }));
 
@@ -279,14 +330,14 @@ describe('FeatListPage', () => {
 
     it('shows a Create feat link for signed-in users', async () => {
       authAsOwner();
-      render(<FeatListPage />);
+      renderPage();
 
       const link = await screen.findByRole('link', { name: /create feat/i });
       expect(link).toHaveAttribute('href', '/srd/feats/new');
     });
 
     it('hides the Create feat link for anonymous visitors', async () => {
-      render(<FeatListPage />);
+      renderPage();
 
       await screen.findByText('Alert');
       expect(screen.queryByRole('link', { name: /create feat/i })).not.toBeInTheDocument();
@@ -295,7 +346,7 @@ describe('FeatListPage', () => {
     it('flags homebrew feats with a badge in the list', async () => {
       authAsOwner();
       routeApi();
-      render(<FeatListPage />);
+      renderPage();
 
       const card = (await screen.findByText('Lucky Dodge')).closest('button')!;
       expect(within(card).getByText('Homebrew')).toBeInTheDocument();
@@ -308,7 +359,7 @@ describe('FeatListPage', () => {
       authAsOwner();
       routeApi();
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Lucky Dodge/i }));
 
@@ -324,7 +375,7 @@ describe('FeatListPage', () => {
       authAsOwner();
       routeApi();
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Alert/i }));
 
@@ -341,7 +392,7 @@ describe('FeatListPage', () => {
       });
       routeApi();
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Lucky Dodge/i }));
 
@@ -369,7 +420,7 @@ describe('FeatListPage', () => {
         );
       });
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Alert/i }));
 
@@ -381,7 +432,7 @@ describe('FeatListPage', () => {
       authAsOwner();
       routeApi();
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Lucky Dodge/i }));
       await user.click(await screen.findByRole('button', { name: /delete/i }));
@@ -403,11 +454,40 @@ describe('FeatListPage', () => {
       expect(listCalls.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('names the deleted feat and keeps a feat opened mid-delete open', async () => {
+      authAsOwner();
+      let resolveDelete: (v: unknown) => void = () => {};
+      routeApi({ onDelete: () => new Promise(r => (resolveDelete = r)) });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Lucky Dodge/i }));
+      await user.click(await screen.findByRole('button', { name: /delete/i }));
+      await user.click(await screen.findByRole('button', { name: /^Delete feat$/i }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/srd/feats/hb-1',
+          expect.objectContaining({ method: 'DELETE' })
+        )
+      );
+
+      // Close A's modal and open B while A's DELETE is still in flight.
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+      await user.click(screen.getByRole('button', { name: /^Alert/i }));
+      const dialog = await screen.findByRole('dialog', { name: 'Alert' });
+
+      resolveDelete(undefined);
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted Lucky Dodge'));
+      expect(toast.success).not.toHaveBeenCalledWith('Deleted Alert');
+      expect(screen.getByRole('dialog', { name: 'Alert' })).toBe(dialog);
+    });
+
     it('toasts and keeps the modal open when the delete fails (Error)', async () => {
       authAsOwner();
       routeApi({ onDelete: () => Promise.reject(new Error('nope')) });
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Lucky Dodge/i }));
       await user.click(await screen.findByRole('button', { name: /delete/i }));
@@ -423,7 +503,7 @@ describe('FeatListPage', () => {
       authAsOwner();
       routeApi({ onDelete: () => Promise.reject('boom') });
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByRole('button', { name: /^Lucky Dodge/i }));
       await user.click(await screen.findByRole('button', { name: /delete/i }));
@@ -461,7 +541,7 @@ describe('FeatListPage', () => {
         }
       );
       const user = userEvent.setup();
-      render(<FeatListPage />);
+      renderPage();
 
       await user.click(await screen.findByTestId('pagination'));
       await screen.findByText('Lucky Dodge');

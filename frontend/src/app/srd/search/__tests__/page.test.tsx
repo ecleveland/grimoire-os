@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import SrdSearchPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { PaginatedResponse, SrdSpell, SrdFeat, SrdItem } from '@/lib/types';
@@ -174,11 +176,13 @@ function paginated(hits: UnifiedSearchHit[]): PaginatedResponse<UnifiedSearchHit
   return { data: hits, total: hits.length, page: 1, lastPage: 1 };
 }
 
-function renderPage() {
+function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
-    <PrintTrayProvider>
-      <SrdSearchPage />
-    </PrintTrayProvider>
+    <QueryClientProvider client={client}>
+      <PrintTrayProvider>
+        <SrdSearchPage />
+      </PrintTrayProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -807,6 +811,57 @@ describe('SrdSearchPage', () => {
         expect(mockApiFetch).toHaveBeenCalled();
       });
       expect(mockApiFetch.mock.calls[0][0]).toMatch(/^\/srd\/search\?/);
+    });
+
+    it('shows the loading label until the first page arrives', async () => {
+      mockApiFetch.mockReturnValue(new Promise(() => {}));
+      renderPage();
+
+      expect(await screen.findByText('Loading…')).toBeInTheDocument();
+    });
+
+    it('shows a retryable error when the search fails', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockRejectedValueOnce(new Error('network'));
+      renderPage();
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load search results.');
+      expect(toast.error).toHaveBeenCalledWith('Failed to load search results', {
+        id: 'load-search',
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+      expect(await screen.findByText('Fireball')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('shows the loading label, not the error, while a retry is in flight', async () => {
+      const user = userEvent.setup();
+      mockApiFetch
+        .mockRejectedValueOnce(new Error('network'))
+        .mockReturnValueOnce(new Promise(() => {}));
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: 'Retry' }));
+
+      expect(await screen.findByText('Loading…')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('refetches on remount despite the app-wide staleTime', async () => {
+      // The app client keeps reads fresh for 60s; search must still reflect
+      // edits and deletes made on other pages.
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      const first = renderPage(client);
+      await screen.findByText('Fireball');
+      first.unmount();
+
+      renderPage(client);
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
     });
 
     it('passes selected types to the API when not all enabled', async () => {

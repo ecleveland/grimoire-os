@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import SpellListPage from '../page';
 import { PrintTrayProvider } from '@/lib/print-tray-context';
@@ -73,10 +74,17 @@ function makeResponse(spells: SrdSpell[]): PaginatedResponse<SrdSpell> {
 }
 
 function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <PrintTrayProvider>
-      <SpellListPage />
-    </PrintTrayProvider>
+    <QueryClientProvider client={client}>
+      <PrintTrayProvider>
+        <SpellListPage />
+      </PrintTrayProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -134,6 +142,43 @@ describe('SpellListPage', () => {
       await waitFor(() => {
         expect(toast.error).toHaveBeenCalledWith('Failed to load spells', { id: 'load-spells' });
       });
+    });
+
+    it('shows the shared loading status until the first page arrives', async () => {
+      let resolveList: (v: unknown) => void = () => {};
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation(() => new Promise(r => (resolveList = r)));
+      renderPage();
+
+      expect(screen.getByRole('status')).toHaveTextContent('Loading spells…');
+
+      resolveList(makeResponse([fireball]));
+      expect(await screen.findByText('Fireball')).toBeInTheDocument();
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    });
+
+    it('shows a load error with a Retry that refetches the list', async () => {
+      mockApiFetch.mockReset();
+      let resolveRetry: (v: unknown) => void = () => {};
+      mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+      mockApiFetch.mockImplementationOnce(() => new Promise(r => (resolveRetry = r)));
+      const user = userEvent.setup();
+      renderPage();
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Failed to load spells');
+
+      await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+
+      // While the retry is in flight the error and its Retry button give way to
+      // the loading status.
+      expect(await screen.findByRole('status')).toHaveTextContent('Loading spells…');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      resolveRetry(makeResponse([fireball]));
+      expect(await screen.findByText('Fireball')).toBeInTheDocument();
+      expect(mockApiFetch).toHaveBeenCalledTimes(2);
+      expect(mockApiFetch.mock.calls[1][0]).toBe('/srd/spells?limit=20&page=1');
     });
   });
 
@@ -450,6 +495,72 @@ describe('SpellListPage', () => {
         String(path).startsWith('/srd/spells?')
       );
       expect(listCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('names the deleted spell and keeps a spell opened mid-delete open', async () => {
+      authAsOwner();
+      let resolveDelete: (v: unknown) => void = () => {};
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+        if (options?.method === 'DELETE') return new Promise(r => (resolveDelete = r));
+        if (path === '/srd/spells/hb-1') return Promise.resolve(soulBonfire);
+        if (path === '/srd/spells/sp-1') return Promise.resolve(fireball);
+        return Promise.resolve(makeResponse([fireball, soulBonfire]));
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: /^Soul Bonfire/i }));
+      await user.click(await screen.findByRole('button', { name: /delete/i }));
+      await user.click(await screen.findByRole('button', { name: /^Delete spell$/i }));
+      await waitFor(() =>
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/srd/spells/hb-1',
+          expect.objectContaining({ method: 'DELETE' })
+        )
+      );
+
+      // Close A's modal and open B while A's DELETE is still in flight.
+      await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+      await user.click(screen.getByRole('button', { name: /^Fireball/i }));
+      const dialog = await screen.findByRole('dialog', { name: 'Fireball' });
+
+      resolveDelete(undefined);
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted Soul Bonfire'));
+      expect(toast.success).not.toHaveBeenCalledWith('Deleted Fireball');
+      expect(screen.getByRole('dialog', { name: 'Fireball' })).toBe(dialog);
+    });
+
+    it('shows the loading status, not the stale error, while a Retry after a failed refetch runs', async () => {
+      authAsOwner();
+      let listCalls = 0;
+      let resolveRetry: (v: unknown) => void = () => {};
+      mockApiFetch.mockReset();
+      mockApiFetch.mockImplementation((path: string, options?: { method?: string }) => {
+        if (options?.method === 'DELETE') return Promise.resolve(undefined);
+        if (path.startsWith('/srd/spells/')) return Promise.resolve(soulBonfire);
+        listCalls += 1;
+        if (listCalls === 2) return Promise.reject(new Error('boom'));
+        if (listCalls === 3) return new Promise(r => (resolveRetry = r));
+        return Promise.resolve(makeResponse([fireball, soulBonfire]));
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      // The post-delete refetch fails while the list still holds data.
+      await user.click(await screen.findByRole('button', { name: /^Soul Bonfire/i }));
+      await user.click(await screen.findByRole('button', { name: /delete/i }));
+      await user.click(await screen.findByRole('button', { name: /^Delete spell$/i }));
+      const loadError = await screen.findByRole('alert');
+
+      await user.click(within(loadError).getByRole('button', { name: 'Retry' }));
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Loading spells…');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      resolveRetry(makeResponse([fireball]));
+      expect(await screen.findByText('1 spell found')).toBeInTheDocument();
     });
 
     it('toasts and keeps the modal open when the delete fails (Error)', async () => {

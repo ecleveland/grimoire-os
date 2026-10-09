@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import EditItemPage from '../page';
 import type { SrdItem } from '@/lib/types';
@@ -42,6 +44,14 @@ const ownItem: SrdItem = {
   createdById: 'u1',
 };
 
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return { client, ...render(<EditItemPage />, { wrapper }) };
+}
+
 describe('EditItemPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -64,7 +74,7 @@ describe('EditItemPage', () => {
     });
     mockApiFetch.mockResolvedValue(ownItem);
 
-    render(<EditItemPage />);
+    renderPage();
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
     expect(screen.queryByText(/only edit your own homebrew/i)).not.toBeInTheDocument();
@@ -74,7 +84,7 @@ describe('EditItemPage', () => {
   it('loads the item and prefills the form', async () => {
     mockApiFetch.mockResolvedValue(ownItem);
 
-    render(<EditItemPage />);
+    renderPage();
 
     expect(await screen.findByLabelText(/^Name/)).toHaveValue('Lucky Coin');
     expect(mockApiFetch).toHaveBeenCalledWith('/srd/items/hb-1');
@@ -84,7 +94,7 @@ describe('EditItemPage', () => {
     mockApiFetch.mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce(ownItem);
     const user = userEvent.setup();
 
-    render(<EditItemPage />);
+    renderPage();
 
     const retry = await screen.findByRole('button', { name: /retry/i });
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -97,7 +107,7 @@ describe('EditItemPage', () => {
   it('treats a null response (invisible/missing item) as a failed load', async () => {
     mockApiFetch.mockResolvedValue(null);
 
-    render(<EditItemPage />);
+    renderPage();
 
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -111,7 +121,7 @@ describe('EditItemPage', () => {
       source: 'SRD 5.2.1',
     });
 
-    render(<EditItemPage />);
+    renderPage();
 
     expect(await screen.findByText(/only edit your own homebrew/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -125,7 +135,7 @@ describe('EditItemPage', () => {
     });
     mockApiFetch.mockResolvedValue({ ...ownItem, contentSource: 'shared', createdById: 'u1' });
 
-    render(<EditItemPage />);
+    renderPage();
 
     expect(await screen.findByLabelText(/^Name/)).toHaveValue('Lucky Coin');
   });
@@ -134,7 +144,7 @@ describe('EditItemPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(ownItem).mockResolvedValueOnce({ ...ownItem });
 
-    render(<EditItemPage />);
+    renderPage();
     const name = await screen.findByLabelText(/^Name/);
     fireEvent.change(name, { target: { value: 'Luckier Coin' } });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -157,7 +167,7 @@ describe('EditItemPage', () => {
       .mockResolvedValueOnce(ownItem)
       .mockRejectedValueOnce(new Error('You already have an item with this name'));
 
-    render(<EditItemPage />);
+    renderPage();
     await screen.findByLabelText(/^Name/);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -171,7 +181,7 @@ describe('EditItemPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(ownItem).mockRejectedValueOnce('boom');
 
-    render(<EditItemPage />);
+    renderPage();
     await screen.findByLabelText(/^Name/);
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -179,5 +189,57 @@ describe('EditItemPage', () => {
       expect(toast.error).toHaveBeenCalledWith('Failed to update item');
     });
     expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the cached item lists after a save', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownItem);
+
+    const { client } = renderPage();
+    client.setQueryData(['api', '/srd/items?page=1'], { data: [], total: 0 });
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/items'));
+    expect(client.getQueryState(['api', '/srd/items?page=1'])?.isInvalidated).toBe(true);
+  });
+
+  it('keeps Save disabled after a successful save so a second click cannot re-PATCH', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownItem);
+
+    renderPage();
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/items'));
+
+    const save = screen.getByRole('button', { name: 'Saving...' });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mockApiFetch.mock.calls.filter(c => c[1]?.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('shows the loading state, not the error, while a retry is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch
+      .mockRejectedValueOnce(new Error('network'))
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the loading state while a retry after a null response is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(null).mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

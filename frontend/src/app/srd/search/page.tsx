@@ -1,11 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api';
-import { toast } from 'sonner';
 import { SEARCH_KINDS, type SearchKind } from '@grimoire-os/shared';
-import type { PaginatedResponse } from '@/lib/types';
+import { useListQuery } from '@/lib/query';
 import {
   KIND_LABEL,
   KIND_LABEL_PLURAL,
@@ -18,6 +16,7 @@ import SearchBox from '@/components/SearchBox';
 import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
+import LoadError from '@/components/LoadError';
 import SpellDetail from '@/components/SpellDetail';
 import FeatDetail from '@/components/FeatDetail';
 import ItemDetail from '@/components/ItemDetail';
@@ -46,11 +45,7 @@ function hitId(hit: UnifiedSearchHit): string {
 }
 
 export default function SrdSearchPage() {
-  const [hits, setHits] = useState<UnifiedSearchHit[]>([]);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
@@ -79,76 +74,45 @@ export default function SrdSearchPage() {
     setPage(1);
   }, []);
 
-  // Fetch results. Uses AbortController so that superseded fetches (filter
-  // changes, fast typing, unmount) cancel on the wire instead of silently
-  // running to completion and only being suppressed at setState time.
-  useEffect(() => {
-    const controller = new AbortController();
-    const params = new URLSearchParams();
-    params.set('page', String(page));
-    params.set('limit', String(LIMIT));
-    if (search) params.set('q', search);
-    if (enabledKinds.size > 0 && enabledKinds.size < SEARCH_KINDS.length) {
+  const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
+  const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
+  const onlyItems = enabledKinds.size === 1 && enabledKinds.has('item');
+  const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
+
+  // Sub-filters only apply while their kind is the sole one enabled.
+  // `useListQuery` drops the empty ones.
+  const list = useListQuery<UnifiedSearchHit>(
+    '/srd/search',
+    {
+      page,
+      limit: LIMIT,
+      q: search,
       // Canonical order, not the Set's insertion order: toggling a chip off and
       // back on would otherwise move that kind to the end, and the anonymous
       // response cache keys on the whole URL.
-      params.set('types', SEARCH_KINDS.filter(k => enabledKinds.has(k)).join(','));
+      types:
+        enabledKinds.size < SEARCH_KINDS.length
+          ? SEARCH_KINDS.filter(k => enabledKinds.has(k)).join(',')
+          : undefined,
+      class: onlySpells ? spellClass : undefined,
+      level: onlySpells ? spellLevel : undefined,
+      school: onlySpells ? spellSchool : undefined,
+      category: onlyFeats ? featCategory : onlyItems ? itemCategory : undefined,
+      hasPrerequisite: onlyFeats ? featPrereq : undefined,
+      repeatable: onlyFeats ? featRepeatable : undefined,
+      rarity: onlyItems ? itemRarity : undefined,
+      isMagic: onlyItems ? itemMagic : undefined,
+      parentType: onlyFeatures ? featureParent : undefined,
+    },
+    {
+      errorToast: { message: 'Failed to load search results', id: 'load-search' },
+      // Results must reflect edits and deletes made on other pages.
+      staleTime: 0,
     }
-    const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
-    const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
-    const onlyItems = enabledKinds.size === 1 && enabledKinds.has('item');
-    const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
-    if (onlySpells) {
-      if (spellClass) params.set('class', spellClass);
-      if (spellLevel !== '') params.set('level', spellLevel);
-      if (spellSchool) params.set('school', spellSchool);
-    }
-    if (onlyFeats) {
-      if (featCategory) params.set('category', featCategory);
-      if (featPrereq) params.set('hasPrerequisite', featPrereq);
-      if (featRepeatable) params.set('repeatable', featRepeatable);
-    }
-    if (onlyItems) {
-      if (itemCategory) params.set('category', itemCategory);
-      if (itemRarity) params.set('rarity', itemRarity);
-      if (itemMagic) params.set('isMagic', itemMagic);
-    }
-    if (onlyFeatures) {
-      if (featureParent) params.set('parentType', featureParent);
-    }
-
-    apiFetch<PaginatedResponse<UnifiedSearchHit>>(`/srd/search?${params.toString()}`, {
-      signal: controller.signal,
-    })
-      .then(res => {
-        setHits(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-        setLoading(false);
-      })
-      .catch(err => {
-        if (controller.signal.aborted) return;
-        console.error('Failed to load search results:', err);
-        toast.error('Failed to load search results', { id: 'load-search' });
-        setLoading(false);
-      });
-
-    return () => controller.abort();
-  }, [
-    page,
-    search,
-    enabledKinds,
-    spellClass,
-    spellLevel,
-    spellSchool,
-    featCategory,
-    featPrereq,
-    featRepeatable,
-    itemCategory,
-    itemRarity,
-    itemMagic,
-    featureParent,
-  ]);
+  );
+  const hits = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
 
   const toggleKind = (kind: SearchKind) => {
     setEnabledKinds(prev => {
@@ -177,15 +141,10 @@ export default function SrdSearchPage() {
     setPage(1);
   };
 
-  const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
-  const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
-  const onlyItems = enabledKinds.size === 1 && enabledKinds.has('item');
-  const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
-
   const countLabel = useMemo(() => {
-    if (loading) return 'Loading…';
+    if (list.isPending) return 'Loading…';
     return `${total} result${total !== 1 ? 's' : ''}`;
-  }, [loading, total]);
+  }, [list.isPending, total]);
 
   return (
     <div>
@@ -387,17 +346,31 @@ export default function SrdSearchPage() {
         </FilterBar>
       )}
 
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{countLabel}</p>
+      {list.isError && !list.data ? (
+        <LoadError message="Failed to load search results." onRetry={() => list.refetch()} />
+      ) : (
+        <>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{countLabel}</p>
 
-      <div className={`space-y-3 ${loading ? 'opacity-60' : ''}`} aria-busy={loading}>
-        {hits.map(hit => {
-          const key = `${hit.kind}-${hitId(hit)}`;
-          const isOpen = expanded.has(key);
-          return (
-            <ResultCard key={key} hit={hit} expanded={isOpen} onToggle={() => toggleExpand(key)} />
-          );
-        })}
-      </div>
+          <div
+            className={`space-y-3 ${list.isFetching ? 'opacity-60' : ''}`}
+            aria-busy={list.isFetching}
+          >
+            {hits.map(hit => {
+              const key = `${hit.kind}-${hitId(hit)}`;
+              const isOpen = expanded.has(key);
+              return (
+                <ResultCard
+                  key={key}
+                  hit={hit}
+                  expanded={isOpen}
+                  onToggle={() => toggleExpand(key)}
+                />
+              );
+            })}
+          </div>
+        </>
+      )}
 
       <Pagination
         page={page}

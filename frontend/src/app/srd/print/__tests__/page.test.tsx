@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import SrdPrintPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
@@ -133,11 +134,13 @@ function seedTray(items: PrintTrayItem[]) {
   localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify(items));
 }
 
-function renderPage() {
+function renderPage(client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
-    <PrintTrayProvider>
-      <SrdPrintPage />
-    </PrintTrayProvider>
+    <QueryClientProvider client={client}>
+      <PrintTrayProvider>
+        <SrdPrintPage />
+      </PrintTrayProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -412,10 +415,42 @@ describe('SrdPrintPage', () => {
       renderPage();
       await screen.findByText('Hydrate failed');
 
-      await user.click(screen.getByRole('button', { name: /try again/i }));
+      await user.click(screen.getByRole('button', { name: /retry/i }));
 
       expect(await screen.findByText('Goblin')).toBeInTheDocument();
       expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('refetches on remount despite the app-wide staleTime', async () => {
+      // The app client keeps reads fresh for 60s; the cards must still reflect
+      // edits and deletes made on other pages.
+      seedTray(seededItems);
+      mockApiFetch.mockResolvedValue(hydrateResponse);
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false, staleTime: 60_000 } },
+      });
+      const first = renderPage(client);
+      await screen.findByText('Goblin');
+      first.unmount();
+
+      renderPage(client);
+
+      await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(2));
+    });
+
+    it('swaps the error for the loading state while a retry is in flight', async () => {
+      const user = userEvent.setup();
+      seedTray(seededItems);
+      mockApiFetch.mockRejectedValueOnce(new Error('Hydrate failed'));
+      mockApiFetch.mockReturnValueOnce(new Promise(() => {}));
+
+      renderPage();
+      await screen.findByText('Hydrate failed');
+
+      await user.click(screen.getByRole('button', { name: /retry/i }));
+
+      expect(await screen.findByText(/loading print set/i)).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
   });
 

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import ClassForm from '@/components/ClassForm';
+import LoadError from '@/components/LoadError';
+import LoadingState from '@/components/LoadingState';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import type { ClassPayload } from '@/lib/class-form';
@@ -61,27 +63,15 @@ export default function EditClassPage() {
 
   // The failure view is only for a class that never loaded. A reload that fails
   // in the background, say after the network drops mid-edit, keeps the form and
-  // its unsaved changes, and the error toast still reports the failure.
-  if (query.isError && cls === undefined)
-    return (
-      <div className="text-center py-12">
-        <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load class.</p>
-        <button
-          type="button"
-          onClick={() => query.refetch()}
-          disabled={query.isFetching}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-        >
-          Retry
-        </button>
-      </div>
-    );
+  // its unsaved changes, and the error toast still reports the failure. A retry
+  // in flight falls through to the loading view.
+  if (query.isError && cls === undefined && !query.isFetching)
+    return <LoadError message="Failed to load class." onRetry={() => query.refetch()} />;
 
   // Wait for auth to hydrate as well as the class. The GET can resolve before
   // `user` and `isAdmin` arrive, and judging edit rights then would turn away a
   // real owner or admin.
-  if (authLoading || cls === undefined)
-    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  if (authLoading || cls === undefined) return <LoadingState />;
 
   const canEdit =
     (cls.contentSource === 'homebrew' && cls.createdById === user?.userId) ||
@@ -107,7 +97,7 @@ export default function EditClassPage() {
       <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-6">Edit Class</h1>
       <ClassForm
         initial={cls}
-        submitting={mutation.isPending}
+        submitting={mutation.isPending || mutation.isSuccess}
         submitLabel="Save changes"
         onSubmit={payload => mutation.mutate(payload)}
         onCancel={() => router.back()}

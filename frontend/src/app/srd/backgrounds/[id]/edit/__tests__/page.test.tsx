@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { toast } from 'sonner';
 import EditBackgroundPage from '../page';
+import { invalidateApiPath } from '@/lib/query';
 import type { SrdBackground } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
@@ -59,6 +62,14 @@ const ownBackground: SrdBackground = {
   createdById: 'u1',
 };
 
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+  return { client, ...render(<EditBackgroundPage />, { wrapper }) };
+}
+
 describe('EditBackgroundPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -87,15 +98,15 @@ describe('EditBackgroundPage', () => {
       user: null,
     });
 
-    render(<EditBackgroundPage />);
+    renderPage();
 
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/srd/backgrounds/bg-hb'));
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     expect(screen.queryByText(/only edit your own/)).not.toBeInTheDocument();
   });
 
   it('loads the background and prefills the form for its owner', async () => {
-    render(<EditBackgroundPage />);
+    renderPage();
 
     expect(await screen.findByDisplayValue('Gravedigger')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Alert')).toBeInTheDocument();
@@ -104,7 +115,7 @@ describe('EditBackgroundPage', () => {
   it('treats a 200 null response as not-found instead of an empty editable form (VEG-317)', async () => {
     mockApiFetch.mockResolvedValue(null);
 
-    render(<EditBackgroundPage />);
+    renderPage();
 
     expect(await screen.findByText('Failed to load background.')).toBeInTheDocument();
     expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
@@ -117,7 +128,7 @@ describe('EditBackgroundPage', () => {
       createdById: null,
     });
 
-    render(<EditBackgroundPage />);
+    renderPage();
 
     expect(await screen.findByText(/only edit your own homebrew backgrounds/)).toBeInTheDocument();
   });
@@ -125,7 +136,7 @@ describe('EditBackgroundPage', () => {
   it("denies editing another user's homebrew", async () => {
     mockApiFetch.mockResolvedValue({ ...ownBackground, createdById: 'someone-else' });
 
-    render(<EditBackgroundPage />);
+    renderPage();
 
     expect(await screen.findByText(/only edit your own homebrew backgrounds/)).toBeInTheDocument();
   });
@@ -143,7 +154,7 @@ describe('EditBackgroundPage', () => {
       createdById: 'other-admin',
     });
 
-    render(<EditBackgroundPage />);
+    renderPage();
 
     expect(await screen.findByDisplayValue('Gravedigger')).toBeInTheDocument();
   });
@@ -151,7 +162,7 @@ describe('EditBackgroundPage', () => {
   it('PATCHes the edited fields and redirects to the list', async () => {
     const user = userEvent.setup();
 
-    render(<EditBackgroundPage />);
+    renderPage();
     await screen.findByDisplayValue('Gravedigger');
 
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Exhumer' } });
@@ -175,7 +186,7 @@ describe('EditBackgroundPage', () => {
   it('toasts the API error message and stays on the page', async () => {
     const user = userEvent.setup();
 
-    render(<EditBackgroundPage />);
+    renderPage();
     await screen.findByDisplayValue('Gravedigger');
 
     mockApiFetch.mockRejectedValue(new Error('Origin feat not found or not accessible'));
@@ -190,7 +201,7 @@ describe('EditBackgroundPage', () => {
   it('offers a retry after a failed load', async () => {
     mockApiFetch.mockRejectedValueOnce(new Error('network down'));
 
-    render(<EditBackgroundPage />);
+    renderPage();
 
     expect(await screen.findByText('Failed to load background.')).toBeInTheDocument();
 
@@ -199,5 +210,55 @@ describe('EditBackgroundPage', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }));
 
     expect(await screen.findByDisplayValue('Gravedigger')).toBeInTheDocument();
+  });
+
+  it('invalidates the cached background lists after a save', async () => {
+    const user = userEvent.setup();
+
+    renderPage();
+    await screen.findByDisplayValue('Gravedigger');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/backgrounds'));
+    expect(invalidateApiPath).toHaveBeenCalledWith(expect.anything(), '/srd/backgrounds');
+  });
+
+  it('keeps Save disabled after a successful save so a second click cannot re-PATCH', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue(ownBackground);
+
+    renderPage();
+    await screen.findByLabelText(/^Name/);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/backgrounds'));
+
+    const save = screen.getByRole('button', { name: 'Saving...' });
+    expect(save).toBeDisabled();
+    await user.click(save);
+    expect(mockApiFetch.mock.calls.filter(c => c[1]?.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('shows the loading state, not the error, while a retry is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch
+      .mockRejectedValueOnce(new Error('network'))
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('shows the loading state while a retry after a null response is in flight', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(null).mockReturnValueOnce(new Promise(() => {}));
+
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

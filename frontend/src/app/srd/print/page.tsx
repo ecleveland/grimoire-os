@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
+import { apiQueryKey } from '@/lib/query';
 import { usePrintTray } from '@/lib/print-tray-context';
 import type {
   HydratePrintableCardsResponse,
   PrintableCard,
-  PrintableCardGroup,
   PrintableCardType,
 } from '@grimoire-os/shared';
 import PrintMonsterCard from '@/components/PrintMonsterCard';
@@ -16,6 +17,8 @@ import PrintSpellCard from '@/components/PrintSpellCard';
 import PrintItemCard from '@/components/PrintItemCard';
 import PrintFeatureCard from '@/components/PrintFeatureCard';
 import PrintTraitsCard from '@/components/PrintTraitsCard';
+import LoadError from '@/components/LoadError';
+import LoadingState from '@/components/LoadingState';
 
 type PaperSize = 'letter' | 'a4';
 
@@ -57,6 +60,10 @@ function printPageCss(paper: PaperSize): string {
 `;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Failed to load print cards';
+}
+
 /** Dispatch one hydrated card view-model to its card component. */
 function CardForType({ card }: { card: PrintableCard }) {
   switch (card.type) {
@@ -85,42 +92,40 @@ function CardForType({ card }: { card: PrintableCard }) {
 
 export default function SrdPrintPage() {
   const { grouped, count, hydrated } = usePrintTray();
-  const [groups, setGroups] = useState<PrintableCardGroup[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [paper, setPaper] = useState<PaperSize>('letter');
-  // Bumped by "Try again" to re-run the hydrate effect after a failure.
-  const [attempt, setAttempt] = useState(0);
 
-  useEffect(() => {
-    // Wait for the tray's localStorage hydration: until then an empty
-    // selection means "don't know yet", not "nothing to print".
-    if (!hydrated || grouped.length === 0) return;
-    let cancelled = false;
-    apiFetch<HydratePrintableCardsResponse>('/srd/cards', {
-      method: 'POST',
-      body: JSON.stringify({ selections: grouped }),
-    })
-      .then(response => {
-        if (cancelled) return;
+  // The hydrate call is a POST, so `useApiQuery` can't make it. The selection
+  // rides in the key, which refetches whenever the tray changes.
+  const query = useQuery<HydratePrintableCardsResponse>({
+    queryKey: [...apiQueryKey('/srd/cards'), grouped],
+    queryFn: async () => {
+      try {
+        const response = await apiFetch<HydratePrintableCardsResponse>('/srd/cards', {
+          method: 'POST',
+          body: JSON.stringify({ selections: grouped }),
+        });
         if (response.groups.length === 0) {
           // A 200 with everything dropped is indistinguishable from stale
           // ids — log it so a backend regression here isn't silent.
           console.error('Print card hydrate returned no cards for selections:', grouped);
         }
-        setGroups(response.groups);
-        setError(null);
-      })
-      .catch(err => {
-        if (cancelled) return;
+        return response;
+      } catch (err) {
         console.error('Failed to hydrate print cards:', err);
-        const message = err instanceof Error ? err.message : 'Failed to load print cards';
-        setError(message);
-        toast.error(message);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [grouped, hydrated, attempt]);
+        toast.error(errorMessage(err));
+        throw err;
+      }
+    },
+    // Wait for the tray's localStorage hydration: until then an empty
+    // selection means "don't know yet", not "nothing to print".
+    enabled: hydrated && grouped.length > 0,
+    // One attempt per click, so each failure toasts once and the retry button
+    // stays in the user's hands.
+    retry: false,
+    // The cards must reflect edits and deletes made on other pages.
+    staleTime: 0,
+  });
+  const groups = query.data?.groups;
 
   if (hydrated && count === 0) {
     return (
@@ -142,28 +147,14 @@ export default function SrdPrintPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="text-center py-16">
-        <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
-        <button
-          type="button"
-          onClick={() => {
-            // Reset to the loading state, then re-arm the hydrate effect.
-            setError(null);
-            setGroups(null);
-            setAttempt(a => a + 1);
-          }}
-          className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-        >
-          Try again
-        </button>
-      </div>
-    );
+  // A retry in flight falls through to the loading view rather than leaving
+  // the stale error on screen.
+  if (query.isError && !query.isFetching) {
+    return <LoadError message={errorMessage(query.error)} onRetry={() => query.refetch()} />;
   }
 
   if (!hydrated || !groups) {
-    return <p className="text-center py-16 text-gray-600 dark:text-gray-400">Loading print set…</p>;
+    return <LoadingState label="Loading print set…" className="text-center py-16" />;
   }
 
   if (groups.length === 0) {
