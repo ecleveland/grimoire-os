@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import {
   DUPLICATE_FEATURE_MESSAGE,
   assertNoDuplicateFeatures,
@@ -17,31 +17,74 @@ import {
  * own decisions directly.
  */
 
-function knownError(code: string, target?: string[]): Prisma.PrismaClientKnownRequestError {
+/** A known request error shaped the way the pg driver adapter reports a violated index. */
+function knownError(code: string, index?: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Prisma failure', {
     code,
     clientVersion: 'test',
-    meta: target ? { target } : undefined,
+    meta: index
+      ? {
+          driverAdapterError: {
+            name: 'DriverAdapterError',
+            cause: { kind: 'UniqueConstraintViolation', constraint: { index } },
+          },
+        }
+      : undefined,
   });
 }
 
 describe('isFeatureConflict', () => {
-  // The two targets Prisma reports for a duplicate feature, one per table.
-  it.each([[['subclassId', 'name', 'level']], [['classId', 'name', 'level']]])(
+  // The two indexes Postgres names for a duplicate feature, one per table.
+  it.each(['subclass_features_subclassId_name_level_key', 'class_features_classId_name_level_key'])(
     'recognizes a unique violation on the feature index %p',
-    target => {
-      expect(isFeatureConflict(knownError('P2002', target))).toBe(true);
+    index => {
+      expect(isFeatureConflict(knownError('P2002', index))).toBe(true);
     }
   );
 
-  // The homebrew subclass name index. Reading this as a feature conflict would
-  // tell an author their features collide when their subclass name does.
-  it('does not claim a duplicate parent name', () => {
-    expect(isFeatureConflict(knownError('P2002', ['name', 'createdById', 'classId']))).toBe(false);
+  // The parent-name indexes. Reading one as a feature conflict would tell an
+  // author their features collide when their class or subclass name does.
+  it.each([
+    'subclasses_homebrew_owner_name_key',
+    'srd_classes_homebrew_owner_name_key',
+    'srd_classes_srd_name_key',
+  ])('does not claim a duplicate parent name on %p', index => {
+    expect(isFeatureConflict(knownError('P2002', index))).toBe(false);
   });
 
-  it('does not claim a different error code that happens to carry a level target', () => {
-    expect(isFeatureConflict(knownError('P2001', ['subclassId', 'name', 'level']))).toBe(false);
+  it('does not claim a different error code that happens to name a feature index', () => {
+    expect(
+      isFeatureConflict(knownError('P2001', 'subclass_features_subclassId_name_level_key'))
+    ).toBe(false);
+  });
+
+  // The adapter's typings also allow a column list in place of the index name.
+  function fieldsError(fields: string[]): Prisma.PrismaClientKnownRequestError {
+    return new Prisma.PrismaClientKnownRequestError('Prisma failure', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: {
+        driverAdapterError: {
+          name: 'DriverAdapterError',
+          cause: { kind: 'UniqueConstraintViolation', constraint: { fields } },
+        },
+      },
+    });
+  }
+
+  it.each([[['classId', 'name', 'level']], [['subclassId', 'name', 'level']]])(
+    'recognizes a feature violation reported as the column list %p',
+    fields => {
+      expect(isFeatureConflict(fieldsError(fields))).toBe(true);
+    }
+  );
+
+  it('does not claim a parent-name violation reported as a column list', () => {
+    expect(isFeatureConflict(fieldsError(['name', 'createdById', 'classId']))).toBe(false);
+  });
+
+  it('does not claim a unique violation that names no constraint', () => {
+    expect(isFeatureConflict(knownError('P2002'))).toBe(false);
   });
 
   it('does not claim an error that is not a Prisma known error', () => {
@@ -186,7 +229,9 @@ describe('replaceFeatures', () => {
 
   it('turns a level-keyed unique violation into the feature conflict', async () => {
     const children = makeChildren();
-    children.createMany.mockRejectedValue(knownError('P2002', ['subclassId', 'name', 'level']));
+    children.createMany.mockRejectedValue(
+      knownError('P2002', 'subclass_features_subclassId_name_level_key')
+    );
 
     const err = await replaceFeatures(children, 'subclassId', 'sc1', ROWS).catch((e: unknown) => e);
 
@@ -195,7 +240,10 @@ describe('replaceFeatures', () => {
   });
 
   it.each([
-    ['a unique violation on another index', knownError('P2002', ['name', 'createdById'])],
+    [
+      'a unique violation on another index',
+      knownError('P2002', 'subclasses_homebrew_owner_name_key'),
+    ],
     ['a different Prisma error', knownError('P2003')],
     ['a plain error', new Error('connection reset')],
   ])('rethrows %s untouched', async (_label, failure) => {

@@ -19,6 +19,10 @@ import {
 import { ContentAccessService } from '../../src/srd/content-access.service';
 import { SrdService } from '../../src/srd/srd.service';
 import { catalogNameWhere } from '../../src/srd/resolve-catalog-ref';
+import type { ArgumentsHost } from '@nestjs/common';
+import { AllExceptionsFilter } from '../../src/common/filters/all-exceptions.filter';
+import { violatedConstraint } from '../../src/common/helpers/prisma-errors';
+import { Prisma } from '../../src/generated/prisma/client';
 
 const HOMEBREW_LABEL = 'Homebrew';
 
@@ -146,7 +150,55 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
             source: HOMEBREW_LABEL,
           },
         })
-      ).rejects.toThrow(/Unique constraint failed on the fields: \(`name`,`createdById`\)/);
+      ).rejects.toThrow(
+        /Unique constraint failed on the constraint: `srd_classes_homebrew_owner_name_key`/
+      );
+    });
+
+    // The driver adapter reports the index name, not the columns. This pins the
+    // real error's shape end to end: the helper reads it, the filter logs it,
+    // and the client gets fixed copy without it.
+    it('reports the violated partial index through the helper and the filter', async () => {
+      const err = await ctx.prisma.srdClass
+        .create({
+          data: {
+            name: srdClassName,
+            hitDie: 'd10',
+            contentSource: 'homebrew',
+            createdById: userId,
+            source: HOMEBREW_LABEL,
+          },
+        })
+        .then(() => null)
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      const known = err as Prisma.PrismaClientKnownRequestError;
+      expect(known.code).toBe('P2002');
+      expect(violatedConstraint(known)).toBe('srd_classes_homebrew_owner_name_key');
+
+      const json = jest.fn();
+      const host = {
+        switchToHttp: () => ({
+          getResponse: () => ({ status: () => ({ json }) }),
+          getRequest: () => ({ url: '/api/srd/classes', method: 'POST' }),
+        }),
+      } as unknown as ArgumentsHost;
+      const filter = new AllExceptionsFilter();
+      const warn = jest
+        .spyOn((filter as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+        .mockImplementation(() => undefined);
+      filter.catch(known, host);
+
+      expect(json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 409,
+          message: 'A record with these values already exists',
+        })
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('srd_classes_homebrew_owner_name_key')
+      );
     });
 
     it('still keeps SRD class names globally unique', async () => {
@@ -154,7 +206,7 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
         ctx.prisma.srdClass.create({
           data: { name: srdClassName, hitDie: 'd12', contentSource: 'srd' },
         })
-      ).rejects.toThrow(/Unique constraint failed on the fields: \(`name`\)/);
+      ).rejects.toThrow(/Unique constraint failed on the constraint: `srd_classes_srd_name_key`/);
     });
 
     it('scopes the homebrew subclass index by parent class as well as owner', async () => {
@@ -193,7 +245,7 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
 
       // Twice under the SAME parent is not.
       await expect(prisma.subclass.create({ data: { ...shared, classId: a.id } })).rejects.toThrow(
-        /Unique constraint failed on the fields: \(`name`,`createdById`,`classId`\)/
+        /Unique constraint failed on the constraint: `subclasses_homebrew_owner_name_key`/
       );
     });
   });
@@ -305,7 +357,7 @@ describe('class content-source tiering — real DB (VEG-505)', () => {
         ctx.prisma.subclass.create({
           data: { name: existing.name, classId: srdClassId, contentSource: 'srd' },
         })
-      ).rejects.toThrow(/Unique constraint failed on the fields: \(`name`\)/);
+      ).rejects.toThrow(/Unique constraint failed on the constraint: `subclasses_srd_name_key`/);
     });
   });
 

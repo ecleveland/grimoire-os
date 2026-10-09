@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { HomebrewClassesService } from './homebrew-classes.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -31,11 +31,17 @@ function p2003(): Prisma.PrismaClientKnownRequestError {
   });
 }
 
-function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
+/** A unique violation shaped the way the pg driver adapter reports it, by index name. */
+function p2002(index: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002',
     clientVersion: 'test',
-    meta: { target },
+    meta: {
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: { kind: 'UniqueConstraintViolation', constraint: { index } },
+      },
+    },
   });
 }
 
@@ -481,7 +487,9 @@ describe('HomebrewClassesService', () => {
     });
 
     it('reports a duplicate feature as a feature conflict, not a duplicate class name', async () => {
-      prisma.classFeature.createMany.mockRejectedValue(p2002(['classId', 'name', 'level']));
+      prisma.classFeature.createMany.mockRejectedValue(
+        p2002('class_features_classId_name_level_key')
+      );
 
       await expect(
         service.update('c1', { features: [{ name: 'Rage', level: 1 }] }, OWNER)
@@ -489,7 +497,7 @@ describe('HomebrewClassesService', () => {
     });
 
     it('still maps a duplicate class name to the class-level conflict copy', async () => {
-      prisma.srdClass.update.mockRejectedValue(p2002(['name']));
+      prisma.srdClass.update.mockRejectedValue(p2002('srd_classes_homebrew_owner_name_key'));
 
       await expect(service.update('c1', { name: 'Fighter' }, OWNER)).rejects.toThrow(
         /class with this name/i

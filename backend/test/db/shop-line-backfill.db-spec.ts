@@ -9,7 +9,7 @@
 // is what lets the service drop the exemption. This spec runs that migration's
 // real SQL against real rows, because the mocked unit suite cannot model a
 // value that is already persisted.
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '../../src/generated/prisma/client';
 import type { Currency, ShopLineItem } from '@grimoire-os/shared';
 import {
   applyMigration,

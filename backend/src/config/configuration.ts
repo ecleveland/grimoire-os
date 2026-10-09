@@ -1,3 +1,5 @@
+import databaseConfig from './database.config';
+
 export default () => {
   if (!process.env.JWT_SECRET) {
     throw new Error('JWT_SECRET environment variable must be set');
@@ -5,9 +7,7 @@ export default () => {
 
   return {
     port: parseInt(process.env.PORT ?? '3001', 10),
-    database: {
-      url: process.env.DATABASE_URL || 'postgresql://grimoire:grimoire@localhost:5432/grimoire_os',
-    },
+    database: databaseConfig(),
     auth: {
       jwtSecret: process.env.JWT_SECRET,
       jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',

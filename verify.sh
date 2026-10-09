@@ -21,6 +21,9 @@ cd "$ROOT_DIR" && bash e2e/stack-env.test.sh
 echo "==> Building @grimoire-os/shared"
 cd "$ROOT_DIR/shared" && npm run build
 
+echo "==> Generating Prisma client"
+cd "$ROOT_DIR/backend" && npx prisma generate
+
 echo "==> Linting backend"
 cd "$ROOT_DIR/backend" && npm run lint:check
 

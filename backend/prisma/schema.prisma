@@ -1,12 +1,15 @@
 datasource db {
   provider   = "postgresql"
-  url        = env("DATABASE_URL")
   extensions = [pg_trgm]
 }
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // Extensionless relative imports, so ts-node (seed, backfill) and ts-jest resolve the generated .ts files.
+  importFileExtension = ""
+  previewFeatures     = ["postgresqlExtensions"]
 }
 
 // ── Enums ──────────────────────────────────────────────

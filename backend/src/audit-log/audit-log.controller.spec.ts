@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { AuditAction } from '@prisma/client';
+import { AuditAction } from '../generated/prisma/client';
 import { AuditLogController } from './audit-log.controller';
 import { AuditLogService } from './audit-log.service';
 

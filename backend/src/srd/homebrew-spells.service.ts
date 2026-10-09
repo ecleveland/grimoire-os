@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Spell } from '@prisma/client';
+import { Spell } from '../generated/prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateSpellDto } from './dto/create-spell.dto';
 import { UpdateSpellDto } from './dto/update-spell.dto';

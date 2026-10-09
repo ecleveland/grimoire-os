@@ -26,6 +26,7 @@ import {
   type SeedContext,
 } from './db-harness';
 import { SrdService } from '../../src/srd/srd.service';
+import { DUPLICATE_FEATURE_MESSAGE } from '../../src/srd/feature-rows';
 import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
 
@@ -192,7 +193,9 @@ describe('class features — real DB (VEG-507)', () => {
             description: '',
           },
         })
-      ).rejects.toThrow(/Unique constraint failed on the fields: \(`classId`,`name`,`level`\)/);
+      ).rejects.toThrow(
+        /Unique constraint failed on the constraint: `class_features_classId_name_level_key`/
+      );
     });
 
     it('scopes the key to one class — two classes may each name a feature the same', async () => {
@@ -231,7 +234,7 @@ describe('class features — real DB (VEG-507)', () => {
             data: { subclassId, name: 'Veg507 Recurring', level: 3, description: '' },
           })
         ).rejects.toThrow(
-          /Unique constraint failed on the fields: \(`subclassId`,`name`,`level`\)/
+          /Unique constraint failed on the constraint: `subclass_features_subclassId_name_level_key`/
         );
       } finally {
         await ctx.prisma.subclassFeature.deleteMany({ where: { id: { in: rows.map(r => r.id) } } });
@@ -494,7 +497,7 @@ describe('class features — real DB (VEG-507)', () => {
           },
           owner
         )
-      ).rejects.toThrow(/feature/i);
+      ).rejects.toThrow(DUPLICATE_FEATURE_MESSAGE);
 
       const after = await ctx.prisma.srdClass.findUniqueOrThrow({
         where: { id: cls.id },

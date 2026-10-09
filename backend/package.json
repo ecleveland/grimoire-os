@@ -13,9 +13,10 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "test:db": "jest --config test/db/jest-db.config.js --runInBand",
+    "test:db": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config test/db/jest-db.config.js --runInBand",
     "seed": "ts-node -r tsconfig-paths/register src/seed/run-seed.ts",
     "backfill:npc-statblocks": "ts-node -r tsconfig-paths/register src/npcs/run-npc-statblock-backfill.ts",
+    "postinstall": "prisma generate",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
@@ -33,13 +34,15 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.2.6",
     "@nestjs/throttler": "^6.5.0",
-    "@prisma/client": "^6.5.0",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
     "bcryptjs": "^3.0.3",
     "cache-manager": "^6.4.3",
     "cacheable": "^2.3.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
+    "dotenv": "^18.0.6",
     "helmet": "^8.1.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
@@ -64,7 +67,7 @@
     "globals": "^16.0.0",
     "jest": "^30.0.0",
     "prettier": "^3.4.2",
-    "prisma": "^6.5.0",
+    "prisma": "7.10.0",
     "source-map-support": "^0.5.21",
     "supertest": "^7.3.1",
     "ts-jest": "^29.2.5",
@@ -97,9 +100,14 @@
         "lines": 90
       }
     },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/generated/"
+    ]
   },
   "overrides": {
-    "deepmerge-ts": "^8.0.2"
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.5"
   }
 }

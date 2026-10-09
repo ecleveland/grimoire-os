@@ -26,6 +26,7 @@ jobs:
       - name: Install shared deps (prepare builds dist)
         working-directory: shared
         run: npm ci
+      # npm ci runs the backend's postinstall, which generates the Prisma client.
       - name: Install backend deps
         working-directory: backend
         run: npm ci
@@ -34,9 +35,6 @@ jobs:
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci
-      - name: Generate Prisma client
-        working-directory: backend
-        run: npx prisma generate
       - name: Lint
         working-directory: backend
         run: npm run lint:check
@@ -128,9 +126,6 @@ jobs:
       - name: Install backend deps
         working-directory: backend
         run: npm ci
-      - name: Generate Prisma client
-        working-directory: backend
-        run: npx prisma generate
       # global-setup provisions + migrates grimoire_os_seedtest; the service
       # container already created the empty database.
       - name: Seed idempotency (real DB) tests
@@ -237,7 +232,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|backend/prisma\.config\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"

@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { priceFromCost } from '@grimoire-os/shared';
 import type { ShopLineItem } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';

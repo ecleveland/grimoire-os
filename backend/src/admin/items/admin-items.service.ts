@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Item, Prisma } from '@prisma/client';
+import { Item, Prisma } from '../../generated/prisma/client';
 import { ContentActor } from '../../srd/content-access.service';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from '../../srd/content-crud.base';
 import { mapWriteError, toItemColumnData } from '../../srd/homebrew-write.helpers';

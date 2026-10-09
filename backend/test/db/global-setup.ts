@@ -4,7 +4,8 @@
 // manual createdb/migrate — locally (compose Postgres on 5432) and in CI (a
 // `services: postgres` container).
 import { execSync } from 'node:child_process';
-import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../../src/generated/prisma/client';
 import { assertTestDatabaseUrl, resolveTestDatabaseUrl } from './test-db-env';
 
 export default async function globalSetup(): Promise<void> {
@@ -17,7 +18,9 @@ export default async function globalSetup(): Promise<void> {
   // transaction, so it goes through $executeRawUnsafe.
   const adminUrl = new URL(url);
   adminUrl.pathname = '/postgres';
-  const admin = new PrismaClient({ datasources: { db: { url: adminUrl.toString() } } });
+  const admin = new PrismaClient({
+    adapter: new PrismaPg({ connectionString: adminUrl.toString() }),
+  });
   try {
     const existing = await admin.$queryRawUnsafe<Array<{ exists: number }>>(
       'SELECT 1 AS exists FROM pg_database WHERE datname = $1',

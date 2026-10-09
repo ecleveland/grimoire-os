@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { HomebrewSubclassesService } from './homebrew-subclasses.service';
 import { ContentAccessService } from './content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,11 +25,17 @@ function makeCreateDto(over: Partial<CreateSubclassDto> = {}): CreateSubclassDto
   return { name: 'Path of Ash', classId: CLASS_ID, ...over };
 }
 
-function p2002(target: string[]): Prisma.PrismaClientKnownRequestError {
+/** A unique violation shaped the way the pg driver adapter reports it, by index name. */
+function p2002(index: string): Prisma.PrismaClientKnownRequestError {
   return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
     code: 'P2002',
     clientVersion: 'test',
-    meta: { target },
+    meta: {
+      driverAdapterError: {
+        name: 'DriverAdapterError',
+        cause: { kind: 'UniqueConstraintViolation', constraint: { index } },
+      },
+    },
   });
 }
 
@@ -441,7 +447,9 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('reports a duplicate feature as a feature conflict, not a duplicate subclass name', async () => {
-      prisma.subclassFeature.createMany.mockRejectedValue(p2002(['subclassId', 'name', 'level']));
+      prisma.subclassFeature.createMany.mockRejectedValue(
+        p2002('subclass_features_subclassId_name_level_key')
+      );
 
       await expect(
         service.update('sc1', { features: [{ name: 'Ashen Step', level: 3 }] }, OWNER)
@@ -449,7 +457,7 @@ describe('HomebrewSubclassesService', () => {
     });
 
     it('still maps a duplicate subclass name to the subclass-level conflict copy', async () => {
-      prisma.subclass.update.mockRejectedValue(p2002(['name', 'createdById', 'classId']));
+      prisma.subclass.update.mockRejectedValue(p2002('subclasses_homebrew_owner_name_key'));
 
       await expect(service.update('sc1', { name: 'Berserker' }, OWNER)).rejects.toThrow(
         /subclass with this name/i

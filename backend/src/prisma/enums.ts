@@ -2,7 +2,7 @@ import {
   Role as PrismaRole,
   CampaignStatus as PrismaCampaignStatus,
   NoteVisibility as PrismaNoteVisibility,
-} from '@prisma/client';
+} from '../generated/prisma/client';
 
 // Re-export shared types for use across the backend.
 // The const objects provide uppercase key access (e.g., UserRole.ADMIN)

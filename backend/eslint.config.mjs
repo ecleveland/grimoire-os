@@ -136,7 +136,7 @@ const escapingRules = [
 
 export default tseslint.config(
   {
-    ignores: ['eslint.config.mjs', 'dist/**'],
+    ignores: ['eslint.config.mjs', 'dist/**', 'src/generated/**'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

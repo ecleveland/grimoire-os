@@ -12,7 +12,7 @@
 // shop-line-backfill.db-spec covers it. The retired-item update cases and the
 // purchase cases below write the id straight through Prisma to model one that
 // changed under a stocked line, such as a deleted item.
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '../../src/generated/prisma/client';
 import type { Currency, InventoryItem, ShopLineItem } from '@grimoire-os/shared';
 import {
   createSeedContext,

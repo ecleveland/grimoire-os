@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { AdminItemsService } from './admin-items.service';
 import { ContentAccessService } from '../../srd/content-access.service';
 import { PrismaService } from '../../prisma/prisma.service';

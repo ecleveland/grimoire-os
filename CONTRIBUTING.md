@@ -54,9 +54,12 @@ cd frontend && npm test     # Frontend unit tests
 ```bash
 cd backend
 npx prisma migrate dev      # Run migrations
+npx prisma generate         # Regenerate the Prisma client
 npx prisma studio           # Visual database browser
 npm run seed                # Seed SRD reference data
 ```
+
+After you change `prisma/schema.prisma`, run `npx prisma migrate dev` and then `npx prisma generate`. Prisma 7's `migrate dev` no longer regenerates the client or runs the seed, so both are separate steps.
 
 ## Coding Standards
 

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Feat, Prisma } from '@prisma/client';
+import { Feat, Prisma } from '../generated/prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { CreateFeatDto } from './dto/create-feat.dto';
 import { UpdateFeatDto } from './dto/update-feat.dto';

@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
+import { violatedConstraint, violatedFields } from '../common/helpers/prisma-errors';
 import { classFeatureIdentity } from '@grimoire-os/shared';
 import { ColumnData } from './content-crud.base';
 import { ClassFeatureDto } from './dto/create-class.dto';
@@ -49,18 +50,20 @@ export function takeFeatures(data: ColumnData): FeatureRow[] | undefined {
  * Whether a Prisma error is a unique violation on a feature table's index
  * rather than on the parent's name.
  *
- * `level` is the discriminator because none of the parent-name indexes carry it:
- * the partial uniques on `srd_classes` and `subclasses` key on `name`,
- * `createdById` and (for a subclass) `classId`, while the feature
- * tables key on `[parentId, name, level]`. Prisma reports the field names rather
- * than the index name. Verified against a live Postgres, where the duplicate
- * raises `meta.target = ['classId','name','level']`, so this reads the same list
- * the unit specs construct.
+ * The driver adapter reports the violated index by name, and Prisma names every
+ * index `<table>_<columns>_key`, so the table prefix is the discriminator. The
+ * feature tables' `[parentId, name, level]` keys therefore start with
+ * `class_features_` or `subclass_features_`, while every parent-name index,
+ * generated or hand-written, starts with `srd_classes_` or `subclasses_`.
+ * Verified against a live Postgres in `test/db/class-features.db-spec.ts`.
+ *
+ * When the adapter reports the columns instead of an index name, `level` is
+ * the discriminator, because none of the parent-name indexes carry it.
  */
 export function isFeatureConflict(err: unknown): boolean {
   if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
-  const target = (err.meta as { target?: unknown } | undefined)?.target;
-  return Array.isArray(target) && target.includes('level');
+  if (violatedFields(err)?.includes('level')) return true;
+  return /^(class|subclass)_features_/.test(violatedConstraint(err) ?? '');
 }
 
 /**

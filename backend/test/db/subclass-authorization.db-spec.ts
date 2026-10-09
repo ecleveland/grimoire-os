@@ -21,13 +21,14 @@
 // 5. Two overlapping features-only updates on one subclass, interleaved on
 //    purpose, which must end with one list or the other and never both.
 import { createSeedContext, noopCache, teardownSeedContext, type SeedContext } from './db-harness';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../src/generated/prisma/client';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SrdService } from '../../src/srd/srd.service';
 import { HomebrewClassesService } from '../../src/srd/homebrew-classes.service';
 import { HomebrewSubclassesService } from '../../src/srd/homebrew-subclasses.service';
 import { ContentAccessService } from '../../src/srd/content-access.service';
 import { UsersService, isConcurrentWriteConflict } from '../../src/users/users.service';
+import { sqlStateOf } from '../../src/common/helpers/prisma-errors';
 import { HOMEBREW_SOURCE_LABEL, SHARED_SOURCE_LABEL } from '../../src/srd/homebrew-write.helpers';
 import type { RefreshTokenService } from '../../src/auth/refresh-token.service';
 import type { PrismaService } from '../../src/prisma/prisma.service';
@@ -423,13 +424,12 @@ describe('homebrew subclass authorization, real DB (VEG-509)', () => {
         .then(() => null)
         .catch((e: unknown) => e);
 
-      // Postgres 16 through Prisma 6.19.2. SQLSTATE 23514 arrives with no
-      // Prisma error code at all, so anything keyed on a code (P2004 among
-      // them) would miss it. The SQLSTATE and the constraint name survive only
-      // in the message text.
-      expect(err).toBeInstanceOf(Prisma.PrismaClientUnknownRequestError);
-      expect(err).not.toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
-      expect((err as { code?: unknown }).code).toBeUndefined();
+      // Postgres 16 through the pg driver adapter. SQLSTATE 23514 arrives under
+      // a generic code shared with deadlocks and timeouts, so anything keyed on
+      // a code (P2004 among them) would miss it. The SQLSTATE survives in the
+      // adapter's cause and the constraint name in the message text.
+      expect(err).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+      expect(sqlStateOf(err as Prisma.PrismaClientKnownRequestError)).toBe('23514');
       expect((err as Error).message).toContain('23514');
       expect((err as Error).message).toContain('subclasses_homebrew_has_creator_check');
       expect(isConcurrentWriteConflict(err)).toBe(true);

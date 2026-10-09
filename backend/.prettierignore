@@ -1,0 +1,3 @@
+# Prettier reads ignore files from the working directory, and the backend's
+# format scripts run from here, so the repo-root .prettierignore does not apply.
+src/generated

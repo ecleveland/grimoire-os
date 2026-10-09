@@ -6,7 +6,7 @@
 // stranger's. The write boundary refuses both, because every campaign member
 // reads the encounter and only the owner can read a homebrew item. Ids already
 // stored on an encounter are grandfathered, so a pre-rule row stays saveable.
-import type { Prisma } from '@prisma/client';
+import type { Prisma } from '../../src/generated/prisma/client';
 import type { Combatant } from '@grimoire-os/shared';
 import {
   createSeedContext,

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Item } from '@prisma/client';
+import { Item } from '../generated/prisma/client';
 import { ColumnData, ContentCrudService, ContentWriteDelegate } from './content-crud.base';
 import { toItemColumnData } from './homebrew-write.helpers';
 import { CreateItemDto } from './dto/create-item.dto';

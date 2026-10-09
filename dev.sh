@@ -45,8 +45,11 @@ echo "PostgreSQL is ready."
 echo "Building shared package..."
 cd "$ROOT_DIR/shared" && npm run build
 
+echo "Generating Prisma client..."
+cd "$ROOT_DIR/backend" && npx prisma generate
+
 echo "Running Prisma migrations..."
-cd "$ROOT_DIR/backend" && npx prisma migrate dev --skip-generate
+cd "$ROOT_DIR/backend" && npx prisma migrate dev
 
 echo "Seeding SRD data (idempotent)..."
 cd "$ROOT_DIR/backend" && npm run seed

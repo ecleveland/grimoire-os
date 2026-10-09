@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LOOT_GAME_RULE_CATEGORY, resolveLootGameRules } from '../../loot/loot-game-rules';
 import { LootGameRules } from '../../loot/loot.types';

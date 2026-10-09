@@ -1,5 +1,5 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { mapWriteError } from './homebrew-write.helpers';
 
 function prismaError(code: string): Prisma.PrismaClientKnownRequestError {

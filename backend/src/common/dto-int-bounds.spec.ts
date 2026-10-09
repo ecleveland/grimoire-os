@@ -1,4 +1,5 @@
-import { Prisma } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '../generated/prisma/client';
 import { getMetadataStorage } from 'class-validator';
 import { CreateCampaignDto } from '../campaigns/dto/create-campaign.dto';
 import { CreateCharacterDto } from '../characters/dto/create-character.dto';
@@ -39,8 +40,25 @@ const GUARDED: ReadonlyArray<readonly [new () => object, string]> = [
 /** `@IsInt` alone still lets an out-of-int4 integer through, so bounds count too. */
 const REQUIRED = ['isInt', 'min', 'max'] as const;
 
+type RuntimeField = { name: string; kind: string; type: string };
+
+/**
+ * Prisma 7 removed `Prisma.dmmf`, so the field list comes from
+ * `_runtimeDataModel`, an internal a client instance carries. The first test
+ * below fails loudly if a Prisma upgrade renames or reshapes it. The client
+ * only connects on its first query, so the placeholder URL is never dialled.
+ */
+const runtimeModels =
+  (
+    new PrismaClient({
+      adapter: new PrismaPg({ connectionString: 'postgresql://unused' }),
+    }) as unknown as {
+      _runtimeDataModel?: { models?: Record<string, { fields: RuntimeField[] } | undefined> };
+    }
+  )._runtimeDataModel?.models ?? {};
+
 function intColumnsOf(model: string): string[] {
-  const found = Prisma.dmmf.datamodel.models.find(m => m.name === model);
+  const found = runtimeModels[model];
   if (!found) return [];
   return found.fields.filter(f => f.kind === 'scalar' && f.type === 'Int').map(f => f.name);
 }
@@ -63,6 +81,12 @@ describe('Int-backed DTO fields are bounded at the write boundary', () => {
   // A guard that silently checks nothing is worse than no guard: if the Prisma
   // client is stale or ungenerated the DMMF lookup returns nothing, every
   // intersection below comes out empty, and the real assertion passes vacuously.
+  it('reads field types from the client runtime data model', () => {
+    expect(runtimeModels.User?.fields).toEqual(
+      expect.arrayContaining([{ name: 'username', kind: 'scalar', type: 'String' }])
+    );
+  });
+
   it.each([...new Set(GUARDED.map(([, model]) => model))])(
     'resolves %s in the generated Prisma schema',
     model => {
