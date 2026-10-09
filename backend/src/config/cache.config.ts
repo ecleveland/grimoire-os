@@ -1,5 +1,5 @@
 import { createKeyv } from 'cacheable';
-import { Keyv } from 'keyv';
+import type { Keyv } from 'keyv' with { 'resolution-mode': 'import' };
 
 /**
  * TTL for the global in-memory cache. SRD data is static between seeds, so 24h
@@ -34,10 +34,15 @@ export const CACHE_LRU_SIZE = parseInt(process.env.CACHE_LRU_SIZE ?? '1000', 10)
  * aren't needlessly round-tripped through JSON and a single CacheableMemory
  * envelope tracks each entry's TTL. Parameterized for tests; production callers
  * rely on the exported defaults.
+ *
+ * keyv ships separate CJS and ESM type declarations, and `@nestjs/cache-manager`
+ * 12's ESM typings reference the ESM one, so the return type is imported in
+ * `import` resolution mode. `createKeyv` is typed against the CJS declaration;
+ * the cast bridges the two type sets only, the runtime store object is unchanged.
  */
 export function createAppCacheStore({
   ttl = CACHE_TTL_MS,
   lruSize = CACHE_LRU_SIZE,
 }: { ttl?: number; lruSize?: number } = {}): Keyv {
-  return createKeyv({ ttl, lruSize });
+  return createKeyv({ ttl, lruSize }) as unknown as Keyv;
 }
