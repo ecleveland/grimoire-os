@@ -14,7 +14,7 @@ JWT_SECRET=your-secret docker compose up --build
 
 ## Architecture
 
-- **Backend**: NestJS 11 + PostgreSQL 16 (Prisma) — port 3001
+- **Backend**: NestJS 12 + PostgreSQL 16 (Prisma) — port 3001
 - **Frontend**: Next.js 16 + React 19 + Tailwind v4 — port 3000
 - **Auth**: JWT + Passport + bcryptjs, roles: player / dungeon_master / admin
 
@@ -25,6 +25,8 @@ JWT_SECRET=your-secret docker compose up --build
 - `PrismaService` connects through the `@prisma/adapter-pg` driver adapter. The `pg` pool keeps pg's default size of 10. The service sets a 5 s `connectionTimeoutMillis`, which bounds both opening a connection and waiting for a free one, because pg waits forever by default. `onModuleInit` runs `SELECT 1`, because `$connect` alone succeeds with the database down. PrismaModule loads only `src/config/database.config.ts`, so it boots without `JWT_SECRET`. Constraint errors carry the violated index name under `meta.driverAdapterError.cause`, not `meta.target`; read them with `src/common/helpers/prisma-errors.ts`.
 - `DATABASE_URL` parameters: pg ignores Prisma 6's `connection_limit`, `pool_timeout`, `schema`, `sslaccept` and `socket_timeout`. `sslmode=require` (and `prefer`) keeps its Prisma 6 meaning here, encrypted without chain verification, because `src/config/database.config.ts` translates it into pg's `ssl` option and removes it from the URL pg sees. Use `sslmode=verify-full` to ask for chain verification. pg would otherwise read `require` as full verification and reject a managed provider's private CA.
 - `npm run test:db` runs Jest under `--experimental-vm-modules` because the generated client loads its query compiler with a dynamic `import()`.
+- Every backend Jest script (`test`, `test:watch`, `test:cov`, `test:db`) runs under `node --experimental-vm-modules` because NestJS 12 ships ESM-only packages. Jest needs Node 24.9 or later for this, so run the backend suites on Node 24.
+- `nest g` needs `-c ./node_modules/@nestjs/cli/node_modules/@nestjs/schematics` while TypeScript stays on 5.x, because @nestjs/schematics 12 peers on TypeScript 6 and so is installed only under the CLI. The flag goes away when TypeScript moves to 6 or 7.
 
 ## Key Commands
 
@@ -117,22 +119,22 @@ Base images are pinned to immutable SHA256 digests in `backend/Dockerfile`, `fro
 
 Every compose service has a healthcheck, and each one starts only after its dependency reports healthy (postgres, then backend, then frontend). The backend probe calls `GET /api/health`, which runs `SELECT 1` and answers 503 when the database is unreachable. The probes use `node -e "fetch(...)"` because the alpine images ship no curl. `docker compose ps` shows the health state.
 
-Currently pinned (resolved 2026-10-02):
+Currently pinned:
 
-| Image | Tag | Digest |
-|-------|-----|--------|
-| node | 22-alpine | sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 |
-| postgres | 16-alpine | sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea |
+| Image | Tag | Digest | Resolved |
+|-------|-----|--------|----------|
+| node | 24-alpine | sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 | 2026-10-09 |
+| postgres | 16-alpine | sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea | 2026-10-02 |
 
 ### Updating pinned image digests
 
-Refresh the digests at minimum **quarterly**, or sooner whenever Dependabot / a security advisory flags a base image, or when picking up a CVE fix. Stay within the same major version (e.g. `node:22-alpine`, `postgres:16-alpine`) — do not silently bump majors when refreshing digests.
+Refresh the digests at minimum **quarterly**, or sooner whenever Dependabot / a security advisory flags a base image, or when picking up a CVE fix. Stay within the same major version (e.g. `node:24-alpine`, `postgres:16-alpine`). Do not silently bump majors when refreshing digests.
 
 To resolve the current digest for a tag:
 
 ```bash
-docker pull node:22-alpine
-docker inspect --format='{{index .RepoDigests 0}}' node:22-alpine
+docker pull node:24-alpine
+docker inspect --format='{{index .RepoDigests 0}}' node:24-alpine
 
 docker pull postgres:16-alpine
 docker inspect --format='{{index .RepoDigests 0}}' postgres:16-alpine
@@ -140,8 +142,8 @@ docker inspect --format='{{index .RepoDigests 0}}' postgres:16-alpine
 
 Then update each occurrence:
 
-- `backend/Dockerfile` — three `FROM node:22-alpine@sha256:...` stages
-- `frontend/Dockerfile` — three `FROM node:22-alpine@sha256:...` stages
+- `backend/Dockerfile`, four `FROM node:24-alpine@sha256:...` stages
+- `frontend/Dockerfile`, four `FROM node:24-alpine@sha256:...` stages
 - `docker-compose.yml` — `image: postgres:16-alpine@sha256:...`
 - `.github/workflows/ci.yml` — the `backend-db` job's `services.postgres.image`
 
@@ -153,4 +155,4 @@ docker compose build         # all services build
 docker compose up -d postgres  # comes up healthy
 ```
 
-Record the resolution date in the table above when you bump the digests.
+Record the resolution date in the table above for each image you bump.
