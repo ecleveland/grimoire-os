@@ -829,6 +829,7 @@ describe('SrdSearchPage', () => {
       expect(toast.error).toHaveBeenCalledWith('Failed to load search results', {
         id: 'load-search',
       });
+      expect(screen.queryByTestId('pagination')).not.toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: 'Retry' }));
 
@@ -845,7 +846,7 @@ describe('SrdSearchPage', () => {
 
       await user.click(await screen.findByRole('button', { name: 'Retry' }));
 
-      expect(await screen.findByText('Loading…')).toBeInTheDocument();
+      expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 

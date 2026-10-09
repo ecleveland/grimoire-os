@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { SEARCH_KINDS, type SearchKind } from '@grimoire-os/shared';
 import { useListQuery } from '@/lib/query';
@@ -17,6 +17,7 @@ import FilterBar from '@/components/FilterBar';
 import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
 import LoadError from '@/components/LoadError';
+import LoadingState from '@/components/LoadingState';
 import SpellDetail from '@/components/SpellDetail';
 import FeatDetail from '@/components/FeatDetail';
 import ItemDetail from '@/components/ItemDetail';
@@ -141,10 +142,7 @@ export default function SrdSearchPage() {
     setPage(1);
   };
 
-  const countLabel = useMemo(() => {
-    if (list.isPending) return 'Loading…';
-    return `${total} result${total !== 1 ? 's' : ''}`;
-  }, [list.isPending, total]);
+  const countLabel = `${total} result${total !== 1 ? 's' : ''}`;
 
   return (
     <div>
@@ -346,7 +344,9 @@ export default function SrdSearchPage() {
         </FilterBar>
       )}
 
-      {list.isError && !list.data ? (
+      {list.isPending || (list.isError && list.isFetching) ? (
+        <LoadingState className="text-sm mb-4" />
+      ) : list.isError ? (
         <LoadError message="Failed to load search results." onRetry={() => list.refetch()} />
       ) : (
         <>
@@ -369,16 +369,16 @@ export default function SrdSearchPage() {
               );
             })}
           </div>
+
+          <Pagination
+            page={page}
+            lastPage={lastPage}
+            total={total}
+            limit={LIMIT}
+            onPageChange={setPage}
+          />
         </>
       )}
-
-      <Pagination
-        page={page}
-        lastPage={lastPage}
-        total={total}
-        limit={LIMIT}
-        onPageChange={setPage}
-      />
     </div>
   );
 }

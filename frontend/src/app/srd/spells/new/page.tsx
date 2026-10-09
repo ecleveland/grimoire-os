@@ -6,12 +6,15 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateApiPath } from '@/lib/query';
 import SpellForm from '@/components/SpellForm';
 import type { SpellPayload } from '@/lib/spell-form';
 import type { SrdSpell } from '@/lib/types';
 
 export default function NewSpellPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,6 +26,9 @@ export default function NewSpellPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Spell created');
+      // The list holds a 60s staleTime; refetch it before landing there so the
+      // new spell shows up.
+      await invalidateApiPath(queryClient, '/srd/spells?');
       router.push('/srd/spells');
     } catch (err) {
       console.error('Failed to create spell:', err);

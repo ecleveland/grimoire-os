@@ -6,12 +6,15 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateApiPath } from '@/lib/query';
 import FeatForm from '@/components/FeatForm';
 import type { FeatPayload } from '@/lib/feat-form';
 import type { SrdFeat } from '@/lib/types';
 
 export default function NewFeatPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,6 +26,9 @@ export default function NewFeatPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Feat created');
+      // The list holds a 60s staleTime; refetch it before landing there so the
+      // new feat shows up.
+      await invalidateApiPath(queryClient, '/srd/feats?');
       router.push('/srd/feats');
     } catch (err) {
       console.error('Failed to create feat:', err);

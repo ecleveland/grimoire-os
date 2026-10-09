@@ -6,12 +6,15 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateApiPath } from '@/lib/query';
 import ItemForm from '@/components/ItemForm';
 import type { ItemPayload } from '@/lib/item-form';
 import type { SrdItem } from '@/lib/types';
 
 export default function NewItemPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated, isLoading: authLoading } = useAuth();
   const [submitting, setSubmitting] = useState(false);
 
@@ -23,6 +26,9 @@ export default function NewItemPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Item created');
+      // The list holds a 60s staleTime; refetch it before landing there so the
+      // new item shows up.
+      await invalidateApiPath(queryClient, '/srd/items?');
       router.push('/srd/items');
     } catch (err) {
       console.error('Failed to create item:', err);

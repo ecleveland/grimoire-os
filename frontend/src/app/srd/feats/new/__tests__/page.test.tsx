@@ -8,6 +8,8 @@ const mockApiFetch = vi.fn();
 const mockUseAuth = vi.fn();
 const mockPush = vi.fn();
 const mockBack = vi.fn();
+const mockInvalidateApiPath = vi.fn((..._args: unknown[]) => Promise.resolve());
+const mockQueryClient = {};
 
 vi.mock('@/lib/api', async importOriginal => {
   const actual = await importOriginal<typeof import('@/lib/api')>();
@@ -20,6 +22,16 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => mockUseAuth(),
+}));
+
+vi.mock('@/lib/query', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/query')>()),
+  invalidateApiPath: (...args: unknown[]) => mockInvalidateApiPath(...args),
+}));
+
+vi.mock('@tanstack/react-query', async importOriginal => ({
+  ...(await importOriginal<typeof import('@tanstack/react-query')>()),
+  useQueryClient: () => mockQueryClient,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -82,6 +94,29 @@ describe('NewFeatPage', () => {
     );
     expect(toast.success).toHaveBeenCalledWith('Feat created');
     expect(mockPush).toHaveBeenCalledWith('/srd/feats');
+  });
+
+  it('invalidates the cached feat list before redirecting to it', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValue({ id: 'hb-1' });
+    let finishInvalidate: () => void = () => {};
+    mockInvalidateApiPath.mockImplementationOnce(
+      () => new Promise<void>(r => (finishInvalidate = r))
+    );
+
+    render(<NewFeatPage />);
+    fillRequired();
+    await user.click(screen.getByRole('button', { name: 'Create feat' }));
+
+    await waitFor(() =>
+      expect(mockInvalidateApiPath).toHaveBeenCalledWith(mockQueryClient, '/srd/feats?')
+    );
+    // The list keeps a 60s staleTime, so landing on it before the invalidation
+    // settles would show the cached list without the new feat.
+    expect(mockPush).not.toHaveBeenCalled();
+
+    finishInvalidate();
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/feats'));
   });
 
   it('toasts the API error message and stays on the page', async () => {
