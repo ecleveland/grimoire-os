@@ -26,8 +26,8 @@ export default function NewFeatPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Feat created');
-      // The list holds a 60s staleTime; refetch it before landing there so the
-      // new feat shows up.
+      // The list holds a 60s staleTime; mark it stale so the list page refetches
+      // on mount and the new feat shows up.
       await invalidateApiPath(queryClient, '/srd/feats?');
       router.push('/srd/feats');
     } catch (err) {

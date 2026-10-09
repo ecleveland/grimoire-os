@@ -26,8 +26,8 @@ export default function NewItemPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Item created');
-      // The list holds a 60s staleTime; refetch it before landing there so the
-      // new item shows up.
+      // The list holds a 60s staleTime; mark it stale so the list page refetches
+      // on mount and the new item shows up.
       await invalidateApiPath(queryClient, '/srd/items?');
       router.push('/srd/items');
     } catch (err) {

@@ -26,8 +26,8 @@ export default function NewMonsterPage() {
         body: JSON.stringify(payload),
       });
       toast.success('Monster created');
-      // The list holds a 60s staleTime; refetch it before landing there so the
-      // new monster shows up.
+      // The list holds a 60s staleTime; mark it stale so the list page refetches
+      // on mount and the new monster shows up.
       await invalidateApiPath(queryClient, '/srd/monsters?');
       router.push('/srd/monsters');
     } catch (err) {
