@@ -37,7 +37,8 @@ function sslFor(sslmode: string | null): DatabaseSsl {
  * `sslrootcert` or `sslcert` still makes pg build its own `ssl`, which follows libpq.
  */
 function withoutSslMode(url: string): string {
-  return url.replace(/([?&])sslmode=[^&#]*&?/, '$1').replace(/[?&](#|$)/, '$1');
+  // Every occurrence, because a leftover one would reach pg and win.
+  return url.replace(/(?<=[?&])sslmode=[^&#]*(&|(?=#|$))/g, '').replace(/[?&](?=#|$)/, '');
 }
 
 /**
@@ -46,7 +47,16 @@ function withoutSslMode(url: string): string {
  */
 export default registerAs('database', () => {
   const raw = process.env.DATABASE_URL || DEFAULT_DATABASE_URL;
-  const sslmode = new URL(raw).searchParams.get('sslmode');
+  let sslmode: string | null;
+  try {
+    // get() returns the first sslmode when the URL repeats it, so the first wins.
+    sslmode = new URL(raw).searchParams.get('sslmode');
+  } catch {
+    // WHATWG URL rejects forms pg accepts, such as the unix-socket
+    // `postgresql://u:p@/db?host=/var/run/postgresql`, and its error carries
+    // the raw URL with the password. Hand the URL to pg as written instead.
+    return { url: raw, ssl: undefined };
+  }
   return {
     url: sslmode === null ? raw : withoutSslMode(raw),
     ssl: sslFor(sslmode),
