@@ -17,7 +17,7 @@ interface Props {
 /**
  * Reusable debounced picker over the spell catalog (`GET /srd/spells`, which
  * spans srd/shared and the caller's homebrew). The spell-catalog sibling of
- * `SrdItemSearch`: plain `apiFetch` with a stale-response guard, so consumers
+ * `CatalogItemPicker`: plain `apiFetch` with a stale-response guard, so consumers
  * can mock `@/lib/api` without a react-query provider. Picking a spell fires
  * `onSelect` with the full catalog row so the caller can map it to a structured
  * SpellEntry (via `toSpellEntry`).

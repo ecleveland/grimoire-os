@@ -7,22 +7,39 @@ import type { PaginatedResponse, SrdItem } from '@grimoire-os/shared';
 
 const LIMIT = 8;
 
-interface Props {
+export interface CatalogItemPickerProps {
   /** Fired with the chosen catalog item; the search clears afterwards. */
   onSelect: (item: SrdItem) => void;
   placeholder?: string;
   disabled?: boolean;
+  /**
+   * `global` limits the search to the SRD and shared catalog, leaving out the
+   * caller's homebrew. The server applies it, so a page of homebrew cannot
+   * crowd catalog rows out of the results.
+   */
+  tier?: 'global';
+  /** Hides results the caller cannot take, such as items already in its list. */
+  exclude?: (item: SrdItem) => boolean;
+  /** The input's accessible name. */
+  inputLabel?: string;
 }
 
 /**
- * Reusable debounced picker over the item catalog (`GET /srd/items`, which
- * spans srd/shared and the caller's homebrew). Modeled on `LootItemsEditor`'s
- * search: plain `apiFetch` with a stale-response guard, so consumers can mock
- * `@/lib/api` without a react-query provider. Picking an item fires `onSelect`
- * with the full catalog row (name, weight, category, description) so the caller
- * can autofill a linked entry.
+ * Debounced picker over the item catalog (`GET /srd/items`, which spans
+ * srd/shared and the caller's homebrew unless `tier` narrows it). It uses plain
+ * `apiFetch` with a stale-response guard, so consumers can mock `@/lib/api`
+ * without a react-query provider. Picking an item fires `onSelect` with the
+ * full catalog row (name, weight, category, description) so the caller can
+ * autofill a linked entry.
  */
-export default function SrdItemSearch({ onSelect, placeholder, disabled = false }: Props) {
+export default function CatalogItemPicker({
+  onSelect,
+  placeholder,
+  disabled = false,
+  tier,
+  exclude,
+  inputLabel = 'Search the item catalog',
+}: CatalogItemPickerProps) {
   const inputId = useId();
   const [searchInput, setSearchInput] = useState('');
   const [query, setQuery] = useState('');
@@ -50,6 +67,7 @@ export default function SrdItemSearch({ onSelect, placeholder, disabled = false 
     // newer query's results or end its loading state.
     let stale = false;
     const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
+    if (tier) params.set('tier', tier);
     apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
       .then(res => {
         if (!stale) setResults(res.data);
@@ -66,7 +84,7 @@ export default function SrdItemSearch({ onSelect, placeholder, disabled = false 
     return () => {
       stale = true;
     };
-  }, [query]);
+  }, [query, tier]);
 
   const pick = (item: SrdItem) => {
     onSelect(item);
@@ -75,10 +93,12 @@ export default function SrdItemSearch({ onSelect, placeholder, disabled = false 
     setResults([]);
   };
 
+  const shown = exclude ? results.filter(item => !exclude(item)) : results;
+
   return (
     <div>
       <label htmlFor={inputId} className="sr-only">
-        Search the item catalog
+        {inputLabel}
       </label>
       <input
         id={inputId}
@@ -92,13 +112,13 @@ export default function SrdItemSearch({ onSelect, placeholder, disabled = false 
       {query &&
         (loading ? (
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Searching…</p>
-        ) : results.length === 0 ? (
+        ) : shown.length === 0 ? (
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
             No matching items for &ldquo;{query}&rdquo;.
           </p>
         ) : (
           <ul className="mt-2 space-y-1">
-            {results.map(item => (
+            {shown.map(item => (
               <li key={item.id}>
                 <button
                   type="button"

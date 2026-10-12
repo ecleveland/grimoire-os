@@ -22,7 +22,7 @@ import {
 } from '@/lib/character-inventory';
 import { ATTUNEMENT_MAX, addAttunedItem, removeAttunedItemAt } from '@/lib/character-attunement';
 import { DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
-import SrdItemSearch from '@/components/SrdItemSearch';
+import CatalogItemPicker from '@/components/CatalogItemPicker';
 
 type InventorySectionProps = { character: Character } & PlayControlProps;
 
@@ -535,7 +535,7 @@ export default function InventorySection(props: InventorySectionProps) {
                   {addGearHint}
                 </p>
               )}
-              <SrdItemSearch
+              <CatalogItemPicker
                 onSelect={fillFromCatalog}
                 disabled={isSaving}
                 placeholder="Search the catalog to autofill…"
@@ -614,7 +614,7 @@ export default function InventorySection(props: InventorySectionProps) {
                     Attune item
                   </button>
                 </div>
-                <SrdItemSearch
+                <CatalogItemPicker
                   onSelect={fillAttuneFromCatalog}
                   disabled={isSaving}
                   placeholder="Search the catalog to attune…"

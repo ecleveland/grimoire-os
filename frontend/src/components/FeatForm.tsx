@@ -1,8 +1,9 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
+import FormCheckbox from '@/components/FormCheckbox';
 import { FEAT_CATEGORIES } from '@/lib/feat-constants';
 import type { SrdFeat } from '@/lib/types';
 import {
@@ -37,8 +38,6 @@ export default function FeatForm({
   const [form, setForm] = useState<FeatFormState>(() =>
     initial ? featToFormState(initial) : emptyFeatFormState()
   );
-
-  const repeatableId = useId();
 
   const update = <K extends keyof FeatFormState>(key: K, value: FeatFormState[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -87,19 +86,11 @@ export default function FeatForm({
       </section>
 
       <section>
-        <label
-          htmlFor={repeatableId}
-          className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
-        >
-          <input
-            id={repeatableId}
-            type="checkbox"
-            checked={form.repeatable}
-            onChange={e => update('repeatable', e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-          />
-          Repeatable
-        </label>
+        <FormCheckbox
+          label="Repeatable"
+          checked={form.repeatable}
+          onChange={checked => update('repeatable', checked)}
+        />
       </section>
 
       <FormField

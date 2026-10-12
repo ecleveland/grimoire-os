@@ -6,7 +6,7 @@ import type { AbilityScores, Character, InventoryItem } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
 
 // Stub the catalog picker so these tests don't exercise the debounced network
-// search (covered in SrdItemSearch.test.tsx). The stub exposes one button per
+// search (covered in CatalogItemPicker.test.tsx). The stub exposes one button per
 // fixture that fires onSelect with that catalog item.
 const catalogItem = {
   id: '123e4567-e89b-42d3-a456-426614174000',
@@ -62,7 +62,7 @@ type CatalogFixture =
   | typeof catalogWeapon
   | typeof catalogMagicWeapon
   | typeof catalogMagicShield;
-vi.mock('@/components/SrdItemSearch', () => ({
+vi.mock('@/components/CatalogItemPicker', () => ({
   default: ({ onSelect }: { onSelect: (item: CatalogFixture) => void }) => (
     <>
       <button type="button" onClick={() => onSelect(catalogItem)}>

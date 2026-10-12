@@ -22,21 +22,10 @@ import SpellDetail from '@/components/SpellDetail';
 import FeatDetail from '@/components/FeatDetail';
 import ItemDetail from '@/components/ItemDetail';
 import PrintToggle from '@/components/PrintToggle';
-import { SRD_CLASSES, SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
-import { FEAT_CATEGORIES } from '@/lib/feat-constants';
-import { ITEM_CATEGORIES, ITEM_RARITIES } from '@/lib/item-constants';
+import { levelLabel } from '@/lib/spell-constants';
+import { SEARCH_FILTERS, searchFilterParams } from '@/lib/srd-search-filters';
 
 const LIMIT = 20;
-
-const FEATURE_PARENT_TYPES: {
-  value: 'class' | 'subclass' | 'race' | 'background';
-  label: string;
-}[] = [
-  { value: 'class', label: 'Class' },
-  { value: 'subclass', label: 'Subclass' },
-  { value: 'race', label: 'Race' },
-  { value: 'background', label: 'Background' },
-];
 
 const inputClass =
   'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -52,36 +41,20 @@ export default function SrdSearchPage() {
   const [search, setSearch] = useState('');
   const [enabledKinds, setEnabledKinds] = useState<Set<SearchKind>>(() => new Set(SEARCH_KINDS));
 
-  // Spell sub-filters
-  const [spellClass, setSpellClass] = useState('');
-  const [spellLevel, setSpellLevel] = useState('');
-  const [spellSchool, setSpellSchool] = useState('');
-
-  // Feat sub-filters
-  const [featCategory, setFeatCategory] = useState('');
-  const [featPrereq, setFeatPrereq] = useState('');
-  const [featRepeatable, setFeatRepeatable] = useState('');
-
-  // Item sub-filters
-  const [itemCategory, setItemCategory] = useState('');
-  const [itemRarity, setItemRarity] = useState('');
-  const [itemMagic, setItemMagic] = useState('');
-
-  // Feature sub-filters
-  const [featureParent, setFeatureParent] = useState('');
+  // Sub-filter values, bucketed per kind so a feat category chosen under
+  // Feats never leaks into the item query after switching to Items.
+  const [filters, setFilters] = useState<Partial<Record<SearchKind, Record<string, string>>>>({});
 
   const handleDebouncedSearch = useCallback((value: string) => {
     setSearch(value);
     setPage(1);
   }, []);
 
-  const onlySpells = enabledKinds.size === 1 && enabledKinds.has('spell');
-  const onlyFeats = enabledKinds.size === 1 && enabledKinds.has('feat');
-  const onlyItems = enabledKinds.size === 1 && enabledKinds.has('item');
-  const onlyFeatures = enabledKinds.size === 1 && enabledKinds.has('feature');
-
   // Sub-filters only apply while their kind is the sole one enabled.
   // `useListQuery` drops the empty ones.
+  const soleKind = enabledKinds.size === 1 ? [...enabledKinds][0] : null;
+  const soleFields = soleKind ? SEARCH_FILTERS[soleKind] : undefined;
+
   const list = useListQuery<UnifiedSearchHit>(
     '/srd/search',
     {
@@ -95,15 +68,7 @@ export default function SrdSearchPage() {
         enabledKinds.size < SEARCH_KINDS.length
           ? SEARCH_KINDS.filter(k => enabledKinds.has(k)).join(',')
           : undefined,
-      class: onlySpells ? spellClass : undefined,
-      level: onlySpells ? spellLevel : undefined,
-      school: onlySpells ? spellSchool : undefined,
-      category: onlyFeats ? featCategory : onlyItems ? itemCategory : undefined,
-      hasPrerequisite: onlyFeats ? featPrereq : undefined,
-      repeatable: onlyFeats ? featRepeatable : undefined,
-      rarity: onlyItems ? itemRarity : undefined,
-      isMagic: onlyItems ? itemMagic : undefined,
-      parentType: onlyFeatures ? featureParent : undefined,
+      ...searchFilterParams(soleKind, soleKind ? filters[soleKind] : undefined),
     },
     {
       errorToast: { message: 'Failed to load search results', id: 'load-search' },
@@ -137,8 +102,8 @@ export default function SrdSearchPage() {
     });
   };
 
-  const resetPage = (setter: (v: string) => void) => (value: string) => {
-    setter(value);
+  const setFilter = (kind: SearchKind, param: string, value: string) => {
+    setFilters(prev => ({ ...prev, [kind]: { ...prev[kind], [param]: value } }));
     setPage(1);
   };
 
@@ -174,173 +139,26 @@ export default function SrdSearchPage() {
         })}
       </div>
 
-      {(onlySpells || onlyFeats || onlyItems || onlyFeatures) && (
+      {soleKind && soleFields && (
         <FilterBar>
-          {onlySpells && (
-            <>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Spell Class</span>
-                <select
-                  aria-label="Spell Class"
-                  value={spellClass}
-                  onChange={e => resetPage(setSpellClass)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">All Classes</option>
-                  {SRD_CLASSES.map(c => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Spell Level</span>
-                <select
-                  aria-label="Spell Level"
-                  value={spellLevel}
-                  onChange={e => resetPage(setSpellLevel)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">All Levels</option>
-                  {SPELL_LEVELS.map(l => (
-                    <option key={l} value={l}>
-                      {levelLabel(l)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Spell School</span>
-                <select
-                  aria-label="Spell School"
-                  value={spellSchool}
-                  onChange={e => resetPage(setSpellSchool)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">All Schools</option>
-                  {SPELL_SCHOOLS.map(s => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </>
-          )}
-          {onlyFeats && (
-            <>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Feat Category</span>
-                <select
-                  aria-label="Feat Category"
-                  value={featCategory}
-                  onChange={e => resetPage(setFeatCategory)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">All Categories</option>
-                  {FEAT_CATEGORIES.map(c => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Prerequisite</span>
-                <select
-                  aria-label="Prerequisite"
-                  value={featPrereq}
-                  onChange={e => resetPage(setFeatPrereq)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">Any</option>
-                  <option value="true">Has prerequisite</option>
-                  <option value="false">No prerequisite</option>
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Repeatable</span>
-                <select
-                  aria-label="Repeatable"
-                  value={featRepeatable}
-                  onChange={e => resetPage(setFeatRepeatable)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">Any</option>
-                  <option value="true">Repeatable</option>
-                  <option value="false">Single-use</option>
-                </select>
-              </label>
-            </>
-          )}
-          {onlyItems && (
-            <>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Item Category</span>
-                <select
-                  aria-label="Item Category"
-                  value={itemCategory}
-                  onChange={e => resetPage(setItemCategory)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">All Categories</option>
-                  {ITEM_CATEGORIES.map(c => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Rarity</span>
-                <select
-                  aria-label="Rarity"
-                  value={itemRarity}
-                  onChange={e => resetPage(setItemRarity)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">Any Rarity</option>
-                  {ITEM_RARITIES.map(r => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm">
-                <span className="block mb-1 text-gray-600 dark:text-gray-400">Magic</span>
-                <select
-                  aria-label="Magic"
-                  value={itemMagic}
-                  onChange={e => resetPage(setItemMagic)(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="">Any</option>
-                  <option value="true">Magic items</option>
-                  <option value="false">Mundane items</option>
-                </select>
-              </label>
-            </>
-          )}
-          {onlyFeatures && (
-            <label className="block text-sm">
-              <span className="block mb-1 text-gray-600 dark:text-gray-400">Parent Type</span>
+          {soleFields.map(field => (
+            <label key={field.param} className="block text-sm">
+              <span className="block mb-1 text-gray-600 dark:text-gray-400">{field.label}</span>
               <select
-                aria-label="Parent Type"
-                value={featureParent}
-                onChange={e => resetPage(setFeatureParent)(e.target.value)}
+                aria-label={field.label}
+                value={filters[soleKind]?.[field.param] ?? ''}
+                onChange={e => setFilter(soleKind, field.param, e.target.value)}
                 className={inputClass}
               >
-                <option value="">All Sources</option>
-                {FEATURE_PARENT_TYPES.map(p => (
-                  <option key={p.value} value={p.value}>
-                    {p.label}
+                <option value="">{field.emptyLabel}</option>
+                {field.options.map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </select>
             </label>
-          )}
+          ))}
         </FilterBar>
       )}
 

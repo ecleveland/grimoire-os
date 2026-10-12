@@ -6,7 +6,14 @@ import { toast } from 'sonner';
 import SrdSearchPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { PaginatedResponse, SrdSpell, SrdFeat, SrdItem } from '@/lib/types';
-import type { UnifiedClassHitData, UnifiedFeatureData, UnifiedSearchHit } from '@/lib/srd-search';
+import {
+  KIND_LABEL_PLURAL,
+  type UnifiedClassHitData,
+  type UnifiedFeatureData,
+  type UnifiedSearchHit,
+} from '@/lib/srd-search';
+import { SEARCH_FILTERS } from '@/lib/srd-search-filters';
+import { SEARCH_KINDS } from '@grimoire-os/shared';
 
 const mockApiFetch = vi.fn();
 
@@ -802,6 +809,36 @@ describe('SrdSearchPage', () => {
 
       expect(screen.getByLabelText('Parent Type')).toBeInTheDocument();
     });
+
+    it.each(Object.entries(SEARCH_FILTERS))(
+      'shows every %s sub-filter and sends a chosen value to the API',
+      async (kind, fields) => {
+        const user = userEvent.setup();
+        renderPage();
+        await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+
+        for (const other of SEARCH_KINDS) {
+          if (other === kind) continue;
+          await user.click(screen.getByRole('button', { name: KIND_LABEL_PLURAL[other] }));
+        }
+
+        for (const field of fields!) {
+          expect(screen.getByRole('combobox', { name: field.label })).toBeInTheDocument();
+        }
+        for (const field of fields!) {
+          const option = field.options[0];
+          mockApiFetch.mockClear();
+          await user.selectOptions(
+            screen.getByRole('combobox', { name: field.label }),
+            option.value
+          );
+
+          await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
+          const url = mockApiFetch.mock.calls.at(-1)?.[0] as string;
+          expect(new URLSearchParams(url.split('?')[1]).get(field.param)).toBe(option.value);
+        }
+      }
+    );
   });
 
   describe('api interaction', () => {

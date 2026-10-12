@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import SrdItemSearch from '../SrdItemSearch';
+import type { ComponentProps } from 'react';
+import CatalogItemPicker from '../CatalogItemPicker';
 
 const mockApiFetch = vi.fn();
 vi.mock('@/lib/api', () => ({
@@ -19,17 +20,30 @@ function makeResponse(items: object[]) {
   return { data: items, total: items.length, page: 1, lastPage: 1 };
 }
 
-function setup() {
+function setup(props: Partial<ComponentProps<typeof CatalogItemPicker>> = {}) {
   const onSelect = vi.fn();
-  render(<SrdItemSearch onSelect={onSelect} />);
+  render(<CatalogItemPicker onSelect={onSelect} {...props} />);
   return { onSelect };
+}
+
+/** The query string of the one `/srd/items` request, once it has fired. */
+async function searchParams(): Promise<URLSearchParams> {
+  let url = '';
+  await waitFor(() => {
+    const call = mockApiFetch.mock.calls.find(
+      ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
+    );
+    expect(call).toBeDefined();
+    url = call![0] as string;
+  });
+  return new URLSearchParams(url.split('?')[1]);
 }
 
 beforeEach(() => {
   mockApiFetch.mockReset();
 });
 
-describe('SrdItemSearch', () => {
+describe('CatalogItemPicker', () => {
   it('does not fetch while the input is empty', () => {
     setup();
     expect(mockApiFetch).not.toHaveBeenCalled();
@@ -120,9 +134,70 @@ describe('SrdItemSearch', () => {
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
+  it('falls back to a generic message for non-Error rejections', async () => {
+    const { toast } = await import('sonner');
+    mockApiFetch.mockRejectedValue('nope');
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search the item catalog/i), 'dag');
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search items'));
+  });
+
+  it('searches every tier the caller can see when no tier is given', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([dagger]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search the item catalog/i), 'dag');
+
+    expect((await searchParams()).has('tier')).toBe(false);
+  });
+
+  it('asks for the global tier only when tier="global"', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([dagger]));
+    const user = userEvent.setup();
+    setup({ tier: 'global' });
+
+    await user.type(screen.getByLabelText(/search the item catalog/i), 'dag');
+
+    const params = await searchParams();
+    expect(params.get('tier')).toBe('global');
+    expect(params.get('q')).toBe('dag');
+  });
+
+  it('leaves out the results that exclude rejects', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([dagger, quarterstaff]));
+    const user = userEvent.setup();
+    setup({ exclude: item => item.id === dagger.id });
+
+    await user.type(screen.getByLabelText(/search the item catalog/i), 'a');
+
+    expect(await screen.findByRole('button', { name: /add quarterstaff/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
+  });
+
+  it('shows the no-matches message when exclude rejects every result', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([dagger]));
+    const user = userEvent.setup();
+    setup({ exclude: () => true });
+
+    await user.type(screen.getByLabelText(/search the item catalog/i), 'dag');
+
+    expect(await screen.findByText(/no matching items/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
+  });
+
+  it('names the input with inputLabel when given', () => {
+    setup({ inputLabel: 'Search items' });
+    expect(screen.getByRole('textbox', { name: 'Search items' })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/search the item catalog/i)).toBeNull();
+  });
+
   it('disables the input when disabled', () => {
     const onSelect = vi.fn();
-    render(<SrdItemSearch onSelect={onSelect} disabled />);
+    render(<CatalogItemPicker onSelect={onSelect} disabled />);
     expect(screen.getByLabelText(/search the item catalog/i)).toBeDisabled();
   });
 });
