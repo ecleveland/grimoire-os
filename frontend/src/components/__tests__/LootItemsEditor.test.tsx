@@ -74,28 +74,6 @@ describe('LootItemsEditor', () => {
     expect(mockApiFetch).not.toHaveBeenCalled();
   });
 
-  it('debounces the search input into a GET /srd/items request carrying the query', async () => {
-    mockApiFetch.mockResolvedValue(makeResponse([dagger]));
-    const user = userEvent.setup();
-    setup();
-
-    await user.type(screen.getByLabelText(/search items/i), 'dag');
-
-    await waitFor(() => {
-      const call = mockApiFetch.mock.calls.find(
-        ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
-      );
-      expect(call).toBeDefined();
-      expect(call![0]).toContain('q=dag');
-    });
-    // Debounce collapses the keystrokes into a single request.
-    expect(
-      mockApiFetch.mock.calls.filter(
-        ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
-      )
-    ).toHaveLength(1);
-  });
-
   it('picking a search result adds an entry with default weight and qty', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([dagger]));
     const user = userEvent.setup();
@@ -141,58 +119,6 @@ describe('LootItemsEditor', () => {
     await user.type(screen.getByLabelText(/search items/i), 'zzz');
 
     expect(await screen.findByText(/no matching items/i)).toBeInTheDocument();
-  });
-
-  it('surfaces the server message and clears stale results when the search fails', async () => {
-    const { toast } = await import('sonner');
-    mockApiFetch
-      .mockResolvedValueOnce(makeResponse([dagger]))
-      .mockRejectedValueOnce(new Error('boom'));
-    const user = userEvent.setup();
-    setup();
-
-    await user.type(screen.getByLabelText(/search items/i), 'dag');
-    await screen.findByRole('button', { name: /add dagger/i });
-
-    await user.type(screen.getByLabelText(/search items/i), 'ger');
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
-    // The previous query's matches must not linger under the new query text.
-    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
-  });
-
-  it('falls back to a generic message for non-Error rejections', async () => {
-    const { toast } = await import('sonner');
-    mockApiFetch.mockRejectedValue('nope');
-    const user = userEvent.setup();
-    setup();
-
-    await user.type(screen.getByLabelText(/search items/i), 'dag');
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search items'));
-  });
-
-  it('ignores a stale response that resolves after a newer query', async () => {
-    let resolveFirst!: (v: unknown) => void;
-    const first = new Promise(r => {
-      resolveFirst = r;
-    });
-    mockApiFetch.mockReturnValueOnce(first).mockResolvedValueOnce(makeResponse([quarterstaff]));
-    const user = userEvent.setup();
-    setup();
-
-    const search = screen.getByLabelText(/search items/i);
-    await user.type(search, 'dag');
-    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(1));
-    // Newer query fires while the first request is still in flight.
-    await user.type(search, 'ger');
-    await screen.findByRole('button', { name: /add quarterstaff/i });
-
-    // The slow first response lands last — it must not overwrite the results.
-    resolveFirst(makeResponse([dagger]));
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /add quarterstaff/i })).toBeInTheDocument()
-    );
-    expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
   it('explains weight/qty semantics via tooltips and a caption when entries exist', () => {

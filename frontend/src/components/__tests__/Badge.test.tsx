@@ -18,6 +18,13 @@ describe('Badge', () => {
       render(<Badge>Tag</Badge>);
       expect(screen.getByText('Tag')).toHaveClass('rounded-full');
     });
+
+    it('renders square shape (rounded, not rounded-full) when shape="square"', () => {
+      render(<Badge shape="square">Tag</Badge>);
+      const el = screen.getByText('Tag');
+      expect(el).toHaveClass('rounded', 'px-2', 'py-0.5', 'text-xs');
+      expect(el).not.toHaveClass('rounded-full');
+    });
   });
 
   describe('variants', () => {

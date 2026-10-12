@@ -227,12 +227,9 @@ function ItemCard({
       {item.properties.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
           {item.properties.map(p => (
-            <span
-              key={p}
-              className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
-            >
+            <Badge key={p} shape="square">
               {p}
-            </span>
+            </Badge>
           ))}
         </div>
       )}

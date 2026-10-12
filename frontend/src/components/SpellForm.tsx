@@ -1,8 +1,9 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
+import FormCheckbox from '@/components/FormCheckbox';
 import { SPELL_SCHOOLS, SPELL_LEVELS, levelLabel } from '@/lib/spell-constants';
 import type { SrdSpell } from '@/lib/types';
 import {
@@ -37,9 +38,6 @@ export default function SpellForm({
   const [form, setForm] = useState<SpellFormState>(() =>
     initial ? spellToFormState(initial) : emptySpellFormState()
   );
-
-  const ritualId = useId();
-  const concentrationId = useId();
 
   const update = <K extends keyof SpellFormState>(key: K, value: SpellFormState[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
@@ -126,32 +124,16 @@ export default function SpellForm({
       </section>
 
       <section className="flex flex-wrap gap-6">
-        <label
-          htmlFor={ritualId}
-          className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
-        >
-          <input
-            id={ritualId}
-            type="checkbox"
-            checked={form.ritual}
-            onChange={e => update('ritual', e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-          />
-          Ritual
-        </label>
-        <label
-          htmlFor={concentrationId}
-          className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"
-        >
-          <input
-            id={concentrationId}
-            type="checkbox"
-            checked={form.concentration}
-            onChange={e => update('concentration', e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-          />
-          Concentration
-        </label>
+        <FormCheckbox
+          label="Ritual"
+          checked={form.ritual}
+          onChange={checked => update('ritual', checked)}
+        />
+        <FormCheckbox
+          label="Concentration"
+          checked={form.concentration}
+          onChange={checked => update('concentration', checked)}
+        />
       </section>
 
       <FormField

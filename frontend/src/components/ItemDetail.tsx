@@ -1,5 +1,6 @@
 import type { SrdItem } from '@/lib/types';
 import Markdown from '@/components/Markdown';
+import Badge from '@/components/Badge';
 
 /**
  * Expanded item view for the unified-search result card (VEG-296): the
@@ -41,12 +42,9 @@ export default function ItemDetail({ item }: { item: SrdItem }) {
       {item.properties.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {item.properties.map(p => (
-            <span
-              key={p}
-              className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded"
-            >
+            <Badge key={p} shape="square">
               {p}
-            </span>
+            </Badge>
           ))}
         </div>
       )}

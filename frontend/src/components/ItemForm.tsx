@@ -1,8 +1,9 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
+import FormCheckbox from '@/components/FormCheckbox';
 import { ITEM_CATEGORIES, ITEM_RARITIES } from '@/lib/item-constants';
 import type { SrdItem } from '@/lib/types';
 import {
@@ -38,10 +39,6 @@ export default function ItemForm({
     initial ? itemToFormState(initial) : emptyItemFormState()
   );
 
-  const magicId = useId();
-  const attunementId = useId();
-  const stealthId = useId();
-
   const update = <K extends keyof ItemFormState>(key: K, value: ItemFormState[K]) => {
     setForm(prev => ({ ...prev, [key]: value }));
   };
@@ -55,9 +52,6 @@ export default function ItemForm({
     }
     onSubmit(result.payload);
   };
-
-  const checkboxClass = 'h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500';
-  const checkboxLabelClass = 'flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -100,36 +94,21 @@ export default function ItemForm({
       </section>
 
       <section className="flex flex-wrap gap-x-6 gap-y-2">
-        <label htmlFor={magicId} className={checkboxLabelClass}>
-          <input
-            id={magicId}
-            type="checkbox"
-            checked={form.isMagic}
-            onChange={e => update('isMagic', e.target.checked)}
-            className={checkboxClass}
-          />
-          Magic item
-        </label>
-        <label htmlFor={attunementId} className={checkboxLabelClass}>
-          <input
-            id={attunementId}
-            type="checkbox"
-            checked={form.requiresAttunement}
-            onChange={e => update('requiresAttunement', e.target.checked)}
-            className={checkboxClass}
-          />
-          Requires attunement
-        </label>
-        <label htmlFor={stealthId} className={checkboxLabelClass}>
-          <input
-            id={stealthId}
-            type="checkbox"
-            checked={form.stealthDisadvantage}
-            onChange={e => update('stealthDisadvantage', e.target.checked)}
-            className={checkboxClass}
-          />
-          Stealth disadvantage
-        </label>
+        <FormCheckbox
+          label="Magic item"
+          checked={form.isMagic}
+          onChange={checked => update('isMagic', checked)}
+        />
+        <FormCheckbox
+          label="Requires attunement"
+          checked={form.requiresAttunement}
+          onChange={checked => update('requiresAttunement', checked)}
+        />
+        <FormCheckbox
+          label="Stealth disadvantage"
+          checked={form.stealthDisadvantage}
+          onChange={checked => update('stealthDisadvantage', checked)}
+        />
       </section>
 
       <section className="grid grid-cols-1 sm:grid-cols-2 gap-3">

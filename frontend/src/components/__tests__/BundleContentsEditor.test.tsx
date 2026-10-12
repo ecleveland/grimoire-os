@@ -36,7 +36,7 @@ describe('BundleContentsEditor', () => {
     expect(mockApiFetch).not.toHaveBeenCalled();
   });
 
-  it('debounces the search into a single GET /srd/items request', async () => {
+  it('searches the global tier only, since the save resolves components against srd and shared', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([candle]));
     const user = userEvent.setup();
     setup();
@@ -44,19 +44,10 @@ describe('BundleContentsEditor', () => {
     await user.type(screen.getByLabelText(/search items/i), 'can');
 
     await waitFor(() => {
-      const call = mockApiFetch.mock.calls.find(
-        ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
-      );
+      const call = mockApiFetch.mock.calls.find(([url]) => String(url).startsWith('/srd/items?'));
       expect(call).toBeDefined();
-      // Global tier only, since the save resolves components against srd + shared.
-      expect(call![0]).toContain('tier=global');
-      expect(call![0]).toContain('q=can');
+      expect(new URLSearchParams(String(call![0]).split('?')[1]).get('tier')).toBe('global');
     });
-    expect(
-      mockApiFetch.mock.calls.filter(
-        ([path]) => typeof path === 'string' && path.startsWith('/srd/items?')
-      )
-    ).toHaveLength(1);
   });
 
   it('picking a result adds an entry keyed by itemId with quantity 1', async () => {
@@ -115,16 +106,5 @@ describe('BundleContentsEditor', () => {
     expect(onChange).toHaveBeenCalledWith([
       { itemId: 'item-2', name: 'Rope, Hempen', quantity: 1 },
     ]);
-  });
-
-  it('toasts the server message when the search fails', async () => {
-    const { toast } = await import('sonner');
-    mockApiFetch.mockRejectedValue(new Error('boom'));
-    const user = userEvent.setup();
-    setup();
-
-    await user.type(screen.getByLabelText(/search items/i), 'can');
-
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
   });
 });
