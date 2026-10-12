@@ -56,8 +56,9 @@ export default function SrdEditPage({ kind }: { kind: SrdKind }) {
   );
 
   // The API answers a row the caller can't see, or one that is gone, with an
-  // empty body, which reads as null.
-  if (row === null)
+  // empty body, which reads as null. A cached null that is being refetched
+  // falls through to the loading view instead of flashing this.
+  if (row === null && !query.isFetching)
     return (
       <div className="text-center py-12">
         <p className="text-gray-500 dark:text-gray-400 mb-4">{entry.label} not found.</p>
@@ -75,7 +76,7 @@ export default function SrdEditPage({ kind }: { kind: SrdKind }) {
   // Wait for auth to hydrate as well as the row. The GET can resolve before
   // `user` and `isAdmin` arrive, and judging edit rights then would turn away a
   // real owner or admin.
-  if (authLoading || row === undefined) return <LoadingState />;
+  if (authLoading || row == null) return <LoadingState />;
 
   const canEdit =
     (row.contentSource === 'homebrew' && row.createdById === user?.userId) ||

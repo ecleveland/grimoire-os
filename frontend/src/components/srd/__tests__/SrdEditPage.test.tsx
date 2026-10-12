@@ -318,6 +318,27 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
+  it('shows the loading state, not the not-found view, while a refetch after null is in flight', async () => {
+    // A null stays cached for the staleTime, so a revisit after a hidden-row
+    // visit refetches it. The page must not flash "not found" meanwhile.
+    const get = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockReturnValue(new Promise(() => {}));
+    routeApi(kind, get);
+    const { client } = renderPage(kind);
+    await screen.findByText(`${entry.label} not found.`);
+
+    // Fire and forget: the refetch never settles in this test.
+    act(() => {
+      void client.refetchQueries({ queryKey: ['api', detail] });
+    });
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Loading…');
+    expect(screen.queryByText(`${entry.label} not found.`)).not.toBeInTheDocument();
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
   it('shows the load failure with Retry and the toast during an outage', async () => {
     routeApi(kind, () => Promise.reject(new ApiError(503, 'Service Unavailable')));
     renderPage(kind);
