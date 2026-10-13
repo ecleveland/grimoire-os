@@ -30,7 +30,7 @@ export default function CampaignsPage() {
 
   // A Retry after a failed load keeps status 'error' while it runs, so the
   // loading view checks isFetching as well as isPending.
-  if (list.isPending || (list.isError && list.isFetching)) {
+  if (list.isPending || (list.isError && list.isFetching && !list.data)) {
     return <LoadingState label="Loading campaigns…" />;
   }
 

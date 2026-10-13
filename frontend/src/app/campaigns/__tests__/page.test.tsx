@@ -178,6 +178,27 @@ describe('CampaignsPage', () => {
     consoleError.mockRestore();
   });
 
+  it('keeps the rows on screen while a refetch runs after a failed background refetch', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockResolvedValueOnce(makeResponse([makeCampaign()]));
+    const { client } = renderPage();
+    expect(await screen.findByText('The Lost Mines')).toBeInTheDocument();
+
+    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
+    await client.invalidateQueries();
+    await waitFor(() => expect(mockToastError).toHaveBeenCalled());
+
+    // The query now holds status 'error' with data. A second refetch that is
+    // still in flight must not replace the rows with the loading view.
+    mockApiFetch.mockReturnValueOnce(new Promise(() => {}));
+    void client.invalidateQueries();
+    await waitFor(() => expect(mockApiFetch).toHaveBeenCalledTimes(3));
+
+    expect(screen.getByText('The Lost Mines')).toBeInTheDocument();
+    expect(screen.queryByText(/loading campaigns/i)).not.toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
   it('renders pagination controls when there is more than one page', async () => {
     mockApiFetch.mockResolvedValue(
       makeResponse([makeCampaign({ id: 'a' })], { total: 25, lastPage: 2 })
