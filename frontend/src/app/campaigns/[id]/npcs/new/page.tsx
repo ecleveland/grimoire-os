@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { invalidateApiPath } from '@/lib/query';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
 import LootOddsAdvanced from '@/components/LootOddsAdvanced';
@@ -47,6 +49,7 @@ interface ManualFields {
 export default function NewNpcPage() {
   const { id: campaignId } = useParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [mode, setMode] = useState<'generate' | 'manual'>('generate');
   const [constraints, setConstraints] = useState<Constraints>(emptyConstraints);
   const [manualFields, setManualFields] = useState<ManualFields>({
@@ -111,6 +114,8 @@ export default function NewNpcPage() {
         body: JSON.stringify(preview),
       });
       toast.success('NPC saved');
+      // The cached NPC lists don't have the new row yet.
+      await invalidateApiPath(queryClient, '/npcs?');
       router.push(`/campaigns/${campaignId}/npcs/${npc.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save NPC');
@@ -140,6 +145,8 @@ export default function NewNpcPage() {
         body: JSON.stringify(payload),
       });
       toast.success('NPC saved');
+      // The cached NPC lists don't have the new row yet.
+      await invalidateApiPath(queryClient, '/npcs?');
       router.push(`/campaigns/${campaignId}/npcs/${npc.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save NPC');

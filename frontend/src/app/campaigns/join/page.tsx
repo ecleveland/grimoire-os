@@ -24,9 +24,8 @@ export default function JoinCampaignPage() {
         router.push(`/campaigns/${campaign.id}`);
         // Cache refresh is best-effort — it runs *after* the toast/navigate above
         // so a failed refetch can never strand a user who already joined. The
-        // campaigns list page isn't on react-query yet, so this currently matches
-        // nothing; it's wired ahead of that migration. The trailing `?` keeps the
-        // prefix from also matching `/campaigns/<id>` detail keys.
+        // trailing `?` keeps the prefix from also matching `/campaigns/<id>`
+        // detail keys.
         invalidateApiPath(queryClient, '/campaigns?').catch(err =>
           console.error('Failed to invalidate campaigns list after join:', err)
         );

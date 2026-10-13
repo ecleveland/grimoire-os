@@ -1,10 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { apiQueryKey, invalidateApiPath, useApiMutation, useApiQuery } from '@/lib/query';
 import { toast } from 'sonner';
 import FormField from '@/components/FormField';
+import LoadError from '@/components/LoadError';
+import LoadingState from '@/components/LoadingState';
 import LootOddsAdvanced from '@/components/LootOddsAdvanced';
 import { NPC_ALIGNMENTS, NPC_PROFESSIONS, NPC_RACES } from '@/lib/npc-constants';
 import type { Npc, NpcLootOverrides } from '@/lib/types';
@@ -46,82 +51,138 @@ function fromNpc(npc: Npc): FormState {
   };
 }
 
+interface NpcPayload {
+  name: string;
+  race: string;
+  background: string | null;
+  profession: string | null;
+  alignment: string | null;
+  age: number | null;
+  gender: string | null;
+  appearance: string | null;
+  goldPieces: number;
+  silverPieces: number;
+  copperPieces: number;
+  lootOverrides: NpcLootOverrides | null;
+}
+
+function resolvedProfession(state: FormState): string | null {
+  if (!state.profession) return null;
+  if (state.profession === PROFESSION_OTHER) return state.customProfession.trim() || null;
+  return state.profession;
+}
+
+/**
+ * Writes a PATCH or reroll response into the detail cache. Those responses
+ * carry no relation joins, so the cached links are kept. With no cached row
+ * the response is written as is and the full row is refetched.
+ */
+function putNpcKeepingLinks(queryClient: QueryClient, detailPath: string, updated: Npc) {
+  let hadRow = false;
+  queryClient.setQueryData<Npc | null>(apiQueryKey(detailPath), prev => {
+    if (!prev) return updated;
+    hadRow = true;
+    return { ...updated, outgoingLinks: prev.outgoingLinks, incomingLinks: prev.incomingLinks };
+  });
+  if (!hadRow) void invalidateApiPath(queryClient, detailPath);
+}
+
 export default function EditNpcPage() {
   const { id: campaignId, npcId } = useParams<{ id: string; npcId: string }>();
   const router = useRouter();
-  const [form, setForm] = useState<FormState | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+  const detailPath = `/npcs/${npcId}`;
 
-  useEffect(() => {
-    setLoadError(false);
-    apiFetch<Npc>(`/npcs/${npcId}`)
-      .then(npc => setForm(fromNpc(npc)))
-      .catch(() => {
-        // Without this flag a failed load left the page stuck on
-        // "Loading..." forever (VEG-317).
-        setLoadError(true);
-        toast.error('Failed to load NPC');
-      });
-  }, [npcId, reloadKey]);
+  const query = useApiQuery<Npc | null>(detailPath, { errorToast: 'Failed to load NPC' });
 
-  const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
-    setForm(prev => (prev ? { ...prev, [key]: value } : prev));
-  };
-
-  const resolvedProfession = (state: FormState): string | null => {
-    if (!state.profession) return null;
-    if (state.profession === PROFESSION_OTHER) return state.customProfession.trim() || null;
-    return state.profession;
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form) return;
-    setSaving(true);
-    try {
-      const profession = resolvedProfession(form);
-      const payload = {
-        name: form.name.trim(),
-        race: form.race,
-        background: form.background || null,
-        profession,
-        alignment: form.alignment || null,
-        age: form.age ? Number(form.age) : null,
-        gender: form.gender || null,
-        appearance: form.appearance || null,
-        goldPieces: Number(form.goldPieces) || 0,
-        silverPieces: Number(form.silverPieces) || 0,
-        copperPieces: Number(form.copperPieces) || 0,
-        lootOverrides: form.lootOverrides,
-      };
-      await apiFetch<Npc>(`/npcs/${npcId}`, {
+  const save = useApiMutation(
+    (payload: NpcPayload) =>
+      apiFetch<Npc>(detailPath, {
         method: 'PATCH',
         body: JSON.stringify(payload),
-      });
-      toast.success('NPC updated');
-      router.push(`/campaigns/${campaignId}/npcs/${npcId}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update NPC');
-      setSaving(false);
+      }),
+    {
+      onSuccess: updated => {
+        putNpcKeepingLinks(queryClient, detailPath, updated);
+        void invalidateApiPath(queryClient, '/npcs?');
+        toast.success('NPC updated');
+        router.push(`/campaigns/${campaignId}/npcs/${npcId}`);
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to update NPC');
+      },
     }
-  };
+  );
 
-  if (loadError)
+  const row = query.data;
+
+  // An empty response body reads as null. A cached null that is being
+  // refetched falls through to the loading view instead of flashing this.
+  if (row === null && !query.isFetching)
     return (
       <div className="text-center py-12">
-        <p className="text-gray-500 dark:text-gray-400 mb-4">Failed to load NPC.</p>
-        <button
-          type="button"
-          onClick={() => setReloadKey(k => k + 1)}
+        <p className="text-gray-500 dark:text-gray-400 mb-4">NPC not found.</p>
+        <Link
+          href={`/campaigns/${campaignId}/npcs`}
           className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
         >
-          Retry
-        </button>
+          Back to NPCs
+        </Link>
       </div>
     );
-  if (!form) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+
+  // A failed load shows a Retry instead of leaving the page on the loading
+  // view. A background refetch that fails keeps the form and its unsaved
+  // changes, and a retry in flight falls through to the loading view.
+  if (query.isError && row === undefined && !query.isFetching)
+    return <LoadError message="Failed to load NPC." onRetry={() => query.refetch()} />;
+
+  if (row == null) return <LoadingState />;
+
+  return (
+    <NpcEditForm
+      initial={fromNpc(row)}
+      submitting={save.isPending || save.isSuccess}
+      onSubmit={payload => save.mutate(payload)}
+      onCancel={() => router.back()}
+    />
+  );
+}
+
+function NpcEditForm({
+  initial,
+  submitting,
+  onSubmit,
+  onCancel,
+}: {
+  initial: FormState;
+  submitting: boolean;
+  onSubmit: (payload: NpcPayload) => void;
+  onCancel: () => void;
+}) {
+  const [form, setForm] = useState<FormState>(initial);
+
+  const update = <K extends keyof FormState>(key: K, value: FormState[K]) => {
+    setForm(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      name: form.name.trim(),
+      race: form.race,
+      background: form.background || null,
+      profession: resolvedProfession(form),
+      alignment: form.alignment || null,
+      age: form.age ? Number(form.age) : null,
+      gender: form.gender || null,
+      appearance: form.appearance || null,
+      goldPieces: Number(form.goldPieces) || 0,
+      silverPieces: Number(form.silverPieces) || 0,
+      copperPieces: Number(form.copperPieces) || 0,
+      lootOverrides: form.lootOverrides,
+    });
+  };
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -236,14 +297,14 @@ export default function EditNpcPage() {
         <div className="flex gap-3 pt-2">
           <button
             type="submit"
-            disabled={saving}
+            disabled={submitting}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
           >
-            {saving ? 'Saving...' : 'Save'}
+            {submitting ? 'Saving...' : 'Save'}
           </button>
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={onCancel}
             className="px-4 py-2 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
             Cancel

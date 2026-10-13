@@ -1,12 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import {
+  apiQueryKey,
+  invalidateApiPath,
+  useApiMutation,
+  useApiQuery,
+  useDeleteMutation,
+} from '@/lib/query';
 import { toast } from 'sonner';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import LoadError from '@/components/LoadError';
+import LoadingState from '@/components/LoadingState';
 import NpcFieldRow from '@/components/NpcFieldRow';
 import NpcRelationsPanel from '@/components/NpcRelationsPanel';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
@@ -82,71 +92,127 @@ function statBlockShape(sb: Npc['statBlock']): NpcStatBlockShape | null {
   return sb as unknown as NpcStatBlockShape;
 }
 
+/**
+ * Writes a PATCH or reroll response into the detail cache. Those responses
+ * carry no relation joins, so the cached links are kept. With no cached row
+ * the response is written as is and the full row is refetched.
+ */
+function putNpcKeepingLinks(queryClient: QueryClient, detailPath: string, updated: Npc) {
+  let hadRow = false;
+  queryClient.setQueryData<Npc | null>(apiQueryKey(detailPath), prev => {
+    if (!prev) return updated;
+    hadRow = true;
+    return { ...updated, outgoingLinks: prev.outgoingLinks, incomingLinks: prev.incomingLinks };
+  });
+  if (!hadRow) void invalidateApiPath(queryClient, detailPath);
+}
+
 export default function NpcDetailPage() {
   const { id: campaignId, npcId } = useParams<{ id: string; npcId: string }>();
   const router = useRouter();
   const { user, isDm } = useAuth();
-  const [npc, setNpc] = useState<Npc | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const queryClient = useQueryClient();
   const [confirmRerollAllOpen, setConfirmRerollAllOpen] = useState(false);
   const [generosity, setGenerosity] = useState<Generosity | null>(null);
   const [confirmRemoveStatBlockOpen, setConfirmRemoveStatBlockOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  const fetchNpc = useCallback(() => {
-    apiFetch<Npc>(`/npcs/${npcId}`)
-      .then(setNpc)
-      .catch(() => toast.error('Failed to load NPC'))
-      .finally(() => setLoading(false));
-  }, [npcId]);
+  const detailPath = `/npcs/${npcId}`;
 
-  useEffect(() => {
-    fetchNpc();
-  }, [fetchNpc]);
+  const npcQuery = useApiQuery<Npc | null>(detailPath, { errorToast: 'Failed to load NPC' });
+  const npc = npcQuery.data;
 
-  const reroll = async (field: NpcRerollField) => {
-    if (!npc) return;
-    setBusy(true);
-    try {
+  const putNpc = (updated: Npc) => putNpcKeepingLinks(queryClient, detailPath, updated);
+  const touchList = () => void invalidateApiPath(queryClient, '/npcs?');
+
+  const reroll = useApiMutation(
+    (field: NpcRerollField) => {
       const body: { field: NpcRerollField; lootOverrides?: NpcLootOverrides | null } = { field };
       if (field === 'loot' && generosity) {
         body.lootOverrides = GENEROSITY_PRESETS[generosity].overrides;
       }
-      const updated = await apiFetch<Npc>(`/npcs/${npcId}/reroll`, {
+      return apiFetch<Npc>(`${detailPath}/reroll`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      setNpc(updated);
-      // Clear the preset on any reroll that consumed it (loot) or that could
-      // not (all/other) — leaving it pressed would imply it was applied.
-      if (field === 'loot' || field === 'all') setGenerosity(null);
-      toast.success(field === 'all' ? 'NPC re-rolled' : `Re-rolled ${field}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to reroll');
-    } finally {
-      setBusy(false);
+    },
+    {
+      onSuccess: (updated, field) => {
+        putNpc(updated);
+        // Clear the preset on any reroll that consumed it (loot) or that could
+        // not (all), because leaving it pressed would imply it was applied.
+        if (field === 'loot' || field === 'all') setGenerosity(null);
+        toast.success(field === 'all' ? 'NPC re-rolled' : `Re-rolled ${field}`);
+        touchList();
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to reroll');
+      },
     }
-  };
+  );
 
-  const toggleLock = async (field: RowField) => {
-    if (!npc) return;
-    const next = npc.lockedFields.includes(field)
-      ? npc.lockedFields.filter(f => f !== field)
-      : [...npc.lockedFields, field];
-    setBusy(true);
-    try {
-      const updated = await apiFetch<Npc>(`/npcs/${npcId}`, {
+  const toggleLock = useApiMutation(
+    (field: RowField) => {
+      const current = npc?.lockedFields ?? [];
+      const next = current.includes(field) ? current.filter(f => f !== field) : [...current, field];
+      return apiFetch<Npc>(detailPath, {
         method: 'PATCH',
         body: JSON.stringify({ lockedFields: next }),
       });
-      setNpc(updated);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update lock');
-    } finally {
-      setBusy(false);
+    },
+    {
+      onSuccess: putNpc,
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to update lock');
+      },
     }
-  };
+  );
+
+  const removeStatBlock = useApiMutation(
+    () =>
+      apiFetch<Npc>(detailPath, {
+        method: 'PATCH',
+        body: JSON.stringify({ statBlock: null }),
+      }),
+    {
+      onSuccess: updated => {
+        putNpc(updated);
+        toast.success('Stat block removed');
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to remove stat block');
+      },
+    }
+  );
+
+  // The delete invalidates only the list prefix. The bare `/npcs` prefix would
+  // also match this page's own detail key and refetch the deleted row into a
+  // 404 before the navigation lands.
+  const deleteNpc = useDeleteMutation({
+    path: '/npcs',
+    invalidate: '/npcs?',
+    onDeleted: () => {
+      toast.success('NPC deleted');
+      router.push(`/campaigns/${campaignId}/npcs`);
+    },
+  });
+
+  const performDelete = () =>
+    deleteNpc.mutate(npcId, {
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete NPC');
+      },
+    });
+
+  const busy =
+    reroll.isPending ||
+    toggleLock.isPending ||
+    removeStatBlock.isPending ||
+    deleteNpc.isPending ||
+    deleteNpc.isSuccess;
+
+  const rerollField = (field: NpcRerollField) => reroll.mutate(field);
+  const toggleLockField = (field: RowField) => toggleLock.mutate(field);
 
   const handleRerollAll = () => {
     if (!npc) return;
@@ -154,43 +220,23 @@ export default function NpcDetailPage() {
       setConfirmRerollAllOpen(true);
       return;
     }
-    reroll('all');
+    rerollField('all');
   };
 
-  const performRemoveStatBlock = async () => {
-    if (!npc) return;
-    setBusy(true);
-    try {
-      const updated = await apiFetch<Npc>(`/npcs/${npcId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ statBlock: null }),
-      });
-      setNpc(updated);
-      toast.success('Stat block removed');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove stat block');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const handleGenerateStatBlock = () => rerollField('statBlock');
 
-  const handleGenerateStatBlock = () => reroll('statBlock');
+  // An empty response body reads as null. A cached null that is being
+  // refetched falls through to the loading view instead of flashing this.
+  if (npc === null && !npcQuery.isFetching)
+    return <div className="text-gray-500 dark:text-gray-400">NPC not found.</div>;
 
-  const performDelete = async () => {
-    if (!npc) return;
-    setBusy(true);
-    try {
-      await apiFetch<void>(`/npcs/${npcId}`, { method: 'DELETE' });
-      toast.success('NPC deleted');
-      router.push(`/campaigns/${campaignId}/npcs`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete NPC');
-      setBusy(false);
-    }
-  };
+  // The failure view is only for an NPC that never loaded. A background
+  // refetch that fails keeps the rendered NPC, and the error toast still
+  // reports the failure. A retry in flight falls through to the loading view.
+  if (npcQuery.isError && npc === undefined && !npcQuery.isFetching)
+    return <LoadError message="Failed to load NPC." onRetry={() => npcQuery.refetch()} />;
 
-  if (loading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
-  if (!npc) return <div className="text-gray-500 dark:text-gray-400">NPC not found.</div>;
+  if (npc == null) return <LoadingState />;
 
   const personalityValue = [
     ...npc.personalityTraits.map(t => `• ${t}`),
@@ -256,56 +302,56 @@ export default function NpcDetailPage() {
           label={FIELD_LABELS.name}
           value={npc.name}
           locked={isLocked(npc, 'name')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
         <NpcFieldRow
           field="race"
           label={FIELD_LABELS.race}
           value={npc.race}
           locked={isLocked(npc, 'race')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
         <NpcFieldRow
           field="background"
           label={FIELD_LABELS.background}
           value={npc.background}
           locked={isLocked(npc, 'background')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
         <NpcFieldRow
           field="profession"
           label={FIELD_LABELS.profession}
           value={npc.profession}
           locked={isLocked(npc, 'profession')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
         <NpcFieldRow
           field="alignment"
           label={FIELD_LABELS.alignment}
           value={npc.alignment}
           locked={isLocked(npc, 'alignment')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
         <NpcFieldRow
           field="appearance"
           label={FIELD_LABELS.appearance}
           value={npc.appearance}
           locked={isLocked(npc, 'appearance')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
         <NpcFieldRow
           field="personality"
           label={FIELD_LABELS.personality}
           value={personalityValue || null}
           locked={isLocked(npc, 'personality')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
       </div>
 
@@ -335,7 +381,7 @@ export default function NpcDetailPage() {
               </div>
               <button
                 type="button"
-                onClick={() => reroll('loot')}
+                onClick={() => rerollField('loot')}
                 disabled={busy || isLocked(npc, 'loot')}
                 aria-label="Reroll loot"
                 title={isLocked(npc, 'loot') ? 'Loot is locked' : 'Reroll loot'}
@@ -364,8 +410,8 @@ export default function NpcDetailPage() {
             ) : null
           }
           locked={isLocked(npc, 'loot')}
-          onReroll={reroll}
-          onToggleLock={toggleLock}
+          onReroll={rerollField}
+          onToggleLock={toggleLockField}
         />
       </div>
 
@@ -401,7 +447,9 @@ export default function NpcDetailPage() {
         )}
       </div>
 
-      <NpcRelationsPanel npc={npc} onRefetch={fetchNpc} />
+      {/* The key remounts the panel when the route moves to another NPC, which
+          resets its mode and its mutations. */}
+      <NpcRelationsPanel key={npc.id} npc={npc} onRefetch={() => void npcQuery.refetch()} />
 
       <ConfirmDialog
         open={confirmRerollAllOpen}
@@ -410,7 +458,7 @@ export default function NpcDetailPage() {
         description={`${npc.lockedFields.length} field(s) are locked and will be preserved. Continue?`}
         confirmLabel="Continue"
         variant="default"
-        onConfirm={() => reroll('all')}
+        onConfirm={() => rerollField('all')}
       />
       <ConfirmDialog
         open={confirmRemoveStatBlockOpen}
@@ -419,7 +467,7 @@ export default function NpcDetailPage() {
         description="Remove the stat block from this NPC?"
         confirmLabel="Remove"
         variant="danger"
-        onConfirm={performRemoveStatBlock}
+        onConfirm={() => removeStatBlock.mutate()}
       />
       <ConfirmDialog
         open={confirmDeleteOpen}

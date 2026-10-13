@@ -2,13 +2,16 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
+import { invalidateApiPath } from '@/lib/query';
 import { toast } from 'sonner';
 import type { Campaign } from '@/lib/types';
 import FormField from '@/components/FormField';
 
 export default function NewCampaignPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [setting, setSetting] = useState('');
@@ -23,6 +26,9 @@ export default function NewCampaignPage() {
         body: JSON.stringify({ name, description, setting }),
       });
       toast.success('Campaign created!');
+      // The list holds a staleTime, so wait for the invalidation before
+      // leaving, or the way back shows the cached rows without the new one.
+      await invalidateApiPath(queryClient, '/campaigns?');
       router.push(`/campaigns/${campaign.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create campaign');

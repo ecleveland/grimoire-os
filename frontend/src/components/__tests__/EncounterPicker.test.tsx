@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import EncounterPicker from '@/components/EncounterPicker';
 
 const mockApiFetch = vi.fn();
@@ -36,6 +37,19 @@ beforeEach(() => {
   onCancel.mockReset();
 });
 
+function renderPicker() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <EncounterPicker onSelect={onSelect} onCancel={onCancel} />
+    </QueryClientProvider>
+  );
+}
+
 function routeApi(encounters: typeof ENCOUNTERS = ENCOUNTERS, campaigns = CAMPAIGNS) {
   mockApiFetch.mockImplementation((path: string) => {
     if (path.startsWith('/campaigns')) return Promise.resolve(page(campaigns));
@@ -47,16 +61,16 @@ function routeApi(encounters: typeof ENCOUNTERS = ENCOUNTERS, campaigns = CAMPAI
 describe('EncounterPicker', () => {
   it('loads campaigns on mount and lists them', async () => {
     routeApi();
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/campaigns?page=1&limit=100'));
-    expect(screen.getByRole('option', { name: /curse of strahd/i })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /curse of strahd/i })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /lost mines/i })).toBeInTheDocument();
   });
 
   it('fetches encounters for the selected campaign', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     await screen.findByRole('option', { name: /curse of strahd/i });
 
     await user.selectOptions(screen.getByLabelText(/campaign/i), 'camp-2');
@@ -69,7 +83,7 @@ describe('EncounterPicker', () => {
   it('keeps Continue disabled until an encounter is chosen, then emits its id', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     await screen.findByRole('option', { name: /curse of strahd/i });
     await user.selectOptions(screen.getByLabelText(/campaign/i), 'camp-1');
     await screen.findByRole('option', { name: /death house/i });
@@ -83,16 +97,38 @@ describe('EncounterPicker', () => {
     expect(onSelect).toHaveBeenCalledWith('enc-2');
   });
 
+  it('clears the chosen encounter when the campaign changes', async () => {
+    routeApi();
+    const user = userEvent.setup();
+    renderPicker();
+    await screen.findByRole('option', { name: /curse of strahd/i });
+    await user.selectOptions(screen.getByLabelText(/campaign/i), 'camp-1');
+    await screen.findByRole('option', { name: /death house/i });
+    await user.selectOptions(screen.getByLabelText(/encounter/i), 'enc-2');
+    const continueBtn = screen.getByRole('button', { name: /continue/i });
+    expect(continueBtn).toBeEnabled();
+
+    await user.selectOptions(screen.getByLabelText(/campaign/i), 'camp-2');
+
+    expect(continueBtn).toBeDisabled();
+    await waitFor(() =>
+      expect(mockApiFetch).toHaveBeenCalledWith('/encounters?campaignId=camp-2&page=1&limit=100')
+    );
+    expect(await screen.findByRole('option', { name: /death house/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/encounter/i)).toHaveValue('');
+    expect(continueBtn).toBeDisabled();
+  });
+
   it('shows an empty state when the user has no campaigns', async () => {
     routeApi(ENCOUNTERS, []);
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     expect(await screen.findByText(/no campaigns/i)).toBeInTheDocument();
   });
 
   it('shows an empty state when the selected campaign has no encounters', async () => {
     routeApi([]);
     const user = userEvent.setup();
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     await screen.findByRole('option', { name: /curse of strahd/i });
     await user.selectOptions(screen.getByLabelText(/campaign/i), 'camp-1');
     expect(await screen.findByText(/no encounters/i)).toBeInTheDocument();
@@ -100,14 +136,14 @@ describe('EncounterPicker', () => {
 
   it('toasts when the campaign fetch fails', async () => {
     mockApiFetch.mockRejectedValue(new Error('boom'));
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load campaigns'));
   });
 
   it('cancels without selecting', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<EncounterPicker onSelect={onSelect} onCancel={onCancel} />);
+    renderPicker();
     await screen.findByRole('option', { name: /curse of strahd/i });
     await user.click(screen.getByRole('button', { name: /cancel/i }));
     expect(onCancel).toHaveBeenCalled();

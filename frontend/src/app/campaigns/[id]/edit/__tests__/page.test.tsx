@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import EditCampaignPage from '../page';
 import type { Campaign } from '@/lib/types';
 
@@ -40,6 +41,21 @@ function makeCampaign(over: Partial<Campaign> = {}): Campaign {
   };
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests. The client is returned so a
+  // test can invalidate the cached campaign to force a background refetch.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const utils = render(
+    <QueryClientProvider client={client}>
+      <EditCampaignPage />
+    </QueryClientProvider>
+  );
+  return { client, ...utils };
+}
+
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
@@ -51,13 +67,13 @@ beforeEach(() => {
 describe('EditCampaignPage', () => {
   it('shows the loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
-    render(<EditCampaignPage />);
+    renderPage();
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
   it('prefills the form with existing campaign values', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign());
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() => {
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines');
     });
@@ -70,7 +86,7 @@ describe('EditCampaignPage', () => {
 
   it('treats missing optional fields as empty strings', async () => {
     mockApiFetch.mockResolvedValue(makeCampaign({ description: undefined, setting: undefined }));
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() => {
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines');
     });
@@ -80,14 +96,16 @@ describe('EditCampaignPage', () => {
 
   it('toasts an error when the initial load fails', async () => {
     mockApiFetch.mockRejectedValue(new Error('nope'));
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load campaign'));
   });
 
   it('renders an error state instead of an editable form when the initial load fails', async () => {
     mockApiFetch.mockRejectedValue(new Error('nope'));
-    render(<EditCampaignPage />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
+    renderPage();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load campaign.');
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
     // No form: a Save here would PATCH empty defaults over the real record.
     expect(screen.queryByRole('button', { name: /save changes/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
@@ -97,7 +115,7 @@ describe('EditCampaignPage', () => {
     mockApiFetch.mockRejectedValueOnce(new Error('nope'));
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 
     await user.click(screen.getByRole('button', { name: /retry/i }));
@@ -108,11 +126,40 @@ describe('EditCampaignPage', () => {
     expect(mockApiFetch).toHaveBeenCalledTimes(2);
   });
 
+  it('renders not-found when the campaign comes back empty', async () => {
+    mockApiFetch.mockResolvedValue(null);
+    renderPage();
+    expect(await screen.findByText('Campaign not found.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /back to campaigns/i })).toHaveAttribute(
+      'href',
+      '/campaigns'
+    );
+    expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the form and its unsaved edits when a background refetch fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockResolvedValueOnce(makeCampaign());
+    const { client } = renderPage();
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
+    );
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: 'Half-typed' } });
+
+    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
+    await client.invalidateQueries();
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load campaign'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Half-typed');
+    consoleError.mockRestore();
+  });
+
   it('PATCHes /campaigns/:id with edited values and redirects on save', async () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
 
     await waitFor(() =>
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
@@ -143,7 +190,7 @@ describe('EditCampaignPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockRejectedValueOnce(new Error('forbidden'));
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
 
     await waitFor(() =>
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
@@ -158,7 +205,7 @@ describe('EditCampaignPage', () => {
   it('Cancel navigates back without saving', async () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() =>
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
     );
@@ -171,7 +218,7 @@ describe('EditCampaignPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockResolvedValueOnce(undefined);
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() =>
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
     );
@@ -197,10 +244,33 @@ describe('EditCampaignPage', () => {
     expect(mockPush).toHaveBeenCalledWith('/campaigns');
   });
 
+  it('does not toast a load error after a successful delete', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockResolvedValueOnce(makeCampaign());
+    mockApiFetch.mockResolvedValueOnce(undefined);
+    // Any GET after the DELETE hits a campaign that no longer exists.
+    mockApiFetch.mockRejectedValue(new Error('Campaign not found'));
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
+    );
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /delete/i }));
+
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Campaign deleted'));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns'));
+    // Let any refetch the delete triggered settle before checking for its toast.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    consoleError.mockRestore();
+  });
+
   it('Delete confirm dialog can be dismissed via Cancel', async () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() =>
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
     );
@@ -215,7 +285,7 @@ describe('EditCampaignPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeCampaign());
     mockApiFetch.mockRejectedValueOnce(new Error('cannot delete'));
     const user = userEvent.setup();
-    render(<EditCampaignPage />);
+    renderPage();
     await waitFor(() =>
       expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('The Lost Mines')
     );
