@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ReactElement } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import NpcRelationsPanel from '../NpcRelationsPanel';
+import { apiQueryKey } from '@/lib/query';
 import type { Npc, NpcRelation, PaginatedResponse } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
@@ -64,6 +67,16 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
   };
 }
 
+function renderPanel(ui: ReactElement) {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const result = render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return { ...result, client };
+}
+
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
@@ -71,7 +84,7 @@ beforeEach(() => {
 
 describe('NpcRelationsPanel', () => {
   it('shows empty state when no relations exist', () => {
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
     expect(screen.getByText(/no relations yet/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /add existing npc/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /generate related npc/i })).toBeInTheDocument();
@@ -82,7 +95,7 @@ describe('NpcRelationsPanel', () => {
       relation: 'parent',
       toNpc: { id: 'npc-2', name: 'Aria Stormwind', race: 'Elf' },
     });
-    render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
     expect(screen.getByText(/parent/i)).toBeInTheDocument();
     expect(screen.getByText(/aria stormwind/i)).toBeInTheDocument();
     expect(screen.getByText(/elf/i)).toBeInTheDocument();
@@ -94,7 +107,11 @@ describe('NpcRelationsPanel', () => {
     mockApiFetch.mockResolvedValueOnce(undefined);
 
     const rel = makeRelation({ id: 'rel-99' });
-    render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={onRefetch} />);
+    const { client } = renderPanel(
+      <NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={onRefetch} />
+    );
+    // The backend deletes the inverse row too, so the target's cached detail goes stale.
+    client.setQueryData(apiQueryKey('/npcs/npc-2'), makeNpc({ id: 'npc-2' }));
 
     await user.click(screen.getByRole('button', { name: /remove relation/i }));
     const dialog = await screen.findByRole('dialog');
@@ -105,12 +122,13 @@ describe('NpcRelationsPanel', () => {
       '/npcs/npc-1/relations/rel-99',
       expect.objectContaining({ method: 'DELETE' })
     );
+    expect(client.getQueryState(apiQueryKey('/npcs/npc-2'))?.isInvalidated).toBe(true);
   });
 
   it('skips delete when the confirmation dialog is cancelled', async () => {
     const user = userEvent.setup();
     const rel = makeRelation();
-    render(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc({ outgoingLinks: [rel] })} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /remove relation/i }));
     const dialog = await screen.findByRole('dialog');
     await user.click(within(dialog).getByRole('button', { name: /cancel/i }));
@@ -140,7 +158,9 @@ describe('NpcRelationsPanel', () => {
       return Promise.resolve(undefined);
     });
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={onRefetch} />);
+    const { client } = renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={onRefetch} />);
+    // The backend writes the inverse row on the target, so its cached detail goes stale.
+    client.setQueryData(apiQueryKey('/npcs/npc-2'), makeNpc({ id: 'npc-2' }));
 
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.selectOptions(screen.getByLabelText(/relation type/i), 'parent');
@@ -166,6 +186,47 @@ describe('NpcRelationsPanel', () => {
       )
     );
     expect(onRefetch).toHaveBeenCalled();
+    expect(client.getQueryState(apiQueryKey('/npcs/npc-2'))?.isInvalidated).toBe(true);
+  });
+
+  it('disables the pick buttons while the relation POST is in flight', async () => {
+    const user = userEvent.setup();
+    let resolvePost: (value: unknown) => void = () => {};
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (typeof path === 'string' && path.startsWith('/npcs?')) {
+        return Promise.resolve({
+          data: [
+            makeNpc({ id: 'npc-2', name: 'Bren Stormwind' }),
+            makeNpc({ id: 'npc-3', name: 'Aria Stormwind' }),
+          ],
+          total: 2,
+          page: 1,
+          lastPage: 1,
+        });
+      }
+      if (path === '/npcs/npc-1/relations' && init?.method === 'POST') {
+        return new Promise(resolve => {
+          resolvePost = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    await user.click(screen.getByRole('button', { name: /add existing npc/i }));
+    await user.type(screen.getByPlaceholderText(/search npcs/i), 'Stormwind');
+
+    await user.click(await screen.findByRole('button', { name: /bren stormwind/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /bren stormwind/i })).toBeDisabled()
+    );
+    expect(screen.getByRole('button', { name: /aria stormwind/i })).toBeDisabled();
+
+    resolvePost({ id: 'rel-new' });
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /aria stormwind/i })).not.toBeInTheDocument()
+    );
   });
 
   it('Add Existing search sends the term to the API instead of filtering client-side (VEG-313)', async () => {
@@ -186,7 +247,7 @@ describe('NpcRelationsPanel', () => {
       return Promise.resolve(undefined);
     });
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.type(screen.getByPlaceholderText(/search npcs/i), 'shadow cloak');
 
@@ -211,7 +272,7 @@ describe('NpcRelationsPanel', () => {
     };
     mockApiFetch.mockResolvedValue(page1);
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.type(screen.getByPlaceholderText(/search npcs/i), 'townsfolk');
 
@@ -228,7 +289,7 @@ describe('NpcRelationsPanel', () => {
       lastPage: 1,
     });
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.type(screen.getByPlaceholderText(/search npcs/i), 'bren');
 
@@ -247,7 +308,7 @@ describe('NpcRelationsPanel', () => {
       lastPage: 1,
     });
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.type(screen.getByPlaceholderText(/search npcs/i), 'mae');
 
@@ -259,7 +320,7 @@ describe('NpcRelationsPanel', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValue({ data: [], total: 0, page: 1, lastPage: 1 });
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.type(screen.getByPlaceholderText(/search npcs/i), 'Bren');
 
@@ -290,7 +351,7 @@ describe('NpcRelationsPanel', () => {
       return Promise.resolve(undefined);
     });
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
 
     await user.click(screen.getByRole('button', { name: /add existing npc/i }));
     await user.type(screen.getByPlaceholderText(/search npcs/i), 'm');
@@ -306,8 +367,11 @@ describe('NpcRelationsPanel', () => {
       campaignId: 'campaign-1',
       name: 'Bren',
     });
+    const onRefetch = vi.fn();
 
-    render(<NpcRelationsPanel npc={makeNpc()} onRefetch={() => {}} />);
+    const { client } = renderPanel(<NpcRelationsPanel npc={makeNpc()} onRefetch={onRefetch} />);
+    const listKey = apiQueryKey('/npcs?campaignId=campaign-1&limit=20&page=1');
+    client.setQueryData(listKey, { data: [], total: 0, page: 1, lastPage: 1 });
 
     await user.click(screen.getByRole('button', { name: /generate related npc/i }));
     await user.selectOptions(screen.getByLabelText(/relation type/i), 'parent');
@@ -323,5 +387,8 @@ describe('NpcRelationsPanel', () => {
       )
     );
     expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs/new-npc-id');
+    // The source NPC gained a link and the list gained a row.
+    expect(onRefetch).toHaveBeenCalled();
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
   });
 });

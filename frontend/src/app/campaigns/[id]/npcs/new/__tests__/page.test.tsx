@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { apiQueryKey } from '@/lib/query';
 import NewNpcPage from '../page';
 import type { GeneratedNpcPreview, Npc } from '@/lib/types';
 
@@ -45,6 +47,55 @@ function buildPreview(over: Partial<GeneratedNpcPreview> = {}): GeneratedNpcPrev
   };
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const result = render(
+    <QueryClientProvider client={client}>
+      <NewNpcPage />
+    </QueryClientProvider>
+  );
+  return { ...result, client };
+}
+
+function makeSavedNpc(id: string): Npc {
+  return {
+    id,
+    campaignId: 'campaign-1',
+    createdById: 'u',
+    name: 'Old Maelin',
+    race: 'Human',
+    personalityTraits: [],
+    ideals: [],
+    bonds: [],
+    flaws: [],
+    goldPieces: 0,
+    silverPieces: 0,
+    copperPieces: 0,
+    lockedFields: [],
+    isManual: false,
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+/**
+ * Seeds a cached NPC list page and records whether it was already invalidated
+ * when the page navigated, so a test can check the list is refreshed first.
+ */
+function trackListInvalidationAtPush(client: QueryClient) {
+  const listKey = apiQueryKey('/npcs?campaignId=campaign-1&limit=20&page=1');
+  client.setQueryData(listKey, { data: [], total: 0, page: 1, lastPage: 1 });
+  const seen: { invalidated?: boolean } = {};
+  mockPush.mockImplementation(() => {
+    seen.invalidated = client.getQueryState(listKey)?.isInvalidated;
+  });
+  return seen;
+}
+
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
@@ -52,7 +103,7 @@ beforeEach(() => {
 
 describe('NewNpcPage', () => {
   it('renders the heading and constraints form', () => {
-    render(<NewNpcPage />);
+    renderPage();
     expect(screen.getByRole('heading', { name: /generate npc/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/race/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/profession/i)).toBeInTheDocument();
@@ -63,7 +114,7 @@ describe('NewNpcPage', () => {
 
   it('shows free-text profession input when "Other" is selected', async () => {
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.selectOptions(screen.getByLabelText(/profession/i), '__other__');
     expect(screen.getByLabelText(/custom profession/i)).toBeInTheDocument();
   });
@@ -71,7 +122,7 @@ describe('NewNpcPage', () => {
   it('calls POST /npcs/generate with constraints when "Generate Preview" clicked', async () => {
     mockApiFetch.mockResolvedValue(buildPreview());
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.selectOptions(screen.getByLabelText(/race/i), 'Human');
     await user.selectOptions(screen.getByLabelText(/profession/i), 'Peasant');
     await user.click(screen.getByRole('button', { name: /generate preview/i }));
@@ -109,7 +160,7 @@ describe('NewNpcPage', () => {
       updatedAt: '',
     } as Npc);
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.click(screen.getByRole('button', { name: /generate preview/i }));
     await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /^save$/i }));
@@ -123,7 +174,7 @@ describe('NewNpcPage', () => {
 
   it('switches to manual create mode', async () => {
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.click(screen.getByRole('button', { name: /create manually/i }));
     expect(screen.getByLabelText(/^name/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /generate preview/i })).not.toBeInTheDocument();
@@ -132,7 +183,7 @@ describe('NewNpcPage', () => {
   it('passes combatRelevant: true when the toggle is checked', async () => {
     mockApiFetch.mockResolvedValue(buildPreview());
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.click(screen.getByLabelText(/combat-relevant/i));
     await user.click(screen.getByRole('button', { name: /generate preview/i }));
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
@@ -165,10 +216,42 @@ describe('NewNpcPage', () => {
       })
     );
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.click(screen.getByRole('button', { name: /generate preview/i }));
     await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
     expect(screen.getByText(/Based on Guard/i)).toBeInTheDocument();
+  });
+
+  it('invalidates the cached NPC lists before navigating to a saved preview', async () => {
+    mockApiFetch.mockResolvedValueOnce(buildPreview({ name: 'Old Maelin' }));
+    mockApiFetch.mockResolvedValueOnce(makeSavedNpc('new-id'));
+    const user = userEvent.setup();
+    const { client } = renderPage();
+    const seen = trackListInvalidationAtPush(client);
+    await user.click(screen.getByRole('button', { name: /generate preview/i }));
+    await screen.findByText('Old Maelin');
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs/new-id'));
+    expect(seen.invalidated).toBe(true);
+  });
+
+  it('invalidates the cached NPC lists before navigating to a manual NPC', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeSavedNpc('manual-id'));
+    const user = userEvent.setup();
+    const { client } = renderPage();
+    const seen = trackListInvalidationAtPush(client);
+    await user.click(screen.getByRole('button', { name: /create manually/i }));
+    fireEvent.change(screen.getByLabelText(/^name/i), { target: { value: 'Manual NPC' } });
+    await user.selectOptions(screen.getByLabelText(/^race/i), 'Human');
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() =>
+      expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs/manual-id')
+    );
+    expect(seen.invalidated).toBe(true);
   });
 
   it('manual create posts to /npcs with isManual:true', async () => {
@@ -191,7 +274,7 @@ describe('NewNpcPage', () => {
       updatedAt: '',
     } as Npc);
     const user = userEvent.setup();
-    render(<NewNpcPage />);
+    renderPage();
     await user.click(screen.getByRole('button', { name: /create manually/i }));
     await user.type(screen.getByLabelText(/^name/i), 'Manual NPC');
     await user.selectOptions(screen.getByLabelText(/^race/i), 'Human');

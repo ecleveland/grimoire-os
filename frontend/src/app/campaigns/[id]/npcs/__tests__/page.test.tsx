@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import NpcsListPage from '../page';
 import type { Npc, PaginatedResponse } from '@/lib/types';
@@ -55,6 +56,20 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
   };
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const result = render(
+    <QueryClientProvider client={client}>
+      <NpcsListPage />
+    </QueryClientProvider>
+  );
+  return { ...result, client };
+}
+
 function makeResponse(data: Npc[]): PaginatedResponse<Npc> {
   return { data, total: data.length, page: 1, lastPage: 1 };
 }
@@ -71,17 +86,15 @@ beforeEach(() => {
 describe('NpcsListPage', () => {
   it('fetches NPCs for the campaign on mount', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
-    render(<NpcsListPage />);
+    renderPage();
     await waitFor(() => {
-      expect(mockApiFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/npcs?campaignId=campaign-1')
-      );
+      expect(mockApiFetch).toHaveBeenCalledWith('/npcs?campaignId=campaign-1&limit=20&page=1');
     });
   });
 
   it('renders the heading and "New NPC" link', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
-    render(<NpcsListPage />);
+    renderPage();
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
     expect(screen.getByRole('heading', { name: /npcs/i })).toBeInTheDocument();
     const newLink = screen.getByRole('link', { name: /new npc/i });
@@ -95,7 +108,7 @@ describe('NpcsListPage', () => {
         makeNpc({ id: 'b', name: 'Borin', race: 'Dwarf', profession: 'Blacksmith' }),
       ])
     );
-    render(<NpcsListPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
     expect(screen.getByText('Borin')).toBeInTheDocument();
     // Race + profession appear under each NPC card alongside the dropdown options.
@@ -108,8 +121,40 @@ describe('NpcsListPage', () => {
 
   it('shows empty state when no NPCs', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
-    render(<NpcsListPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText(/no npcs yet/i)).toBeInTheDocument());
+  });
+
+  it('toasts a failed load and offers a Retry that refetches the list', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+    mockApiFetch.mockResolvedValue(makeResponse([makeNpc({ id: 'a', name: 'Old Maelin' })]));
+    renderPage();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load NPCs');
+    expect(toast.error).toHaveBeenCalledWith('Failed to load NPCs', { id: 'load-npcs' });
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Old Maelin')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps loaded rows when a background refetch fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    mockApiFetch.mockResolvedValueOnce(makeResponse([makeNpc({ id: 'a', name: 'Old Maelin' })]));
+    mockApiFetch.mockRejectedValueOnce(new Error('network down'));
+    const { client } = renderPage();
+    await screen.findByText('Old Maelin');
+
+    await client.invalidateQueries();
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith('Failed to load NPCs', { id: 'load-npcs' })
+    );
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Old Maelin')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   describe('bulk loot reroll', () => {
@@ -124,7 +169,7 @@ describe('NpcsListPage', () => {
         if (url.startsWith('/npcs?')) return Promise.resolve(makeResponse(twoNpcs()));
         return Promise.resolve(makeNpc());
       });
-      render(<NpcsListPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
       expect(screen.queryByRole('button', { name: /reroll loot/i })).not.toBeInTheDocument();
 
@@ -153,7 +198,7 @@ describe('NpcsListPage', () => {
         if (url === '/npcs/b/reroll') return Promise.reject(new Error('manual NPC'));
         return Promise.resolve(makeNpc());
       });
-      render(<NpcsListPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
 
       await user.click(screen.getByRole('checkbox', { name: /select old maelin/i }));
@@ -175,7 +220,7 @@ describe('NpcsListPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeResponse(twoNpcs()));
-      render(<NpcsListPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
       expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /reroll loot/i })).not.toBeInTheDocument();
@@ -187,7 +232,7 @@ describe('NpcsListPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeResponse(twoNpcs()));
-      render(<NpcsListPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
       expect(screen.getByRole('checkbox', { name: /select old maelin/i })).toBeInTheDocument();
     });
@@ -195,7 +240,7 @@ describe('NpcsListPage', () => {
     it('clears the selection when filters change', async () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValue(makeResponse(twoNpcs()));
-      render(<NpcsListPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('Old Maelin')).toBeInTheDocument());
 
       await user.click(screen.getByRole('checkbox', { name: /select old maelin/i }));
@@ -211,13 +256,15 @@ describe('NpcsListPage', () => {
   it('refetches with race filter when changed', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
     const user = userEvent.setup();
-    render(<NpcsListPage />);
+    renderPage();
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalled());
     mockApiFetch.mockClear();
     mockApiFetch.mockResolvedValue(makeResponse([]));
     await user.selectOptions(screen.getByLabelText(/race/i), 'Elf');
     await waitFor(() => {
-      expect(mockApiFetch).toHaveBeenCalledWith(expect.stringContaining('race=Elf'));
+      expect(mockApiFetch).toHaveBeenCalledWith(
+        '/npcs?campaignId=campaign-1&limit=20&page=1&race=Elf'
+      );
     });
   });
 });

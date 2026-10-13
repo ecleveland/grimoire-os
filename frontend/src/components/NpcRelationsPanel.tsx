@@ -1,10 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
+import { invalidateApiPath, useApiMutation, useApiQuery } from '@/lib/query';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import SearchBox from '@/components/SearchBox';
 import type { Npc, NpcRelation, PaginatedResponse } from '@/lib/types';
@@ -31,22 +33,72 @@ interface NpcRelationsPanelProps {
 
 export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelProps) {
   const router = useRouter();
-  const [busy, setBusy] = useState(false);
+  const queryClient = useQueryClient();
   const [mode, setMode] = useState<'view' | 'add' | 'generate'>('view');
   const [pendingRemoval, setPendingRemoval] = useState<NpcRelation | null>(null);
 
-  const performRemove = async (rel: NpcRelation) => {
-    setBusy(true);
-    try {
-      await apiFetch<void>(`/npcs/${npc.id}/relations/${rel.id}`, { method: 'DELETE' });
-      toast.success('Relation removed');
-      onRefetch();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove relation');
-    } finally {
-      setBusy(false);
+  const removeRelation = useApiMutation(
+    (rel: NpcRelation) =>
+      apiFetch<void>(`/npcs/${npc.id}/relations/${rel.id}`, { method: 'DELETE' }),
+    {
+      onSuccess: (_data, rel) => {
+        toast.success('Relation removed');
+        onRefetch();
+        // The backend deletes the inverse row on the target NPC as well.
+        void invalidateApiPath(queryClient, `/npcs/${rel.toNpcId}`);
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to remove relation');
+      },
     }
-  };
+  );
+
+  const addRelation = useApiMutation(
+    ({ target, relation }: { target: Npc; relation: string }) =>
+      apiFetch(`/npcs/${npc.id}/relations`, {
+        method: 'POST',
+        body: JSON.stringify({ toNpcId: target.id, relation }),
+      }),
+    {
+      onSuccess: (_data, { target, relation }) => {
+        toast.success(`Linked ${target.name} as ${relation}`);
+        setMode('view');
+        onRefetch();
+        // The backend writes the inverse row on the target NPC as well.
+        void invalidateApiPath(queryClient, `/npcs/${target.id}`);
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to add relation');
+      },
+    }
+  );
+
+  const generateRelated = useApiMutation(
+    (relation: string) =>
+      apiFetch<Npc>(`/npcs/${npc.id}/relations/generate`, {
+        method: 'POST',
+        body: JSON.stringify({ relation }),
+      }),
+    {
+      onSuccess: (created, relation) => {
+        toast.success(`Generated ${relation}: ${created.name}`);
+        setMode('view');
+        // The source NPC gained a link and the list gained a row.
+        onRefetch();
+        void invalidateApiPath(queryClient, '/npcs?');
+        router.push(`/campaigns/${npc.campaignId}/npcs/${created.id}`);
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to generate related NPC');
+      },
+    }
+  );
+
+  const busy =
+    removeRelation.isPending ||
+    addRelation.isPending ||
+    generateRelated.isPending ||
+    generateRelated.isSuccess;
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
@@ -75,24 +127,17 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
       {mode === 'add' && (
         <AddRelationForm
           npc={npc}
+          busy={busy}
           onCancel={() => setMode('view')}
-          onAdded={() => {
-            setMode('view');
-            onRefetch();
-          }}
-          setBusy={setBusy}
+          onPick={(target, relation) => addRelation.mutate({ target, relation })}
         />
       )}
 
       {mode === 'generate' && (
         <GenerateRelatedForm
-          npc={npc}
+          busy={busy}
           onCancel={() => setMode('view')}
-          onGenerated={newNpc => {
-            setMode('view');
-            router.push(`/campaigns/${npc.campaignId}/npcs/${newNpc.id}`);
-          }}
-          setBusy={setBusy}
+          onGenerate={relation => generateRelated.mutate(relation)}
         />
       )}
 
@@ -152,7 +197,7 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
         confirmLabel="Remove"
         variant="danger"
         onConfirm={() => {
-          if (pendingRemoval) performRemove(pendingRemoval);
+          if (pendingRemoval) removeRelation.mutate(pendingRemoval);
         }}
       />
     </div>
@@ -163,68 +208,32 @@ export default function NpcRelationsPanel({ npc, onRefetch }: NpcRelationsPanelP
 
 function AddRelationForm({
   npc,
+  busy,
   onCancel,
-  onAdded,
-  setBusy,
+  onPick,
 }: {
   npc: Npc;
+  busy: boolean;
   onCancel: () => void;
-  onAdded: () => void;
-  setBusy: (b: boolean) => void;
+  onPick: (target: Npc, relation: string) => void;
 }) {
   const [relation, setRelation] = useState<string>('parent');
   const [query, setQuery] = useState('');
-  const [candidates, setCandidates] = useState<Npc[]>([]);
-  const [total, setTotal] = useState(0);
-  const fetchSeq = useRef(0);
 
   // Stable callback so SearchBox's debounce effect doesn't re-arm per render.
   const handleDebouncedSearch = useCallback((value: string) => setQuery(value.trim()), []);
 
-  // Search server-side so matches beyond the first page are reachable
-  // (VEG-313); only the exclude-self filter stays on the client.
-  useEffect(() => {
-    if (!query) {
-      setCandidates([]);
-      setTotal(0);
-      return;
-    }
-    const seq = ++fetchSeq.current;
-    apiFetch<PaginatedResponse<Npc>>(
-      `/npcs?campaignId=${encodeURIComponent(npc.campaignId)}&search=${encodeURIComponent(query)}&limit=10`
-    )
-      .then(res => {
-        if (seq !== fetchSeq.current) return;
-        const linkable = res.data.filter(n => n.id !== npc.id);
-        setCandidates(linkable);
-        // Don't count rows excluded client-side (the NPC being edited) toward
-        // the "more matches exist" hint.
-        setTotal(res.total - (res.data.length - linkable.length));
-      })
-      .catch(() => {
-        setCandidates([]);
-        setTotal(0);
-      });
-  }, [query, npc.id, npc.campaignId]);
-
-  const handlePick = useCallback(
-    async (target: Npc) => {
-      setBusy(true);
-      try {
-        await apiFetch(`/npcs/${npc.id}/relations`, {
-          method: 'POST',
-          body: JSON.stringify({ toNpcId: target.id, relation }),
-        });
-        toast.success(`Linked ${target.name} as ${relation}`);
-        onAdded();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to add relation');
-      } finally {
-        setBusy(false);
-      }
-    },
-    [npc.id, relation, onAdded, setBusy]
+  // Search server-side so matches beyond the first page are reachable; only
+  // the exclude-self filter stays on the client.
+  const search = useApiQuery<PaginatedResponse<Npc>>(
+    `/npcs?campaignId=${encodeURIComponent(npc.campaignId)}&search=${encodeURIComponent(query)}&limit=10`,
+    { enabled: query !== '', placeholderData: keepPreviousData }
   );
+  const rows = query && search.data ? search.data.data : [];
+  const candidates = rows.filter(n => n.id !== npc.id);
+  // Don't count rows excluded client-side (the NPC being edited) toward the
+  // "more matches exist" hint.
+  const total = query && search.data ? search.data.total - (rows.length - candidates.length) : 0;
 
   return (
     <div className="mb-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900/30 space-y-3">
@@ -263,8 +272,9 @@ function AddRelationForm({
             <li key={c.id}>
               <button
                 type="button"
-                onClick={() => handlePick(c)}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700"
+                onClick={() => onPick(c, relation)}
+                disabled={busy}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
               >
                 <span className="font-medium">{c.name}</span>
                 <span className="text-gray-500 dark:text-gray-400">
@@ -289,33 +299,15 @@ function AddRelationForm({
 // ── Generate Related NPC form ─────────────────────────────────────────────────
 
 function GenerateRelatedForm({
-  npc,
+  busy,
   onCancel,
-  onGenerated,
-  setBusy,
+  onGenerate,
 }: {
-  npc: Npc;
+  busy: boolean;
   onCancel: () => void;
-  onGenerated: (newNpc: Npc) => void;
-  setBusy: (b: boolean) => void;
+  onGenerate: (relation: string) => void;
 }) {
   const [relation, setRelation] = useState<string>('parent');
-
-  const handleGenerate = async () => {
-    setBusy(true);
-    try {
-      const created = await apiFetch<Npc>(`/npcs/${npc.id}/relations/generate`, {
-        method: 'POST',
-        body: JSON.stringify({ relation }),
-      });
-      toast.success(`Generated ${relation}: ${created.name}`);
-      onGenerated(created);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to generate related NPC');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div className="mb-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900/30 space-y-3">
@@ -347,8 +339,9 @@ function GenerateRelatedForm({
         </button>
         <button
           type="button"
-          onClick={handleGenerate}
-          className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          onClick={() => onGenerate(relation)}
+          disabled={busy}
+          className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
         >
           Generate
         </button>

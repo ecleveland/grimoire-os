@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import NpcDetailPage from '../page';
-import type { Npc } from '@/lib/types';
+import type { Npc, NpcRelation } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 const mockApiFetch = vi.fn();
@@ -58,6 +59,20 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
   };
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const result = render(
+    <QueryClientProvider client={client}>
+      <NpcDetailPage />
+    </QueryClientProvider>
+  );
+  return { ...result, client };
+}
+
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
@@ -71,7 +86,7 @@ beforeEach(() => {
 describe('NpcDetailPage', () => {
   it('fetches and renders the NPC', async () => {
     mockApiFetch.mockResolvedValue(makeNpc());
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -80,11 +95,49 @@ describe('NpcDetailPage', () => {
     expect(screen.getByText('Peasant')).toBeInTheDocument();
   });
 
+  it('shows a Retry after a failed load, toasts, and renders the NPC once Retry succeeds', async () => {
+    const user = userEvent.setup();
+    vi.mocked(toast.error).mockClear();
+    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+    mockApiFetch.mockResolvedValueOnce(makeNpc());
+    renderPage();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load NPC.');
+    expect(toast.error).toHaveBeenCalledWith('Failed to load NPC');
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument();
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows "NPC not found." when the API answers with an empty body', async () => {
+    mockApiFetch.mockResolvedValueOnce(null);
+    renderPage();
+    expect(await screen.findByText('NPC not found.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps the rendered NPC when a background refetch fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    mockApiFetch.mockResolvedValueOnce(makeNpc());
+    mockApiFetch.mockRejectedValueOnce(new Error('network down'));
+    const { client } = renderPage();
+    await screen.findByRole('heading', { name: 'Old Maelin' });
+
+    await client.invalidateQueries();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to load NPC'));
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('rerolls a single field on dice click', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ alignment: 'Lawful Good' }));
     mockApiFetch.mockResolvedValueOnce(makeNpc({ alignment: 'Chaotic Good' }));
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText('Lawful Good')).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: /reroll alignment/i }));
     await waitFor(() => expect(screen.getByText('Chaotic Good')).toBeInTheDocument());
@@ -97,11 +150,40 @@ describe('NpcDetailPage', () => {
     );
   });
 
+  it('keeps the relations listed after a reroll whose response carries no links', async () => {
+    const user = userEvent.setup();
+    const link: NpcRelation = {
+      id: 'rel-1',
+      fromNpcId: 'npc-1',
+      toNpcId: 'npc-2',
+      relation: 'parent',
+      notes: null,
+      toNpc: { id: 'npc-2', name: 'Aria Stormwind', race: 'Elf' },
+      fromNpc: { id: 'npc-1', name: 'Old Maelin', race: 'Human' },
+    };
+    mockApiFetch.mockResolvedValueOnce(
+      makeNpc({ alignment: 'Lawful Good', outgoingLinks: [link] })
+    );
+    // The reroll and PATCH responses come back without the relation joins.
+    const rerolled = makeNpc({ alignment: 'Chaotic Good' });
+    delete rerolled.outgoingLinks;
+    delete rerolled.incomingLinks;
+    mockApiFetch.mockResolvedValueOnce(rerolled);
+    renderPage();
+    expect(await screen.findByRole('link', { name: 'Aria Stormwind' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /reroll alignment/i }));
+
+    await waitFor(() => expect(screen.getByText('Chaotic Good')).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'Aria Stormwind' })).toBeInTheDocument();
+    expect(screen.queryByText(/no relations yet/i)).not.toBeInTheDocument();
+  });
+
   it('toggles lock via PATCH /npcs/:id', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: [] }));
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: ['alignment'] }));
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -119,7 +201,7 @@ describe('NpcDetailPage', () => {
   it('reroll-all opens a confirm dialog when fields are locked and cancels safely', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: ['name'] }));
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -136,7 +218,7 @@ describe('NpcDetailPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: ['name'] }));
     mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'Old Maelin', lockedFields: ['name'] }));
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -154,7 +236,7 @@ describe('NpcDetailPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lockedFields: [] }));
     mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'Borin' }));
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -171,7 +253,7 @@ describe('NpcDetailPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc());
     mockApiFetch.mockResolvedValueOnce(undefined);
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -190,7 +272,7 @@ describe('NpcDetailPage', () => {
   it('cancelling the delete confirm leaves the NPC alone', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc());
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -204,7 +286,7 @@ describe('NpcDetailPage', () => {
 
   it('shows edit link', async () => {
     mockApiFetch.mockResolvedValue(makeNpc());
-    render(<NpcDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
     );
@@ -229,7 +311,7 @@ describe('NpcDetailPage', () => {
           goldPieces: 7,
         })
       );
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByText('1× Hemp Rope')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
       await waitFor(() => expect(screen.getByText('2× Ruby Pendant')).toBeInTheDocument());
@@ -246,7 +328,7 @@ describe('NpcDetailPage', () => {
 
     it('disables the Reroll Loot button when the loot field is locked', async () => {
       mockApiFetch.mockResolvedValue(makeNpc({ lockedFields: ['loot'] }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
       );
@@ -259,7 +341,7 @@ describe('NpcDetailPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeNpc({ createdById: 'user-1' }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
       );
@@ -272,7 +354,7 @@ describe('NpcDetailPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeNpc({ createdById: 'user-1' }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
       );
@@ -283,7 +365,7 @@ describe('NpcDetailPage', () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValueOnce(makeNpc());
       mockApiFetch.mockRejectedValueOnce(new Error('Reroll failed badly'));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
       );
@@ -295,7 +377,7 @@ describe('NpcDetailPage', () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValueOnce(makeNpc());
       mockApiFetch.mockRejectedValueOnce('nope');
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
       );
@@ -329,7 +411,7 @@ describe('NpcDetailPage', () => {
 
     async function renderWithNpc(npc: Npc) {
       mockApiFetch.mockResolvedValueOnce(npc);
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: 'Old Maelin' })).toBeInTheDocument()
       );
@@ -502,7 +584,7 @@ describe('NpcDetailPage', () => {
 
     it('shows Generate Stat Block button when none is present', async () => {
       mockApiFetch.mockResolvedValue(makeNpc({ statBlock: null }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /generate stat block/i })).toBeInTheDocument()
       );
@@ -513,7 +595,7 @@ describe('NpcDetailPage', () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: null }));
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: SAMPLE_STAT_BLOCK }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() =>
         expect(screen.getByRole('button', { name: /generate stat block/i })).toBeInTheDocument()
       );
@@ -530,7 +612,7 @@ describe('NpcDetailPage', () => {
 
     it('renders the stat block card and a Remove button when present', async () => {
       mockApiFetch.mockResolvedValue(makeNpc({ statBlock: SAMPLE_STAT_BLOCK }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
       expect(screen.getByRole('button', { name: /remove stat block/i })).toBeInTheDocument();
       expect(
@@ -542,7 +624,7 @@ describe('NpcDetailPage', () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: SAMPLE_STAT_BLOCK }));
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: null }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /remove stat block/i }));
       const dialog = await screen.findByRole('dialog');
@@ -560,7 +642,7 @@ describe('NpcDetailPage', () => {
     it('Remove Stat Block skips API call when the user cancels the confirm dialog', async () => {
       const user = userEvent.setup();
       mockApiFetch.mockResolvedValueOnce(makeNpc({ statBlock: SAMPLE_STAT_BLOCK }));
-      render(<NpcDetailPage />);
+      renderPage();
       await waitFor(() => expect(screen.getByTestId('npc-stat-block')).toBeInTheDocument());
       await user.click(screen.getByRole('button', { name: /remove stat block/i }));
       const dialog = await screen.findByRole('dialog');

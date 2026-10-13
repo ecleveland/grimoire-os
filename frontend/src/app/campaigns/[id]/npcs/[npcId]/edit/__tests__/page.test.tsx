@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import EditNpcPage from '../page';
-import type { Npc } from '@/lib/types';
+import { apiQueryKey } from '@/lib/query';
+import type { Npc, NpcRelation } from '@/lib/types';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 const mockApiFetch = vi.fn();
@@ -51,6 +53,20 @@ function makeNpc(over: Partial<Npc> = {}): Npc {
   };
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const result = render(
+    <QueryClientProvider client={client}>
+      <EditNpcPage />
+    </QueryClientProvider>
+  );
+  return { ...result, client };
+}
+
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
@@ -59,7 +75,7 @@ beforeEach(() => {
 describe('EditNpcPage', () => {
   it('loads existing NPC and prefills the form', async () => {
     mockApiFetch.mockResolvedValue(makeNpc());
-    render(<EditNpcPage />);
+    renderPage();
     await waitFor(() => {
       const nameInput = screen.getByLabelText(/^name/i) as HTMLInputElement;
       expect(nameInput.value).toBe('Old Maelin');
@@ -74,7 +90,7 @@ describe('EditNpcPage', () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc());
     mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'New Name' }));
-    render(<EditNpcPage />);
+    renderPage();
     await waitFor(() => {
       const nameInput = screen.getByLabelText(/^name/i) as HTMLInputElement;
       expect(nameInput.value).toBe('Old Maelin');
@@ -95,7 +111,7 @@ describe('EditNpcPage', () => {
 
   it('renders an error state with Retry instead of hanging on Loading when the load fails', async () => {
     mockApiFetch.mockRejectedValue(new Error('nope'));
-    render(<EditNpcPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
     expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
@@ -105,7 +121,7 @@ describe('EditNpcPage', () => {
     mockApiFetch.mockRejectedValueOnce(new Error('nope'));
     mockApiFetch.mockResolvedValueOnce(makeNpc());
     const user = userEvent.setup();
-    render(<EditNpcPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument());
 
     await user.click(screen.getByRole('button', { name: /retry/i }));
@@ -116,11 +132,64 @@ describe('EditNpcPage', () => {
     expect(mockApiFetch).toHaveBeenCalledTimes(2);
   });
 
+  it('shows "NPC not found." with a link back to the list when the API answers an empty body', async () => {
+    mockApiFetch.mockResolvedValueOnce(null);
+    renderPage();
+    expect(await screen.findByText('NPC not found.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /back to npcs/i })).toHaveAttribute(
+      'href',
+      '/campaigns/campaign-1/npcs'
+    );
+    expect(screen.queryByRole('button', { name: /^save$/i })).not.toBeInTheDocument();
+  });
+
+  it('navigates after Save without fetching the NPC a second time', async () => {
+    const user = userEvent.setup();
+    mockApiFetch.mockResolvedValueOnce(makeNpc());
+    mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'New Name' }));
+    renderPage();
+    await screen.findByDisplayValue('Old Maelin');
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs/npc-1'));
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(mockApiFetch.mock.calls[0]).toEqual(['/npcs/npc-1']);
+    expect(mockApiFetch.mock.calls[1]).toEqual([
+      '/npcs/npc-1',
+      expect.objectContaining({ method: 'PATCH' }),
+    ]);
+  });
+
+  it('keeps the relation joins from the GET in the cached row after Save', async () => {
+    const user = userEvent.setup();
+    const link: NpcRelation = {
+      id: 'rel-1',
+      fromNpcId: 'npc-1',
+      toNpcId: 'npc-2',
+      relation: 'parent',
+      notes: null,
+      toNpc: { id: 'npc-2', name: 'Aria Stormwind', race: 'Elf' },
+    };
+    mockApiFetch.mockResolvedValueOnce(makeNpc({ outgoingLinks: [link], incomingLinks: [] }));
+    // The PATCH response comes back without the relation joins.
+    mockApiFetch.mockResolvedValueOnce(makeNpc({ name: 'New Name' }));
+    const { client } = renderPage();
+    await screen.findByDisplayValue('Old Maelin');
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(mockPush).toHaveBeenCalled());
+    expect(client.getQueryData(apiQueryKey('/npcs/npc-1'))).toEqual(
+      expect.objectContaining({ name: 'New Name', outgoingLinks: [link], incomingLinks: [] })
+    );
+  });
+
   it('reads and persists existing lootOverrides', async () => {
     const user = userEvent.setup();
     mockApiFetch.mockResolvedValueOnce(makeNpc({ lootOverrides: { trinketChance: 25 } }));
     mockApiFetch.mockResolvedValueOnce(makeNpc());
-    render(<EditNpcPage />);
+    renderPage();
     await waitFor(() => {
       const nameInput = screen.getByLabelText(/^name/i) as HTMLInputElement;
       expect(nameInput.value).toBe('Old Maelin');

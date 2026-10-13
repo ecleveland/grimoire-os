@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api';
-import { toast } from 'sonner';
+import { useListQuery } from '@/lib/query';
 import Pagination from '@/components/Pagination';
-import type { CampaignListItem, PaginatedResponse } from '@/lib/types';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
+import type { CampaignListItem } from '@/lib/types';
 
 const statusColors: Record<string, string> = {
   active: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
@@ -16,29 +17,21 @@ const statusColors: Record<string, string> = {
 const LIMIT = 20;
 
 export default function CampaignsPage() {
-  const [campaigns, setCampaigns] = useState<CampaignListItem[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    apiFetch<PaginatedResponse<CampaignListItem>>(`/campaigns?page=${page}&limit=${LIMIT}`)
-      .then(res => {
-        setCampaigns(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-      })
-      .catch(err => {
-        console.error('Failed to load campaigns:', err);
-        toast.error('Failed to load campaigns', { id: 'load-campaigns' });
-      })
-      .finally(() => setLoading(false));
-  }, [page]);
+  const list = useListQuery<CampaignListItem>(
+    '/campaigns',
+    { page, limit: LIMIT },
+    { errorToast: { message: 'Failed to load campaigns', id: 'load-campaigns' } }
+  );
+  const campaigns = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
 
-  if (loading && campaigns.length === 0) {
-    return <div className="text-gray-500 dark:text-gray-400">Loading campaigns...</div>;
+  // A Retry after a failed load keeps status 'error' while it runs, so the
+  // loading view checks isFetching as well as isPending.
+  if (list.isPending || (list.isError && list.isFetching)) {
+    return <LoadingState label="Loading campaigns…" />;
   }
 
   return (
@@ -61,7 +54,11 @@ export default function CampaignsPage() {
         </div>
       </div>
 
-      {campaigns.length === 0 ? (
+      {/* A background refetch that fails keeps the loaded rows, and the error
+          toast reports it. */}
+      {list.isError && !list.data ? (
+        <LoadError message="Failed to load campaigns" onRetry={list.refetch} />
+      ) : campaigns.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400">
           No campaigns yet. Create one to get started!
         </p>

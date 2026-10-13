@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { apiQueryKey } from '@/lib/query';
 import NoteDetailPage from '../page';
 import type { Note } from '@/lib/types';
 
@@ -43,6 +45,21 @@ function makeNote(over: Partial<Note> = {}): Note {
   } as Note;
 }
 
+function renderPage() {
+  // Fresh QueryClient per render with retries off so error states settle
+  // immediately and no cache bleeds between tests. The client is returned so a
+  // test can invalidate the cached note to force a background refetch.
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const utils = render(
+    <QueryClientProvider client={client}>
+      <NoteDetailPage />
+    </QueryClientProvider>
+  );
+  return { client, ...utils };
+}
+
 beforeEach(() => {
   mockApiFetch.mockReset();
   mockToastError.mockReset();
@@ -56,20 +73,51 @@ beforeEach(() => {
 describe('NoteDetailPage', () => {
   it('shows the loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
-    render(<NoteDetailPage />);
-    expect(screen.getByText(/^loading\.\.\./i)).toBeInTheDocument();
+    renderPage();
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
-  it('renders not-found and toasts when the request fails', async () => {
-    mockApiFetch.mockRejectedValue(new Error('404'));
-    render(<NoteDetailPage />);
-    await waitFor(() => expect(screen.getByText(/note not found/i)).toBeInTheDocument());
+  it('renders a retryable error and toasts when the request fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockRejectedValueOnce(new Error('500'));
+    const user = userEvent.setup();
+    renderPage();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load note.');
     expect(mockToastError).toHaveBeenCalledWith('Failed to load note');
+
+    mockApiFetch.mockResolvedValueOnce(makeNote());
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('renders not-found when the note comes back empty', async () => {
+    mockApiFetch.mockResolvedValue(null);
+    renderPage();
+    expect(await screen.findByText(/note not found/i)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps the note on screen when a background refetch fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockResolvedValueOnce(makeNote());
+    const { client } = renderPage();
+    expect(await screen.findByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument();
+
+    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
+    await client.invalidateQueries();
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load note'));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument();
+    expect(screen.getByText('The party met at the inn.')).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('renders title, visibility badge, session number, tags, and content', async () => {
     mockApiFetch.mockResolvedValue(makeNote());
-    render(<NoteDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument()
     );
@@ -82,7 +130,7 @@ describe('NoteDetailPage', () => {
 
   it('omits the session line and tag row when those fields are absent', async () => {
     mockApiFetch.mockResolvedValue(makeNote({ sessionNumber: undefined, tags: [] }));
-    render(<NoteDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument()
     );
@@ -98,7 +146,7 @@ describe('NoteDetailPage', () => {
 
   it('shows an Edit button only when the current user is the author', async () => {
     mockApiFetch.mockResolvedValue(makeNote({ authorId: 'someone-else' }));
-    render(<NoteDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument()
     );
@@ -117,7 +165,7 @@ describe('NoteDetailPage', () => {
       })
     );
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
 
     await user.click(await screen.findByRole('button', { name: /^edit$/i }));
 
@@ -160,10 +208,31 @@ describe('NoteDetailPage', () => {
     expect(screen.queryByLabelText(/^title$/i)).not.toBeInTheDocument();
   });
 
+  it('invalidates the notes lists but not the campaign queries after a save', async () => {
+    mockApiFetch.mockResolvedValueOnce(makeNote());
+    mockApiFetch.mockResolvedValueOnce(makeNote({ title: 'Updated title' }));
+    const user = userEvent.setup();
+    const { client } = renderPage();
+    const notesKey = apiQueryKey('/notes?campaignId=camp-1&page=1&limit=20');
+    const campaignKey = apiQueryKey('/campaigns/camp-1');
+    const membersKey = apiQueryKey('/campaigns/camp-1/members');
+    client.setQueryData(notesKey, { data: [], total: 0, page: 1, lastPage: 1 });
+    client.setQueryData(campaignKey, { id: 'camp-1' });
+    client.setQueryData(membersKey, []);
+
+    await user.click(await screen.findByRole('button', { name: /^edit$/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => expect(mockToastSuccess).toHaveBeenCalledWith('Note updated!'));
+    expect(client.getQueryState(notesKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(campaignKey)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(membersKey)?.isInvalidated).toBe(false);
+  });
+
   it('cancel button exits edit mode without persisting changes', async () => {
     mockApiFetch.mockResolvedValueOnce(makeNote());
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /^edit$/i }));
 
     await user.clear(screen.getByLabelText(/title/i));
@@ -183,7 +252,7 @@ describe('NoteDetailPage', () => {
       })
     );
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /^edit$/i }));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 
@@ -199,7 +268,7 @@ describe('NoteDetailPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeNote());
     mockApiFetch.mockRejectedValueOnce('boom');
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /^edit$/i }));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to update note'));
@@ -209,7 +278,7 @@ describe('NoteDetailPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: 3 }));
     mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: undefined }));
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /^edit$/i }));
     await user.clear(screen.getByLabelText(/session number/i));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
@@ -224,7 +293,7 @@ describe('NoteDetailPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: 3 }));
     mockApiFetch.mockResolvedValueOnce(makeNote({ sessionNumber: undefined }));
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
     await user.click(await screen.findByRole('button', { name: /^edit$/i }));
     await user.clear(screen.getByLabelText(/session number/i));
     await user.type(screen.getByLabelText(/session number/i), '0');
@@ -239,7 +308,7 @@ describe('NoteDetailPage', () => {
   it('navigates back to the campaign when the back link is clicked', async () => {
     mockApiFetch.mockResolvedValue(makeNote());
     const user = userEvent.setup();
-    render(<NoteDetailPage />);
+    renderPage();
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /session 1 recap/i })).toBeInTheDocument()
     );

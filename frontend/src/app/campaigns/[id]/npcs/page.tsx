@@ -1,54 +1,38 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { invalidateApiPath, useApiMutation, useListQuery } from '@/lib/query';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
 import { NPC_PROFESSIONS, NPC_RACES } from '@/lib/npc-constants';
-import type { Npc, NpcListItem, PaginatedResponse } from '@/lib/types';
+import type { Npc, NpcListItem } from '@/lib/types';
 
 const LIMIT = 20;
 
 export default function NpcsListPage() {
   const { id } = useParams<{ id: string }>();
   const { user, isDm } = useAuth();
-  const [npcs, setNpcs] = useState<NpcListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [race, setRace] = useState('');
   const [profession, setProfession] = useState('');
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [rerolling, setRerolling] = useState(false);
 
-  useEffect(() => {
-    const params = new URLSearchParams({
-      campaignId: id,
-      page: String(page),
-      limit: String(LIMIT),
-    });
-    if (race) params.set('race', race);
-    if (profession) params.set('profession', profession);
-    setLoading(true);
-    // A page or filter change shows a different slice of NPCs — drop any
-    // selection so the bulk action only ever targets visible rows.
-    setSelected(new Set());
-    apiFetch<PaginatedResponse<NpcListItem>>(`/npcs?${params.toString()}`)
-      .then(res => {
-        setNpcs(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-      })
-      .catch(err => {
-        console.error('Failed to load NPCs:', err);
-        toast.error('Failed to load NPCs', { id: 'load-npcs' });
-      })
-      .finally(() => setLoading(false));
-  }, [id, page, race, profession]);
+  const list = useListQuery<NpcListItem>(
+    '/npcs',
+    { campaignId: id, page, limit: LIMIT, race, profession },
+    { errorToast: { message: 'Failed to load NPCs', id: 'load-npcs' } }
+  );
+  const npcs = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
 
   // Backend reroll access is campaign-owner scoped; mirror the encounter-page
   // gate (DM role or creator) since the campaign's ownerId isn't in this payload.
@@ -63,10 +47,8 @@ export default function NpcsListPage() {
     });
   };
 
-  const bulkRerollLoot = async () => {
-    const ids = [...selected];
-    setRerolling(true);
-    try {
+  const bulk = useApiMutation<string[], string[]>(
+    async ids => {
       const results = await Promise.allSettled(
         ids.map(npcId =>
           apiFetch<Npc>(`/npcs/${npcId}/reroll`, {
@@ -75,22 +57,35 @@ export default function NpcsListPage() {
           })
         )
       );
-      const failedIds = ids.filter((_, i) => results[i].status === 'rejected');
-      if (failedIds.length === 0) {
-        toast.success(`Rerolled loot for ${ids.length} NPC${ids.length === 1 ? '' : 's'}`);
-      } else {
-        toast.error(`Failed to reroll loot for ${failedIds.length} of ${ids.length} NPCs`);
-      }
-      // Keep failed NPCs selected so the DM can retry just those.
-      setSelected(new Set(failedIds));
-    } finally {
-      setRerolling(false);
+      return ids.filter((_, i) => results[i].status === 'rejected');
+    },
+    {
+      onSuccess: (failedIds, ids) => {
+        if (failedIds.length === 0) {
+          toast.success(`Rerolled loot for ${ids.length} NPC${ids.length === 1 ? '' : 's'}`);
+        } else {
+          toast.error(`Failed to reroll loot for ${failedIds.length} of ${ids.length} NPCs`);
+        }
+        // Keep failed NPCs selected so the DM can retry just those.
+        setSelected(new Set(failedIds));
+        // The trailing slash matches cached detail rows and leaves the list alone.
+        void invalidateApiPath(queryClient, '/npcs/');
+      },
     }
-  };
+  );
+  const rerolling = bulk.isPending;
 
+  // A page or filter change shows a different slice of NPCs, so the selection
+  // is dropped with it and the bulk action only ever targets visible rows.
   const handleFilterChange = (setter: (v: string) => void) => (value: string) => {
     setter(value);
     setPage(1);
+    setSelected(new Set());
+  };
+
+  const handlePageChange = (p: number) => {
+    setPage(p);
+    setSelected(new Set());
   };
 
   const filterClass =
@@ -111,7 +106,7 @@ export default function NpcsListPage() {
           {selected.size > 0 && (
             <button
               type="button"
-              onClick={bulkRerollLoot}
+              onClick={() => bulk.mutate([...selected])}
               disabled={rerolling}
               className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
@@ -162,8 +157,13 @@ export default function NpcsListPage() {
         </label>
       </div>
 
-      {loading && npcs.length === 0 ? (
-        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
+      {/* A Retry after a failed first load keeps status 'error' while it runs,
+          so isFetching (not just isPending) shows the loading line. A failed
+          background refetch keeps the loaded rows, and the toast reports it. */}
+      {list.isPending || (list.isError && !list.data && list.isFetching) ? (
+        <LoadingState />
+      ) : list.isError && !list.data ? (
+        <LoadError message="Failed to load NPCs" onRetry={list.refetch} />
       ) : npcs.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400">No NPCs yet.</p>
       ) : (
@@ -204,7 +204,7 @@ export default function NpcsListPage() {
             lastPage={lastPage}
             total={total}
             limit={LIMIT}
-            onPageChange={setPage}
+            onPageChange={handlePageChange}
           />
         </>
       )}
