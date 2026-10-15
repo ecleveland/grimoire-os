@@ -241,9 +241,12 @@ export default function InitiativeTrackerPage() {
   // Load the panel's stat block. The QueryProvider cache keeps each fetched
   // monster, so returning to one on a later turn skips the loader. A 200-null
   // body (not visible to this viewer, or deleted) clears the panel rather than
-  // sticking on the loader, and a failed fetch clears it silently.
+  // sticking on the loader. A failed fetch clears it at once and silently:
+  // retries are off, so a server error never holds the loader through the
+  // provider's retry backoff.
   const panelQuery = useApiQuery<SrdMonster | null>(`/srd/monsters/${panelMonsterId}`, {
     enabled: panelMonsterId !== null,
+    retry: false,
   });
   const panelMonster = panelMonsterId ? (panelQuery.data ?? null) : null;
   const panelLoading = panelMonsterId !== null && panelQuery.isPending;

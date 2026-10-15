@@ -6,13 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
-import {
-  apiQueryKey,
-  invalidateApiPath,
-  useApiMutation,
-  useApiQuery,
-  useDeleteMutation,
-} from '@/lib/query';
+import { apiQueryKey, invalidateApiPath, useApiMutation, useApiQuery } from '@/lib/query';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import LoadError from '@/components/LoadError';
 import LoadingState from '@/components/LoadingState';
@@ -185,6 +179,10 @@ function emptyForm(tab: TabConfig): FormState {
   return Object.fromEntries(tab.fields.map(f => [f.key, emptyValue(f)]));
 }
 
+function rowsPathFor(slug: TableSlug): string {
+  return `/admin/npc-data/${slug}`;
+}
+
 function isDeletable(tab: TabConfig, row: AnyRow): boolean {
   if (!tab.hasSource) return true;
   return row.source === 'user';
@@ -212,24 +210,29 @@ export default function AdminNpcDataPage() {
   // Each tab has its own cache entry, so a tab that has never loaded shows no
   // rows rather than the previous tab's rows under this tab's columns, and a
   // late response from a previous tab cannot land in this one.
-  const rowsPath = `/admin/npc-data/${tab.slug}`;
-  const rowsQuery = useApiQuery<AnyRow[]>(rowsPath, {
+  const rowsQuery = useApiQuery<AnyRow[]>(rowsPathFor(tab.slug), {
     enabled: !authLoading && isAdmin,
     errorToast: 'Failed to load rows',
   });
   const rows = useMemo(() => rowsQuery.data ?? [], [rowsQuery.data]);
 
+  // Each write carries the slug of the tab it was made on. React Query hands a
+  // running mutation the options from the latest render, so reading the
+  // current tab in onSuccess would patch or refetch whichever tab the admin
+  // switched to while the request was in flight.
   const addRow = useApiMutation(
-    (body: Record<string, unknown>) =>
-      apiFetch(rowsPath, {
+    ({ slug, body }: { slug: TableSlug; body: Record<string, unknown> }) =>
+      apiFetch(rowsPathFor(slug), {
         method: 'POST',
         body: JSON.stringify(body),
       }),
     {
-      onSuccess: async () => {
+      onSuccess: async (_data, { slug }) => {
         toast.success('Row added');
-        setForm(emptyForm(tab));
-        await invalidateApiPath(queryClient, rowsPath);
+        // The form now belongs to whichever tab is open, so it resets only
+        // when that is still the tab the row was added to.
+        if (slug === tab.slug) setForm(emptyForm(tab));
+        await invalidateApiPath(queryClient, rowsPathFor(slug));
       },
       onError: err => {
         toast.error(err instanceof Error ? err.message : 'Failed to add row');
@@ -271,18 +274,18 @@ export default function AdminNpcDataPage() {
       if (text === '') continue;
       body[f.key] = text;
     }
-    addRow.mutate(body);
+    addRow.mutate({ slug: tab.slug, body });
   };
 
   const toggleActive = useApiMutation(
-    (row: AnyRow) =>
-      apiFetch(`${rowsPath}/${row.id}`, {
+    ({ slug, row }: { slug: TableSlug; row: AnyRow }) =>
+      apiFetch(`${rowsPathFor(slug)}/${row.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive: !row.isActive }),
       }),
     {
-      onSuccess: (_data, row) =>
-        queryClient.setQueryData<AnyRow[]>(apiQueryKey(rowsPath), prev =>
+      onSuccess: (_data, { slug, row }) =>
+        queryClient.setQueryData<AnyRow[]>(apiQueryKey(rowsPathFor(slug)), prev =>
           prev?.map(r => (r.id === row.id ? { ...r, isActive: !row.isActive } : r))
         ),
       onError: err => {
@@ -291,26 +294,28 @@ export default function AdminNpcDataPage() {
     }
   );
 
-  const remove = useDeleteMutation({
-    path: rowsPath,
-    invalidate: rowsPath,
-    onDeleted: id => {
-      queryClient.setQueryData<AnyRow[]>(apiQueryKey(rowsPath), prev =>
-        prev?.filter(r => r.id !== id)
-      );
-      toast.success('Row deleted');
-    },
-  });
+  const remove = useApiMutation(
+    ({ slug, id }: { slug: TableSlug; id: string }) =>
+      apiFetch<void>(`${rowsPathFor(slug)}/${id}`, { method: 'DELETE' }),
+    {
+      onSuccess: (_data, { slug, id }) => {
+        queryClient.setQueryData<AnyRow[]>(apiQueryKey(rowsPathFor(slug)), prev =>
+          prev?.filter(r => r.id !== id)
+        );
+        toast.success('Row deleted');
+        return invalidateApiPath(queryClient, rowsPathFor(slug));
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete row');
+      },
+    }
+  );
 
   const confirmDelete = () => {
     if (!pendingDelete) return;
     const target = pendingDelete;
     setPendingDelete(null);
-    remove.mutate(target.id, {
-      onError: err => {
-        toast.error(err instanceof Error ? err.message : 'Failed to delete row');
-      },
-    });
+    remove.mutate({ slug: tab.slug, id: target.id });
   };
 
   const filtered = useMemo(() => {
@@ -528,7 +533,7 @@ export default function AdminNpcDataPage() {
                     </td>
                     <td className="px-4 py-2 text-right space-x-2">
                       <button
-                        onClick={() => toggleActive.mutate(r)}
+                        onClick={() => toggleActive.mutate({ slug: tab.slug, row: r })}
                         className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
                       >
                         {r.isActive ? 'Disable' : 'Enable'}

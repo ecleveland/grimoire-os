@@ -67,6 +67,26 @@ describe('print tray store', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('hydrates before a write that lands ahead of hydration, keeping the stored set', () => {
+    localStorage.setItem(
+      PRINT_TRAY_STORAGE_KEY,
+      JSON.stringify([{ type: 'monster', id: 'goblin' }])
+    );
+
+    setItems(prev => [...prev, { type: 'spell', id: 'fireball' }]);
+
+    const expected = [
+      { type: 'monster', id: 'goblin' },
+      { type: 'spell', id: 'fireball' },
+    ];
+    expect(getSnapshot()).toEqual({ items: expected, hydrated: true });
+    expect(JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY)!)).toEqual(expected);
+    // A later hydrate from the provider's effect changes nothing.
+    const after = getSnapshot();
+    hydrate();
+    expect(getSnapshot()).toBe(after);
+  });
+
   it('does not notify or persist when the updater returns the same array', () => {
     hydrate();
     const listener = vi.fn();

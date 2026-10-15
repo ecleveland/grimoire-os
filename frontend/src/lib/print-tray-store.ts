@@ -145,11 +145,13 @@ export function hydrate(): void {
 
 /**
  * Apply `update` and persist the result. Writing on change replaces a persist
- * effect, and it never runs before hydration: the provider hydrates on mount,
- * and the first call comes from a click. An update that returns the same
- * array is a no-op, like a React state bail-out.
+ * effect. A write can land before the provider's hydrate effect runs, for
+ * example from a child's mount effect, so it hydrates first and the update
+ * applies on top of the stored set instead of overwriting it. An update that
+ * returns the same array is a no-op, like a React state bail-out.
  */
 export function setItems(update: (prev: PrintTrayItem[]) => PrintTrayItem[]): void {
+  if (!hydrated) hydrate();
   const next = update(items);
   if (next === items) return;
   items = next;

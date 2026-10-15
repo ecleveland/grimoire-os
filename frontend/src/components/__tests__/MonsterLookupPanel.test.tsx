@@ -124,6 +124,29 @@ describe('MonsterLookupPanel', () => {
     expect(await screen.findByRole('button', { name: /goblin/i })).toBeInTheDocument();
   });
 
+  it('does not show the previous search rows while a new search after a cleared box loads', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      // The dragon search never settles, so the test sees the loading window.
+      if (path.includes('q=dragon')) return new Promise(() => {});
+      return Promise.resolve(makeResponse([goblin]));
+    });
+    const user = userEvent.setup();
+    renderWithQueryClient(<MonsterLookupPanel />);
+    const input = screen.getByPlaceholderText(/search monsters/i);
+
+    await user.type(input, 'goblin');
+    expect(await screen.findByRole('button', { name: /goblin/i })).toBeInTheDocument();
+
+    await user.clear(input);
+    expect(await screen.findByText(/type to search/i)).toBeInTheDocument();
+
+    await user.type(input, 'dragon');
+    await waitFor(() =>
+      expect(mockApiFetch).toHaveBeenCalledWith(expect.stringContaining('q=dragon'))
+    );
+    expect(screen.queryByRole('button', { name: /goblin/i })).not.toBeInTheDocument();
+  });
+
   it('opens the shared stat block when a result is selected, fetching the detail', async () => {
     routeApi();
     const user = userEvent.setup();
