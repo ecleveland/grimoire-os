@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useApiQuery } from '@/lib/query';
+import { useValueChange } from '@/lib/use-value-change';
 import { toast } from 'sonner';
 import type { Combatant, Encounter, PartyCharacter, SrdMonster } from '@/lib/types';
 import Badge from '@/components/Badge';
@@ -199,20 +201,16 @@ export default function InitiativeTrackerPage() {
   // stat block floats in a sticky right-hand column so the DM never scrolls to
   // read it. `pinnedMonsterId` is a click-override: clicking a combatant's name
   // pins its stat block until the turn advances, otherwise the panel follows
-  // whoever is up. The cache spares us a refetch of the (static) SRD monster on
-  // every turn.
+  // whoever is up.
   const isWide = useMediaQuery('(min-width: 1024px)');
   const [pinnedMonsterId, setPinnedMonsterId] = useState<string | null>(null);
-  const [panelMonster, setPanelMonster] = useState<SrdMonster | null>(null);
-  const [panelLoading, setPanelLoading] = useState(false);
-  const monsterCacheRef = useRef<Map<string, SrdMonster>>(new Map());
   // The two-column row and the active card, used to (a) anchor the stat panel
   // level with the active card and (b) scroll that card into view as the turn
   // advances, so the turn controls and damage/status controls — now inline on
   // the active card — never sit off-screen (VEG-384).
   const containerRef = useRef<HTMLDivElement>(null);
   const activeCardRef = useRef<HTMLDivElement>(null);
-  const [panelOffset, setPanelOffset] = useState(0);
+  const [measuredOffset, setMeasuredOffset] = useState(0);
   // Distinguishes a genuine turn change from the initial load, so the page
   // doesn't yank-scroll on first render.
   const prevTurnRef = useRef<number | null>(null);
@@ -238,48 +236,17 @@ export default function InitiativeTrackerPage() {
 
   // Advancing/stepping the turn drops any manual pin so the panel resumes
   // following whoever is now up.
-  useEffect(() => {
-    setPinnedMonsterId(null);
-  }, [encounter?.currentTurn]);
+  useValueChange(encounter?.currentTurn, () => setPinnedMonsterId(null));
 
-  // Load the panel's stat block, served from the per-session cache when we've
-  // already fetched that monster. A 200-null body (not visible to this viewer,
-  // or deleted) clears the panel rather than sticking on the loader.
-  useEffect(() => {
-    if (!panelMonsterId) {
-      setPanelMonster(null);
-      setPanelLoading(false);
-      return;
-    }
-    const cached = monsterCacheRef.current.get(panelMonsterId);
-    if (cached) {
-      setPanelMonster(cached);
-      setPanelLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setPanelMonster(null);
-    setPanelLoading(true);
-    apiFetch<SrdMonster | null>(`/srd/monsters/${panelMonsterId}`)
-      .then(monster => {
-        if (cancelled) return;
-        if (monster) {
-          monsterCacheRef.current.set(panelMonsterId, monster);
-          setPanelMonster(monster);
-        } else {
-          setPanelMonster(null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setPanelMonster(null);
-      })
-      .finally(() => {
-        if (!cancelled) setPanelLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [panelMonsterId]);
+  // Load the panel's stat block. The QueryProvider cache keeps each fetched
+  // monster, so returning to one on a later turn skips the loader. A 200-null
+  // body (not visible to this viewer, or deleted) clears the panel rather than
+  // sticking on the loader, and a failed fetch clears it silently.
+  const panelQuery = useApiQuery<SrdMonster | null>(`/srd/monsters/${panelMonsterId}`, {
+    enabled: panelMonsterId !== null,
+  });
+  const panelMonster = panelMonsterId ? (panelQuery.data ?? null) : null;
+  const panelLoading = panelMonsterId !== null && panelQuery.isPending;
 
   // Scroll the active card into view when the turn advances (not on first
   // load). Brings the card — and its now-inline turn/damage/status controls —
@@ -300,26 +267,29 @@ export default function InitiativeTrackerPage() {
   // card's offset within the two-column row and push the panel down to match,
   // re-measuring when the active card changes, when cards resize (HP/condition
   // edits shift the list), or on window resize. Only on wide screens — the
-  // panel is hidden below `lg`. getBoundingClientRect is 0 and ResizeObserver
-  // is absent under jsdom, so this no-ops harmlessly in tests.
+  // panel is hidden below `lg`, so a narrow screen reads an offset of 0
+  // whatever was last measured. The first measurement waits one animation
+  // frame. getBoundingClientRect is 0 and ResizeObserver and
+  // requestAnimationFrame may be absent under jsdom, so this no-ops harmlessly
+  // in tests.
+  const panelOffset = isWide ? measuredOffset : 0;
   useEffect(() => {
-    if (!isWide) {
-      setPanelOffset(0);
-      return;
-    }
+    if (!isWide) return;
     const measure = () => {
       const container = containerRef.current;
       const card = activeCardRef.current;
       if (!container || !card) return;
       const offset = card.getBoundingClientRect().top - container.getBoundingClientRect().top;
-      setPanelOffset(prev => (Math.abs(prev - offset) > 1 ? Math.max(0, offset) : prev));
+      setMeasuredOffset(prev => (Math.abs(prev - offset) > 1 ? Math.max(0, offset) : prev));
     };
-    measure();
+    const frame =
+      typeof requestAnimationFrame === 'function' ? requestAnimationFrame(measure) : null;
     const Observer = typeof ResizeObserver !== 'undefined' ? ResizeObserver : null;
     const ro = Observer ? new Observer(measure) : null;
     if (ro && containerRef.current) ro.observe(containerRef.current);
     window.addEventListener('resize', measure);
     return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
       ro?.disconnect();
       window.removeEventListener('resize', measure);
     };

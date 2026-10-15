@@ -1,18 +1,23 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { invalidateApiPath, useApiMutation, useDeleteMutation, useListQuery } from '@/lib/query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import AdminSubnav from '@/components/AdminSubnav';
 import Pagination from '@/components/Pagination';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import ItemForm from '@/components/ItemForm';
 import BundleContentsEditor from '@/components/BundleContentsEditor';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
 import { ITEM_CATEGORIES } from '@/lib/item-constants';
 import type { ItemPayload } from '@/lib/item-form';
-import type { PaginatedResponse, SrdItem, SrdItemBundleComponent } from '@/lib/types';
+import type { SrdItem, SrdItemBundleComponent } from '@/lib/types';
 
 const LIMIT = 20;
 
@@ -21,7 +26,6 @@ type Mode = { kind: 'list' } | { kind: 'create' } | { kind: 'edit'; item: SrdIte
 interface ContentsEditState {
   item: SrdItem;
   contents: SrdItemBundleComponent[];
-  saving: boolean;
 }
 
 const controlClass =
@@ -30,140 +34,131 @@ const controlClass =
 export default function AdminEquipmentPage() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
+  const queryClient = useQueryClient();
 
-  const [items, setItems] = useState<SrdItem[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [reloadKey, setReloadKey] = useState(0);
-
   const [category, setCategory] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [query, setQuery] = useState('');
+  const q = useDebouncedValue(searchInput.trim());
 
   const [mode, setMode] = useState<Mode>({ kind: 'list' });
-  const [submitting, setSubmitting] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<SrdItem | null>(null);
   const [contentsEdit, setContentsEdit] = useState<ContentsEditState | null>(null);
 
-  // Debounce the search box into the query that drives the fetch.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setQuery(searchInput.trim());
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  // A committed search resets to page 1 in the same render (React's
+  // adjust-state-while-rendering pattern), so the list fetches once, with
+  // page=1 and the new query, instead of first refetching the old page.
+  const [prevSearch, setPrevSearch] = useState(q);
+  if (q !== prevSearch) {
+    setPrevSearch(q);
+    setPage(1);
+  }
 
-  const loadSeq = useRef(0);
+  // The redirect waits for session hydration, because the pre-hydration
+  // `isAdmin: false` would bounce a real admin on refresh.
   useEffect(() => {
-    // Wait for session hydration before judging admin status — acting on the
-    // pre-hydration `isAdmin:false` would bounce a real admin on refresh.
     if (authLoading) return;
-    if (!isAdmin) {
-      router.replace('/');
-      return;
+    if (!isAdmin) router.replace('/');
+  }, [authLoading, isAdmin, router]);
+
+  const list = useListQuery<SrdItem>(
+    '/admin/items',
+    { page, limit: LIMIT, category, q },
+    { enabled: !authLoading && isAdmin, errorToast: 'Failed to load items' }
+  );
+  const items = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
+
+  const create = useApiMutation(
+    (payload: ItemPayload) =>
+      apiFetch('/admin/items', { method: 'POST', body: JSON.stringify(payload) }),
+    {
+      onSuccess: async () => {
+        toast.success('Item created');
+        await invalidateApiPath(queryClient, '/admin/items?');
+        setMode({ kind: 'list' });
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to create item');
+      },
     }
-    const seq = ++loadSeq.current;
-    setLoading(true);
-    const params = new URLSearchParams({ page: String(page), limit: String(LIMIT) });
-    if (category) params.set('category', category);
-    if (query) params.set('q', query);
-    apiFetch<PaginatedResponse<SrdItem>>(`/admin/items?${params.toString()}`)
-      .then(res => {
-        if (seq !== loadSeq.current) return;
-        setItems(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-      })
-      .catch(() => {
-        if (seq === loadSeq.current) toast.error('Failed to load items');
-      })
-      .finally(() => {
-        if (seq === loadSeq.current) setLoading(false);
-      });
-  }, [authLoading, isAdmin, router, page, category, query, reloadKey]);
+  );
 
-  const reload = useCallback(() => setReloadKey(k => k + 1), []);
-
-  const handleCreate = async (payload: ItemPayload) => {
-    setSubmitting(true);
-    try {
-      await apiFetch('/admin/items', { method: 'POST', body: JSON.stringify(payload) });
-      toast.success('Item created');
-      setMode({ kind: 'list' });
-      reload();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create item');
-    } finally {
-      setSubmitting(false);
+  const update = useApiMutation(
+    ({ id, payload }: { id: string; payload: ItemPayload }) =>
+      apiFetch(`/admin/items/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+    {
+      onSuccess: async () => {
+        toast.success('Item updated');
+        await invalidateApiPath(queryClient, '/admin/items?');
+        setMode({ kind: 'list' });
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to update item');
+      },
     }
-  };
+  );
 
-  const handleUpdate = async (id: string, payload: ItemPayload) => {
-    setSubmitting(true);
-    try {
-      await apiFetch(`/admin/items/${id}`, { method: 'PATCH', body: JSON.stringify(payload) });
-      toast.success('Item updated');
-      setMode({ kind: 'list' });
-      reload();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update item');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const submitting = create.isPending || update.isPending;
 
-  const confirmDelete = async () => {
-    if (!pendingDelete) return;
-    try {
-      await apiFetch(`/admin/items/${pendingDelete.id}`, { method: 'DELETE' });
+  const remove = useDeleteMutation({
+    path: '/admin/items',
+    invalidate: '/admin/items?',
+    onDeleted: () => {
       toast.success('Item deleted');
-      // Refetch authoritatively (keeps total/lastPage in sync) rather than
-      // mutating local counts. If we just removed the last row on a non-first
-      // page, step back so the admin doesn't land on a stranded empty page.
-      if (items.length === 1 && page > 1) {
-        setPage(p => p - 1);
-      } else {
-        reload();
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete item');
-    }
+      // The invalidation refetches the authoritative total and lastPage. If
+      // the deleted row was the last one on a later page, step back so the
+      // admin does not land on a stranded empty page.
+      if (items.length === 1 && page > 1) setPage(p => p - 1);
+    },
+  });
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    remove.mutate(pendingDelete.id, {
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete item');
+      },
+    });
   };
 
-  const openContents = async (item: SrdItem) => {
-    try {
-      // The detail endpoint resolves bundle contents; the list response omits them.
-      const detail = await apiFetch<SrdItem | null>(`/srd/items/${item.id}`);
-      if (!detail) {
-        toast.error('That item no longer exists');
-        return;
-      }
-      setContentsEdit({ item, contents: detail.contents ?? [], saving: false });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load pack contents');
+  // The detail endpoint resolves bundle contents; the list response omits them.
+  const loadContents = useApiMutation(
+    (item: SrdItem) => apiFetch<SrdItem | null>(`/srd/items/${item.id}`),
+    {
+      onSuccess: (detail, item) => {
+        if (!detail) {
+          toast.error('That item no longer exists');
+          return;
+        }
+        setContentsEdit({ item, contents: detail.contents ?? [] });
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to load pack contents');
+      },
     }
-  };
+  );
 
-  const saveContents = async () => {
-    if (!contentsEdit) return;
-    setContentsEdit({ ...contentsEdit, saving: true });
-    try {
-      await apiFetch(`/admin/items/${contentsEdit.item.id}/contents`, {
+  const saveContents = useApiMutation(
+    (edit: ContentsEditState) =>
+      apiFetch(`/admin/items/${edit.item.id}/contents`, {
         method: 'PUT',
         body: JSON.stringify({
-          contents: contentsEdit.contents.map(c => ({ itemId: c.itemId, quantity: c.quantity })),
+          contents: edit.contents.map(c => ({ itemId: c.itemId, quantity: c.quantity })),
         }),
-      });
-      toast.success('Pack contents saved');
-      setContentsEdit(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save pack contents');
-      setContentsEdit(prev => (prev ? { ...prev, saving: false } : prev));
+      }),
+    {
+      onSuccess: (_data, edit) => {
+        toast.success('Pack contents saved');
+        void invalidateApiPath(queryClient, `/srd/items/${edit.item.id}`);
+        setContentsEdit(null);
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to save pack contents');
+      },
     }
-  };
+  );
 
   if (!isAdmin) return null;
 
@@ -181,7 +176,7 @@ export default function AdminEquipmentPage() {
             submitting={submitting}
             submitLabel={editing ? 'Save changes' : 'Create item'}
             onSubmit={payload =>
-              editing ? handleUpdate(editing.id, payload) : handleCreate(payload)
+              editing ? update.mutate({ id: editing.id, payload }) : create.mutate(payload)
             }
             onCancel={() => setMode({ kind: 'list' })}
           />
@@ -235,8 +230,12 @@ export default function AdminEquipmentPage() {
         />
       </div>
 
-      {loading && items.length === 0 ? (
-        <div className="text-gray-500 dark:text-gray-400">Loading items...</div>
+      {/* A Retry after a failed load keeps status 'error' while it runs, so the
+          loading view checks isFetching as well as isPending. */}
+      {list.isPending || (list.isError && list.isFetching && !list.data) ? (
+        <LoadingState label="Loading items..." />
+      ) : list.isError && !list.data ? (
+        <LoadError message="Failed to load items" onRetry={list.refetch} />
       ) : items.length === 0 ? (
         <div className="text-gray-500 dark:text-gray-400">
           No shared items yet. Use “New item” to add an equipment pack or edge-category item.
@@ -277,7 +276,7 @@ export default function AdminEquipmentPage() {
                         </button>
                         {item.category === 'Equipment Pack' && (
                           <button
-                            onClick={() => openContents(item)}
+                            onClick={() => loadContents.mutate(item)}
                             className="text-sm text-indigo-600 hover:text-indigo-700"
                           >
                             Contents
@@ -341,11 +340,11 @@ export default function AdminEquipmentPage() {
             />
             <div className="flex gap-3 pt-6">
               <button
-                onClick={saveContents}
-                disabled={contentsEdit.saving}
+                onClick={() => saveContents.mutate(contentsEdit)}
+                disabled={saveContents.isPending}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm"
               >
-                {contentsEdit.saving ? 'Saving...' : 'Save contents'}
+                {saveContents.isPending ? 'Saving...' : 'Save contents'}
               </button>
               <button
                 onClick={() => setContentsEdit(null)}

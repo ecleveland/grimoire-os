@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useState } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import LootItemsEditor from '../LootItemsEditor';
 import type { LootTemplateItemEntry } from '@grimoire-os/shared';
 
@@ -28,7 +29,7 @@ const twoEntries: LootTemplateItemEntry[] = [
 
 function setup(value: LootTemplateItemEntry[] = []) {
   const onChange = vi.fn();
-  render(<LootItemsEditor value={value} onChange={onChange} />);
+  renderWithQueryClient(<LootItemsEditor value={value} onChange={onChange} />);
   return { onChange };
 }
 
@@ -55,7 +56,7 @@ function Harness({
 
 function setupStateful(initial: LootTemplateItemEntry[]) {
   const onChange = vi.fn();
-  render(<Harness initial={initial} onChange={onChange} />);
+  renderWithQueryClient(<Harness initial={initial} onChange={onChange} />);
   return { onChange };
 }
 

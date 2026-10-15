@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Character, CharacterResource, ResourceRecharge } from '@/lib/types';
 import { RECHARGE_KINDS } from '@/lib/types';
 import { togglePip } from '@/lib/character-play';
 import { addResource, editResource, removeResource } from '@/lib/character-resources';
+import { useValueChange } from '@/lib/use-value-change';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 
 type ResourceTrackerProps = { character: Character } & PlayControlProps;
@@ -66,29 +67,30 @@ export default function ResourceTracker(props: ResourceTrackerProps) {
   const [editForm, setEditForm] = useState<ResourceFormState>(EMPTY_FORM);
 
   // `character.resources` (the prop reference) only changes when a refetch
-  // lands — exactly the event this confirmation watches for.
-  useEffect(() => {
-    if (!pendingAdd) return;
-    const matches = (character.resources ?? []).filter(r =>
-      sameResource(r, pendingAdd.resource)
-    ).length;
-    if (matches > pendingAdd.priorCount) {
-      setPendingAdd(null);
-      // Reference equality distinguishes "untouched since submit" (clear it)
-      // from "re-typed — even identically — for the next add" (keep it):
-      // every keystroke allocates a new form object.
-      setAddForm(current => (current === pendingAdd.form ? EMPTY_FORM : current));
+  // lands, which is the event both checks below watch for. Watching the list
+  // alone is enough. When `pendingAdd` is set, `priorCount` was counted
+  // against this same list, so `matches` equals it and nothing would clear.
+  // When `editTarget` is set, it is a row of this same list, so it still
+  // matches.
+  useValueChange(character.resources, nextResources => {
+    const rows = nextResources ?? [];
+    if (pendingAdd) {
+      const matches = rows.filter(r => sameResource(r, pendingAdd.resource)).length;
+      if (matches > pendingAdd.priorCount) {
+        setPendingAdd(null);
+        // Reference equality distinguishes "untouched since submit" (clear it)
+        // from "re-typed, even identically, for the next add" (keep it),
+        // because every keystroke allocates a new form object.
+        setAddForm(current => (current === pendingAdd.form ? EMPTY_FORM : current));
+      }
     }
-  }, [character.resources, pendingAdd]);
-
-  // A refetch can delete the row under an open editor; drop the stale target
-  // so a later value-identical row can't resurrect the editor with the
-  // forgotten draft.
-  useEffect(() => {
-    if (editTarget && !(character.resources ?? []).some(r => sameResource(r, editTarget))) {
+    // A refetch can delete the row under an open editor; drop the stale target
+    // so a later value-identical row can't resurrect the editor with the
+    // forgotten draft.
+    if (editTarget && !rows.some(r => sameResource(r, editTarget))) {
       setEditTarget(null);
     }
-  }, [character.resources, editTarget]);
+  });
 
   // A viewer with nothing to see gets no empty card taking up sheet space.
   if (!editable && resources.length === 0) return null;

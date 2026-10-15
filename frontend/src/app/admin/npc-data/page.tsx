@@ -1,11 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import {
+  apiQueryKey,
+  invalidateApiPath,
+  useApiMutation,
+  useApiQuery,
+  useDeleteMutation,
+} from '@/lib/query';
 import ConfirmDialog from '@/components/ConfirmDialog';
+import LoadError from '@/components/LoadError';
+import LoadingState from '@/components/LoadingState';
 import AdminSubnav from '@/components/AdminSubnav';
 import CoinRangeEditor from '@/components/CoinRangeEditor';
 import LootItemsEditor from '@/components/LootItemsEditor';
@@ -185,50 +195,50 @@ export default function AdminNpcDataPage() {
   const router = useRouter();
   const [activeSlug, setActiveSlug] = useState<TableSlug>('names');
   const tab = useMemo(() => TABS.find(t => t.slug === activeSlug) as TabConfig, [activeSlug]);
-  const [rows, setRows] = useState<AnyRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [form, setForm] = useState<FormState>(() => emptyForm(TABS[0]));
-  const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
   const [pendingDelete, setPendingDelete] = useState<AnyRow | null>(null);
 
+  // The redirect waits for session hydration, so a real admin is not bounced
+  // on the pre-hydration `isAdmin: false`.
   useEffect(() => {
-    // Wait for hydration so a real admin isn't bounced on the pre-hydration
-    // `isAdmin:false`.
     if (authLoading) return;
     if (!isAdmin) {
       router.replace('/');
     }
   }, [authLoading, isAdmin, router]);
 
-  const loadSeq = useRef(0);
-  const load = useCallback(async (slug: TableSlug) => {
-    const seq = ++loadSeq.current;
-    setLoading(true);
-    // Clear eagerly: on failure (or a slow response) the previous tab's rows
-    // would otherwise keep rendering under this tab's columns — plausibly,
-    // since the two loot tabs share most row keys.
-    setRows([]);
-    try {
-      const data = await apiFetch<AnyRow[]>(`/admin/npc-data/${slug}`);
-      if (seq !== loadSeq.current) return; // a newer load owns the table now
-      setRows(data);
-    } catch (err) {
-      if (seq !== loadSeq.current) return;
-      toast.error(err instanceof Error ? err.message : 'Failed to load rows');
-    } finally {
-      if (seq === loadSeq.current) setLoading(false);
+  // Each tab has its own cache entry, so a tab that has never loaded shows no
+  // rows rather than the previous tab's rows under this tab's columns, and a
+  // late response from a previous tab cannot land in this one.
+  const rowsPath = `/admin/npc-data/${tab.slug}`;
+  const rowsQuery = useApiQuery<AnyRow[]>(rowsPath, {
+    enabled: !authLoading && isAdmin,
+    errorToast: 'Failed to load rows',
+  });
+  const rows = useMemo(() => rowsQuery.data ?? [], [rowsQuery.data]);
+
+  const addRow = useApiMutation(
+    (body: Record<string, unknown>) =>
+      apiFetch(rowsPath, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    {
+      onSuccess: async () => {
+        toast.success('Row added');
+        setForm(emptyForm(tab));
+        await invalidateApiPath(queryClient, rowsPath);
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to add row');
+      },
     }
-  }, []);
+  );
+  const submitting = addRow.isPending;
 
-  useEffect(() => {
-    if (!isAdmin) return;
-    setForm(emptyForm(tab));
-    setSearch('');
-    void load(tab.slug);
-  }, [isAdmin, tab, load]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const body: Record<string, unknown> = {};
     for (const f of tab.fields) {
@@ -261,45 +271,46 @@ export default function AdminNpcDataPage() {
       if (text === '') continue;
       body[f.key] = text;
     }
-    setSubmitting(true);
-    try {
-      await apiFetch(`/admin/npc-data/${tab.slug}`, {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      toast.success('Row added');
-      setForm(emptyForm(tab));
-      await load(tab.slug);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add row');
-    } finally {
-      setSubmitting(false);
-    }
+    addRow.mutate(body);
   };
 
-  const toggleActive = async (row: AnyRow) => {
-    try {
-      await apiFetch(`/admin/npc-data/${tab.slug}/${row.id}`, {
+  const toggleActive = useApiMutation(
+    (row: AnyRow) =>
+      apiFetch(`${rowsPath}/${row.id}`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive: !row.isActive }),
-      });
-      setRows(prev => prev.map(r => (r.id === row.id ? { ...r, isActive: !row.isActive } : r)));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to toggle row');
+      }),
+    {
+      onSuccess: (_data, row) =>
+        queryClient.setQueryData<AnyRow[]>(apiQueryKey(rowsPath), prev =>
+          prev?.map(r => (r.id === row.id ? { ...r, isActive: !row.isActive } : r))
+        ),
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to toggle row');
+      },
     }
-  };
+  );
 
-  const confirmDelete = async () => {
+  const remove = useDeleteMutation({
+    path: rowsPath,
+    invalidate: rowsPath,
+    onDeleted: id => {
+      queryClient.setQueryData<AnyRow[]>(apiQueryKey(rowsPath), prev =>
+        prev?.filter(r => r.id !== id)
+      );
+      toast.success('Row deleted');
+    },
+  });
+
+  const confirmDelete = () => {
     if (!pendingDelete) return;
     const target = pendingDelete;
     setPendingDelete(null);
-    try {
-      await apiFetch(`/admin/npc-data/${tab.slug}/${target.id}`, { method: 'DELETE' });
-      setRows(prev => prev.filter(r => r.id !== target.id));
-      toast.success('Row deleted');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete row');
-    }
+    remove.mutate(target.id, {
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete row');
+      },
+    });
   };
 
   const filtered = useMemo(() => {
@@ -408,9 +419,11 @@ export default function AdminNpcDataPage() {
               aria-selected={selected}
               onClick={() => {
                 setActiveSlug(t.slug);
-                // Reset synchronously: the structured editors render before
-                // the tab-change effect fires and need this tab's defaults.
+                // A tab change resets the add form and the search here, in the
+                // same update, because the structured editors render this
+                // tab's fields at once and need this tab's defaults.
                 setForm(emptyForm(t));
+                setSearch('');
               }}
               className={`px-3 py-1.5 text-sm rounded-lg border ${
                 selected
@@ -458,13 +471,26 @@ export default function AdminNpcDataPage() {
               </tr>
             </thead>
             <tbody>
-              {loading ? (
+              {/* A Retry after a failed load keeps status 'error' while it
+                  runs, so the loading row checks isFetching as well. */}
+              {rowsQuery.isPending ||
+              (rowsQuery.isError && rowsQuery.isFetching && !rowsQuery.data) ? (
                 <tr>
                   <td
                     colSpan={tab.columns.length + (tab.hasSource ? 3 : 2)}
-                    className="px-4 py-6 text-center text-gray-500 dark:text-gray-400"
+                    className="px-4 py-6 text-center"
                   >
-                    Loading…
+                    <LoadingState />
+                  </td>
+                </tr>
+              ) : rowsQuery.isError && !rowsQuery.data ? (
+                <tr>
+                  <td colSpan={tab.columns.length + (tab.hasSource ? 3 : 2)} className="px-4 py-6">
+                    <LoadError
+                      message="Failed to load rows."
+                      onRetry={() => rowsQuery.refetch()}
+                      className="justify-center"
+                    />
                   </td>
                 </tr>
               ) : filtered.length === 0 ? (
@@ -502,7 +528,7 @@ export default function AdminNpcDataPage() {
                     </td>
                     <td className="px-4 py-2 text-right space-x-2">
                       <button
-                        onClick={() => toggleActive(r)}
+                        onClick={() => toggleActive.mutate(r)}
                         className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700"
                       >
                         {r.isActive ? 'Disable' : 'Enable'}

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
+import { renderWithQueryClient } from '@/test-utils/query';
 import CatalogItemPicker from '../CatalogItemPicker';
 
 const mockApiFetch = vi.fn();
@@ -22,7 +23,7 @@ function makeResponse(items: object[]) {
 
 function setup(props: Partial<ComponentProps<typeof CatalogItemPicker>> = {}) {
   const onSelect = vi.fn();
-  render(<CatalogItemPicker onSelect={onSelect} {...props} />);
+  renderWithQueryClient(<CatalogItemPicker onSelect={onSelect} {...props} />);
   return { onSelect };
 }
 
@@ -94,7 +95,7 @@ describe('CatalogItemPicker', () => {
     expect(await screen.findByText(/no matching items/i)).toBeInTheDocument();
   });
 
-  it('surfaces the server error message and clears stale results on failure', async () => {
+  it('toasts a search failure and clears stale results', async () => {
     const { toast } = await import('sonner');
     mockApiFetch
       .mockResolvedValueOnce(makeResponse([dagger]))
@@ -106,7 +107,7 @@ describe('CatalogItemPicker', () => {
     await screen.findByRole('button', { name: /add dagger/i });
 
     await user.type(screen.getByLabelText(/search the item catalog/i), 'ger');
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search items'));
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
   });
 
@@ -132,6 +133,20 @@ describe('CatalogItemPicker', () => {
     // The newer results survive; the stale dagger never appears.
     expect(await screen.findByRole('button', { name: /add quarterstaff/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /add dagger/i })).toBeNull();
+  });
+
+  it('picking a result hides the list at once', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([dagger, quarterstaff]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search the item catalog/i), 'a');
+    await user.click(await screen.findByRole('button', { name: /add dagger/i }));
+
+    // The debounced query still holds 'a' here, so only the raw-input gate hides the list.
+    expect(screen.queryByRole('list')).toBeNull();
+    expect(screen.queryByText(/searching/i)).toBeNull();
+    expect(screen.queryByText(/no matching items/i)).toBeNull();
   });
 
   it('falls back to a generic message for non-Error rejections', async () => {
@@ -197,7 +212,7 @@ describe('CatalogItemPicker', () => {
 
   it('disables the input when disabled', () => {
     const onSelect = vi.fn();
-    render(<CatalogItemPicker onSelect={onSelect} disabled />);
+    renderWithQueryClient(<CatalogItemPicker onSelect={onSelect} disabled />);
     expect(screen.getByLabelText(/search the item catalog/i)).toBeDisabled();
   });
 });

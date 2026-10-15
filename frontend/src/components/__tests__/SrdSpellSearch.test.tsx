@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import SrdSpellSearch from '../SrdSpellSearch';
 
 const mockApiFetch = vi.fn();
@@ -21,7 +22,7 @@ function makeResponse(items: object[]) {
 
 function setup() {
   const onSelect = vi.fn();
-  render(<SrdSpellSearch onSelect={onSelect} />);
+  renderWithQueryClient(<SrdSpellSearch onSelect={onSelect} />);
   return { onSelect };
 }
 
@@ -88,7 +89,7 @@ describe('SrdSpellSearch', () => {
     expect(await screen.findByText(/no matching spells/i)).toBeInTheDocument();
   });
 
-  it('surfaces the server error message and clears stale results on failure', async () => {
+  it('toasts a search failure and clears stale results', async () => {
     const { toast } = await import('sonner');
     mockApiFetch
       .mockResolvedValueOnce(makeResponse([fireball]))
@@ -99,8 +100,22 @@ describe('SrdSpellSearch', () => {
     await user.type(screen.getByLabelText(/search the spell catalog/i), 'fire');
     await screen.findByRole('button', { name: /add fireball/i });
     await user.type(screen.getByLabelText(/search the spell catalog/i), 'ball');
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search spells'));
     expect(screen.queryByRole('button', { name: /add fireball/i })).toBeNull();
+  });
+
+  it('picking a result hides the list at once', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([fireball, fireBolt]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search the spell catalog/i), 'fire');
+    await user.click(await screen.findByRole('button', { name: /add fireball/i }));
+
+    // The debounced query still holds 'fire' here, so only the raw-input gate hides the list.
+    expect(screen.queryByRole('list')).toBeNull();
+    expect(screen.queryByText(/searching/i)).toBeNull();
+    expect(screen.queryByText(/no matching spells/i)).toBeNull();
   });
 
   it('a late-resolving stale success response does not clobber newer results', async () => {
@@ -124,7 +139,7 @@ describe('SrdSpellSearch', () => {
   });
 
   it('disables the input when disabled', () => {
-    render(<SrdSpellSearch onSelect={vi.fn()} disabled />);
+    renderWithQueryClient(<SrdSpellSearch onSelect={vi.fn()} disabled />);
     expect(screen.getByLabelText(/search the spell catalog/i)).toBeDisabled();
   });
 });

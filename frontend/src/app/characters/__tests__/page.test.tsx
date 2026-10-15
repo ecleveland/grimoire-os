@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import CharactersPage from '../page';
 import type { CharacterListItem, PaginatedResponse } from '@/lib/types';
 
@@ -51,21 +53,21 @@ beforeEach(() => {
 describe('CharactersPage', () => {
   it('shows the loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     expect(screen.getByText(/loading characters/i)).toBeInTheDocument();
   });
 
   it('fetches characters with pagination params on mount', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     await waitFor(() => {
-      expect(mockApiFetch).toHaveBeenCalledWith('/characters?page=1&limit=20');
+      expect(mockApiFetch).toHaveBeenCalledWith('/characters?limit=20&page=1');
     });
   });
 
   it('renders the heading and a link to create a new character', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([makeCharacter()]));
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /characters/i })).toBeInTheDocument()
     );
@@ -92,7 +94,7 @@ describe('CharactersPage', () => {
         }),
       ])
     );
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     await waitFor(() => expect(screen.getByText('Thora Ironfist')).toBeInTheDocument());
     expect(screen.getByText('Dwarf Fighter')).toBeInTheDocument();
     expect(screen.getByText('Lyra Moonwhisper')).toBeInTheDocument();
@@ -105,14 +107,14 @@ describe('CharactersPage', () => {
 
   it('shows the empty state when no characters are returned', async () => {
     mockApiFetch.mockResolvedValue(makeResponse([]));
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     await waitFor(() => expect(screen.getByText(/no characters yet/i)).toBeInTheDocument());
   });
 
   it('toasts an error when the characters request fails', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     mockApiFetch.mockRejectedValue(new Error('boom'));
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     await waitFor(() =>
       expect(mockToastError).toHaveBeenCalledWith(
         'Failed to load characters',
@@ -126,9 +128,44 @@ describe('CharactersPage', () => {
     mockApiFetch.mockResolvedValue(
       makeResponse([makeCharacter({ id: 'a' })], { total: 25, lastPage: 2 })
     );
-    render(<CharactersPage />);
+    renderWithQueryClient(<CharactersPage />);
     await waitFor(() => expect(screen.getByText('Thora Ironfist')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument();
     expect(screen.getByText(/page 1 of 2/i)).toBeInTheDocument();
+  });
+
+  it('shows a retryable error when the characters request fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+    renderWithQueryClient(<CharactersPage />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load characters');
+    expect(screen.queryByText(/no characters yet/i)).not.toBeInTheDocument();
+
+    mockApiFetch.mockResolvedValueOnce(makeResponse([makeCharacter()]));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText('Thora Ironfist')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('a background refetch failure keeps the rows', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockResolvedValueOnce(makeResponse([makeCharacter()]));
+    const { client } = renderWithQueryClient(<CharactersPage />);
+    expect(await screen.findByText('Thora Ironfist')).toBeInTheDocument();
+
+    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
+    await client.invalidateQueries();
+
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith(
+        'Failed to load characters',
+        expect.objectContaining({ id: 'load-characters' })
+      )
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText('Thora Ironfist')).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 });

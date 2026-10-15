@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import BundleContentsEditor from '../BundleContentsEditor';
 import type { SrdItemBundleComponent } from '@/lib/types';
 
@@ -21,7 +22,7 @@ function makeResponse(items: object[]) {
 
 function setup(value: SrdItemBundleComponent[] = [], selfId?: string) {
   const onChange = vi.fn();
-  render(<BundleContentsEditor value={value} onChange={onChange} selfId={selfId} />);
+  renderWithQueryClient(<BundleContentsEditor value={value} onChange={onChange} selfId={selfId} />);
   return { onChange };
 }
 

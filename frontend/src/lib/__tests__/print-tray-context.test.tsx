@@ -10,6 +10,7 @@ import {
   PRINT_TRAY_STORAGE_KEY,
 } from '../print-tray-context';
 import type { PrintTrayItem } from '../print-tray-context';
+import { resetPrintTrayStore } from '../print-tray-store';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn() },
@@ -62,6 +63,7 @@ function storageMethodOwner(method: 'getItem' | 'setItem'): Storage {
 
 beforeEach(() => {
   localStorage.clear();
+  resetPrintTrayStore();
   vi.mocked(toast.error).mockClear();
 });
 

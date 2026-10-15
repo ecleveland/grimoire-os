@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useState } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import ShopStockEditor from '../ShopStockEditor';
 import type { ShopLineItem } from '@/lib/types';
 
@@ -23,7 +24,7 @@ const zero = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 
 function setup(value: ShopLineItem[] = []) {
   const onChange = vi.fn();
-  render(<ShopStockEditor value={value} onChange={onChange} />);
+  renderWithQueryClient(<ShopStockEditor value={value} onChange={onChange} />);
   return { onChange };
 }
 
@@ -50,7 +51,7 @@ function Harness({
 
 function setupStateful(initial: ShopLineItem[] = []) {
   const onChange = vi.fn();
-  render(<Harness initial={initial} onChange={onChange} />);
+  renderWithQueryClient(<Harness initial={initial} onChange={onChange} />);
   return { onChange };
 }
 
@@ -139,7 +140,7 @@ describe('ShopStockEditor', () => {
 
     await user.type(screen.getByLabelText(/search items/i), 'pot');
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search items'));
     expect(await screen.findByText(/no matching items for/i)).toBeInTheDocument();
     expect(screen.queryByText(/homebrew items cannot be stocked/i)).toBeNull();
   });
@@ -161,6 +162,20 @@ describe('ShopStockEditor', () => {
         stock: null,
       },
     ]);
+  });
+
+  it('picking a result hides the list at once', async () => {
+    mockApiFetch.mockResolvedValue(makeResponse([potion, torch]));
+    const user = userEvent.setup();
+    setup();
+
+    await user.type(screen.getByLabelText(/search items/i), 'o');
+    await user.click(await screen.findByRole('button', { name: /add potion of healing/i }));
+
+    // The debounced query still holds 'o' here, so only the raw-input gate hides the list.
+    expect(screen.queryByRole('button', { name: /add torch/i })).toBeNull();
+    expect(screen.queryByText(/searching/i)).toBeNull();
+    expect(screen.queryByText(/no matching items for/i)).toBeNull();
   });
 
   it('defaults a non-fixed catalog cost (e.g. "Varies") to a free price', async () => {
@@ -264,7 +279,7 @@ describe('ShopStockEditor', () => {
     expect(remaining).toHaveValue('Wheel of cheese');
   });
 
-  it('surfaces the server message and clears stale results when the search fails', async () => {
+  it('toasts a search failure and clears stale results', async () => {
     const { toast } = await import('sonner');
     mockApiFetch
       .mockResolvedValueOnce(makeResponse([potion]))
@@ -276,7 +291,7 @@ describe('ShopStockEditor', () => {
     await screen.findByRole('button', { name: /add potion of healing/i });
 
     await user.type(screen.getByLabelText(/search items/i), 'ion');
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('boom'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to search items'));
     expect(screen.queryByRole('button', { name: /add potion of healing/i })).toBeNull();
   });
 });

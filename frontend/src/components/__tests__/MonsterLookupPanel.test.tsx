@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
+import { renderWithQueryClient } from '@/test-utils/query';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import MonsterLookupPanel from '../MonsterLookupPanel';
@@ -77,7 +78,7 @@ describe('MonsterLookupPanel', () => {
 
   it('renders the panel heading and a search input without fetching on mount', () => {
     routeApi();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     expect(screen.getByText(/monster lookup/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/search monsters/i)).toBeInTheDocument();
@@ -87,7 +88,7 @@ describe('MonsterLookupPanel', () => {
 
   it('shows a prompt to search while the query is empty', () => {
     routeApi();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     expect(screen.getByText(/type to search/i)).toBeInTheDocument();
   });
@@ -95,7 +96,7 @@ describe('MonsterLookupPanel', () => {
   it('debounces the search input into a GET /srd/monsters request carrying the query', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
 
@@ -116,7 +117,7 @@ describe('MonsterLookupPanel', () => {
   it('renders compact results for a query', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
 
@@ -126,7 +127,7 @@ describe('MonsterLookupPanel', () => {
   it('opens the shared stat block when a result is selected, fetching the detail', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
     await user.click(await screen.findByRole('button', { name: /goblin/i }));
@@ -141,7 +142,7 @@ describe('MonsterLookupPanel', () => {
   it('closes the stat block on Escape without leaving the dialog mounted', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
     await user.click(await screen.findByRole('button', { name: /goblin/i }));
@@ -156,7 +157,7 @@ describe('MonsterLookupPanel', () => {
   it('shows a no-results state when the query matches nothing', async () => {
     routeApi([]);
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'zzzz');
 
@@ -167,7 +168,7 @@ describe('MonsterLookupPanel', () => {
     vi.mocked(toast.error).mockClear();
     routeApi([goblin], () => Promise.reject(new Error('boom')));
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
     await user.click(await screen.findByRole('button', { name: /goblin/i }));
@@ -181,7 +182,7 @@ describe('MonsterLookupPanel', () => {
     // The tiered detail endpoint answers null for a monster the caller can't see.
     routeApi([goblin], () => Promise.resolve(null));
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
     await user.click(await screen.findByRole('button', { name: /goblin/i }));
@@ -196,7 +197,7 @@ describe('MonsterLookupPanel', () => {
     vi.mocked(toast.error).mockClear();
     mockApiFetch.mockRejectedValue(new Error('search boom'));
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
 
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
 
@@ -214,7 +215,7 @@ describe('MonsterLookupPanel', () => {
   it('shows no "Add to encounter" CTA when canAdd is false', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel />);
+    renderWithQueryClient(<MonsterLookupPanel />);
     await openGoblin(user);
     expect(screen.queryByRole('button', { name: /add to encounter/i })).not.toBeInTheDocument();
   });
@@ -222,7 +223,7 @@ describe('MonsterLookupPanel', () => {
   it('exposes an "Add to encounter" CTA on the stat block when canAdd is true', async () => {
     routeApi();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel canAdd onAdd={vi.fn()} />);
+    renderWithQueryClient(<MonsterLookupPanel canAdd onAdd={vi.fn()} />);
     await openGoblin(user);
     expect(screen.getByRole('button', { name: /add to encounter/i })).toBeInTheDocument();
   });
@@ -231,7 +232,7 @@ describe('MonsterLookupPanel', () => {
     routeApi();
     const onAdd = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
-    render(<MonsterLookupPanel canAdd onAdd={onAdd} />);
+    renderWithQueryClient(<MonsterLookupPanel canAdd onAdd={onAdd} />);
     await openGoblin(user);
 
     // CTA swaps the modal to the dialog (so only one "Add to encounter" button exists).
@@ -253,7 +254,7 @@ describe('MonsterLookupPanel', () => {
     routeApi();
     const onAdd = vi.fn();
     const user = userEvent.setup();
-    render(<MonsterLookupPanel canAdd onAdd={onAdd} />);
+    renderWithQueryClient(<MonsterLookupPanel canAdd onAdd={onAdd} />);
     await openGoblin(user);
 
     await user.click(screen.getByRole('button', { name: /add to encounter/i }));

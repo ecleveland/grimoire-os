@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
+import { renderWithQueryClient } from '@/test-utils/query';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import LinkMonsterDialog from '@/components/LinkMonsterDialog';
@@ -58,7 +59,7 @@ beforeEach(() => {
 });
 
 function renderDialog(props: Partial<React.ComponentProps<typeof LinkMonsterDialog>> = {}) {
-  return render(
+  return renderWithQueryClient(
     <LinkMonsterDialog combatantName="Trap" onSelect={onSelect} onCancel={onCancel} {...props} />
   );
 }

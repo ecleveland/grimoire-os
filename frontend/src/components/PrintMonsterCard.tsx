@@ -7,6 +7,7 @@ import PrintCard from './PrintCard';
 import { paginateSections } from '@/lib/print-card-pagination';
 import type { CardPageLayout } from '@/lib/print-card-pagination';
 import { abilityModifier, formatCr } from '@/lib/srd-format';
+import { useValueChange } from '@/lib/use-value-change';
 
 const ABILITY_LABELS = [
   { key: 'str', label: 'STR' },
@@ -58,8 +59,8 @@ export default function PrintMonsterCard({ card }: { card: PrintableMonsterCardM
   const measureRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<CardPageLayout | null>(null);
 
-  // A different monster invalidates the measurements (no-op on mount: null → null).
-  useEffect(() => setPages(null), [card]);
+  // A different monster invalidates the measurements.
+  useValueChange(card, () => setPages(null));
 
   // Measurement pass — runs against the unpaginated render (pages === null).
   useEffect(() => {

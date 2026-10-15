@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Character, Condition } from '@/lib/types';
 import AddConditionSelect from '@/components/AddConditionSelect';
 import ConcentrationChip from '@/components/ConcentrationChip';
 import ConditionChips from '@/components/ConditionChips';
+import { useValueChange } from '@/lib/use-value-change';
 import {
   toggleConditionInList,
   setExhaustionLevel,
@@ -53,17 +54,15 @@ export default function StatusTracker(props: StatusTrackerProps) {
   const [pendingSpell, setPendingSpell] = useState<string | null>(null);
   const serverSpell = concentration?.spell;
   const isConcentrating = concentration !== null;
-  useEffect(() => {
-    setPendingSpell(null);
-  }, [serverSpell]);
-  useEffect(() => {
-    // Concentration ended: drop any draft/pending so a stale spell name can't
-    // resurface (or be stray-committed) on the next concentration.
-    if (!isConcentrating) {
+  useValueChange(serverSpell, () => setPendingSpell(null));
+  // Concentration ended: drop any draft/pending so a stale spell name can't
+  // resurface (or be stray-committed) on the next concentration.
+  useValueChange(isConcentrating, concentrating => {
+    if (!concentrating) {
       setSpellDraft(null);
       setPendingSpell(null);
     }
-  }, [isConcentrating]);
+  });
 
   // The spell name never commits on blur. An implicit blur-commit races the
   // click that caused it (its PATCH flips `isSaving` and disables the clicked
