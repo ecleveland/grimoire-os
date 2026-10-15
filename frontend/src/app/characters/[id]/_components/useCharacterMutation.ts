@@ -1,9 +1,9 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { apiFetch, ApiError } from '@/lib/api';
-import { invalidateApiPath, useApiMutation } from '@/lib/query';
+import { apiFetch } from '@/lib/api';
+import { invalidateApiPath } from '@/lib/query';
+import { useOptimisticPatch } from '@/lib/use-optimistic-patch';
 import type { Character } from '@/lib/types';
 
 /**
@@ -101,38 +101,27 @@ export function useCharacterMutation(character: Character): CharacterMutation {
   const queryClient = useQueryClient();
   const path = `/characters/${character.id}`;
 
-  const mutation = useApiMutation<Character, CharacterPatch>(
+  // The sheet reads this same `/characters/:id` query, so a successful write
+  // refetches it and the new stored state and bumped version flow back down
+  // before the next write. A failed reload would leave `character.version`
+  // stale and trigger a spurious 409 on the next write, so it goes to the
+  // console. `useOptimisticPatch` owns the 409 rule: refetch, then ask the
+  // player to retry.
+  const mutation = useOptimisticPatch<Character, CharacterPatch>(
     fields =>
       apiFetch<Character>(path, {
         method: 'PATCH',
         body: JSON.stringify({ ...fields, expectedVersion: character.version }),
       }),
     {
-      // The sheet reads this same `/characters/:id` query; refetch so the new
-      // stored state and the bumped version flow back down before the next write.
-      // A failed reload would leave `character.version` stale (and trigger a
-      // spurious 409 on the next write), so surface it in the console.
+      path,
+      conflictMessage:
+        'This character was changed elsewhere. Reloaded the latest version — try again.',
+      errorMessage: 'Failed to update character',
       onSuccess: () =>
         void invalidateApiPath(queryClient, path).catch(err =>
           console.error('Failed to refetch character after write:', err)
         ),
-      onError: err => {
-        // Log before toasting, matching the codebase's catch + console.error
-        // convention so a failed write leaves a diagnostic trail for self-hosters.
-        console.error('Failed to update character:', err);
-        if (err instanceof ApiError && err.status === 409) {
-          // Concurrent edit (VEG-137 optimistic lock): pull the latest so the
-          // next click carries the new version, and tell the player to retry.
-          void invalidateApiPath(queryClient, path).catch(refetchErr =>
-            console.error('Failed to refetch character after conflict:', refetchErr)
-          );
-          toast.error(
-            'This character was changed elsewhere. Reloaded the latest version — try again.'
-          );
-        } else {
-          toast.error(err instanceof Error ? err.message : 'Failed to update character');
-        }
-      },
     }
   );
 
