@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useApiQuery, useApiMutation, invalidateApiPath, apiQueryKey } from '@/lib/query';
+import { useValueChange } from '@/lib/use-value-change';
 import { useAuth } from '@/lib/auth-context';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
@@ -122,8 +123,7 @@ export default function CampaignDetailPage() {
 
   // Self-heal: a fetched encounters page that comes back empty and out of range
   // (rows were deleted elsewhere) steps back to the real last page.
-  useEffect(() => {
-    const d = encountersQuery.data;
+  useValueChange(encountersQuery.data, d => {
     if (
       tab === 'encounters' &&
       d &&
@@ -132,7 +132,7 @@ export default function CampaignDetailPage() {
     ) {
       setEncountersPage(Math.max(1, d.lastPage));
     }
-  }, [encountersQuery.data, encountersPage, tab]);
+  });
 
   const handleTabChange = (newTab: Tab) => {
     if (newTab !== tab) {

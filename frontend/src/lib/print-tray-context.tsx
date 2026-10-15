@@ -6,19 +6,20 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
-  useState,
+  useSyncExternalStore,
   ReactNode,
 } from 'react';
-import { toast } from 'sonner';
-import { PRINTABLE_CARD_TYPES } from '@grimoire-os/shared';
 import type { PrintableCardType } from '@grimoire-os/shared';
+import {
+  getServerSnapshot,
+  getSnapshot,
+  hydrate,
+  setItems,
+  subscribe,
+  type PrintTrayItem,
+} from './print-tray-store';
 
-/** One entry in the print set: a printable SRD record, identified by type + id. */
-export interface PrintTrayItem {
-  type: PrintableCardType;
-  id: string;
-}
+export { PRINT_TRAY_STORAGE_KEY, type PrintTrayItem } from './print-tray-store';
 
 /** The grouped shape the `/srd/print` route sends to the batch hydrate endpoint. */
 export interface PrintTrayGroup {
@@ -27,12 +28,10 @@ export interface PrintTrayGroup {
 }
 
 /**
- * Soft cap on the print set size. Adds beyond this are still allowed — the
+ * Soft cap on the print set size. Adds beyond this are still allowed. The
  * tray UI surfaces a warning via `isOverSoftCap` instead of blocking.
  */
 export const PRINT_TRAY_SOFT_CAP = 60;
-
-export const PRINT_TRAY_STORAGE_KEY = 'print-tray';
 
 interface PrintTrayContextType {
   /** The selection in insertion order, de-duped by (type, id). */
@@ -43,9 +42,9 @@ interface PrintTrayContextType {
   /** True when the set has grown past {@link PRINT_TRAY_SOFT_CAP}. */
   isOverSoftCap: boolean;
   /**
-   * True once the stored set has been read from localStorage (VEG-268).
-   * Until then `items` is transiently empty — consumers that branch on
-   * emptiness (the /srd/print route's empty state) must wait for this.
+   * True once the stored set has been read from localStorage. Until then
+   * `items` is transiently empty, so consumers that branch on emptiness (the
+   * /srd/print route's empty state) must wait for this.
    */
   hydrated: boolean;
   add: (type: PrintableCardType, id: string) => void;
@@ -57,96 +56,16 @@ interface PrintTrayContextType {
 
 const PrintTrayContext = createContext<PrintTrayContextType | null>(null);
 
-const keyOf = (type: PrintableCardType, id: string) => `${type}:${id}`;
-
-function isPrintTrayItem(value: unknown): value is PrintTrayItem {
-  if (typeof value !== 'object' || value === null) return false;
-  const { type, id } = value as { type?: unknown; id?: unknown };
-  return (
-    typeof id === 'string' &&
-    typeof type === 'string' &&
-    (PRINTABLE_CARD_TYPES as readonly string[]).includes(type)
-  );
-}
-
-/**
- * Parse a persisted print set, dropping anything corrupt or malformed.
- * Genuine error branches log to the console: a failed hydration is otherwise
- * pixel-identical to an empty tray (the tray bar hides at count 0), so silent
- * data loss would be undiagnosable.
- */
-function readStoredItems(): PrintTrayItem[] {
-  try {
-    const raw = localStorage.getItem(PRINT_TRAY_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      console.error('Print tray: stored value is not an array — starting empty.');
-      return [];
-    }
-    const seen = new Set<string>();
-    const items: PrintTrayItem[] = [];
-    let dropped = 0;
-    for (const entry of parsed) {
-      if (!isPrintTrayItem(entry)) {
-        dropped++;
-        continue;
-      }
-      const key = keyOf(entry.type, entry.id);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      items.push({ type: entry.type, id: entry.id });
-    }
-    if (dropped > 0) {
-      console.error(`Print tray: dropped ${dropped} malformed stored entries.`);
-    }
-    return items;
-  } catch (err) {
-    // Corrupt JSON or storage unavailable — start with an empty set.
-    console.error('Failed to read print tray from storage:', err);
-    return [];
-  }
-}
-
 export function PrintTrayProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<PrintTrayItem[]>([]);
-  // Skip persisting until the mount-time hydration has run, so the initial
-  // empty render can't clobber a stored set. This must be render state, not a
-  // ref: a ref flipped inside the hydrate effect is already true when the
-  // persist effect runs in the same mount commit (items still []), which wrote
-  // [] over the stored set — and under React StrictMode's double-invoked
-  // effects (Next.js dev) the second hydrate pass then read the clobbered
-  // store, wiping the selection on every page load. Latent since the VEG-264
-  // store; caught by the VEG-265 e2e.
-  const [hydrated, setHydrated] = useState(false);
-  // Warn the user at most once per mount when persistence fails — without a
-  // signal, the selection silently becoming session-only is indistinguishable
-  // from "my clicks aren't registering" after the next reload.
-  const persistFailedRef = useRef(false);
+  // The set lives in a module store read through useSyncExternalStore. The
+  // server snapshot is always empty and unhydrated, so the server and first
+  // client render agree, and the store holds `hydrated` itself, so persisting
+  // can never run ahead of the read and write [] over the stored set.
+  const { items, hydrated } = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
-  // Hydrate in an effect (not a useState initializer) so server and first
-  // client render agree — localStorage only exists in the browser.
-  useEffect(() => {
-    setItems(readStoredItems());
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify(items));
-    } catch (err) {
-      // Storage full or unavailable — the in-memory set still works.
-      console.error('Failed to persist print tray:', err);
-      if (!persistFailedRef.current) {
-        persistFailedRef.current = true;
-        toast.error(
-          'Your print selection cannot be saved and will be lost when you leave or reload.',
-          { id: 'print-tray-persist' }
-        );
-      }
-    }
-  }, [items, hydrated]);
+  // Hydrate after mount, because localStorage only exists in the browser.
+  // `hydrate` is idempotent, so StrictMode's double-invoked effect is harmless.
+  useEffect(() => hydrate(), []);
 
   const add = useCallback((type: PrintableCardType, id: string) => {
     setItems(prev =>
@@ -173,7 +92,7 @@ export function PrintTrayProvider({ children }: { children: ReactNode }) {
   );
 
   const clear = useCallback(() => {
-    setItems([]);
+    setItems(() => []);
   }, []);
 
   const grouped = useMemo(() => {

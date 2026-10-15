@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
-import { toast } from 'sonner';
-import { apiFetch } from '@/lib/api';
+import { useId, useState } from 'react';
+import { useApiQuery } from '@/lib/query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import type { PaginatedResponse, SrdSpell } from '@grimoire-os/shared';
 
 const LIMIT = 8;
@@ -17,62 +17,27 @@ interface Props {
 /**
  * Reusable debounced picker over the spell catalog (`GET /srd/spells`, which
  * spans srd/shared and the caller's homebrew). The spell-catalog sibling of
- * `CatalogItemPicker`: plain `apiFetch` with a stale-response guard, so consumers
- * can mock `@/lib/api` without a react-query provider. Picking a spell fires
- * `onSelect` with the full catalog row so the caller can map it to a structured
- * SpellEntry (via `toSpellEntry`).
+ * `CatalogItemPicker`. It reads through `useApiQuery`, so consumers render
+ * inside the app's QueryProvider and tests use `renderWithQueryClient`. Picking
+ * a spell fires `onSelect` with the full catalog row so the caller can map it
+ * to a structured SpellEntry (via `toSpellEntry`).
  */
 export default function SrdSpellSearch({ onSelect, placeholder, disabled = false }: Props) {
   const inputId = useId();
   const [searchInput, setSearchInput] = useState('');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SrdSpell[]>([]);
-  const [loading, setLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const query = useDebouncedValue(searchInput.trim());
 
-  // Debounce the raw input into the query that drives the fetch.
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setQuery(searchInput.trim()), 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchInput]);
-
-  useEffect(() => {
-    if (!query) {
-      setResults([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    // Stale guard: a slow response for an old query must not overwrite the
-    // newer query's results or end its loading state.
-    let stale = false;
-    const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
-    apiFetch<PaginatedResponse<SrdSpell>>(`/srd/spells?${params.toString()}`)
-      .then(res => {
-        if (!stale) setResults(res.data);
-      })
-      .catch(err => {
-        if (stale) return;
-        console.error('Spell search failed:', err);
-        setResults([]);
-        toast.error(err instanceof Error ? err.message : 'Failed to search spells');
-      })
-      .finally(() => {
-        if (!stale) setLoading(false);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [query]);
+  const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
+  const search = useApiQuery<PaginatedResponse<SrdSpell>>(`/srd/spells?${params.toString()}`, {
+    enabled: query !== '',
+    errorToast: 'Failed to search spells',
+  });
+  const results = search.data?.data ?? [];
+  const loading = query !== '' && search.isPending;
 
   const pick = (spell: SrdSpell) => {
     onSelect(spell);
     setSearchInput('');
-    setQuery('');
-    setResults([]);
   };
 
   return (
@@ -89,7 +54,9 @@ export default function SrdSpellSearch({ onSelect, placeholder, disabled = false
         onChange={e => setSearchInput(e.target.value)}
         className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50"
       />
-      {query &&
+      {/* Gating on the raw input too hides the list the moment a pick clears it. */}
+      {searchInput.trim() !== '' &&
+        query !== '' &&
         (loading ? (
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Searching…</p>
         ) : results.length === 0 ? (

@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { useRef, useState } from 'react';
 import { priceFromCost } from '@grimoire-os/shared';
-import { apiFetch } from '@/lib/api';
+import { useApiQuery } from '@/lib/query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import type { Currency, PaginatedResponse, ShopLineItem, SrdItem } from '@/lib/types';
 
 const LIMIT = 8;
@@ -22,7 +22,7 @@ const ZERO_PRICE: Currency = { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 };
 
 // priceFromCost (catalog cost → default sale price) lives in @grimoire-os/shared
 // so the backend theme-suggestion resolver and this editor derive identical
-// defaults (VEG-355).
+// defaults.
 
 const numberInputClass =
   'w-16 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -36,21 +36,17 @@ interface Props {
 }
 
 /**
- * Stock editor for a shop's line items (VEG-354). Lines are added from the
- * items catalog via a debounced `/srd/items` search (sale price defaults from
- * the catalog `cost`, DM-overridable) or hand-typed as ad-hoc custom lines
- * (e.g. "Mug of ale" for a tavern). `stock` blank means unlimited.
+ * Stock editor for a shop's line items. Lines are added from the items catalog
+ * via a debounced `/srd/items` search (sale price defaults from the catalog
+ * `cost`, DM-overridable) or hand-typed as ad-hoc custom lines (e.g. "Mug of
+ * ale" for a tavern). `stock` blank means unlimited.
  *
- * Forked from LootItemsEditor's catalog picker; the shared extraction is
- * tracked in VEG-418.
+ * It keeps its own result list instead of `CatalogItemPicker` because the list
+ * carries stock-specific hints: the "already in stock" line and the homebrew
+ * note.
  */
 export default function ShopStockEditor({ value, onChange }: Props) {
   const [searchInput, setSearchInput] = useState('');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SrdItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searchFailed, setSearchFailed] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Stable per-line React keys. Custom lines have no itemId, so an index key
   // would mis-associate the editable name/price inputs (and lose focus) when a
@@ -63,53 +59,23 @@ export default function ShopStockEditor({ value, onChange }: Props) {
   const keyCounter = useRef(value.length);
   const [keys, setKeys] = useState<string[]>(() => value.map((_, i) => `line-${i}`));
 
-  // Debounce the raw input into the query that drives the fetch.
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setQuery(searchInput.trim()), 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchInput]);
+  const query = useDebouncedValue(searchInput.trim());
 
-  useEffect(() => {
-    if (!query) {
-      setResults([]);
-      setSearchFailed(false);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setSearchFailed(false);
-    // Stale guard: a slow response for an old query must not overwrite the
-    // newer query's results or end its loading state.
-    let stale = false;
-    // Shop lines are validated against the SRD and shared catalog, so ask for
-    // that tier rather than offering the caller homebrew the save will refuse.
-    const params = new URLSearchParams({
-      q: query,
-      page: '1',
-      limit: String(LIMIT),
-      tier: 'global',
-    });
-    apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
-      .then(res => {
-        if (!stale) setResults(res.data);
-      })
-      .catch(err => {
-        if (stale) return;
-        console.error('Item search failed:', err);
-        setResults([]);
-        setSearchFailed(true);
-        toast.error(err instanceof Error ? err.message : 'Failed to search items');
-      })
-      .finally(() => {
-        if (!stale) setLoading(false);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [query]);
+  // Shop lines are validated against the SRD and shared catalog, so ask for
+  // that tier rather than offering the caller homebrew the save will refuse.
+  const params = new URLSearchParams({
+    q: query,
+    page: '1',
+    limit: String(LIMIT),
+    tier: 'global',
+  });
+  const search = useApiQuery<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`, {
+    enabled: query !== '',
+    errorToast: 'Failed to search items',
+  });
+  const results = search.data?.data ?? [];
+  const loading = query !== '' && search.isPending;
+  const searchFailed = search.isError;
 
   const addLine = (line: ShopLineItem) => {
     setKeys(k => [...k, `line-${keyCounter.current++}`]);
@@ -125,8 +91,6 @@ export default function ShopStockEditor({ value, onChange }: Props) {
       stock: null,
     });
     setSearchInput('');
-    setQuery('');
-    setResults([]);
   };
 
   const addCustomLine = () => {
@@ -265,7 +229,9 @@ export default function ShopStockEditor({ value, onChange }: Props) {
             Add custom line
           </button>
         </div>
-        {query &&
+        {/* Gating on the raw input too hides the list the moment a pick clears it. */}
+        {searchInput.trim() !== '' &&
+          query !== '' &&
           (loading ? (
             <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Searching…</p>
           ) : pickable.length === 0 ? (

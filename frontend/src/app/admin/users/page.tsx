@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useApiMutation, useDeleteMutation, useListQuery } from '@/lib/query';
 import { toast } from 'sonner';
 import Pagination from '@/components/Pagination';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import AdminSubnav from '@/components/AdminSubnav';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
 import type { User, PaginatedResponse } from '@/lib/types';
 
 const LIMIT = 20;
@@ -15,61 +19,81 @@ const LIMIT = 20;
 export default function AdminUsersPage() {
   const { isAdmin, isLoading: authLoading } = useAuth();
   const router = useRouter();
-  const [users, setUsers] = useState<User[]>([]);
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; username: string } | null>(null);
 
+  // The redirect waits for session hydration, because the pre-hydration
+  // `isAdmin: false` would bounce a real admin on refresh.
   useEffect(() => {
-    // Wait for session hydration before judging admin status — acting on the
-    // pre-hydration `isAdmin:false` would bounce a real admin on refresh.
     if (authLoading) return;
-    if (!isAdmin) {
-      router.replace('/');
-      return;
-    }
-    setLoading(true);
-    apiFetch<PaginatedResponse<User>>(`/admin/users?page=${page}&limit=${LIMIT}`)
-      .then(res => {
-        setUsers(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-      })
-      .catch(() => toast.error('Failed to load users'))
-      .finally(() => setLoading(false));
-  }, [authLoading, isAdmin, router, page]);
+    if (!isAdmin) router.replace('/');
+  }, [authLoading, isAdmin, router]);
 
-  const updateRole = async (userId: string, role: User['role']) => {
-    try {
-      await apiFetch(`/admin/users/${userId}`, {
+  const list = useListQuery<User>(
+    '/admin/users',
+    { page, limit: LIMIT },
+    { enabled: !authLoading && isAdmin, errorToast: 'Failed to load users' }
+  );
+  const users = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
+
+  const updateRole = useApiMutation(
+    ({ userId, role }: { userId: string; role: User['role'] }) =>
+      apiFetch(`/admin/users/${userId}`, {
         method: 'PATCH',
         body: JSON.stringify({ role }),
-      });
-      setUsers(prev => prev.map(u => (u.id === userId ? { ...u, role } : u)));
-      toast.success('Role updated');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update role');
+      }),
+    {
+      onSuccess: (_data, { userId, role }) => {
+        // Every cached page gets the new role, not only the one on screen.
+        queryClient.setQueriesData<PaginatedResponse<User>>(
+          {
+            predicate: q =>
+              typeof q.queryKey[1] === 'string' && q.queryKey[1].startsWith('/admin/users?'),
+          },
+          prev =>
+            prev && {
+              ...prev,
+              data: prev.data.map(u => (u.id === userId ? { ...u, role } : u)),
+            }
+        );
+        toast.success('Role updated');
+      },
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to update role');
+      },
     }
-  };
+  );
 
-  const confirmDelete = async () => {
-    if (!pendingDelete) return;
-    const { id: userId } = pendingDelete;
-    try {
-      await apiFetch(`/admin/users/${userId}`, { method: 'DELETE' });
-      setUsers(prev => prev.filter(u => u.id !== userId));
-      setTotal(prev => prev - 1);
+  const remove = useDeleteMutation({
+    path: '/admin/users',
+    invalidate: '/admin/users?',
+    onDeleted: () => {
       toast.success('User deleted');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete user');
-    }
+      // Deleting the only row on a later page steps back a page, so the admin
+      // is not left on an empty page past the end.
+      if (users.length === 1 && page > 1) setPage(p => p - 1);
+    },
+  });
+
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    remove.mutate(pendingDelete.id, {
+      onError: err => {
+        toast.error(err instanceof Error ? err.message : 'Failed to delete user');
+      },
+    });
   };
 
   if (!isAdmin) return null;
-  if (loading && users.length === 0)
-    return <div className="text-gray-500 dark:text-gray-400">Loading users...</div>;
+  // A Retry after a failed load keeps status 'error' while it runs, so the
+  // loading view checks isFetching as well as isPending.
+  if (list.isPending || (list.isError && list.isFetching && !list.data))
+    return <LoadingState label="Loading users..." />;
+  if (list.isError && !list.data)
+    return <LoadError message="Failed to load users" onRetry={list.refetch} />;
 
   const selectClass =
     'px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
@@ -106,7 +130,9 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3">
                     <select
                       value={u.role}
-                      onChange={e => updateRole(u.id, e.target.value as User['role'])}
+                      onChange={e =>
+                        updateRole.mutate({ userId: u.id, role: e.target.value as User['role'] })
+                      }
                       className={selectClass}
                     >
                       <option value="player">Player</option>

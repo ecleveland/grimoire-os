@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
-import { toast } from 'sonner';
-import { apiFetch } from '@/lib/api';
+import { useId, useState } from 'react';
+import { useApiQuery } from '@/lib/query';
+import { useDebouncedValue } from '@/lib/use-debounced-value';
 import type { PaginatedResponse, SrdItem } from '@grimoire-os/shared';
 
 const LIMIT = 8;
@@ -26,9 +26,9 @@ export interface CatalogItemPickerProps {
 
 /**
  * Debounced picker over the item catalog (`GET /srd/items`, which spans
- * srd/shared and the caller's homebrew unless `tier` narrows it). It uses plain
- * `apiFetch` with a stale-response guard, so consumers can mock `@/lib/api`
- * without a react-query provider. Picking an item fires `onSelect` with the
+ * srd/shared and the caller's homebrew unless `tier` narrows it). It reads
+ * through `useApiQuery`, so consumers render inside the app's QueryProvider and
+ * tests use `renderWithQueryClient`. Picking an item fires `onSelect` with the
  * full catalog row (name, weight, category, description) so the caller can
  * autofill a linked entry.
  */
@@ -42,55 +42,20 @@ export default function CatalogItemPicker({
 }: CatalogItemPickerProps) {
   const inputId = useId();
   const [searchInput, setSearchInput] = useState('');
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SrdItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const query = useDebouncedValue(searchInput.trim());
 
-  // Debounce the raw input into the query that drives the fetch.
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setQuery(searchInput.trim()), 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchInput]);
-
-  useEffect(() => {
-    if (!query) {
-      setResults([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    // Stale guard: a slow response for an old query must not overwrite the
-    // newer query's results or end its loading state.
-    let stale = false;
-    const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
-    if (tier) params.set('tier', tier);
-    apiFetch<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`)
-      .then(res => {
-        if (!stale) setResults(res.data);
-      })
-      .catch(err => {
-        if (stale) return;
-        console.error('Item search failed:', err);
-        setResults([]);
-        toast.error(err instanceof Error ? err.message : 'Failed to search items');
-      })
-      .finally(() => {
-        if (!stale) setLoading(false);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [query, tier]);
+  const params = new URLSearchParams({ q: query, page: '1', limit: String(LIMIT) });
+  if (tier) params.set('tier', tier);
+  const search = useApiQuery<PaginatedResponse<SrdItem>>(`/srd/items?${params.toString()}`, {
+    enabled: query !== '',
+    errorToast: 'Failed to search items',
+  });
+  const results = search.data?.data ?? [];
+  const loading = query !== '' && search.isPending;
 
   const pick = (item: SrdItem) => {
     onSelect(item);
     setSearchInput('');
-    setQuery('');
-    setResults([]);
   };
 
   const shown = exclude ? results.filter(item => !exclude(item)) : results;
@@ -109,7 +74,9 @@ export default function CatalogItemPicker({
         onChange={e => setSearchInput(e.target.value)}
         className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:opacity-50"
       />
-      {query &&
+      {/* Gating on the raw input too hides the list the moment a pick clears it. */}
+      {searchInput.trim() !== '' &&
+        query !== '' &&
         (loading ? (
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Searching…</p>
         ) : shown.length === 0 ? (

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import AdminEquipmentPage from '../page';
 import type { SrdItem } from '@/lib/types';
 
@@ -67,7 +68,7 @@ beforeEach(() => {
 describe('AdminEquipmentPage', () => {
   it('redirects non-admins and renders nothing', async () => {
     mockUseAuth.mockReturnValue({ isAdmin: false });
-    const { container } = render(<AdminEquipmentPage />);
+    const { container } = renderWithQueryClient(<AdminEquipmentPage />);
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
     expect(container.querySelector('table')).not.toBeInTheDocument();
     expect(mockApiFetch).not.toHaveBeenCalled();
@@ -75,7 +76,7 @@ describe('AdminEquipmentPage', () => {
 
   it('waits for auth hydration before redirecting', async () => {
     mockUseAuth.mockReturnValue({ isAdmin: false, isLoading: true });
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await Promise.resolve();
     expect(mockReplace).not.toHaveBeenCalled();
     expect(mockApiFetch).not.toHaveBeenCalled();
@@ -83,41 +84,41 @@ describe('AdminEquipmentPage', () => {
 
   it('loads the shared-item list on mount', async () => {
     wireApi([makeItem(), makeItem({ id: 'item-2', name: 'Riding Horse', category: 'Mount' })]);
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     expect(await screen.findByText("Explorer's Pack")).toBeInTheDocument();
-    expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?page=1&limit=20');
+    expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?limit=20&page=1');
     expect(screen.getByText('Riding Horse')).toBeInTheDocument();
   });
 
   it('shows the empty state when there are no shared items', async () => {
     wireApi([]);
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     expect(await screen.findByText(/no shared items yet/i)).toBeInTheDocument();
   });
 
   it('toasts when the list fails to load', async () => {
     mockApiFetch.mockRejectedValue(new Error('boom'));
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load items'));
   });
 
   it('filtering by category refetches with the category param', async () => {
     wireApi([makeItem()]);
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText("Explorer's Pack");
 
     await user.selectOptions(screen.getByLabelText(/filter by category/i), 'Mount');
 
     await waitFor(() =>
-      expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?page=1&limit=20&category=Mount')
+      expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?category=Mount&limit=20&page=1')
     );
   });
 
   it('searching refetches with the debounced q param', async () => {
     wireApi([makeItem()]);
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText("Explorer's Pack");
 
     await user.type(screen.getByLabelText(/search items/i), 'pack');
@@ -133,7 +134,7 @@ describe('AdminEquipmentPage', () => {
   it('creates an item via the form and POSTs the payload', async () => {
     wireApi([]);
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText(/no shared items yet/i);
 
     await user.click(screen.getByRole('button', { name: /new item/i }));
@@ -161,7 +162,7 @@ describe('AdminEquipmentPage', () => {
       return Promise.resolve(undefined);
     });
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText(/no shared items yet/i);
 
     await user.click(screen.getByRole('button', { name: /new item/i }));
@@ -177,7 +178,7 @@ describe('AdminEquipmentPage', () => {
   it('edits an item via the prefilled form and PATCHes', async () => {
     wireApi([makeItem({ name: 'Riding Horse', category: 'Mount' })]);
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText('Riding Horse');
 
     await user.click(screen.getByRole('button', { name: /edit/i }));
@@ -215,7 +216,7 @@ describe('AdminEquipmentPage', () => {
       return Promise.resolve(undefined);
     });
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText('Riding Horse');
 
     await user.click(screen.getByRole('button', { name: /delete/i }));
@@ -228,7 +229,7 @@ describe('AdminEquipmentPage', () => {
     expect(mockToastSuccess).toHaveBeenCalledWith('Item deleted');
     // The list re-fetched and the row is gone (not just optimistically hidden).
     await waitFor(() => expect(screen.queryByText('Riding Horse')).not.toBeInTheDocument());
-    expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?page=1&limit=20');
+    expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?limit=20&page=1');
   });
 
   it('steps back a page when deleting the last row on a non-first page', async () => {
@@ -255,7 +256,7 @@ describe('AdminEquipmentPage', () => {
       return Promise.resolve(undefined);
     });
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText('First Mount');
 
     // Go to page 2 (its single row), then delete it.
@@ -274,7 +275,7 @@ describe('AdminEquipmentPage', () => {
       makeItem({ id: 'item-1', name: "Explorer's Pack", category: 'Equipment Pack' }),
       makeItem({ id: 'item-2', name: 'Riding Horse', category: 'Mount' }),
     ]);
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText("Explorer's Pack");
 
     const packRow = screen.getByText("Explorer's Pack").closest('tr')!;
@@ -289,7 +290,7 @@ describe('AdminEquipmentPage', () => {
       contents: [{ itemId: 'c1', name: 'Bedroll', quantity: 1 }],
     });
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText("Explorer's Pack");
 
     await user.click(screen.getByRole('button', { name: /contents/i }));
@@ -326,7 +327,7 @@ describe('AdminEquipmentPage', () => {
       return Promise.resolve(undefined);
     });
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText("Explorer's Pack");
 
     await user.click(screen.getByRole('button', { name: /contents/i }));
@@ -357,7 +358,7 @@ describe('AdminEquipmentPage', () => {
       return Promise.resolve(undefined);
     });
     const user = userEvent.setup();
-    render(<AdminEquipmentPage />);
+    renderWithQueryClient(<AdminEquipmentPage />);
     await screen.findByText("Explorer's Pack");
 
     await user.click(screen.getByRole('button', { name: /contents/i }));
@@ -368,5 +369,98 @@ describe('AdminEquipmentPage', () => {
     // The dialog stays open and the button returns to enabled "Save contents".
     const saveButton = await screen.findByRole('button', { name: /save contents/i });
     expect(saveButton).toBeEnabled();
+  });
+
+  it('shows a retryable error when the list fails to load', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockRejectedValueOnce(new Error('boom'));
+    const user = userEvent.setup();
+    renderWithQueryClient(<AdminEquipmentPage />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load items');
+    expect(screen.queryByText(/no shared items yet/i)).not.toBeInTheDocument();
+
+    wireApi([makeItem()]);
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByText("Explorer's Pack")).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('typing in search resets to page 1', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path.includes('page=2')) {
+        return Promise.resolve({
+          data: [makeItem({ id: 'item-2', name: 'Second Page Mount', category: 'Mount' })],
+          total: 21,
+          page: 2,
+          lastPage: 2,
+        });
+      }
+      return Promise.resolve({
+        data: [makeItem({ name: 'First Page Mount', category: 'Mount' })],
+        total: 21,
+        page: 1,
+        lastPage: 2,
+      });
+    });
+    const user = userEvent.setup();
+    renderWithQueryClient(<AdminEquipmentPage />);
+    await screen.findByText('First Page Mount');
+    await user.click(screen.getByRole('button', { name: /next/i }));
+    await screen.findByText('Second Page Mount');
+
+    fireEvent.change(screen.getByLabelText(/search items/i), { target: { value: 'mount' } });
+
+    await waitFor(() =>
+      expect(mockApiFetch).toHaveBeenCalledWith('/admin/items?limit=20&page=1&q=mount')
+    );
+    expect(mockApiFetch).not.toHaveBeenCalledWith('/admin/items?limit=20&page=2&q=mount');
+    expect(await screen.findByText(/page 1 of 2/i)).toBeInTheDocument();
+  });
+
+  it('create refetches the list once before it shows again', async () => {
+    let created = false;
+    let releaseRefetch: () => void = () => {};
+    mockApiFetch.mockImplementation((path: string, opts?: RequestInit) => {
+      if (path === '/admin/items' && opts?.method === 'POST') {
+        created = true;
+        return Promise.resolve(undefined);
+      }
+      if (path.startsWith('/admin/items?')) {
+        if (!created) return Promise.resolve(paginated([]));
+        // Hold the post-create refetch so the test can look at the screen
+        // while it is in flight.
+        return new Promise(resolve => {
+          releaseRefetch = () =>
+            resolve(paginated([makeItem({ name: 'Riding Camel', category: 'Mount' })]));
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+    const listGets = () =>
+      mockApiFetch.mock.calls.filter(
+        ([p]) => typeof p === 'string' && p.startsWith('/admin/items?')
+      ).length;
+    const user = userEvent.setup();
+    renderWithQueryClient(<AdminEquipmentPage />);
+    await screen.findByText(/no shared items yet/i);
+    expect(listGets()).toBe(1);
+
+    await user.click(screen.getByRole('button', { name: /new item/i }));
+    await user.type(screen.getByLabelText(/^name/i), 'Riding Camel');
+    await user.selectOptions(screen.getByLabelText(/^category/i), 'Mount');
+    await user.click(screen.getByRole('button', { name: /create item/i }));
+
+    // The form stays up while the refetch runs, so the stale empty list never
+    // shows.
+    await waitFor(() => expect(listGets()).toBe(2));
+    expect(screen.getByRole('heading', { name: 'New item' })).toBeInTheDocument();
+    expect(screen.queryByText(/no shared items yet/i)).not.toBeInTheDocument();
+
+    releaseRefetch();
+    expect(await screen.findByText('Riding Camel')).toBeInTheDocument();
+    expect(screen.queryByText(/no shared items yet/i)).not.toBeInTheDocument();
+    expect(listGets()).toBe(2);
   });
 });

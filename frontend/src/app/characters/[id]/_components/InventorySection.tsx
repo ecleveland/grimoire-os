@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type {
   AttunedItem,
   Character,
@@ -13,6 +13,7 @@ import type { ComputedEncumbrance, ComputedSpeed } from '@grimoire-os/shared';
 import { gearMetaFromItem, isGearCategory } from '@grimoire-os/shared';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import { parseNonNegativeInt } from '@/lib/character-play';
+import { useValueChange } from '@/lib/use-value-change';
 import {
   addInventoryItem,
   removeInventoryItemAt,
@@ -82,9 +83,7 @@ export default function InventorySection(props: InventorySectionProps) {
   // Close any open editor when the character is refetched (a successful write,
   // or a concurrent/409 reload via useCharacterMutation bumps `version`): the
   // refetched inventory may have shifted, invalidating the positional editIndex.
-  useEffect(() => {
-    setEditIndex(null);
-  }, [character.version]);
+  useValueChange(character.version, () => setEditIndex(null));
 
   // Add-item form drafts. `addItemId` links to the catalog when filled from the
   // picker; `addDetail` is the catalog blurb shown after a pick; `addGear` is

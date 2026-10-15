@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithQueryClient } from '@/test-utils/query';
 import AdminLootOddsPage from '../page';
 
 const mockApiFetch = vi.fn();
@@ -51,13 +52,13 @@ beforeEach(() => {
 describe('AdminLootOddsPage', () => {
   it('redirects non-admin users', async () => {
     mockUseAuth.mockReturnValue({ isAdmin: false });
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/'));
   });
 
   it('does not redirect or load data while auth is still hydrating', async () => {
     mockUseAuth.mockReturnValue({ isAdmin: false, isLoading: true });
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await Promise.resolve();
     expect(mockReplace).not.toHaveBeenCalled();
     expect(mockApiFetch).not.toHaveBeenCalled();
@@ -65,7 +66,7 @@ describe('AdminLootOddsPage', () => {
 
   it('loads current values as percentages', async () => {
     routeApi();
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await waitFor(() => expect(mockApiFetch).toHaveBeenCalledWith('/admin/loot-odds'));
 
     expect((await screen.findByLabelText(/Trinket Chance/)) as HTMLInputElement).toHaveValue(5);
@@ -79,14 +80,14 @@ describe('AdminLootOddsPage', () => {
   it('surfaces a load failure as a toast', async () => {
     const { toast } = await import('sonner');
     mockApiFetch.mockRejectedValue(new Error('nope'));
-    render(<AdminLootOddsPage />);
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('nope'));
+    renderWithQueryClient(<AdminLootOddsPage />);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to load loot odds'));
   });
 
   it('saves edited values back as fractions', async () => {
     routeApi();
     const { toast } = await import('sonner');
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     fireEvent.change(screen.getByLabelText(/Trinket Chance/), { target: { value: '10' } });
@@ -115,7 +116,7 @@ describe('AdminLootOddsPage', () => {
     // 0.07 → 7% cleanly, but 7 / 100 and 0.07 * 100 both produce float noise
     // (0.0699…/7.000…1) without the round() helper.
     routeApi({ ...RULES, trinketChance: 0.07 });
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     expect(screen.getByLabelText(/Trinket Chance/)).toHaveValue(7);
@@ -133,7 +134,7 @@ describe('AdminLootOddsPage', () => {
   it('rejects an out-of-range magic chance for a specific CR bucket', async () => {
     routeApi();
     const { toast } = await import('sonner');
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     fireEvent.change(screen.getByLabelText('CR 0'), { target: { value: '150' } });
@@ -148,7 +149,7 @@ describe('AdminLootOddsPage', () => {
   it('rejects an implausibly large coinage multiplier before calling the API', async () => {
     routeApi();
     const { toast } = await import('sonner');
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     fireEvent.change(screen.getByLabelText('Coinage Multiplier'), { target: { value: '150' } });
@@ -161,7 +162,7 @@ describe('AdminLootOddsPage', () => {
   it('rejects a malformed die spec before calling the API', async () => {
     routeApi();
     const { toast } = await import('sonner');
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     fireEvent.change(screen.getByLabelText('Item Count Die'), { target: { value: '1x3' } });
@@ -174,7 +175,7 @@ describe('AdminLootOddsPage', () => {
   it('rejects an out-of-range trinket chance before calling the API', async () => {
     routeApi();
     const { toast } = await import('sonner');
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     fireEvent.change(screen.getByLabelText(/Trinket Chance/), { target: { value: '150' } });
@@ -190,11 +191,58 @@ describe('AdminLootOddsPage', () => {
       if (init?.method === 'PATCH') return Promise.reject(new Error('Validation failed'));
       return Promise.resolve(RULES);
     });
-    render(<AdminLootOddsPage />);
+    renderWithQueryClient(<AdminLootOddsPage />);
     await screen.findByDisplayValue('1d3');
 
     await userEvent.click(screen.getByRole('button', { name: /Save/i }));
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Validation failed'));
+  });
+
+  it('shows a retryable error when the load fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockApiFetch.mockRejectedValueOnce(new Error('nope'));
+    renderWithQueryClient(<AdminLootOddsPage />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Failed to load loot odds.');
+
+    routeApi();
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByDisplayValue('1d3')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('a background refetch failure keeps the typed values', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { toast } = await import('sonner');
+    mockApiFetch.mockResolvedValueOnce(RULES);
+    const { client } = renderWithQueryClient(<AdminLootOddsPage />);
+    await screen.findByDisplayValue('1d3');
+
+    fireEvent.change(screen.getByLabelText(/Trinket Chance/), { target: { value: '42' } });
+    mockApiFetch.mockRejectedValueOnce(new Error('offline'));
+    await client.invalidateQueries();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to load loot odds'));
+    expect(screen.getByLabelText(/Trinket Chance/)).toHaveValue(42);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    consoleError.mockRestore();
+  });
+
+  it('after Save the fields show the saved values', async () => {
+    // The server normalises the save, so the form shows what it returns rather
+    // than what was typed.
+    mockApiFetch.mockImplementation((_path: string, init?: { method?: string }) => {
+      if (init?.method === 'PATCH') return Promise.resolve({ ...RULES, trinketChance: 0.25 });
+      return Promise.resolve(RULES);
+    });
+    renderWithQueryClient(<AdminLootOddsPage />);
+    await screen.findByDisplayValue('1d3');
+
+    fireEvent.change(screen.getByLabelText(/Trinket Chance/), { target: { value: '10' } });
+    await userEvent.click(screen.getByRole('button', { name: /Save/i }));
+
+    await waitFor(() => expect(screen.getByLabelText(/Trinket Chance/)).toHaveValue(25));
   });
 });

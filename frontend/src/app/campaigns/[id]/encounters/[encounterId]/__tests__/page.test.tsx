@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { renderWithQueryClient } from '@/test-utils/query';
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
 import { ApiError } from '@/lib/api';
@@ -148,20 +149,20 @@ async function addGoblinFromLookup(user: ReturnType<typeof userEvent.setup>) {
 describe('InitiativeTrackerPage', () => {
   it('shows the loading state before the fetch resolves', () => {
     mockApiFetch.mockReturnValue(new Promise(() => {}));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     expect(screen.getByText(/^loading\.\.\./i)).toBeInTheDocument();
   });
 
   it('shows the not-found state and toasts when the request fails', async () => {
     mockApiFetch.mockRejectedValue(new Error('404'));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await waitFor(() => expect(screen.getByText(/encounter not found/i)).toBeInTheDocument());
     expect(mockToastError).toHaveBeenCalledWith('Failed to load encounter');
   });
 
   it('renders the encounter header, round, and combatants sorted by initiative descending', async () => {
     mockApiFetch.mockResolvedValue(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument()
     );
@@ -182,7 +183,7 @@ describe('InitiativeTrackerPage', () => {
       isDm: false,
     });
     mockApiFetch.mockResolvedValue(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument()
     );
@@ -196,7 +197,7 @@ describe('InitiativeTrackerPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ isActive: false }));
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ isActive: true }));
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /start combat/i })).toBeInTheDocument()
     );
@@ -221,7 +222,7 @@ describe('InitiativeTrackerPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 2, round: 1 }));
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 0, round: 2 }));
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     await user.click(screen.getByRole('button', { name: /next turn/i }));
@@ -259,7 +260,7 @@ describe('InitiativeTrackerPage', () => {
     it('steps back within the round', async () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 2, round: 1, version: 1 }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('button', { name: /previous turn/i });
       await user.click(screen.getByRole('button', { name: /previous turn/i }));
       await waitFor(() =>
@@ -275,7 +276,7 @@ describe('InitiativeTrackerPage', () => {
     it('wraps to the last combatant and decrements the round', async () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 2, version: 1 }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('button', { name: /previous turn/i });
       await user.click(screen.getByRole('button', { name: /previous turn/i }));
       await waitFor(() =>
@@ -294,7 +295,7 @@ describe('InitiativeTrackerPage', () => {
       // on a valid row (last index 2) rather than persist another bad index.
       mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 5, round: 2, version: 1 }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('button', { name: /previous turn/i });
       await user.click(screen.getByRole('button', { name: /previous turn/i }));
       await waitFor(() =>
@@ -309,7 +310,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('is disabled at the very start (round 1, turn 0)', async () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const btn = await screen.findByRole('button', { name: /previous turn/i });
       expect(btn).toBeDisabled();
     });
@@ -320,7 +321,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /previous turn/i })).not.toBeInTheDocument();
     });
@@ -341,7 +342,7 @@ describe('InitiativeTrackerPage', () => {
           combatants: [makeCombatant({ name: 'Spy', notes: 'secretly a doppelganger' })],
         })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByLabelText('Notes for Spy')).toHaveValue('secretly a doppelganger');
     });
@@ -357,7 +358,7 @@ describe('InitiativeTrackerPage', () => {
           combatants: [makeCombatant({ name: 'Spy', notes: 'lair hazard' })],
         })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText(/lair hazard/)).toBeInTheDocument();
       expect(screen.queryByLabelText('Notes for Spy')).not.toBeInTheDocument();
@@ -367,7 +368,7 @@ describe('InitiativeTrackerPage', () => {
       routeAddFlow({
         encounter: makeEncounter({ version: 4, combatants: [makeCombatant({ name: 'Spy' })] }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       const input = screen.getByLabelText('Notes for Spy');
       fireEvent.change(input, { target: { value: 'bloodied at half HP' } });
@@ -385,7 +386,7 @@ describe('InitiativeTrackerPage', () => {
           combatants: [makeCombatant({ name: 'Spy', notes: 'temp' })],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       const input = screen.getByLabelText('Notes for Spy');
       fireEvent.change(input, { target: { value: '   ' } });
@@ -405,7 +406,7 @@ describe('InitiativeTrackerPage', () => {
       })
     );
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
     await user.click(screen.getByRole('button', { name: /next turn/i }));
     // Only the initial GET was made — no PATCH.
@@ -426,7 +427,7 @@ describe('InitiativeTrackerPage', () => {
     });
     mockApiFetch.mockResolvedValueOnce(wounded);
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ version: 5 }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -449,7 +450,7 @@ describe('InitiativeTrackerPage', () => {
   it('commits the HP edit on Enter, clamping negative entries to 0', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -469,7 +470,7 @@ describe('InitiativeTrackerPage', () => {
 
   it('skips the PATCH when the committed HP is unchanged', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -481,7 +482,7 @@ describe('InitiativeTrackerPage', () => {
   it('floors fractional raw HP edits to whole numbers', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -496,7 +497,7 @@ describe('InitiativeTrackerPage', () => {
 
   it('reverts to the server value when an empty HP edit is committed', async () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -524,7 +525,7 @@ describe('InitiativeTrackerPage', () => {
     mockApiFetch.mockResolvedValueOnce(reordered); // PATCH (toggleActive) → reordered list
     mockApiFetch.mockResolvedValueOnce(reordered); // PATCH (hp commit)
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     // Open a draft on Goblin A (index 1 pre-reorder)...
@@ -561,7 +562,7 @@ describe('InitiativeTrackerPage', () => {
     });
     mockApiFetch.mockResolvedValueOnce(twins);
     mockApiFetch.mockResolvedValueOnce(twins);
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -593,7 +594,7 @@ describe('InitiativeTrackerPage', () => {
       }
       return Promise.resolve(initial);
     });
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
 
     const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -615,7 +616,7 @@ describe('InitiativeTrackerPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     mockApiFetch.mockRejectedValueOnce(new Error('conflict'));
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
     await user.click(screen.getByRole('button', { name: /next turn/i }));
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('conflict'));
@@ -625,7 +626,7 @@ describe('InitiativeTrackerPage', () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter());
     mockApiFetch.mockRejectedValueOnce('boom');
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('button', { name: /next turn/i });
     await user.click(screen.getByRole('button', { name: /next turn/i }));
     await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to update encounter'));
@@ -637,7 +638,7 @@ describe('InitiativeTrackerPage', () => {
       isDm: false,
     });
     mockApiFetch.mockResolvedValue(makeEncounter());
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument()
     );
@@ -653,7 +654,7 @@ describe('InitiativeTrackerPage', () => {
       isDm: false,
     });
     mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument()
     );
@@ -671,7 +672,7 @@ describe('InitiativeTrackerPage', () => {
       }),
     });
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await addGoblinFromLookup(user);
 
     let patchBody: { combatants: Combatant[]; expectedVersion: number } | undefined;
@@ -712,7 +713,7 @@ describe('InitiativeTrackerPage', () => {
         ),
     });
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await addGoblinFromLookup(user);
 
     // Conflict → guidance toast, no success.
@@ -735,7 +736,7 @@ describe('InitiativeTrackerPage', () => {
     });
     routeAddFlow({ encounter: makeEncounter({ version: 3, createdBy: 'user-1' }) });
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
     await user.type(screen.getByPlaceholderText(/search monsters/i), 'goblin');
     await user.click(await screen.findByTestId('lookup-result'));
@@ -761,7 +762,7 @@ describe('InitiativeTrackerPage', () => {
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
 
     // Linked combatant exposes a clickable affordance; the plain one does not.
@@ -810,7 +811,7 @@ describe('InitiativeTrackerPage', () => {
     it('adds a homebrew monster from the lookup panel exactly like an SRD one', async () => {
       routeHomebrew();
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.type(screen.getByPlaceholderText(/search monsters/i), 'troll');
@@ -856,7 +857,7 @@ describe('InitiativeTrackerPage', () => {
         return Promise.reject(new Error(`unexpected path ${path}`));
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /^cave troll 1$/i }));
@@ -882,7 +883,7 @@ describe('InitiativeTrackerPage', () => {
         return Promise.reject(new Error(`unexpected path ${path}`));
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /^cave troll 1$/i }));
@@ -928,7 +929,7 @@ describe('InitiativeTrackerPage', () => {
     it('fetches the campaign roster and appends selected PCs via a version-guarded PATCH', async () => {
       routeAddFlow({ encounter: makeEncounter({ version: 5 }), characters: [thia, mort] });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddParty(user);
 
       // Roster fetched from the campaign-scoped endpoint.
@@ -984,7 +985,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /add party/i })).not.toBeInTheDocument();
     });
@@ -995,7 +996,7 @@ describe('InitiativeTrackerPage', () => {
         characters: () => Promise.reject(new Error('boom')),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /add party/i }));
 
@@ -1015,7 +1016,7 @@ describe('InitiativeTrackerPage', () => {
           ),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddParty(user);
       await dialog.findByText('Thia');
       await user.click(dialog.getByRole('button', { name: /add selected/i }));
@@ -1032,7 +1033,7 @@ describe('InitiativeTrackerPage', () => {
         characters: [thia, { ...mort, name: 'Goblin A' }],
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddParty(user);
       await dialog.findByText('Thia');
       // "Goblin A" is already a combatant — the picker starts it deselected.
@@ -1064,7 +1065,7 @@ describe('InitiativeTrackerPage', () => {
         return Promise.reject(new Error(`unexpected path ${path}`));
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddParty(user);
       await dialog.findByText('Thia');
       await user.click(dialog.getByRole('button', { name: /add selected/i }));
@@ -1090,7 +1091,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => Promise.reject('string rejection'),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddParty(user);
       await dialog.findByText('Thia');
       await user.click(dialog.getByRole('button', { name: /add selected/i }));
@@ -1111,7 +1112,7 @@ describe('InitiativeTrackerPage', () => {
     it('appends a manual combatant via a version-guarded PATCH, toasts, and closes the modal', async () => {
       routeAddFlow({ encounter: makeEncounter({ version: 3 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
 
       await user.type(dialog.getByLabelText(/^name$/i), 'Animated Armor');
@@ -1156,7 +1157,7 @@ describe('InitiativeTrackerPage', () => {
     it('auto-numbers a colliding name and omits blank notes from the body', async () => {
       routeAddFlow({ encounter: makeEncounter() });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
 
       await user.type(dialog.getByLabelText(/^name$/i), 'Goblin A');
@@ -1188,7 +1189,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(makeEncounter({ createdBy: 'user-1' }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /add combatant/i })).not.toBeInTheDocument();
     });
@@ -1204,7 +1205,7 @@ describe('InitiativeTrackerPage', () => {
           ),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
 
       await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
@@ -1231,7 +1232,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => Promise.reject(new Error('nope')),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
       await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
       await user.click(dialog.getByRole('button', { name: /add combatant/i }));
@@ -1244,7 +1245,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => Promise.reject('string rejection'),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
       await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
       await user.click(dialog.getByRole('button', { name: /add combatant/i }));
@@ -1259,7 +1260,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => new Promise(res => (resolvePatch = res)),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
       await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
       const confirm = dialog.getByRole('button', { name: /add combatant/i });
@@ -1319,7 +1320,7 @@ describe('InitiativeTrackerPage', () => {
       // Default order Hero(18) > Goblin A(12) > Goblin B(8); active is Goblin A.
       routeAddFlow({ encounter: makeEncounter({ version: 3, currentTurn: 1 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
 
       await user.type(dialog.getByLabelText(/^name$/i), 'Trap');
@@ -1341,7 +1342,7 @@ describe('InitiativeTrackerPage', () => {
       // Active is Goblin B(8) at index 2; a lower-initiative add sorts beneath it.
       routeAddFlow({ encounter: makeEncounter({ version: 3, currentTurn: 2 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
 
       await user.type(dialog.getByLabelText(/^name$/i), 'Kobold');
@@ -1361,7 +1362,7 @@ describe('InitiativeTrackerPage', () => {
       // Active is Goblin B(8) at index 2; the looked-up Goblin rolls init 10.
       routeAddFlow({ encounter: makeEncounter({ version: 3, currentTurn: 2 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await addGoblinFromLookup(user);
 
       await waitFor(() => expect(mockToastSuccess).toHaveBeenCalled());
@@ -1378,7 +1379,7 @@ describe('InitiativeTrackerPage', () => {
         characters: [thia],
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /add party/i }));
       const dialog = within(await screen.findByRole('dialog'));
@@ -1399,7 +1400,7 @@ describe('InitiativeTrackerPage', () => {
       // yields no active combatant, so indexOf is never consulted.
       routeAddFlow({ encounter: makeEncounter({ version: 3, combatants: [], currentTurn: 0 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       const dialog = await openAddCombatant(user);
 
       await user.type(dialog.getByLabelText(/^name$/i), 'Lone Wolf');
@@ -1443,7 +1444,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('offers Link only on unlinked rows and Unlink only on linked rows', async () => {
       mockApiFetch.mockResolvedValue(linkableEncounter());
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByRole('button', { name: /link monster for hero/i })).toBeInTheDocument();
       expect(
@@ -1463,7 +1464,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(linkableEncounter({ createdBy: 'user-1' }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /link monster/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /unlink monster/i })).not.toBeInTheDocument();
@@ -1472,7 +1473,7 @@ describe('InitiativeTrackerPage', () => {
     it('links the picked monster to the right combatant without touching its other fields', async () => {
       routeAddFlow({ encounter: linkableEncounter({ version: 7 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await linkHero(user);
 
       let patchBody: { combatants: Combatant[]; expectedVersion: number } | undefined;
@@ -1508,7 +1509,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       // Link the second sorted row (initiative 5, hp 99).
       await user.click(screen.getAllByRole('button', { name: /link monster for trap/i })[1]);
@@ -1539,7 +1540,7 @@ describe('InitiativeTrackerPage', () => {
           ),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await linkHero(user);
 
       await waitFor(() => expect(mockToastError).toHaveBeenCalled());
@@ -1551,7 +1552,7 @@ describe('InitiativeTrackerPage', () => {
     it('unlinks a mislinked combatant, removing only its monsterId', async () => {
       routeAddFlow({ encounter: linkableEncounter({ version: 7 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /unlink monster from goblin a/i }));
 
@@ -1578,7 +1579,7 @@ describe('InitiativeTrackerPage', () => {
           combatants: [makeCombatant({ name: 'Orphan', monsterId: undefined, loot: makeLoot() })],
         })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       // The drop stays readable (row drop + encounter total), but there's no
       // monster to reroll from.
@@ -1632,7 +1633,7 @@ describe('InitiativeTrackerPage', () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.5); // d20 face = 11
       routeAddFlow({ encounter: rollableEncounter({ version: 3 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await rollNpc(user, 'each');
@@ -1651,7 +1652,7 @@ describe('InitiativeTrackerPage', () => {
       vi.spyOn(Math, 'random').mockReturnValue(0.5); // 11
       routeAddFlow({ encounter: rollableEncounter() });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await rollNpc(user, 'shared');
@@ -1669,7 +1670,7 @@ describe('InitiativeTrackerPage', () => {
       // Aragorn (PC) holds the turn; sorted by init he is row 0 (18 > 5 > 4 > 3).
       routeAddFlow({ encounter: rollableEncounter({ currentTurn: 0 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await rollNpc(user, 'each');
@@ -1685,7 +1686,7 @@ describe('InitiativeTrackerPage', () => {
       mockApiFetch.mockResolvedValue(
         makeEncounter({ combatants: [makeCombatant({ name: 'Aragorn', isNpc: false })] })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /roll initiative/i })).not.toBeInTheDocument();
     });
@@ -1696,7 +1697,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       mockApiFetch.mockResolvedValue(rollableEncounter({ createdBy: 'user-1' }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /roll initiative/i })).not.toBeInTheDocument();
     });
@@ -1704,7 +1705,7 @@ describe('InitiativeTrackerPage', () => {
     it('opens a menu rather than showing the actions inline', async () => {
       routeAddFlow({ encounter: rollableEncounter() });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       // Actions are hidden until the menu is opened (no longer inline).
       expect(
@@ -1729,7 +1730,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       const readout = screen.getByTestId('encounter-difficulty');
       expect(readout).toHaveTextContent('2 monsters');
@@ -1745,7 +1746,7 @@ describe('InitiativeTrackerPage', () => {
       mockApiFetch.mockResolvedValue(
         makeEncounter({ createdBy: 'user-1', combatants: [makeCombatant({ cr: 1, xp: 200 })] })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByTestId('encounter-difficulty')).not.toBeInTheDocument();
     });
@@ -1799,7 +1800,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByRole('button', { name: /roll loot for goblin a/i })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /roll loot for hero/i })).not.toBeInTheDocument();
@@ -1820,7 +1821,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
@@ -1857,7 +1858,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
@@ -1899,7 +1900,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('3 gp · 5 sp · 12 cp')).toBeInTheDocument();
       expect(screen.getByText(/2× Dagger/)).toBeInTheDocument();
@@ -1913,7 +1914,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByRole('button', { name: /roll loot for encounter/i })).toBeDisabled();
     });
@@ -1933,7 +1934,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       // A looted row offers reroll, not a fresh roll.
@@ -1972,7 +1973,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
@@ -2007,7 +2008,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
@@ -2037,7 +2038,7 @@ describe('InitiativeTrackerPage', () => {
             resolvePatch = res;
           }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const rollBtn = screen.getByRole('button', { name: /roll loot for goblin a/i });
@@ -2064,7 +2065,7 @@ describe('InitiativeTrackerPage', () => {
             resolveRoll = res;
           }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const btn = screen.getByRole('button', { name: /roll loot for encounter/i });
@@ -2095,7 +2096,7 @@ describe('InitiativeTrackerPage', () => {
             resolveRoll = res;
           }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const rollBtn = screen.getByRole('button', { name: /roll loot for goblin a/i });
@@ -2139,7 +2140,7 @@ describe('InitiativeTrackerPage', () => {
           }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await addGoblinFromLookup(user); // add PATCH now pending
 
       expect(screen.getByRole('button', { name: /roll loot for goblin a/i })).toBeDisabled();
@@ -2164,7 +2165,7 @@ describe('InitiativeTrackerPage', () => {
             resolveRoll = res;
           }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
@@ -2209,7 +2210,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       // The drop (first match = the row copy) must not inherit the dead-row
@@ -2239,7 +2240,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: body => Promise.resolve({ ...enc, ...body, version: 5 }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
@@ -2271,7 +2272,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const hpInputs = screen.getAllByRole('spinbutton') as HTMLInputElement[];
@@ -2302,7 +2303,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
 
@@ -2345,7 +2346,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /roll loot/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /reroll loot/i })).not.toBeInTheDocument();
@@ -2367,7 +2368,7 @@ describe('InitiativeTrackerPage', () => {
           ),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /roll loot for encounter/i }));
 
@@ -2388,7 +2389,7 @@ describe('InitiativeTrackerPage', () => {
         onRoll: () => Promise.reject(new Error('loot service down')),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('loot service down'));
@@ -2402,7 +2403,7 @@ describe('InitiativeTrackerPage', () => {
         onRoll: () => Promise.reject('boom'),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       await user.click(screen.getByRole('button', { name: /roll loot for goblin a/i }));
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to roll loot'));
@@ -2461,7 +2462,7 @@ describe('InitiativeTrackerPage', () => {
         ],
       });
       routeHpControls({ encounter: enc });
-      const { unmount } = render(<InitiativeTrackerPage />);
+      const { unmount } = renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('+5 temp')).toBeInTheDocument();
       unmount();
@@ -2470,7 +2471,7 @@ describe('InitiativeTrackerPage', () => {
         user: { userId: 'someone-else', username: 'p', role: 'player' },
         isDm: false,
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('+5 temp')).toBeInTheDocument();
     });
@@ -2486,7 +2487,7 @@ describe('InitiativeTrackerPage', () => {
           combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, tempHp: 5 })],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByRole('button', { name: /damage goblin a/i })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /heal goblin a/i })).not.toBeInTheDocument();
@@ -2506,7 +2507,7 @@ describe('InitiativeTrackerPage', () => {
       });
       routeHpControls({ encounter: enc });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '8' } });
@@ -2536,7 +2537,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '3' } });
@@ -2554,7 +2555,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '99' } });
@@ -2574,7 +2575,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '10' } });
@@ -2592,7 +2593,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '8' } });
@@ -2610,7 +2611,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '3' } });
@@ -2631,7 +2632,7 @@ describe('InitiativeTrackerPage', () => {
           combatants: [makeCombatant({ name: 'Goblin A', initiative: 12, hp: 7 })],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const damageBtn = screen.getByRole('button', { name: /damage goblin a/i });
@@ -2667,7 +2668,7 @@ describe('InitiativeTrackerPage', () => {
         }),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const amounts = screen.getAllByRole('textbox', {
@@ -2714,7 +2715,7 @@ describe('InitiativeTrackerPage', () => {
         },
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
@@ -2740,7 +2741,7 @@ describe('InitiativeTrackerPage', () => {
       });
       routeHpControls({ encounter: enc });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('checkbox', { name: /auto-roll loot on death/i }));
@@ -2761,7 +2762,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => Promise.reject(new Error('save failed')),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '4' } });
@@ -2777,7 +2778,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => Promise.reject('boom'),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '2' } });
@@ -2802,7 +2803,7 @@ describe('InitiativeTrackerPage', () => {
             resolvePatch = res;
           }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(amountInput('Goblin A'), { target: { value: '4' } });
@@ -2843,7 +2844,7 @@ describe('InitiativeTrackerPage', () => {
     it('removes a row after confirm: PATCHes the filtered combatants array', async () => {
       routeAddFlow({ encounter: makeEncounter() });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /remove goblin a/i }));
@@ -2873,7 +2874,7 @@ describe('InitiativeTrackerPage', () => {
     it('re-clamps currentTurn in the same PATCH when removal pushes it out of range', async () => {
       routeAddFlow({ encounter: makeEncounter({ currentTurn: 2 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /remove goblin b/i }));
@@ -2892,7 +2893,7 @@ describe('InitiativeTrackerPage', () => {
     it('cancelling the remove confirm sends nothing', async () => {
       routeAddFlow({ encounter: makeEncounter() });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /remove goblin a/i }));
@@ -2910,7 +2911,7 @@ describe('InitiativeTrackerPage', () => {
     it('clears all combatants after confirm: empty array plus turn/round reset', async () => {
       routeAddFlow({ encounter: makeEncounter({ currentTurn: 2, round: 3 }) });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /clear all/i }));
@@ -2933,7 +2934,7 @@ describe('InitiativeTrackerPage', () => {
     it('cancelling the clear-all confirm sends nothing', async () => {
       routeAddFlow({ encounter: makeEncounter() });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /clear all/i }));
@@ -2958,7 +2959,7 @@ describe('InitiativeTrackerPage', () => {
             resolvePatch = res;
           }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       // Start a write via the HP input (blur commits the PATCH).
@@ -2978,7 +2979,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       routeAddFlow({ encounter: makeEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       expect(screen.queryByRole('button', { name: /remove/i })).not.toBeInTheDocument();
@@ -2996,7 +2997,7 @@ describe('InitiativeTrackerPage', () => {
           ),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: /remove goblin a/i }));
@@ -3022,7 +3023,7 @@ describe('InitiativeTrackerPage', () => {
   describe('inline initiative editing & tie reorder (VEG-285)', () => {
     it('renders an initiative input per row for controllers, sorted top-down', async () => {
       routeAddFlow({ encounter: makeEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const inits = screen.getAllByRole('textbox', {
@@ -3046,7 +3047,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       expect(screen.queryByRole('textbox', { name: /^initiative for/i })).not.toBeInTheDocument();
@@ -3057,7 +3058,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('does not PATCH while typing — one re-sorted, version-guarded PATCH on blur', async () => {
       routeAddFlow({ encounter: makeEncounter({ version: 4 }) });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', {
@@ -3086,7 +3087,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('commits on Enter and omits currentTurn when the active combatant keeps its row', async () => {
       routeAddFlow({ encounter: makeEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', { name: 'Initiative for Goblin A' });
@@ -3110,7 +3111,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('keeps the turn marker on the active combatant when its own initiative moves it', async () => {
       routeAddFlow({ encounter: makeEncounter({ currentTurn: 1 }) }); // Goblin A's turn
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', { name: 'Initiative for Goblin A' });
@@ -3139,7 +3140,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('truncates fractional entries and accepts negative initiative', async () => {
       routeAddFlow({ encounter: makeEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', { name: 'Initiative for Goblin B' });
@@ -3155,7 +3156,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('skips the PATCH when the committed initiative is unchanged, empty, or non-numeric', async () => {
       routeAddFlow({ encounter: makeEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', {
@@ -3174,7 +3175,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('a new tie keeps the existing relative order instead of reshuffling', async () => {
       routeAddFlow({ encounter: makeEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       // Hero 18 → 12 ties Goblin A; the stable tiebreak keeps Hero above A.
@@ -3212,7 +3213,7 @@ describe('InitiativeTrackerPage', () => {
           ],
         }),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const inits = screen.getAllByRole('textbox', { name: 'Initiative for Goblin' });
@@ -3232,7 +3233,7 @@ describe('InitiativeTrackerPage', () => {
         encounter: makeEncounter(),
         onPatch: () => Promise.reject(new Error('boom')),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', { name: 'Initiative for Goblin B' });
@@ -3253,7 +3254,7 @@ describe('InitiativeTrackerPage', () => {
             })
           ),
       });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       const init = screen.getByRole('textbox', { name: 'Initiative for Goblin B' });
@@ -3288,7 +3289,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('offers up/down only inside a tie group', async () => {
       routeAddFlow({ encounter: tieEncounter() });
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       expect(screen.getByRole('button', { name: 'Move Goblin A down' })).toBeInTheDocument();
@@ -3302,7 +3303,7 @@ describe('InitiativeTrackerPage', () => {
     it('swaps a tied pair and keeps the turn marker on the moved combatant', async () => {
       routeAddFlow({ encounter: tieEncounter({ currentTurn: 1, version: 7 }) }); // Goblin A's turn
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Move Goblin A down' }));
@@ -3327,7 +3328,7 @@ describe('InitiativeTrackerPage', () => {
     it('moves a combatant up without touching an unaffected turn pointer', async () => {
       routeAddFlow({ encounter: tieEncounter() }); // Hero's turn (index 0)
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Move Goblin B up' }));
@@ -3350,7 +3351,7 @@ describe('InitiativeTrackerPage', () => {
         onPatch: () => Promise.reject('nope'),
       });
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Move Goblin A down' }));
@@ -3394,7 +3395,7 @@ describe('InitiativeTrackerPage', () => {
     it('adds a condition and persists it with expectedVersion', async () => {
       route(soloEncounter());
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.selectOptions(screen.getByLabelText('Add condition to Goblin'), 'Poisoned');
@@ -3408,7 +3409,7 @@ describe('InitiativeTrackerPage', () => {
     it('removes a condition via the chip ×, keeping the others', async () => {
       route(soloEncounter({ conditions: ['Poisoned', 'Prone'] }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Remove Poisoned from Goblin' }));
@@ -3420,7 +3421,7 @@ describe('InitiativeTrackerPage', () => {
     it('drops the conditions key when the last condition is removed', async () => {
       route(soloEncounter({ conditions: ['Stunned'] }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Remove Stunned from Goblin' }));
@@ -3432,7 +3433,7 @@ describe('InitiativeTrackerPage', () => {
     it('toggles concentration on, then names the spell', async () => {
       route(soloEncounter());
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Toggle concentration for Goblin' }));
@@ -3450,7 +3451,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('renders a concentration chip with the spell name', async () => {
       route(soloEncounter({ concentration: { spell: 'Bless' } }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('Concentrating: Bless')).toBeInTheDocument();
     });
@@ -3458,7 +3459,7 @@ describe('InitiativeTrackerPage', () => {
     it('sets an exhaustion level, then clears it back to none', async () => {
       route(soloEncounter({ exhaustion: 2 }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       // Scope to the chip span — the <option> labels collide with the chip text.
       expect(screen.getByText('Exhaustion 2', { selector: 'span' })).toBeInTheDocument();
@@ -3476,7 +3477,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       route(soloEncounter({ conditions: ['Poisoned'], concentration: { spell: 'Bless' } }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       expect(screen.getByText('Poisoned')).toBeInTheDocument();
@@ -3517,7 +3518,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('shows the tracker only for a downed PC', async () => {
       route(downedPc());
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('Death Saves')).toBeInTheDocument();
     });
@@ -3529,14 +3530,14 @@ describe('InitiativeTrackerPage', () => {
           version: 4,
         })
       );
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByText('Death Saves')).not.toBeInTheDocument();
     });
 
     it('hides the tracker for a PC above 0 HP', async () => {
       route(downedPc({ hp: 5 }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.queryByText('Death Saves')).not.toBeInTheDocument();
     });
@@ -3544,7 +3545,7 @@ describe('InitiativeTrackerPage', () => {
     it('marks a success and persists it with expectedVersion', async () => {
       route(downedPc());
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Mark death save success for Hero' }));
@@ -3557,7 +3558,7 @@ describe('InitiativeTrackerPage', () => {
     it('marks a failure', async () => {
       route(downedPc({ deathSaves: { successes: 1, failures: 1 } }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Mark death save failure for Hero' }));
@@ -3571,7 +3572,7 @@ describe('InitiativeTrackerPage', () => {
       // still be markable (the counts stay capped at 3 by the pure helper).
       route(downedPc({ deathSaves: { successes: 3, failures: 0 } }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('Stable')).toBeInTheDocument();
       expect(
@@ -3585,7 +3586,7 @@ describe('InitiativeTrackerPage', () => {
 
     it('shows Dead at three failures', async () => {
       route(downedPc({ deathSaves: { successes: 0, failures: 3 } }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
       expect(screen.getByText('Dead')).toBeInTheDocument();
     });
@@ -3593,7 +3594,7 @@ describe('InitiativeTrackerPage', () => {
     it('clears death saves when the PC is healed above 0', async () => {
       route(downedPc({ deathSaves: { successes: 1, failures: 2 } }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       fireEvent.change(screen.getByLabelText('Damage or heal amount for Hero'), {
@@ -3610,7 +3611,7 @@ describe('InitiativeTrackerPage', () => {
     it('resets death saves via the Reset button', async () => {
       route(downedPc({ deathSaves: { successes: 2, failures: 1 } }));
       const user = userEvent.setup();
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       await user.click(screen.getByRole('button', { name: 'Reset death saves for Hero' }));
@@ -3625,7 +3626,7 @@ describe('InitiativeTrackerPage', () => {
         isDm: false,
       });
       route(downedPc({ deathSaves: { successes: 1, failures: 0 } }));
-      render(<InitiativeTrackerPage />);
+      renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
 
       expect(screen.getByText('Death Saves')).toBeInTheDocument();
@@ -3669,7 +3670,7 @@ describe('live-combat layout (VEG-384)', () => {
 
   it('shows an inline turn header on the active card with the round and whose turn it is', async () => {
     mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
     expect(screen.getByText(/round 1/i)).toBeInTheDocument();
     // currentTurn 0 → Hero (highest initiative) is up.
@@ -3678,7 +3679,7 @@ describe('live-combat layout (VEG-384)', () => {
 
   it('renders the turn header only on the active card', async () => {
     mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 1, round: 1 }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
     // currentTurn 1 → Goblin A is up; only its card carries the header.
     expect(screen.getByText(/goblin a's turn/i)).toBeInTheDocument();
@@ -3690,7 +3691,7 @@ describe('live-combat layout (VEG-384)', () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 0, round: 1 }));
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 1, round: 1 }));
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByText(/hero's turn/i);
     await user.click(screen.getByRole('button', { name: /next turn/i }));
     expect(await screen.findByText(/goblin a's turn/i)).toBeInTheDocument();
@@ -3704,7 +3705,7 @@ describe('live-combat layout (VEG-384)', () => {
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 0, round: 1 }));
     mockApiFetch.mockResolvedValueOnce(makeEncounter({ currentTurn: 1, round: 1 }));
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByText(/hero's turn/i);
     scrollSpy.mockClear(); // ignore anything before the first real advance
     await user.click(screen.getByRole('button', { name: /next turn/i }));
@@ -3716,7 +3717,7 @@ describe('live-combat layout (VEG-384)', () => {
     const scrollSpy = vi.fn();
     (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
     mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0, round: 1 }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByText(/hero's turn/i);
     expect(scrollSpy).not.toHaveBeenCalled();
   });
@@ -3737,7 +3738,7 @@ describe('live-combat layout (VEG-384)', () => {
       if (path === '/srd/monsters/monster-1') return Promise.resolve(goblinMonster);
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     // The stat block appears with no click — it follows whoever is up.
     expect(await screen.findByText('Nimble Escape.')).toBeInTheDocument();
     expect(mockApiFetch).toHaveBeenCalledWith('/srd/monsters/monster-1');
@@ -3761,7 +3762,7 @@ describe('live-combat layout (VEG-384)', () => {
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
     // The active combatant (Hero) has no linked monster → panel prompts instead.
     expect(screen.getByText(/no stat block for hero/i)).toBeInTheDocument();
@@ -3775,7 +3776,7 @@ describe('live-combat layout (VEG-384)', () => {
     // No active card to host the inline turn header, so the round shows in the
     // page header instead — and is never duplicated when combatants exist.
     mockApiFetch.mockResolvedValue(makeEncounter({ combatants: [], currentTurn: 0, round: 3 }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
     expect(screen.getByText(/round 3/i)).toBeInTheDocument();
     expect(screen.queryByText(/'s turn/i)).not.toBeInTheDocument();
@@ -3787,7 +3788,7 @@ describe('live-combat layout (VEG-384)', () => {
       isDm: false,
     });
     mockApiFetch.mockResolvedValue(makeEncounter({ currentTurn: 0 }));
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByText(/hero's turn/i);
     expect(screen.queryByRole('button', { name: /next turn/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /previous turn/i })).not.toBeInTheDocument();
@@ -3811,7 +3812,7 @@ describe('live-combat layout (VEG-384)', () => {
       return Promise.reject(new Error(`unexpected path ${path}`));
     });
     const user = userEvent.setup();
-    render(<InitiativeTrackerPage />);
+    renderWithQueryClient(<InitiativeTrackerPage />);
     await screen.findByRole('heading', { name: /goblin ambush/i });
     // Active is Hero (a PC) → panel prompts, no quick-reference banner yet.
     expect(screen.queryByText(/quick reference/i)).not.toBeInTheDocument();

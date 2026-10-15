@@ -1,38 +1,31 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
-import { apiFetch } from '@/lib/api';
-import { toast } from 'sonner';
+import { useListQuery } from '@/lib/query';
 import Pagination from '@/components/Pagination';
-import type { CharacterListItem, PaginatedResponse } from '@/lib/types';
+import LoadingState from '@/components/LoadingState';
+import LoadError from '@/components/LoadError';
+import type { CharacterListItem } from '@/lib/types';
 
 const LIMIT = 20;
 
 export default function CharactersPage() {
-  const [characters, setCharacters] = useState<CharacterListItem[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [lastPage, setLastPage] = useState(1);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    apiFetch<PaginatedResponse<CharacterListItem>>(`/characters?page=${page}&limit=${LIMIT}`)
-      .then(res => {
-        setCharacters(res.data);
-        setTotal(res.total);
-        setLastPage(res.lastPage);
-      })
-      .catch(err => {
-        console.error('Failed to load characters:', err);
-        toast.error('Failed to load characters', { id: 'load-characters' });
-      })
-      .finally(() => setLoading(false));
-  }, [page]);
+  const list = useListQuery<CharacterListItem>(
+    '/characters',
+    { page, limit: LIMIT },
+    { errorToast: { message: 'Failed to load characters', id: 'load-characters' } }
+  );
+  const characters = list.data?.data ?? [];
+  const total = list.data?.total ?? 0;
+  const lastPage = list.data?.lastPage ?? 1;
 
-  if (loading && characters.length === 0) {
-    return <div className="text-gray-500 dark:text-gray-400">Loading characters...</div>;
+  // A Retry after a failed load keeps status 'error' while it runs, so the
+  // loading view checks isFetching as well as isPending.
+  if (list.isPending || (list.isError && list.isFetching && !list.data)) {
+    return <LoadingState label="Loading characters..." />;
   }
 
   return (
@@ -47,7 +40,11 @@ export default function CharactersPage() {
         </Link>
       </div>
 
-      {characters.length === 0 ? (
+      {/* A background refetch that fails keeps the loaded rows, and the error
+          toast reports it. */}
+      {list.isError && !list.data ? (
+        <LoadError message="Failed to load characters" onRetry={list.refetch} />
+      ) : characters.length === 0 ? (
         <p className="text-gray-500 dark:text-gray-400">
           No characters yet. Create one to get started!
         </p>

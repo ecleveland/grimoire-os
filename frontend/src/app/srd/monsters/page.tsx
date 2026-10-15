@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { useApiQuery, invalidateApiPath } from '@/lib/query';
+import { useValueChange } from '@/lib/use-value-change';
 import { toast } from 'sonner';
 import { useAuth } from '@/lib/auth-context';
 import CreateEntityLink from '@/components/CreateEntityLink';
@@ -207,14 +208,13 @@ export default function MonsterListPage() {
     };
   }, [searchInput]);
 
-  // Self-healing clamp (VEG-291 pattern): if a delete elsewhere shrank the list,
-  // don't strand the user on an empty out-of-range page.
-  useEffect(() => {
-    const data = listQuery.data;
+  // Self-healing clamp: if a delete elsewhere shrank the list, don't strand the
+  // user on an empty out-of-range page.
+  useValueChange(listQuery.data, data => {
     if (data && data.data.length === 0 && page > Math.max(1, data.lastPage)) {
       setPage(Math.max(1, data.lastPage));
     }
-  }, [listQuery.data, page]);
+  });
 
   const inputClass =
     'w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
