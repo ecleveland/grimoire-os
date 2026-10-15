@@ -133,13 +133,17 @@ export function getServerSnapshot(): PrintTraySnapshot {
 }
 
 /**
- * Read the stored set into the store. Later calls do nothing, so StrictMode's
- * double-invoked mount effect cannot re-read storage or write over it.
+ * Read the stored set into the store and write it back, so the key exists
+ * after mount even for an empty set and malformed entries are dropped from
+ * storage too. Later calls do nothing while the store stays hydrated. A
+ * remount after the last listener left reads storage again, and that is safe
+ * because the write-back only ever stores what was just read.
  */
 export function hydrate(): void {
   if (hydrated) return;
   items = readStoredItems();
   hydrated = true;
+  persist(items);
   publish();
 }
 

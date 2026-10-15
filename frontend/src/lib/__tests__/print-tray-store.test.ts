@@ -53,6 +53,29 @@ describe('print tray store', () => {
     expect(listener).toHaveBeenCalledTimes(1);
   });
 
+  it('writes an empty set back under the key when storage has none', () => {
+    hydrate();
+    expect(localStorage.getItem(PRINT_TRAY_STORAGE_KEY)).toBe('[]');
+  });
+
+  it('writes the cleaned set back after dropping a malformed stored entry', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.setItem(
+      PRINT_TRAY_STORAGE_KEY,
+      JSON.stringify([
+        { type: 'monster', id: 'goblin' },
+        { type: 'bogus', id: 'x' },
+      ])
+    );
+
+    hydrate();
+
+    expect(JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY)!)).toEqual([
+      { type: 'monster', id: 'goblin' },
+    ]);
+    vi.mocked(console.error).mockRestore();
+  });
+
   it('persists and notifies on setItems', () => {
     hydrate();
     const listener = vi.fn();
@@ -89,6 +112,9 @@ describe('print tray store', () => {
 
   it('does not notify or persist when the updater returns the same array', () => {
     hydrate();
+    // Hydrating writes the set back, so drop the key to see whether the no-op
+    // update writes it again.
+    localStorage.removeItem(PRINT_TRAY_STORAGE_KEY);
     const listener = vi.fn();
     subscribe(listener);
     const before = getSnapshot();
