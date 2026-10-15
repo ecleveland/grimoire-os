@@ -45,7 +45,12 @@ export interface UseEncounterResult {
 export function useEncounter(encounterId: string): UseEncounterResult {
   const queryClient = useQueryClient();
   const path = `/encounters/${encounterId}`;
-  const query = useApiQuery<Encounter>(path, { errorToast: 'Failed to load encounter' });
+  // The tracker is a live combat document that other pages also write, so
+  // every mount refetches, as the page did before it read through the cache.
+  const query = useApiQuery<Encounter>(path, {
+    errorToast: 'Failed to load encounter',
+    staleTime: 0,
+  });
   const encounter = query.data ?? null;
 
   // Count of version-guarded writes (PATCHes and loot POSTs) in flight. A
@@ -73,6 +78,8 @@ export function useEncounter(encounterId: string): UseEncounterResult {
       path,
       conflictMessage: CONFLICT_MESSAGE,
       errorMessage: v => v.errorMessage,
+      // The request has already left, so the mutation must run at once and report the failure.
+      networkMode: 'always',
       onSuccess: updated => queryClient.setQueryData(apiQueryKey(path), updated),
     }
   );
@@ -87,6 +94,8 @@ export function useEncounter(encounterId: string): UseEncounterResult {
       path,
       conflictMessage: CONFLICT_MESSAGE,
       errorMessage: 'Failed to roll loot',
+      // The request has already left, so the mutation must run at once and report the failure.
+      networkMode: 'always',
       onSuccess: ({ encounter: updated }) => queryClient.setQueryData(apiQueryKey(path), updated),
     }
   );
@@ -98,6 +107,10 @@ export function useEncounter(encounterId: string): UseEncounterResult {
     opts?: { errorMessage?: string }
   ): Promise<Encounter | null> => {
     if (!encounter) return null;
+    // A write's response is the freshest state, so an in-flight background
+    // refetch is cancelled rather than allowed to land on top of it. Not
+    // awaited, so the request still leaves in the click's tick.
+    void queryClient.cancelQueries({ queryKey: apiQueryKey(path) });
     setPendingWrites(n => n + 1);
     try {
       // All writes carry `expectedVersion` so concurrent edits surface as a 409
@@ -127,6 +140,8 @@ export function useEncounter(encounterId: string): UseEncounterResult {
     combatantIndex: number | undefined,
     successMsg: string
   ): Promise<void> => {
+    // Cancels a background refetch for the same reason as `patch`.
+    void queryClient.cancelQueries({ queryKey: apiQueryKey(path) });
     setPendingWrites(n => n + 1);
     try {
       const request = apiFetch<{ encounter: Encounter; lootTotal: EncounterLootTotal }>(

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, onlineManager } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { ApiError } from '@/lib/api';
@@ -77,6 +77,22 @@ describe('useOptimisticPatch', () => {
 
     await waitFor(() => expect(onSuccess).toHaveBeenCalledWith(updated, { name: 'Orc' }));
     expect(mockToastError).not.toHaveBeenCalled();
+  });
+
+  it('runs the request while offline when networkMode is always', async () => {
+    onlineManager.setOnline(false);
+    try {
+      mockApiFetch.mockResolvedValue({ id: 'thing-1', version: 8 });
+      const onSuccess = vi.fn();
+      const { result } = renderPatch({ networkMode: 'always', onSuccess });
+
+      act(() => result.current.mutate({ name: 'Orc' }));
+
+      await waitFor(() => expect(onSuccess).toHaveBeenCalled());
+      expect(mockApiFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      onlineManager.setOnline(true);
+    }
   });
 
   it('toasts the conflict message and invalidates the guarded query on a 409', async () => {

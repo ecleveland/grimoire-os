@@ -1,7 +1,7 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import type { UseMutationResult } from '@tanstack/react-query';
+import type { NetworkMode, UseMutationResult } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
 import { invalidateApiPath, useApiMutation } from '@/lib/query';
@@ -14,6 +14,8 @@ export interface OptimisticPatchOptions<TData, TVariables> {
   /** Toast when the rejection carries no message. A function when the wording varies per call. */
   errorMessage: string | ((variables: TVariables) => string);
   onSuccess?: (data: TData, variables: TVariables) => void;
+  /** Passed to the mutation. 'always' runs it while the browser reports offline. */
+  networkMode?: NetworkMode;
 }
 
 /**
@@ -31,9 +33,11 @@ export function useOptimisticPatch<TData, TVariables>(
   options: OptimisticPatchOptions<TData, TVariables>
 ): UseMutationResult<TData, Error, TVariables> {
   const queryClient = useQueryClient();
-  const { path, conflictMessage, errorMessage, onSuccess } = options;
+  const { path, conflictMessage, errorMessage, onSuccess, networkMode } = options;
 
   return useApiMutation<TData, TVariables>(mutationFn, {
+    // Only when set, so an unset option keeps the client's default.
+    ...(networkMode && { networkMode }),
     onSuccess: (data, variables) => onSuccess?.(data, variables),
     onError: (err, variables) => {
       // Log before toasting, so a failed write leaves a diagnostic trail for

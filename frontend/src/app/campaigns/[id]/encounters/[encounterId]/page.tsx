@@ -111,8 +111,10 @@ export default function InitiativeTrackerPage() {
   const isController = isDm || (user && encounter.createdBy === user.userId);
   // Card identity follows resolveCombatantRow's rule: a unique name keys by
   // name, so the card and its open draft follow the combatant across a
-  // re-sort; a duplicated name keys by row. A name that flips between unique
-  // and duplicated remounts its card and drops an open draft.
+  // re-sort; a duplicated name keys by row. The u: and d: prefixes keep the
+  // two kinds apart, so a unique "Goblin#1" can't share a key with a
+  // duplicated Goblin. A name that flips between unique and duplicated
+  // remounts its card and drops an open draft.
   const nameCount = new Map<string, number>();
   for (const c of sorted) nameCount.set(c.name, (nameCount.get(c.name) ?? 0) + 1);
 
@@ -171,7 +173,7 @@ export default function InitiativeTrackerPage() {
             const arrayIndex = encounter.combatants.indexOf(c);
             return (
               <CombatantCard
-                key={nameCount.get(c.name) === 1 ? c.name : `${c.name}#${i}`}
+                key={nameCount.get(c.name) === 1 ? `u:${c.name}` : `d:${i}:${c.name}`}
                 combatant={c}
                 rowIndex={i}
                 isCurrent={isCurrent}

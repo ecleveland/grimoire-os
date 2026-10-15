@@ -259,6 +259,37 @@ describe('InitiativeTrackerPage', () => {
     expect(body.expectedVersion).toBe(2);
   });
 
+  it('keys a unique "Goblin#1" apart from duplicated Goblins, so a draft stays on its row', async () => {
+    // Sorted rows: Goblin (row 0), Goblin (row 1), Goblin#1 (row 2). A key of
+    // name#row for duplicates would give the second Goblin the unique
+    // combatant's key.
+    mockApiFetch.mockResolvedValue(
+      makeEncounter({
+        combatants: [
+          makeCombatant({ name: 'Goblin', initiative: 15 }),
+          makeCombatant({ name: 'Goblin', initiative: 12 }),
+          makeCombatant({ name: 'Goblin#1', initiative: 8 }),
+        ],
+      })
+    );
+    vi.mocked(console.error).mockClear();
+    renderWithQueryClient(<InitiativeTrackerPage />);
+    await screen.findByRole('heading', { name: /goblin ambush/i });
+
+    const goblins = screen.getAllByRole('spinbutton', { name: /^hp for goblin$/i });
+    fireEvent.change(goblins[1], { target: { value: '3' } });
+
+    expect((goblins[0] as HTMLInputElement).value).toBe('7');
+    expect((goblins[1] as HTMLInputElement).value).toBe('3');
+    expect(
+      (screen.getByRole('spinbutton', { name: /^hp for goblin#1$/i }) as HTMLInputElement).value
+    ).toBe('7');
+    const keyWarnings = vi
+      .mocked(console.error)
+      .mock.calls.filter(args => args.some(a => String(a).includes('same key')));
+    expect(keyWarnings).toEqual([]);
+  });
+
   it('targets the edited row, not the first name match, when combatant names collide', async () => {
     // Duplicate names are legal — nothing unique-ifies hand-entered combatants.
     const twins = makeEncounter({

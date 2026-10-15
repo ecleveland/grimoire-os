@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import MonsterListPage from '../page';
 import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { SrdMonster, PaginatedResponse } from '@/lib/types';
+import { apiQueryKey } from '@/lib/query';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -101,13 +102,16 @@ function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <PrintTrayProvider>
-        <MonsterListPage />
-      </PrintTrayProvider>
-    </QueryClientProvider>
-  );
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <PrintTrayProvider>
+          <MonsterListPage />
+        </PrintTrayProvider>
+      </QueryClientProvider>
+    ),
+  };
 }
 
 /** The persisted tray contents, for asserting tray state after a toggle. */
@@ -522,6 +526,29 @@ describe('MonsterListPage', () => {
         monsterId: 'monster-1',
       });
       await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    });
+
+    it('marks the cached tracker encounter stale after adding, so the tracker refetches', async () => {
+      mockUseAuth.mockReturnValue({ isDm: true });
+      routeAddFlow({ encounter: { id: 'enc-1', combatants: [], version: 2 } });
+      const user = userEvent.setup();
+      const { client } = renderPage();
+      // The tracker cached this encounter earlier in the session.
+      client.setQueryData(apiQueryKey('/encounters/enc-1'), {
+        id: 'enc-1',
+        combatants: [],
+        version: 2,
+      });
+      await openGoblinModal(user);
+
+      await user.click(screen.getByRole('button', { name: /add to encounter/i }));
+      await user.selectOptions(await screen.findByLabelText(/campaign/i), 'camp-1');
+      await user.selectOptions(await screen.findByLabelText(/encounter/i), 'enc-1');
+      await user.click(screen.getByRole('button', { name: /continue/i }));
+      await user.click(await screen.findByRole('button', { name: /add to encounter/i }));
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalled());
+      expect(client.getQueryState(apiQueryKey('/encounters/enc-1'))?.isInvalidated).toBe(true);
     });
 
     it('surfaces a 409 conflict from the picker flow without reporting success', async () => {
