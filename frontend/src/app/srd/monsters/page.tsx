@@ -170,6 +170,9 @@ export default function MonsterListPage() {
           expectedVersion: encounter.version,
         }),
       });
+      // The tracker already refetches on mount. Marking its cached copy stale
+      // means no other reader trusts it, and guards a future staleTime change.
+      await invalidateApiPath(queryClient, `/encounters/${addEncounterId}`);
       toast.success(
         quantity > 1
           ? `Added ${quantity} ${monster.name}s to the encounter`
