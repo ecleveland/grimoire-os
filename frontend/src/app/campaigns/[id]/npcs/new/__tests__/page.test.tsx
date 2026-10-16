@@ -172,6 +172,16 @@ describe('NewNpcPage', () => {
     expect(mockPush).toHaveBeenCalledWith('/campaigns/campaign-1/npcs/new-id');
   });
 
+  it('leaves zero denominations out of the preview coinage', async () => {
+    mockApiFetch.mockResolvedValueOnce(
+      buildPreview({ goldPieces: 0, silverPieces: 4, copperPieces: 0 })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole('button', { name: /generate preview/i }));
+    expect(await screen.findByText('4 sp')).toBeInTheDocument();
+  });
+
   it('switches to manual create mode', async () => {
     const user = userEvent.setup();
     renderPage();

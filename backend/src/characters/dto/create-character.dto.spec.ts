@@ -1668,3 +1668,43 @@ describe('UpdateCharacterDto — inherited spellcastingAbility catalog (VEG-494)
     });
   });
 });
+
+// Characters and shop prices share one CurrencyDto, so a purse takes the shop's
+// rules: each denomination is an optional non-negative integer. A negative or
+// fractional coin count means nothing on a sheet.
+describe('CreateCharacterDto — currency, through the production pipe', () => {
+  const pipe = new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS);
+  const createMeta = { type: 'body' as const, metatype: CreateCharacterDto };
+  const updateMeta = { type: 'body' as const, metatype: UpdateCharacterDto };
+
+  it('accepts whole coin counts in every denomination', async () => {
+    const currency = { cp: 0, sp: 12, ep: 1, gp: 350, pp: 4 };
+    await expect(
+      pipe.transform({ name: 'Test Character', currency }, createMeta)
+    ).resolves.toMatchObject({ currency });
+  });
+
+  it('accepts a purse that names only some denominations', async () => {
+    await expect(pipe.transform({ currency: { gp: 15 } }, updateMeta)).resolves.toMatchObject({
+      currency: { gp: 15 },
+    });
+  });
+
+  it.each([
+    ['a negative count', { gp: -1 }],
+    ['a fractional count', { sp: 2.5 }],
+  ])('rejects %s on create', async (_label, currency) => {
+    await expect(
+      pipe.transform({ name: 'Test Character', currency }, createMeta)
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([
+    ['a negative count', { cp: -10 }],
+    ['a fractional count', { pp: 0.5 }],
+  ])('rejects %s on PATCH', async (_label, currency) => {
+    await expect(pipe.transform({ currency }, updateMeta)).rejects.toBeInstanceOf(
+      BadRequestException
+    );
+  });
+});

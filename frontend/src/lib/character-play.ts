@@ -7,6 +7,7 @@ import type {
   HitPoints,
   SpellSlot,
 } from '@/lib/types';
+import { CLEARED_DEATH_SAVES, hasDeathSaves, reviveDeathSaves } from '@grimoire-os/shared';
 import { applyDamage, applyHeal } from './combatant-hp';
 import { recoverResources } from './character-resources';
 import { clampIntToRange } from './form-helpers';
@@ -44,28 +45,21 @@ export function setTempHitPoints(hp: HitPoints, amount: number): HitPoints {
   return { ...hp, temporary: Math.max(0, Math.floor(amount)) };
 }
 
-/** A zeroed death-save track — what a revive above 0 HP resets to. */
-export const CLEARED_DEATH_SAVES = { successes: 0, failures: 0 } as const;
-
-/**
- * Whether the track has anything to clear. Extracted (VEG-488) so
- * `applyLongRest`'s omit-when-unchanged guard and the revive rule below can't
- * drift apart — they ask the same question of the same shape.
- */
-export function hasDeathSaves(saves: DeathSaves): boolean {
-  return saves.successes > 0 || saves.failures > 0;
-}
+// Re-exported so the sheet's importers keep one import site. The track and the
+// "anything to clear" check live in shared with the revive rule, so
+// `applyLongRest`'s omit-when-unchanged guard and the rule cannot drift apart.
+export { CLEARED_DEATH_SAVES, hasDeathSaves };
 
 /**
  * Death saves only apply while a PC is down: reviving above 0 HP clears them
- * (5e). Mirrors the encounter tracker's `clearDeathSavesIfRevived`
- * (`lib/death-saves.ts`) rule, but for the character sheet's zeroed-object
- * shape (the sheet always renders `deathSaves`, so it resets to 0/0 rather than
- * deleting the field). Returns the cleared track when a heal lands the PC above
- * 0 with saves on the sheet, else `null` (nothing to change).
+ * (5e). The rule is shared `reviveDeathSaves`, which the encounter tracker's
+ * `clearDeathSavesIfRevived` (`lib/death-saves.ts`) also runs. The sheet keeps
+ * the zeroed-object shape (it always renders `deathSaves`, so it resets to 0/0
+ * rather than deleting the field). Returns the cleared track when a heal lands
+ * the PC above 0 with saves on the sheet, else `null` (nothing to change).
  */
 export function deathSavesAfterRevive(nextCurrent: number, saves: DeathSaves): DeathSaves | null {
-  return nextCurrent > 0 && hasDeathSaves(saves) ? { ...CLEARED_DEATH_SAVES } : null;
+  return reviveDeathSaves(nextCurrent, saves);
 }
 
 /**

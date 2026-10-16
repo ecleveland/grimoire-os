@@ -1,5 +1,5 @@
 import type { Character } from '@/lib/types';
-import { ARMOR_TYPES } from '@/lib/dnd-constants';
+import { ARMOR_TRAINING_CATEGORIES } from '@/lib/dnd-constants';
 
 interface EquipmentTrainingProps {
   character: Character;
@@ -22,7 +22,7 @@ export default function EquipmentTraining({ character }: EquipmentTrainingProps)
           Armor Training
         </h3>
         <div className="flex flex-wrap gap-3">
-          {ARMOR_TYPES.map(type => {
+          {ARMOR_TRAINING_CATEGORIES.map(type => {
             const isTrained = armorTraining.includes(type);
             return (
               <div key={type} className="flex items-center gap-1.5">

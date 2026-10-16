@@ -1,5 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 
 /**
@@ -32,6 +39,9 @@ export class CreateFeatDto {
   })
   @IsOptional()
   @IsArray()
+  // Each benefit is length-capped, so cap the list too or the payload can
+  // smuggle unbounded data past validation. SRD feats list a handful.
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   @MaxLength(2000, { each: true })
   benefits?: string[];

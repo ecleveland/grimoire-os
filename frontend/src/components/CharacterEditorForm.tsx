@@ -29,7 +29,7 @@ import {
   MAX_SPEED,
 } from '@grimoire-os/shared';
 import { clampIntToRange } from '@/lib/form-helpers';
-import { ABILITY_NAMES, ARMOR_TYPES, SKILL_NAMES } from '@/lib/dnd-constants';
+import { ABILITY_NAMES, ARMOR_TRAINING_CATEGORIES, SKILL_NAMES } from '@/lib/dnd-constants';
 import { recommendedAbilityKeys } from '@/lib/ability-math';
 import { DEFAULT_ABILITY_SCORES, DEFAULT_SPEED, EMPTY_CURRENCY } from '@/lib/character-defaults';
 
@@ -399,8 +399,9 @@ function union(current: string[], additions: string[]): { merged: string[]; adde
 /**
  * SRD class `armorProficiencies` are phrases ('Light armor', 'All armor',
  * 'Shields (…)') while the editor's armor-training toggles use the canonical
- * ARMOR_TYPES. Map phrases onto those so autofilled armor lights up the toggles
- * (and the sheet's armor dots). Unrecognized phrasing is kept verbatim.
+ * ARMOR_TRAINING_CATEGORIES. Map phrases onto those so autofilled armor lights
+ * up the toggles (and the sheet's armor dots). Unrecognized phrasing is kept
+ * verbatim.
  */
 export function normalizeArmorProficiencies(raw: string[]): string[] {
   const out: string[] = [];
@@ -558,7 +559,7 @@ function ProficienciesSection({
       />
       <ToggleChips
         label="Armor Training"
-        options={ARMOR_TYPES}
+        options={ARMOR_TRAINING_CATEGORIES}
         value={values.armorTraining}
         onChange={v => set('armorTraining', v)}
       />

@@ -326,6 +326,21 @@ describe('NpcDetailPage', () => {
       );
     });
 
+    it('leaves zero denominations out of the coin line and shows an empty purse as 0 gp', async () => {
+      const user = userEvent.setup();
+      mockApiFetch.mockResolvedValueOnce(
+        makeNpc({ goldPieces: 2, silverPieces: 0, copperPieces: 0 })
+      );
+      mockApiFetch.mockResolvedValueOnce(
+        makeNpc({ goldPieces: 0, silverPieces: 0, copperPieces: 0 })
+      );
+      renderPage();
+      expect(await screen.findByText('2 gp')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: /^reroll loot$/i }));
+      expect(await screen.findByText('0 gp')).toBeInTheDocument();
+      expect(screen.queryByText(/0 sp|0 cp/)).not.toBeInTheDocument();
+    });
+
     it('disables the Reroll Loot button when the loot field is locked', async () => {
       mockApiFetch.mockResolvedValue(makeNpc({ lockedFields: ['loot'] }));
       renderPage();

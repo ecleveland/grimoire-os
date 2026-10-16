@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { reviveDeathSaves } from '@grimoire-os/shared';
 import {
   damageHitPoints,
   healHitPoints,
@@ -20,6 +21,11 @@ import {
   setExhaustionLevel,
   concentrationFromSpellInput,
 } from '../character-play';
+
+vi.mock('@grimoire-os/shared', async importOriginal => {
+  const actual = await importOriginal<typeof import('@grimoire-os/shared')>();
+  return { ...actual, reviveDeathSaves: vi.fn(actual.reviveDeathSaves) };
+});
 
 describe('character-play HP helpers', () => {
   describe('damageHitPoints', () => {
@@ -153,6 +159,13 @@ describe('deathSavesAfterRevive', () => {
 
   it('returns null when there are no saves to clear', () => {
     expect(deathSavesAfterRevive(5, { successes: 0, failures: 0 })).toBeNull();
+  });
+
+  it('returns whatever the shared reviveDeathSaves rule decides', () => {
+    const sentinel = { successes: 2, failures: 2 };
+    vi.mocked(reviveDeathSaves).mockReturnValueOnce(sentinel);
+    expect(deathSavesAfterRevive(0, { successes: 1, failures: 0 })).toBe(sentinel);
+    expect(reviveDeathSaves).toHaveBeenLastCalledWith(0, { successes: 1, failures: 0 });
   });
 });
 

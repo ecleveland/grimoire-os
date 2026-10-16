@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ABILITY_NAMES, ARMOR_TYPES, SKILLS, SKILL_NAMES } from '@/lib/dnd-constants';
+import { ABILITY_NAMES, ARMOR_TRAINING_CATEGORIES, SKILLS, SKILL_NAMES } from '@/lib/dnd-constants';
 import { SKILL_ABILITY_MAP } from '@/app/characters/[id]/_components/utils';
 
 // The sheet's SKILL_ABILITY_MAP is derived from SKILLS; this guards the single
@@ -57,6 +57,6 @@ describe('dnd-constants', () => {
   });
 
   it('exposes the four canonical armor categories', () => {
-    expect(ARMOR_TYPES).toEqual(['Light', 'Medium', 'Heavy', 'Shields']);
+    expect(ARMOR_TRAINING_CATEGORIES).toEqual(['Light', 'Medium', 'Heavy', 'Shields']);
   });
 });

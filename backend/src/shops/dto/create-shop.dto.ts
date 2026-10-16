@@ -12,43 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
-
-/**
- * Structured coin price (VEG-352 `Currency`). Mirrors the file-local CurrencyDto
- * in the characters module — there is no shared/exported validator class yet.
- * Every denomination is optional so a free item is `{}` (or `{ gp: 0 }`).
- */
-class CurrencyDto {
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  cp?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  sp?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  ep?: number;
-
-  @ApiPropertyOptional({ example: 50 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  gp?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  pp?: number;
-}
+import { CurrencyDto } from '../../common/dto/currency.dto';
 
 /**
  * A single stocked line in a shop. `itemId` optionally links the catalog;

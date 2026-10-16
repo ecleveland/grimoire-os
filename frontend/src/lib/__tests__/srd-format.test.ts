@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { abilityModifier as sharedAbilityModifier } from '@grimoire-os/shared';
 import { formatCr, abilityModifier } from '../srd-format';
+
+vi.mock('@grimoire-os/shared', async importOriginal => {
+  const actual = await importOriginal<typeof import('@grimoire-os/shared')>();
+  return { ...actual, abilityModifier: vi.fn(actual.abilityModifier) };
+});
 
 describe('formatCr', () => {
   it('prints fractional CRs the 5e way', () => {
@@ -27,5 +33,11 @@ describe('abilityModifier', () => {
     expect(abilityModifier(9)).toBe('-1');
     expect(abilityModifier(8)).toBe('-1');
     expect(abilityModifier(1)).toBe('-5');
+  });
+
+  it('signs whatever the shared abilityModifier returns', () => {
+    vi.mocked(sharedAbilityModifier).mockReturnValueOnce(7);
+    expect(abilityModifier(10)).toBe('+7');
+    expect(sharedAbilityModifier).toHaveBeenLastCalledWith(10);
   });
 });

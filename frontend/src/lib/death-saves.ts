@@ -1,3 +1,4 @@
+import { reviveDeathSaves } from '@grimoire-os/shared';
 import type { Combatant, DeathSaves } from '@/lib/types';
 
 /**
@@ -38,14 +39,14 @@ export function markDeathSave(
 
 /**
  * Death saves only apply while a PC is down: reviving above 0 HP clears them.
- * A no-op when there are no saves or the combatant is still at/below 0, so it's
- * safe to run on every HP mutation.
+ * The rule is shared `reviveDeathSaves`; the tracker drops the field rather
+ * than storing the cleared track. A no-op when there is nothing to clear (no
+ * saves, an empty 0/0 track, or the combatant still at/below 0), so it's safe
+ * to run on every HP mutation.
  */
 export function clearDeathSavesIfRevived(combatant: Combatant): Combatant {
-  if (combatant.hp > 0 && combatant.deathSaves) {
-    const next = { ...combatant };
-    delete next.deathSaves;
-    return next;
-  }
-  return combatant;
+  if (!reviveDeathSaves(combatant.hp, combatant.deathSaves)) return combatant;
+  const next = { ...combatant };
+  delete next.deathSaves;
+  return next;
 }

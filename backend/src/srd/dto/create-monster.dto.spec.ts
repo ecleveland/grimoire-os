@@ -76,6 +76,34 @@ describe('CreateMonsterDto (through the production ValidationPipe)', () => {
     );
   });
 
+  const stringArrays = [
+    'damageResistances',
+    'damageImmunities',
+    'damageVulnerabilities',
+    'conditionImmunities',
+  ];
+  const actionArrays = ['specialAbilities', 'actions', 'reactions', 'legendaryActions'];
+
+  function filled(field: string, length: number): unknown[] {
+    return Array.from({ length }, (_, i) =>
+      stringArrays.includes(field) ? `entry ${i}` : { name: `Action ${i}`, description: 'hits' }
+    );
+  }
+
+  it.each([...stringArrays, ...actionArrays])('accepts 50 entries in %s', async field => {
+    const result = (await pipe.transform(
+      validBody({ [field]: filled(field, 50) }),
+      createMeta
+    )) as Record<string, unknown[]>;
+    expect(result[field]).toHaveLength(50);
+  });
+
+  it.each([...stringArrays, ...actionArrays])('rejects 51 entries in %s', async field => {
+    await expect(
+      pipe.transform(validBody({ [field]: filled(field, 51) }), createMeta)
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it.each([
     ['contentSource', { contentSource: 'shared' }],
     ['createdById', { createdById: 'someone-else' }],

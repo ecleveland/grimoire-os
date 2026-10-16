@@ -336,7 +336,7 @@ describe('CharactersService', () => {
 
       it('leaves a client-supplied pool exactly as sent', async () => {
         prisma.character.create.mockResolvedValue(mockCharacter);
-        const supplied = { dieType: 'd6', total: 3, spent: 2 };
+        const supplied = { dieType: 'd6' as const, total: 3, spent: 2 };
 
         await service.create(USER_ID, { ...createCharacterDto, hitDice: supplied });
 

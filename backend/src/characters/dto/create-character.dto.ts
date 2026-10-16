@@ -18,11 +18,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ABILITY_NAMES,
   ARMOR_TYPES,
-  AttunedItem,
-  CharacterFeat,
   CONDITIONS,
   DIE_TYPES,
-  Feature,
   MAX_ARMOR_CLASS,
   MAX_EXPERIENCE_POINTS,
   MAX_INITIATIVE_BONUS,
@@ -32,8 +29,28 @@ import {
   RECHARGE_KINDS,
   SIZES,
   SKILL_NAMES,
-  SpellEntry,
   WEAPON_CATEGORIES,
+} from '@grimoire-os/shared';
+// Type-only, because isolatedModules with emitDecoratorMetadata rejects a value
+// import of a type that appears in a decorated property's signature.
+import type {
+  AbilityScores,
+  AttunedItem,
+  CharacterFeat,
+  CharacterResource,
+  Currency,
+  DeathSaves,
+  DieType,
+  Feature,
+  GearMeta,
+  HitDice,
+  HitPoints,
+  InventoryItem,
+  ResourceRecharge,
+  SpellEntry,
+  SpellSlot,
+  Weapon,
+  WeaponCategory,
 } from '@grimoire-os/shared';
 import { IsEachInCatalog } from '../../common/validators/is-each-in-catalog.decorator';
 import {
@@ -44,8 +61,30 @@ import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decor
 import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
 import { IsNonBlankString } from '../../common/validators/non-blank-string.decorator';
 import { ConcentrationDto } from '../../common/dto/concentration.dto';
+import { CurrencyDto } from '../../common/dto/currency.dto';
 
-class AbilityScoresDto {
+// The nested DTOs below mirror the shared embedded types, and these helpers
+// make the build fail when the two drift apart. `implements` checks each
+// field's type, but most of these DTOs leave optional what the shared type
+// requires, so they implement `Partial<...>`, and a Partial cannot notice a
+// renamed, added or removed field. The key-set assertions at the end of the
+// section do: `KeyDrift` is every key only one side has, and `NoDrift` rejects
+// anything but `never`, so any drift fails the build on that assertion line.
+type KeyDrift<Dto, Shared> = Exclude<keyof Dto, keyof Shared> | Exclude<keyof Shared, keyof Dto>;
+type NoDrift<T extends never> = T;
+
+// A discriminated union, viewed as one object type: every key any member has,
+// typed as the union of that key's types across the members that have it. A
+// class cannot implement a union, but it can implement this.
+type AllKeys<U> = U extends unknown ? keyof U : never;
+type FieldOf<U, K extends PropertyKey> = U extends unknown
+  ? K extends keyof U
+    ? U[K]
+    : never
+  : never;
+type Flatten<U> = { [K in AllKeys<U>]: FieldOf<U, K> };
+
+class AbilityScoresDto implements Partial<AbilityScores> {
   @ApiPropertyOptional({ example: 10 })
   @IsOptional()
   @IsNumber()
@@ -77,7 +116,7 @@ class AbilityScoresDto {
   charisma?: number;
 }
 
-class HitPointsDto {
+class HitPointsDto implements Partial<HitPoints> {
   @ApiPropertyOptional()
   @IsOptional()
   @IsNumber()
@@ -94,7 +133,7 @@ class HitPointsDto {
   temporary?: number;
 }
 
-class DeathSavesDto {
+class DeathSavesDto implements Partial<DeathSaves> {
   @ApiPropertyOptional({ example: 0, minimum: 0, maximum: 3 })
   @IsOptional()
   @IsInt()
@@ -110,7 +149,7 @@ class DeathSavesDto {
   failures?: number;
 }
 
-class SpellSlotDto {
+class SpellSlotDto implements Partial<SpellSlot> {
   @ApiProperty({ example: 1 })
   @IsNumber()
   level!: number;
@@ -132,6 +171,7 @@ class SpellSlotDto {
 // every equip-toggle PATCH, so a character owning a shield must keep passing
 // validation. 'shield' is the only value beyond the three body-armor tiers.
 const GEAR_ARMOR_TYPES = [...ARMOR_TYPES, 'shield'] as const;
+type GearArmorType = (typeof GEAR_ARMOR_TYPES)[number];
 
 /**
  * Armor/weapon metadata snapshotted from the catalog at add time (VEG-410).
@@ -146,17 +186,20 @@ const GEAR_ARMOR_TYPES = [...ARMOR_TYPES, 'shield'] as const;
  * for shields rather than required, because a shield can arrive in either the
  * new (`armorClassBonus`) or the legacy (`baseArmorClass`) shape and both must
  * round-trip; `baseArmorClass` stays required for body armor.
+ *
+ * Bound to the flattened union, so every shared field name across the three
+ * members has to appear here with a compatible type.
  */
-class GearMetaDto {
+class GearMetaDto implements Partial<Flatten<GearMeta>> {
   @ApiProperty({ enum: ['armor', 'weapon'] })
   @IsIn(['armor', 'weapon'])
-  type!: string;
+  type!: GearMeta['type'];
 
   // ── armor branch ──
   @ApiPropertyOptional({ enum: GEAR_ARMOR_TYPES })
   @ValidateIf(o => o.type === 'armor' || o.armorType !== undefined)
   @IsIn(GEAR_ARMOR_TYPES)
-  armorType?: string;
+  armorType?: GearArmorType;
 
   // Required for body armor; present-only for shields (which carry
   // armorClassBonus instead, or baseArmorClass on a legacy-persisted row).
@@ -217,7 +260,7 @@ class GearMetaDto {
   @ApiPropertyOptional({ enum: WEAPON_CATEGORIES })
   @ValidateIf(o => o.weaponCategory !== undefined)
   @IsIn(WEAPON_CATEGORIES)
-  weaponCategory?: string;
+  weaponCategory?: WeaponCategory;
 }
 
 // Large enough for any real stack (arrows, rations), small enough that
@@ -225,7 +268,10 @@ class GearMetaDto {
 // bundle contents use.
 const MAX_ITEM_QUANTITY = 10_000;
 
-class InventoryItemDto {
+// `gear` is left out of the `implements` because GearMetaDto, one class with
+// every branch optional, is not assignable to the GearMeta union. GearMetaDto
+// carries its own binding, and the key-set assertion still covers `gear`.
+class InventoryItemDto implements Partial<Omit<InventoryItem, 'gear'>> {
   @ApiProperty({ example: 'Longsword' })
   @IsString()
   name!: string;
@@ -272,37 +318,10 @@ class InventoryItemDto {
   gear?: GearMetaDto;
 }
 
-class CurrencyDto {
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  cp?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  sp?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  ep?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  gp?: number;
-
-  @ApiPropertyOptional({ example: 0 })
-  @IsOptional()
-  @IsNumber()
-  pp?: number;
-}
-
-class HitDiceDto {
+class HitDiceDto implements HitDice {
   @ApiProperty({ example: 'd10', enum: DIE_TYPES })
   @IsIn(DIE_TYPES)
-  dieType!: string;
+  dieType!: DieType;
 
   @ApiProperty({ example: 8 })
   @IsNumber()
@@ -313,7 +332,7 @@ class HitDiceDto {
   spent!: number;
 }
 
-class ResourceDto {
+class ResourceDto implements CharacterResource {
   @ApiProperty({ example: 'Ki Points' })
   // Non-blank, not just non-empty: a whitespace-only name would render an
   // unidentifiable row whose Edit/Remove aria-labels collapse to bare verbs.
@@ -335,10 +354,10 @@ class ResourceDto {
 
   @ApiProperty({ example: 'short', enum: RECHARGE_KINDS })
   @IsIn(RECHARGE_KINDS)
-  recharge!: string;
+  recharge!: ResourceRecharge;
 }
 
-class WeaponDto {
+class WeaponDto implements Weapon {
   @ApiProperty({ example: 'Longsword' })
   @IsString()
   name!: string;
@@ -374,9 +393,10 @@ class FeatureDto implements Feature {
   // The character level this grant arrived at (VEG-454), which is what separates
   // one occurrence of a recurring feature name from the next. Same bounds as the
   // character's own `level` two screens down, for the same reason: 5e caps at 20.
-  // `implements Feature` does not require an optional member, so nothing but the
-  // spec catches this field going missing — and without it forbidNonWhitelisted
-  // 400s every level-up write that carries one (the VEG-349 deathSaves trap).
+  // `implements Feature` does not require an optional member, so the key-set
+  // assertion below and the spec are what catch this field going missing. Without
+  // it forbidNonWhitelisted 400s every level-up write that carries one (the
+  // VEG-349 deathSaves trap).
   @ApiPropertyOptional({ example: 8, description: 'Character level the feature was gained at' })
   @IsOptional()
   @IsInt()
@@ -473,6 +493,23 @@ class AttunedItemDto implements AttunedItem {
   @IsUUID()
   itemId?: string;
 }
+
+type _MirrorsMatchSharedKeys = [
+  NoDrift<KeyDrift<AbilityScoresDto, AbilityScores>>,
+  NoDrift<KeyDrift<HitPointsDto, HitPoints>>,
+  NoDrift<KeyDrift<DeathSavesDto, DeathSaves>>,
+  NoDrift<KeyDrift<SpellSlotDto, SpellSlot>>,
+  NoDrift<KeyDrift<GearMetaDto, Flatten<GearMeta>>>,
+  NoDrift<KeyDrift<InventoryItemDto, InventoryItem>>,
+  NoDrift<KeyDrift<CurrencyDto, Currency>>,
+  NoDrift<KeyDrift<HitDiceDto, HitDice>>,
+  NoDrift<KeyDrift<ResourceDto, CharacterResource>>,
+  NoDrift<KeyDrift<WeaponDto, Weapon>>,
+  NoDrift<KeyDrift<FeatureDto, Feature>>,
+  NoDrift<KeyDrift<CharacterFeatDto, CharacterFeat>>,
+  NoDrift<KeyDrift<SpellEntryDto, SpellEntry>>,
+  NoDrift<KeyDrift<AttunedItemDto, AttunedItem>>,
+];
 
 export class CreateCharacterDto {
   @ApiProperty({ example: 'Thorin Ironforge' })
