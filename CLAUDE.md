@@ -1,6 +1,6 @@
 # GrimoireOS
 
-A free, open-source D&D 5e campaign management tool. Self-hostable alternative to D&D Beyond.
+A D&D 5e campaign management tool, run as a hosted web app. Self-hosting is a README nice-to-have; do not file self-host tickets.
 
 ## Quick Start
 
@@ -46,7 +46,7 @@ cd frontend && npm run test:cov   # Unit tests + coverage (enforces thresholds)
 cd frontend && npm run typecheck  # tsc --noEmit over src, spec files included
 ```
 
-> **Run tests from the right subdirectory.** Every command above is scoped to `backend/` or `frontend/`; the shell cwd does **not** persist between separate tool calls. A sudden Jest/Vitest "cannot find module" or "no test files found" error is almost always cwd drift (e.g. running a frontend spec from the repo root or `backend/`), not a real import bug — check the working directory before investigating the code.
+> **The Bash cwd persists between calls.** Use `cd /Users/picardvega/Projects/grimoire-os/<pkg> && ...` with the absolute path, never a bare `cd backend`. A sudden Jest/Vitest "cannot find module" or "no test files found" error is almost always cwd drift, not a real import bug.
 
 ## Testing & Coverage Thresholds
 
@@ -57,11 +57,11 @@ Both projects enforce minimum coverage thresholds via their respective test runn
 | Backend (Jest) | 90% | 80% | 88% | 90% | `backend/package.json` (`jest.coverageThreshold.global`) |
 | Frontend (Vitest) | 88% | 82% | 86% | 90% | `frontend/vitest.config.ts` (`test.coverage.thresholds`) |
 
-Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0/91.2/95.4% backend, ~93.3/87.0/91.3/95.1% frontend) — enough margin to avoid flaky failures while still catching regression. The frontend floors were originally ~47–52% against a much smaller suite (VEG-204 era); the suite has since grown to ~150 spec files and the floors were ratcheted up to match.
-
 **Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
 
 **Green ≠ working for UI changes.** Passing unit tests have repeatedly shipped live crashes the suite never modelled — e.g. a null `spellSlots` render crash and layout/width regressions caught only by manual clicking. After the suite is green, manually exercise any UI-affecting change in the running app (`./dev.sh`): walk the real user path and hit the empty/null/error state, not just the happy structural assertion. Backfill a regression test for anything you find so the gap closes for next time.
+
+Wait for the dev stack with `curl -sf localhost:3001/api/health` in a loop capped at 180 s that prints the log on timeout.
 
 ## CI & pre-merge verification
 
@@ -79,7 +79,7 @@ In `frontend/`, `npm run typecheck` type-checks the spec files too. Vitest strip
 |----------|----------|---------|
 | JWT_SECRET | Yes | — |
 | DATABASE_URL | No | postgresql://grimoire:grimoire@localhost:5432/grimoire_os |
-| JWT_EXPIRES_IN | No | 24h |
+| JWT_EXPIRES_IN | No | 15m |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
 | INTERNAL_API_URL | No | falls back to NEXT_PUBLIC_API_URL |
@@ -104,14 +104,6 @@ Dependabot (`.github/dependabot.yml`) opens monthly grouped minor-and-patch PRs 
 ## API Docs
 
 Swagger UI available at http://localhost:3001/api/docs when backend is running.
-
-## Dev Server Management
-
-Before invoking `./dev.sh`:
-
-- Kill stale processes on the dev ports: `lsof -ti:3000,3001 | xargs kill -9 2>/dev/null`
-- Verify Docker is running and the `postgres` container is up (`docker compose ps`)
-- Verify `.env` exists in the repo root and `backend/.env` is present; copy from `.env.example` if missing
 
 ## Docker
 

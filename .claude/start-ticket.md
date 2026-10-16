@@ -45,6 +45,8 @@ For UI tickets, also draft a Playwright spec under `e2e/<feature>.spec.ts` cover
 Run both steps below with Bash `run_in_background: true` — `verify.sh` is ten serial stages (SRD lib tests → e2e stack-naming tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend typecheck → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
 
 1. `./verify.sh` from the repo root — mirrors CI exactly (backend + frontend lint, unit tests with coverage thresholds, SRD extraction-lib tests, production builds). Do not substitute plain `npm test`/`npm run build`. (Backend's `prettier.spec.ts` runs `format:check` on the frontend — prettier-format new frontend files first.)
+   - Run it as `./verify.sh > "$LOG" 2>&1; echo VERIFY_EXIT=$?`. Never pipe it to `tail` or `grep`, because the pipe reports their exit status, not the gate's.
+   - Read the result in one call. Commit, push and `gh pr create` go in a later call, after you have seen `VERIFY_EXIT=0` and `All verification steps passed.` On success verify.sh writes the tree hash to `.git/verify-ok`.
 2. **E2E (Playwright)** — `cd e2e && npm run e2e -- <specs>`, as the last step (there is no root `package.json`).
    - The suite provisions its own stack via `dev-e2e.sh`. The main checkout gets ports 3010/3011 and the `grimoire_os_e2e` database. A linked git worktree gets a private database (`grimoire_os_e2e_<worktree>`) and a port pair in 3100-3499, so parallel worktrees can each run `npm run e2e` with no extra setup. `bash e2e/stack-env.sh` prints what a checkout resolves to. Only Postgres needs to be up beforehand.
    - **`./dev.sh` must be stopped first when it runs from the same checkout.** Next 16 takes a `frontend/.next/dev/lock`, so the e2e stack's `next dev` can't start while the dev server runs in that checkout, and the webServer step times out after 120 s. Stop dev (`./stop.sh`), run e2e, restart dev. A worktree has its own `frontend/.next`, so dev in the main checkout does not block e2e in a worktree.
@@ -182,7 +184,8 @@ A review finding becomes a Linear ticket only when one of these holds:
 - It belongs to an open milestone and the PR cannot absorb it within its tier's budget.
 
 Everything else is fixed in the current PR if it fits, or recorded in the
-round summary comment and dropped. At most one follow-up ticket per PR.
+round summary comment and dropped. File every follow-up that meets this
+policy in the same turn and list the IDs; do not ask first.
 A follow-up ticket must carry a milestone or a priority of Medium or above;
 never file a Low with no milestone.
 
