@@ -173,6 +173,34 @@ describe('InitiativeTrackerPage', () => {
       expect(screen.getByText(/2× Dagger/)).toBeInTheDocument();
     });
 
+    it('leaves zero denominations out of the coin line and shows an empty purse as 0 gp', async () => {
+      routeLootFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({
+              name: 'Goblin A',
+              initiative: 12,
+              monsterId: 'monster-1',
+              loot: makeLoot({ coinage: { gp: 2, sp: 0, cp: 0 } }),
+            }),
+            makeCombatant({
+              name: 'Goblin B',
+              initiative: 8,
+              monsterId: 'monster-1',
+              loot: makeLoot({ coinage: { gp: 0, sp: 0, cp: 0 } }),
+            }),
+          ],
+        }),
+      });
+      renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      // Goblin A's row and the encounter total both read 2 gp; Goblin B's row
+      // holds no coin at all.
+      expect(screen.getAllByText('2 gp')).toHaveLength(2);
+      expect(screen.getByText('0 gp')).toBeInTheDocument();
+      expect(screen.queryByText(/0 sp|0 cp/)).not.toBeInTheDocument();
+    });
+
     it('disables the encounter roll when no combatant links to a monster', async () => {
       routeLootFlow({
         encounter: makeEncounter({

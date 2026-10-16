@@ -3,6 +3,7 @@ export * from './embedded';
 export * from './character-stats';
 export * from './coin';
 export * from './computed';
+export * from './death-saves';
 export * from './encounter-difficulty';
 export * from './gear';
 export * from './entities';

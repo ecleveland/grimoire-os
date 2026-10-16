@@ -1,7 +1,9 @@
 import { expect, test } from '@playwright/test';
 import { createEncounter, registerAndLogin } from './helpers';
 
-const COINAGE = /\d+ gp · \d+ sp · \d+ cp/;
+// formatCoin omits zero denominations and renders an empty purse as "0 gp", so
+// match any run of non-zero parts. Anchored to the coinage span alone.
+const COINAGE = /^\d+ (pp|gp|ep|sp|cp)( · \d+ (pp|gp|ep|sp|cp))*$/;
 
 test.describe('Encounter loot rolls (VEG-301)', () => {
   test('DM adds a monster, rolls encounter loot, and sees the per-monster drop plus total', async ({

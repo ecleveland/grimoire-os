@@ -68,6 +68,20 @@ describe('CreateSpellDto (through the production ValidationPipe)', () => {
     );
   });
 
+  it('accepts 20 classes', async () => {
+    const classes = Array.from({ length: 20 }, (_, i) => `Class ${i}`);
+    await expect(pipe.transform(validBody({ classes }), createMeta)).resolves.toEqual(
+      expect.objectContaining({ classes })
+    );
+  });
+
+  it('rejects 21 classes', async () => {
+    const classes = Array.from({ length: 21 }, (_, i) => `Class ${i}`);
+    await expect(pipe.transform(validBody({ classes }), createMeta)).rejects.toBeInstanceOf(
+      BadRequestException
+    );
+  });
+
   it.each([
     ['contentSource', { contentSource: 'shared' }],
     ['createdById', { createdById: 'someone-else' }],

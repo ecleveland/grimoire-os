@@ -1,6 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { abilityModifier } from '@grimoire-os/shared';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '../NpcStatBlockCard';
+
+vi.mock('@grimoire-os/shared', async importOriginal => {
+  const actual = await importOriginal<typeof import('@grimoire-os/shared')>();
+  return { ...actual, abilityModifier: vi.fn(actual.abilityModifier) };
+});
 
 function buildStatBlock(over: Partial<NpcStatBlockShape> = {}): NpcStatBlockShape {
   return {
@@ -68,6 +74,14 @@ describe('NpcStatBlockCard', () => {
     // STR 13 → +1; CHA 10 → +0 (two of each appear; assert at least one).
     expect(screen.getByText('13 (+1)')).toBeInTheDocument();
     expect(screen.getAllByText('10 (+0)').length).toBeGreaterThan(0);
+  });
+
+  it('derives each modifier through the shared abilityModifier', () => {
+    // STR renders first, so the one-off return lands on STR 13.
+    vi.mocked(abilityModifier).mockReturnValueOnce(7);
+    render(<NpcStatBlockCard statBlock={buildStatBlock()} />);
+    expect(screen.getByText('13 (+7)')).toBeInTheDocument();
+    expect(abilityModifier).toHaveBeenCalledWith(13);
   });
 
   it('renders the actions list', () => {

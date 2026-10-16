@@ -63,6 +63,20 @@ describe('CreateFeatDto (through the production ValidationPipe)', () => {
     );
   });
 
+  it('accepts 50 benefits', async () => {
+    const benefits = Array.from({ length: 50 }, (_, i) => `Benefit ${i}`);
+    await expect(pipe.transform(validBody({ benefits }), createMeta)).resolves.toEqual(
+      expect.objectContaining({ benefits })
+    );
+  });
+
+  it('rejects 51 benefits', async () => {
+    const benefits = Array.from({ length: 51 }, (_, i) => `Benefit ${i}`);
+    await expect(pipe.transform(validBody({ benefits }), createMeta)).rejects.toBeInstanceOf(
+      BadRequestException
+    );
+  });
+
   it.each([
     ['contentSource', { contentSource: 'shared' }],
     ['createdById', { createdById: 'someone-else' }],

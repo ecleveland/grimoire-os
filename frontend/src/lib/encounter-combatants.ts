@@ -1,10 +1,10 @@
 import type { Combatant, PartyCharacter, SrdMonster } from '@/lib/types';
 import type { Rng } from '@/lib/dice';
-import { xpForCr } from '@grimoire-os/shared';
+import { abilityModifier, xpForCr } from '@grimoire-os/shared';
 
-/** Derive the 5e DEX modifier from a monster's raw DEX score: floor((dex - 10) / 2). */
+/** Derive the 5e DEX modifier from a monster's raw DEX score, via shared `abilityModifier`. */
 export function dexModifier(monster: SrdMonster): number {
-  return Math.floor((monster.dex - 10) / 2);
+  return abilityModifier(monster.dex);
 }
 
 /**

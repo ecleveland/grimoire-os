@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { abilityModifier } from '@grimoire-os/shared';
 import type { PartyCharacter, SrdMonster } from '@/lib/types';
 import {
   dexModifier,
@@ -10,6 +11,11 @@ import {
   buildManualCombatant,
   buildPartyCombatants,
 } from '@/lib/encounter-combatants';
+
+vi.mock('@grimoire-os/shared', async importOriginal => {
+  const actual = await importOriginal<typeof import('@grimoire-os/shared')>();
+  return { ...actual, abilityModifier: vi.fn(actual.abilityModifier) };
+});
 
 function makeMonster(over: Partial<SrdMonster> = {}): SrdMonster {
   return {
@@ -45,6 +51,12 @@ describe('dexModifier', () => {
     expect(dexModifier(makeMonster({ dex: 8 }))).toBe(-1);
     expect(dexModifier(makeMonster({ dex: 7 }))).toBe(-2);
     expect(dexModifier(makeMonster({ dex: 30 }))).toBe(10);
+  });
+
+  it('returns the shared abilityModifier result for the DEX score', () => {
+    vi.mocked(abilityModifier).mockReturnValueOnce(7);
+    expect(dexModifier(makeMonster({ dex: 14 }))).toBe(7);
+    expect(abilityModifier).toHaveBeenLastCalledWith(14);
   });
 });
 

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsInt,
   IsNotEmpty,
@@ -68,6 +69,10 @@ export class CreateSpellDto {
   @ApiPropertyOptional({ example: ['Wizard', 'Sorcerer'] })
   @IsOptional()
   @IsArray()
+  // Each class name is length-capped, so cap the list too or the payload can
+  // smuggle unbounded data past validation. The SRD has eight spellcasting
+  // classes; 20 leaves room for homebrew ones.
+  @ArrayMaxSize(20)
   @IsString({ each: true })
   @MaxLength(100, { each: true })
   classes?: string[];

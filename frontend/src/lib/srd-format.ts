@@ -1,4 +1,4 @@
-import { formatSigned } from '@grimoire-os/shared';
+import { abilityModifier as scoreModifier, formatSigned } from '@grimoire-os/shared';
 
 /** Format a numeric challenge rating the way 5e prints it (fractions for < 1). */
 export function formatCr(cr: number): string {
@@ -10,8 +10,7 @@ export function formatCr(cr: number): string {
 
 /** Derive the signed 5e ability modifier from a raw score, e.g. 30 → "+10", 8 → "-1". */
 export function abilityModifier(score: number): string {
-  const mod = Math.floor((score - 10) / 2);
-  return mod >= 0 ? `+${mod}` : `${mod}`;
+  return formatSigned(scoreModifier(score));
 }
 
 /** Render a bonus with an explicit sign, e.g. 7 → "+7", -1 → "-1". */

@@ -11,11 +11,12 @@ import {
 
 /**
  * The subset of an inventory line resolution reads. Deliberately looser than
- * `InventoryItem`: the request-side `GearMetaDto` declares `type` as a plain
- * string (class-validator can't switch DTO classes on a discriminant, so
- * `@IsIn(['armor','weapon'])` does that work at runtime), which means the DTO
- * doesn't satisfy the shared `GearMeta` union. `gear` is `unknown` because
- * resolution only ever presence-tests it — it never reads the snapshot.
+ * `InventoryItem`: the request-side `GearMetaDto` is one class with every
+ * branch's fields optional (class-validator can't switch DTO classes on a
+ * discriminant, so `@ValidateIf` on `type` does that work at runtime), which
+ * means the DTO doesn't satisfy the shared `GearMeta` union. `gear` is
+ * `unknown` because resolution only ever presence-tests it — it never reads
+ * the snapshot.
  */
 type ResolvableLine = {
   name: string;

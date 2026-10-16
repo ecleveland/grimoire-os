@@ -21,7 +21,7 @@ import NpcFieldRow from '@/components/NpcFieldRow';
 import NpcRelationsPanel from '@/components/NpcRelationsPanel';
 import { NpcStatBlockCard, type NpcStatBlockShape } from '@/components/NpcStatBlockCard';
 import type { Npc, NpcLootItem, NpcLootOverrides, NpcRerollField } from '@/lib/types';
-import { formatCoinage } from '@/lib/coinage';
+import { formatCoin } from '@grimoire-os/shared';
 
 // Fields rendered as a labelled row with dice + lock controls. The stat block
 // has its own dedicated card and Generate / Remove buttons, so it is not part
@@ -393,7 +393,7 @@ export default function NpcDetailPage() {
           )}
         </div>
         <div className="text-sm text-gray-700 dark:text-gray-300 mb-2">
-          {formatCoinage({ gp: npc.goldPieces, sp: npc.silverPieces, cp: npc.copperPieces })}
+          {formatCoin({ gp: npc.goldPieces, sp: npc.silverPieces, cp: npc.copperPieces })}
         </div>
         <NpcFieldRow
           field="loot"

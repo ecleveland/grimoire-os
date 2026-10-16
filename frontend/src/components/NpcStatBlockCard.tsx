@@ -1,5 +1,7 @@
 'use client';
 
+import { abilityModifier, formatSigned } from '@grimoire-os/shared';
+
 interface Action {
   name: string;
   description: string;
@@ -52,11 +54,6 @@ const ABILITIES: Array<{ key: keyof NpcStatBlockShape; label: string }> = [
   { key: 'wis', label: 'WIS' },
   { key: 'cha', label: 'CHA' },
 ];
-
-function modifier(score: number): string {
-  const mod = Math.floor((score - 10) / 2);
-  return mod >= 0 ? `+${mod}` : `${mod}`;
-}
 
 function formatCr(cr: number): string {
   if (cr === 0.125) return '1/8';
@@ -114,7 +111,7 @@ export function NpcStatBlockCard({ statBlock }: { statBlock: NpcStatBlockShape }
             <div key={a.label} className="border border-amber-200 dark:border-amber-900/40 rounded">
               <div className="text-[10px] font-semibold uppercase">{a.label}</div>
               <div className="font-mono">
-                {v} ({modifier(v)})
+                {v} ({formatSigned(abilityModifier(v))})
               </div>
             </div>
           );

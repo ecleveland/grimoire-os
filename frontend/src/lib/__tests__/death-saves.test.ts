@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { reviveDeathSaves } from '@grimoire-os/shared';
 import type { Combatant } from '@/lib/types';
 import {
   clearDeathSavesIfRevived,
@@ -6,6 +7,11 @@ import {
   markDeathSave,
   showsDeathSaves,
 } from '@/lib/death-saves';
+
+vi.mock('@grimoire-os/shared', async importOriginal => {
+  const actual = await importOriginal<typeof import('@grimoire-os/shared')>();
+  return { ...actual, reviveDeathSaves: vi.fn(actual.reviveDeathSaves) };
+});
 
 const pc = (over: Partial<Combatant> = {}): Combatant => ({
   name: 'Hero',
@@ -85,5 +91,17 @@ describe('clearDeathSavesIfRevived', () => {
   it('is a no-op (same reference) when there are no saves', () => {
     const alive = pc({ hp: 10 });
     expect(clearDeathSavesIfRevived(alive)).toBe(alive);
+  });
+
+  it('keeps an empty 0/0 track above 0 HP (same reference)', () => {
+    const alive = pc({ hp: 10, deathSaves: { successes: 0, failures: 0 } });
+    expect(clearDeathSavesIfRevived(alive)).toBe(alive);
+  });
+
+  it('drops deathSaves whenever the shared reviveDeathSaves rule says to', () => {
+    vi.mocked(reviveDeathSaves).mockReturnValueOnce({ successes: 0, failures: 0 });
+    const down = pc({ hp: 0, deathSaves: { successes: 1, failures: 0 } });
+    expect(clearDeathSavesIfRevived(down)).not.toHaveProperty('deathSaves');
+    expect(reviveDeathSaves).toHaveBeenLastCalledWith(0, { successes: 1, failures: 0 });
   });
 });

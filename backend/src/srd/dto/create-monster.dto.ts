@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsInt,
   IsNotEmpty,
@@ -131,27 +132,33 @@ export class CreateMonsterDto {
   @IsObject()
   skills?: Record<string, number>;
 
+  // Every list on this DTO is capped so a payload can't smuggle unbounded data
+  // past validation. The longest SRD stat blocks list well under 50 entries.
   @ApiPropertyOptional({ example: ['cold', 'fire'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   damageResistances?: string[];
 
   @ApiPropertyOptional({ example: ['poison'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   damageImmunities?: string[];
 
   @ApiPropertyOptional({ example: ['thunder'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   damageVulnerabilities?: string[];
 
   @ApiPropertyOptional({ example: ['poisoned'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
   conditionImmunities?: string[];
 
@@ -181,6 +188,7 @@ export class CreateMonsterDto {
   @ApiPropertyOptional({ type: [MonsterActionDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => MonsterActionDto)
   specialAbilities?: MonsterActionDto[];
@@ -188,6 +196,7 @@ export class CreateMonsterDto {
   @ApiPropertyOptional({ type: [MonsterActionDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => MonsterActionDto)
   actions?: MonsterActionDto[];
@@ -195,6 +204,7 @@ export class CreateMonsterDto {
   @ApiPropertyOptional({ type: [MonsterActionDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => MonsterActionDto)
   reactions?: MonsterActionDto[];
@@ -202,6 +212,7 @@ export class CreateMonsterDto {
   @ApiPropertyOptional({ type: [MonsterActionDto] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(50)
   @ValidateNested({ each: true })
   @Type(() => MonsterActionDto)
   legendaryActions?: MonsterActionDto[];

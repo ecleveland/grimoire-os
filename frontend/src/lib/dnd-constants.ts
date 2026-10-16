@@ -25,5 +25,5 @@ export const SKILLS: readonly SkillDef[] = Object.entries(SKILL_ABILITY_MAP).map
 );
 
 // Armor-training categories — matches the sheet's EquipmentTraining dots.
-export const ARMOR_TYPES = ['Light', 'Medium', 'Heavy', 'Shields'] as const;
-export type ArmorType = (typeof ARMOR_TYPES)[number];
+export const ARMOR_TRAINING_CATEGORIES = ['Light', 'Medium', 'Heavy', 'Shields'] as const;
+export type ArmorTrainingCategory = (typeof ARMOR_TRAINING_CATEGORIES)[number];
