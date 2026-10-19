@@ -53,6 +53,26 @@ Run both steps below with Bash `run_in_background: true` — `verify.sh` is ten 
    - Run only the spec(s) relevant to this ticket plus `smoke.spec.ts`. Full suite runs in CI.
    - Skip E2E only when the ticket touches no user-visible behavior (pure refactor, docs, backend-only internals with no API contract change) — state explicitly when skipping and why.
 
+## Manual test setup
+
+Step 10's guide starts from here. Run `./dev.sh` and open http://localhost:3000. Swagger is at http://localhost:3001/api/docs.
+
+Three accounts exist in the local dev database (`grimoire_os`) for manual testing. All use the password `TestPass1!`. They are dev-only and exist nowhere else.
+
+| Username | Role | Use for |
+|----------|------|---------|
+| `test-player` | player | character sheets, joining a campaign, checking that DM and admin pages refuse a player |
+| `test-dm` | dungeon_master | campaigns, encounters, NPCs, loot, shops, homebrew content |
+| `test-admin` | admin | admin pages (users, equipment, NPC data) |
+
+Name the account in each guide step that depends on a role. When a test needs a player in the DM's campaign, have `test-player` join with the campaign's invite code.
+
+The E2E suite does not use these accounts. It registers throwaway users in its own database and wipes them each run. If the dev database is reset, recreate the accounts. Register each through `POST /api/auth/register` with `{"username", "password", "displayName"}`, then set the roles:
+
+```
+docker compose exec -T postgres psql -U grimoire -d grimoire_os -c "UPDATE users SET role='dungeon_master' WHERE username='test-dm'; UPDATE users SET role='admin' WHERE username='test-admin';"
+```
+
 ## Commit / PR conventions
 
 - Commit message: `feat: <summary> [VEG-NNN]` (or `fix:`/`test:`/`ci:` as appropriate).
