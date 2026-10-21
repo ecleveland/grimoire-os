@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ClassDetailPage from '../page';
@@ -239,7 +239,7 @@ describe('ClassDetailPage', () => {
       expect(within(title).getByText('Homebrew')).toBeInTheDocument();
       expect(screen.getByText('Hit Die: d8 · DEX')).toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'Saving Throws' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Add Grit to print set' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add Grit to print set' })).toBeVisible();
       expect(screen.getByRole('heading', { level: 2, name: 'Subclasses' })).toBeInTheDocument();
       expect(screen.getByText('Chosen at level 3.')).toBeInTheDocument();
       expect(screen.getByText('Deadeye')).toBeInTheDocument();
@@ -297,6 +297,69 @@ describe('ClassDetailPage', () => {
       renderPage();
 
       expect(screen.queryByRole('heading', { name: 'Subclasses' })).not.toBeInTheDocument();
+    });
+  });
+
+  // A feature search hit links to /srd/classes/<classId>#<featureId>, and the
+  // class arrives after the navigation, so the page scrolls once it renders.
+  // useScrollToHash's own spec covers the once-per-hash and bad-hash rules.
+  describe('scrolling to a linked feature', () => {
+    // jsdom has no scrollIntoView, so there is nothing to spy on: install one,
+    // and put the absence back afterwards the way the encounter page spec does.
+    const scrollIntoView = vi.fn();
+
+    beforeEach(() => {
+      (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollIntoView;
+    });
+
+    afterEach(() => {
+      delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+      window.location.hash = '';
+    });
+
+    it('scrolls the class feature row the hash names into view once the class loads', () => {
+      window.location.hash = '#cf-grit';
+      mockUseApiQuery.mockReturnValue(queryResult({ data: undefined, isLoading: true }));
+      const { rerender } = renderPage();
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      mockUseApiQuery.mockReturnValue(queryResult());
+      rerender(
+        <PrintTrayProvider>
+          <ClassDetailPage />
+        </PrintTrayProvider>
+      );
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.instances[0]).toBe(document.getElementById('cf-grit'));
+      expect(document.getElementById('cf-grit')).toHaveTextContent('Grit');
+    });
+
+    it('scrolls a subclass feature row into view', () => {
+      window.location.hash = '#cf-dead-aim';
+      mockUseApiQuery.mockReturnValue(
+        queryResult({
+          data: makeClass({
+            subclasses: [
+              { ...DEADEYE, features: [{ id: 'cf-dead-aim', name: 'Dead Aim', level: 3 }] },
+            ],
+          }),
+        })
+      );
+
+      renderPage();
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.instances[0]).toBe(document.getElementById('cf-dead-aim'));
+    });
+
+    it('scrolls a subclass card into view', () => {
+      window.location.hash = '#sc-deadeye';
+
+      renderPage();
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.instances[0]).toBe(document.getElementById('sc-deadeye'));
     });
   });
 

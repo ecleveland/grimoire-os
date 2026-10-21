@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CancelledError } from '@tanstack/react-query';
@@ -258,6 +258,24 @@ describe('SubclassesSection', () => {
       expect(anchored).toHaveTextContent('Deadeye');
     });
 
+    // A search hit for one subclass feature links to that feature's own row.
+    it('anchors each feature row on its id', () => {
+      renderSection([
+        makeSubclass({
+          features: [
+            { id: 'cf-aim', name: 'Steady Aim', level: 3, description: 'Bonus action aim.' },
+          ],
+        }),
+      ]);
+
+      const anchored = document.getElementById('cf-aim');
+      expect(anchored).not.toBeNull();
+      expect(anchored).toHaveTextContent('Steady Aim');
+      expect(anchored).toHaveTextContent('Level 3');
+      expect(anchored).toHaveTextContent('Bonus action aim.');
+      expect(cardFor('Deadeye')).toContainElement(anchored);
+    });
+
     it('renders a subclass with no description and no features', () => {
       renderSection([makeSubclass({ description: undefined, features: undefined })]);
 
@@ -271,66 +289,6 @@ describe('SubclassesSection', () => {
       ]);
 
       expect(screen.queryByText('Homebrew')).not.toBeInTheDocument();
-    });
-  });
-
-  // A feature search hit links to /srd/classes/<classId>#<subclassId>. The
-  // class is fetched after the navigation, so the browser resolves the fragment
-  // against a page that is still "Loading class…" and never scrolls. The
-  // section does it once the rows are in the DOM.
-  describe('scrolling to a linked subclass', () => {
-    // jsdom has no scrollIntoView, so there is nothing to spy on: install one,
-    // and put the absence back afterwards the way the encounter page spec does.
-    const scrollIntoView = vi.fn();
-
-    beforeEach(() => {
-      (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollIntoView;
-    });
-
-    afterEach(() => {
-      delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
-      window.location.hash = '';
-    });
-
-    it('scrolls the card the hash names into view', () => {
-      window.location.hash = '#sc-deadeye';
-
-      renderSection(twoRows());
-
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
-      expect(cardFor('Deadeye')).toBe(scrollIntoView.mock.instances[0]);
-    });
-
-    it('stays put when the hash names no subclass on this page', () => {
-      window.location.hash = '#sc-from-another-class';
-
-      renderSection(twoRows());
-
-      expect(scrollIntoView).not.toHaveBeenCalled();
-    });
-
-    it('does not scroll again when the list re-renders under the same hash', () => {
-      window.location.hash = '#sc-deadeye';
-      const { rerender } = renderSection(twoRows());
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
-
-      // A rename lands, so the rows arrive as a fresh array. The reader is
-      // wherever they scrolled to by now and must not be yanked back.
-      rerender(sectionElement([makeSubclass({ name: 'Deadeye Prime' }), twoRows()[1]]));
-
-      expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    });
-
-    // Anyone can put a stray percent sign in a URL, and decoding one throws.
-    // The fragment is decoration on a public page, so a bad one costs the
-    // reader the scroll and nothing else.
-    it('renders the list anyway when the hash will not decode', () => {
-      window.location.hash = '#%';
-
-      renderSection(twoRows());
-
-      expect(headingFor('Deadeye')).toBeInTheDocument();
-      expect(scrollIntoView).not.toHaveBeenCalled();
     });
   });
 

@@ -381,12 +381,12 @@ describe('SrdSearchPage', () => {
 
       expect(screen.getByText(/Once per turn, deal extra damage/)).toBeInTheDocument();
       const drilldown = screen.getByRole('link', { name: /Open Rogue/i });
-      expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1');
+      expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1#cf-1');
     });
 
-    // A subclass renders as an anchored card on its class page, not a page of
-    // its own, so the drilldown needs both ids (VEG-558).
-    it('points a subclass feature at its card on the class page', async () => {
+    // A subclass has no page of its own, so the drilldown puts the class id in
+    // the path (VEG-558) and the feature id in the anchor (VEG-618).
+    it('points a subclass feature at its row on the class page', async () => {
       mockApiFetch.mockResolvedValue(paginated([combatSuperiority]));
       const user = userEvent.setup();
       renderPage();
@@ -395,7 +395,7 @@ describe('SrdSearchPage', () => {
       await user.click(screen.getByText('Combat Superiority'));
 
       const drilldown = screen.getByRole('link', { name: /Open Battle Master Subclass/i });
-      expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1#sc-1');
+      expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1#scf-1');
     });
   });
 

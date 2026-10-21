@@ -10,6 +10,7 @@ import {
   UnifiedClassHitData,
   UnifiedFeatureData,
   UnifiedSearchHit,
+  featureDetailHref,
   parentDetailHref,
 } from '@/lib/srd-search';
 import SearchBox from '@/components/SearchBox';
@@ -310,9 +311,9 @@ function subtitleFor(hit: UnifiedSearchHit): string {
 
 /**
  * A class hit's expanded body. Deliberately a summary and a link rather than the
- * full `ClassDetail`. The class page is where the tables, proficiencies and
- * feature print chips live, and a search result that reproduced them would bury
- * the other hits.
+ * full `ClassDetail`. The class page is where the proficiencies and the
+ * feature list live, and a search result that reproduced them would bury the
+ * other hits.
  */
 function ClassSummary({ cls }: { cls: UnifiedClassHitData }) {
   return (
@@ -339,7 +340,7 @@ function FeatureDetail({ feature }: { feature: UnifiedFeatureData }) {
         {feature.description}
       </p>
       <Link
-        href={parentDetailHref(feature.parent)}
+        href={featureDetailHref(feature)}
         className="inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
       >
         Open {feature.parent.name} {capitalize(feature.parent.kind)} →

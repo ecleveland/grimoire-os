@@ -370,14 +370,30 @@ describe('ClassListPage', () => {
     });
   });
 
-  // The chip rendering and keying rules are covered in ClassDetail.test.tsx;
-  // this checks that the list wires a card's chips to the print tray.
+  // The row rendering and keying rules are covered in FeatureList.test.tsx;
+  // this checks that the list wires a card's feature rows to the print tray.
   describe('print set selection', () => {
-    it('toggles a feature chip into the tray and back out', async () => {
+    it('keeps a card short by collapsing its features until asked', async () => {
       const user = userEvent.setup();
       renderPage();
 
       await user.click(screen.getByRole('button', { name: /^Fighter/ }));
+
+      expect(screen.getByRole('button', { name: 'Show 2 features' })).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
+      expect(
+        screen.queryByRole('button', { name: 'Add Action Surge to print set' })
+      ).not.toBeInTheDocument();
+    });
+
+    it('toggles a feature row into the tray and back out', async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(screen.getByRole('button', { name: /^Fighter/ }));
+      await user.click(screen.getByRole('button', { name: 'Show 2 features' }));
       await user.click(screen.getByRole('button', { name: 'Add Action Surge to print set' }));
 
       expect(storedTray()).toEqual([{ type: 'feature', id: 'cf-action-surge' }]);

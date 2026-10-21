@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,6 +12,7 @@ import SubclassesSection from '@/components/SubclassesSection';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { apiQueryKey, invalidateApiPath, useApiQuery } from '@/lib/query';
+import { useScrollToHash } from '@/lib/use-scroll-to-hash';
 import type { SrdClass, SrdSubclass } from '@/lib/types';
 
 /** The detail GET includes the class's subclasses, which the list payload leaves out. */
@@ -30,6 +31,20 @@ export default function ClassDetailPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const cls = query.data;
+
+  // Everything a search hit can link to on this page: each subclass card and
+  // each class and subclass feature row. Called above the early returns so the
+  // hook order holds while the class loads.
+  const anchorIds = useMemo(() => {
+    if (!cls) return [];
+    const subclasses = cls.subclasses ?? [];
+    return [
+      ...subclasses.map(sc => sc.id),
+      ...(cls.features ?? []).map(f => f.id),
+      ...subclasses.flatMap(sc => (sc.features ?? []).map(f => f.id)),
+    ].filter((anchor): anchor is string => anchor !== undefined);
+  }, [cls]);
+  useScrollToHash(anchorIds);
 
   const backLink = (
     <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
@@ -162,7 +177,7 @@ export default function ClassDetailPage() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-        <ClassDetail cls={cls} />
+        <ClassDetail cls={cls} featuresOpen />
       </div>
 
       <SubclassesSection cls={cls} subclasses={subclasses} />

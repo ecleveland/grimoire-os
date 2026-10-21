@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { CancelledError, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import Badge from '@/components/Badge';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import FeatureChips from '@/components/FeatureChips';
+import FeatureList from '@/components/FeatureList';
 import Skeleton from '@/components/Skeleton';
 import SubclassForm from '@/components/SubclassForm';
 import { ApiError, apiFetch } from '@/lib/api';
@@ -55,8 +55,6 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
   const [submitting, setSubmitting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState<SrdSubclass | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  // The fragment already scrolled to, so a re-render does not scroll again.
-  const scrolledToHash = useRef<string | null>(null);
   // Rows whose card can't be trusted yet: a DELETE in flight, or a save that has
   // landed while the refetch carrying its new values is still out. Their Edit and
   // Delete stay withdrawn until that settles, so nothing re-deletes a row or seeds
@@ -69,29 +67,6 @@ export default function SubclassesSection({ cls, subclasses }: SubclassesSection
       const at = prev.indexOf(id);
       return at === -1 ? prev : [...prev.slice(0, at), ...prev.slice(at + 1)];
     });
-
-  // A feature search hit links to a subclass card as
-  // /srd/classes/<classId>#<subclassId>. The class is fetched after the
-  // navigation, so the browser resolves the fragment against a page that still
-  // reads "Loading class…" and scrolls nowhere. The section does it once the
-  // rows are in the DOM.
-  //
-  // Once per hash: the rows arrive as a fresh array after every write, and a
-  // second scroll would yank the reader back from wherever they are.
-  useEffect(() => {
-    // A stray percent sign in the URL makes decoding throw, and the fragment is
-    // decoration: a bad one costs the reader the scroll, not the page.
-    let hash: string;
-    try {
-      hash = decodeURIComponent(window.location.hash.replace(/^#/, ''));
-    } catch {
-      return;
-    }
-    if (!hash || hash === scrolledToHash.current) return;
-    if (!subclasses.some(sc => sc.id === hash)) return;
-    scrolledToHash.current = hash;
-    document.getElementById(hash)?.scrollIntoView({ block: 'start' });
-  }, [subclasses]);
 
   // Same hint CreateEntityLink reads: while the session hydrates, a browser that
   // was signed in keeps the section's place instead of popping it in afterwards.
@@ -358,7 +333,7 @@ function SubclassCard({ sc, canManage, onEdit, onDelete }: SubclassCardProps) {
         {sc.description && (
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{sc.description}</p>
         )}
-        <FeatureChips features={features} className="mt-2" />
+        <FeatureList features={features} defaultOpen className="mt-2" />
       </div>
       {canManage && (
         <div className="flex items-center gap-2 shrink-0">
