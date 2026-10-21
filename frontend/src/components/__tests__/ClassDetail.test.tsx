@@ -29,10 +29,10 @@ function makeClass(over: Partial<SrdClass> = {}): SrdClass {
   };
 }
 
-function renderDetail(cls: SrdClass) {
+function renderDetail(cls: SrdClass, featuresOpen?: boolean) {
   return render(
     <PrintTrayProvider>
-      <ClassDetail cls={cls} />
+      <ClassDetail cls={cls} featuresOpen={featuresOpen} />
     </PrintTrayProvider>
   );
 }
@@ -116,7 +116,7 @@ describe('ClassDetail', () => {
 
   it('renders features with an id as print toggles', async () => {
     const user = userEvent.setup();
-    renderDetail(makeClass());
+    renderDetail(makeClass(), true);
 
     expect(
       screen.getByRole('button', { name: 'Add Second Wind to print set' })
@@ -128,7 +128,53 @@ describe('ClassDetail', () => {
     ]);
   });
 
-  it('renders a feature without an id as a plain non-interactive chip', () => {
+  it('lists the features open with their level and description when featuresOpen is set', () => {
+    renderDetail(makeClass(), true);
+
+    expect(screen.queryByRole('button', { name: /^Show \d+ features?$/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Regain hit points.')).toBeVisible();
+    expect(screen.getByText('Level 1')).toBeVisible();
+    expect(screen.getByText('Extra action.')).toBeVisible();
+    expect(screen.getByText('Level 2')).toBeVisible();
+  });
+
+  it('collapses the features behind a toggle by default', async () => {
+    const user = userEvent.setup();
+    renderDetail(makeClass());
+
+    expect(screen.getByText('Regain hit points.')).not.toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Show 2 features', expanded: false }));
+
+    expect(screen.getByRole('button', { name: 'Hide features' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(screen.getByText('Regain hit points.')).toBeVisible();
+  });
+
+  it('orders the features by level', () => {
+    renderDetail(
+      makeClass({
+        features: [
+          { id: 'cf-action-surge', name: 'Action Surge', level: 2 },
+          { id: 'cf-second-wind', name: 'Second Wind', level: 1 },
+        ],
+      }),
+      true
+    );
+
+    const names = screen.getAllByText(/^(Second Wind|Action Surge)$/).map(el => el.textContent);
+    expect(names).toEqual(['Second Wind', 'Action Surge']);
+  });
+
+  it('anchors each feature row on its id', () => {
+    renderDetail(makeClass(), true);
+
+    expect(document.getElementById('cf-second-wind')).toHaveTextContent('Second Wind');
+    expect(document.getElementById('cf-action-surge')).toHaveTextContent('Action Surge');
+  });
+
+  it('renders a feature without an id as a plain non-interactive row', () => {
     renderDetail(makeClass({ features: [{ name: 'Legacy Feature', level: 1 }] }));
 
     expect(screen.getByText('Legacy Feature')).toBeInTheDocument();

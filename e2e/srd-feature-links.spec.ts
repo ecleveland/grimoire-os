@@ -75,6 +75,57 @@ test.describe('Feature search links (VEG-558)', () => {
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   });
 
+  // A class feature's link names the feature's own row (VEG-618), which the
+  // class page renders inside the class card under the header and above the
+  // subclasses. The fragment resolves against a loading page here too.
+  test('a class feature hit scrolls to its row on the class page', async ({ page }) => {
+    // Mystic Arcanum, not Pact Magic. Pact Magic is a level 1 Warlock row, so
+    // it sits just under the proficiencies and can already be on screen at
+    // scroll 0. Mystic Arcanum is the fifth row, at level 11, below the fold.
+    await searchFeatures(page, 'class', 'Mystic Arcanum');
+
+    const hit = page.getByRole('button', { name: /^Mystic Arcanum/ }).first();
+    await expect(hit).toBeVisible({ timeout: 10_000 });
+    await hit.click();
+
+    await page.getByRole('link', { name: /^Open .+ Class →$/ }).click();
+
+    await expect(page).toHaveURL(/\/srd\/classes\/[^/#]+#.+$/);
+    const fragment = new URL(page.url()).hash.slice(1);
+    expect(fragment, 'the link carried no feature fragment').not.toBe('');
+
+    const row = page.locator(`[id="${fragment}"]`);
+    await expect(row).toBeInViewport({ timeout: 10_000 });
+    await expect(row).toContainText('Mystic Arcanum');
+    // The row being on screen only proves the page scrolled if the page moved.
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  });
+
+  test("the class page shows a feature's text without a click", async ({ page }) => {
+    const list = await page.request.get(`${BACKEND}/api/srd/classes`);
+    expect(list.ok(), `classes list failed: ${list.status()}`).toBeTruthy();
+    const classes = (await list.json()) as { id: string; name: string }[];
+    const warlock = classes.find(c => c.name === 'Warlock');
+    expect(warlock, 'Warlock is not seeded').toBeDefined();
+
+    // Read the prose off the API, so a reworded seed description cannot break
+    // the test.
+    const detail = await page.request.get(`${BACKEND}/api/srd/classes/${warlock!.id}`);
+    expect(detail.ok(), `Warlock detail failed: ${detail.status()}`).toBeTruthy();
+    const { features } = (await detail.json()) as {
+      features: { name: string; description: string }[];
+    };
+    const pactMagic = features.find(f => f.name === 'Pact Magic');
+    expect(pactMagic, 'Warlock has no Pact Magic feature').toBeDefined();
+
+    await page.goto(`/srd/classes/${warlock!.id}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Warlock' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await expect(page.getByText(pactMagic!.description.slice(0, 40))).toBeVisible();
+  });
+
   // Seeded backgrounds carry no feature rows and the create DTO rejects
   // features, so no search hit reaches a background page today. Visiting one
   // directly is the coverage until a background can own a feature.

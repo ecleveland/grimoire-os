@@ -1,12 +1,19 @@
-import FeatureChips from '@/components/FeatureChips';
+import FeatureList from '@/components/FeatureList';
 import type { SrdClass } from '@/lib/types';
 
 /**
  * Expanded class view shared by the class list cards and the class page:
- * description, proficiencies, skill choices, and a chip per feature that adds it
- * to the print set.
+ * description, proficiencies, skill choices, and each feature with its level,
+ * full text and a print toggle. The class page lists the features open; a list
+ * card keeps them behind a toggle so the card stays short.
  */
-export default function ClassDetail({ cls }: { cls: SrdClass }) {
+export default function ClassDetail({
+  cls,
+  featuresOpen = false,
+}: {
+  cls: SrdClass;
+  featuresOpen?: boolean;
+}) {
   // A row can reach here without its features array when the API breaks its
   // contract, and losing the whole card over that hides the rest of the class.
   const features = cls.features ?? [];
@@ -58,7 +65,7 @@ export default function ClassDetail({ cls }: { cls: SrdClass }) {
       {features.length > 0 && (
         <div>
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">Features</h3>
-          <FeatureChips features={features} className="mt-1" />
+          <FeatureList features={features} defaultOpen={featuresOpen} className="mt-1" />
         </div>
       )}
     </div>

@@ -133,6 +133,9 @@ test.describe('SRD print golden path (VEG-269)', () => {
     const className = (await page.getByRole('heading', { level: 2 }).first().textContent())?.trim();
     expect(className, 'expected at least one class to be listed').toBeTruthy();
     await firstClassToggle.click();
+    // A list card keeps its feature rows behind a toggle (VEG-618), so the
+    // print toggles are not reachable until it is opened.
+    await page.getByRole('button', { name: /^Show \d+ features?$/ }).click();
     const addFeature = page.getByRole('button', { name: addToSetButton }).first();
     await expect(addFeature).toBeVisible({ timeout: 10_000 });
     const featureLabel = await addFeature.getAttribute('aria-label');
