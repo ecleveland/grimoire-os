@@ -179,10 +179,14 @@ test.describe('Homebrew class pages (VEG-508)', () => {
     await result.click();
     await page.getByRole('link', { name: `Open ${className} Class →`, exact: true }).click();
 
-    await expect(page).toHaveURL(new RegExp(`/srd/classes/${id}$`));
+    // The link anchors on the feature's own row (VEG-618), so the URL carries
+    // the feature id as its fragment.
+    await expect(page).toHaveURL(new RegExp(`/srd/classes/${id}#.+$`));
     await expect(page.getByRole('heading', { level: 1, name: exact(className) })).toBeVisible({
       timeout: 10_000,
     });
+    const fragment = new URL(page.url()).hash.slice(1);
+    await expect(page.locator(`[id="${fragment}"]`)).toContainText(featureName);
   });
 
   test('a homebrew class is found by the Classes search kind, and not by anyone else [VEG-510]', async ({
