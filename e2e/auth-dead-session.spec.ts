@@ -49,8 +49,9 @@ test.describe('Dead session recovery (VEG-419)', () => {
     await expect(signIn).toBeVisible();
     await expect(signIn).toBeEnabled();
 
-    // The stale access cookie must have been cleared server-side via the
-    // logout cleanup — that's what stops the middleware bouncing /login back to /.
+    // The stale access cookie must have been cleared server-side by the logout
+    // cleanup. The client also expires session_present itself, and that is what
+    // stops the middleware bouncing /login back to /.
     await expect
       .poll(async () => (await page.context().cookies()).some(c => c.name === 'access_token'), {
         timeout: 10_000,
@@ -63,6 +64,51 @@ test.describe('Dead session recovery (VEG-419)', () => {
     await expect(signIn).toBeEnabled();
 
     // ...and we never bounced back onto a protected route after reaching /login.
+    const loginIndex = visited.indexOf('/login');
+    expect(loginIndex, 'never reached /login').toBeGreaterThanOrEqual(0);
+    const afterLogin = visited.slice(loginIndex + 1);
+    expect(afterLogin, `oscillated after /login: ${visited.join(' -> ')}`).not.toContain('/');
+  });
+
+  test('a dead session still settles on /login when the logout request fails', async ({ page }) => {
+    await registerPlayer(page);
+
+    const cookies = await page.context().cookies();
+    const access = cookies.find(c => c.name === 'access_token');
+    const sessionPresent = cookies.find(c => c.name === 'session_present');
+    expect(access, 'access_token cookie missing').toBeDefined();
+    expect(sessionPresent, 'session_present cookie missing').toBeDefined();
+
+    await page.context().clearCookies();
+    await page.context().addCookies([{ ...access!, value: 'dead.invalid.token' }, sessionPresent!]);
+
+    // The anonymous per-IP throttle can reject the logout, so the server never
+    // clears session_present. The client must expire it itself, or the
+    // middleware sends /login straight back to /.
+    await page.route('**/api/auth/logout', route => route.fulfill({ status: 429, body: '' }));
+
+    const visited: string[] = [];
+    page.on('framenavigated', frame => {
+      if (frame === page.mainFrame()) visited.push(new URL(frame.url()).pathname);
+    });
+
+    await page.goto('/');
+
+    await expect(page).toHaveURL(/\/login$/, { timeout: 10_000 });
+    const signIn = page.getByRole('button', { name: 'Sign in' });
+    await expect(signIn).toBeVisible();
+    await expect(signIn).toBeEnabled();
+
+    await expect
+      .poll(async () => (await page.context().cookies()).some(c => c.name === 'session_present'), {
+        timeout: 10_000,
+      })
+      .toBe(false);
+
+    await page.waitForTimeout(1_500);
+    await expect(page).toHaveURL(/\/login$/);
+    await expect(signIn).toBeEnabled();
+
     const loginIndex = visited.indexOf('/login');
     expect(loginIndex, 'never reached /login').toBeGreaterThanOrEqual(0);
     const afterLogin = visited.slice(loginIndex + 1);

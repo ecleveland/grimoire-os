@@ -6,11 +6,19 @@ import LoginPage from '../page';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockLogin = vi.fn();
+const mockReplace = vi.fn();
+let mockIsAuthenticated = false;
+let mockIsLoading = false;
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => ({
     login: mockLogin,
+    isAuthenticated: mockIsAuthenticated,
+    isLoading: mockIsLoading,
   }),
+}));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mockReplace, push: vi.fn() }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -27,7 +35,45 @@ function getInput(labelText: RegExp): HTMLInputElement {
 describe('LoginPage', () => {
   beforeEach(() => {
     mockLogin.mockReset();
+    mockReplace.mockReset();
+    mockIsAuthenticated = false;
+    mockIsLoading = false;
     window.history.replaceState({}, '', '/login');
+  });
+
+  describe('signed-in visitor', () => {
+    it('renders the form and stays put when not signed in', () => {
+      render(<LoginPage />);
+      expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('waits while the session is still loading', () => {
+      mockIsLoading = true;
+      mockIsAuthenticated = true;
+      render(<LoginPage />);
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('replaces the page with next once signed in', () => {
+      mockIsAuthenticated = true;
+      window.history.replaceState({}, '', '/login?next=%2Fcampaigns%2F1');
+      render(<LoginPage />);
+      expect(mockReplace).toHaveBeenCalledWith('/campaigns/1');
+    });
+
+    it('replaces the page with / when there is no next', () => {
+      mockIsAuthenticated = true;
+      render(<LoginPage />);
+      expect(mockReplace).toHaveBeenCalledWith('/');
+    });
+
+    it('replaces the page with / when next leaves the site', () => {
+      mockIsAuthenticated = true;
+      window.history.replaceState({}, '', '/login?next=https%3A%2F%2Fevil.com');
+      render(<LoginPage />);
+      expect(mockReplace).toHaveBeenCalledWith('/');
+    });
   });
 
   describe('rendering', () => {

@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { middleware } from '@/middleware';
 
 const ORIGIN = 'http://localhost:3000';
-const AUTHED = { headers: { cookie: 'access_token=abc' } };
+const AUTHED = { headers: { cookie: 'session_present=1' } };
 
 function run(path: string, init?: typeof AUTHED) {
   return middleware(new NextRequest(`${ORIGIN}${path}`, init));
@@ -63,6 +63,33 @@ describe('middleware', () => {
     it('lets a protected page through', () => {
       const res = run('/campaigns/1', AUTHED);
       expect(res.headers.get('location')).toBeNull();
+    });
+  });
+
+  describe('session cookie', () => {
+    it('lets a protected page through on session_present alone, with no access cookie', () => {
+      const res = run('/campaigns/1', { headers: { cookie: 'session_present=1' } });
+      expect(res.headers.get('location')).toBeNull();
+    });
+
+    it('treats an access cookie without session_present as signed out', () => {
+      const res = run('/campaigns/1', { headers: { cookie: 'access_token=abc' } });
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(`${ORIGIN}/login?next=%2Fcampaigns%2F1`);
+    });
+
+    it('treats an empty session_present value as signed out', () => {
+      const res = run('/campaigns/1', { headers: { cookie: 'session_present=' } });
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(`${ORIGIN}/login?next=%2Fcampaigns%2F1`);
+    });
+
+    it('sends /login on to next when only session_present is set', () => {
+      const res = run('/login?next=%2Fcampaigns%2F1', {
+        headers: { cookie: 'session_present=1' },
+      });
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(`${ORIGIN}/campaigns/1`);
     });
   });
 });

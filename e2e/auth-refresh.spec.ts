@@ -61,6 +61,46 @@ test.describe('Refresh token flow', () => {
       .toBe(true);
   });
 
+  test('a private page loads after the access cookie expires, without a trip through /login', async ({
+    page,
+  }) => {
+    await registerPlayer(page);
+
+    // The browser drops the 15-minute access cookie while session_present and
+    // the refresh token live on. The middleware must let the navigation through
+    // so the client can refresh, rather than bouncing it to /login.
+    const allCookies = await page.context().cookies();
+    const refreshOnly = allCookies.filter(c => c.name !== 'access_token');
+    await page.context().clearCookies();
+    await page.context().addCookies(refreshOnly);
+
+    await page.goto('/campaigns');
+
+    await expect(page).toHaveURL(/\/campaigns$/);
+    await expect(page.getByRole('link', { name: 'Refresh User' })).toBeVisible({ timeout: 10_000 });
+
+    await expect
+      .poll(async () => (await page.context().cookies()).some(c => c.name === 'access_token'), {
+        timeout: 10_000,
+      })
+      .toBe(true);
+  });
+
+  test('/login with a live session but no access cookie bounces to the app', async ({ page }) => {
+    await registerPlayer(page);
+
+    const allCookies = await page.context().cookies();
+    const refreshOnly = allCookies.filter(c => c.name !== 'access_token');
+    await page.context().clearCookies();
+    await page.context().addCookies(refreshOnly);
+
+    await page.goto('/login');
+
+    // With no next param the middleware sends a signed-in visit to /login on to /.
+    await expect(page).toHaveURL(/\/$/, { timeout: 10_000 });
+    await expect(page.getByRole('link', { name: 'Refresh User' })).toBeVisible({ timeout: 10_000 });
+  });
+
   test('two tabs loading at once after the access cookie expires both stay signed in and share one refresh', async ({
     page,
   }) => {
