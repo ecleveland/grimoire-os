@@ -283,6 +283,30 @@ describe('SubclassesSection', () => {
       expect(screen.queryByText('A patient marksman.')).not.toBeInTheDocument();
     });
 
+    // SRD subclass descriptions are markdown: a tagline, flavor paragraphs and,
+    // for some oaths, a bullet list of tenets.
+    it('renders the description as markdown paragraphs and a list', () => {
+      renderSection([
+        makeSubclass({
+          description: 'Tagline line\n\nFirst paragraph.\n\n- First tenet\n- Second tenet',
+          features: [],
+        }),
+      ]);
+
+      const tagline = within(cardFor('Deadeye')).getByText('Tagline line');
+      expect(tagline.tagName).toBe('P');
+      const body = tagline.parentElement as HTMLElement;
+      const paragraphs = body.querySelectorAll('p');
+      expect(paragraphs).toHaveLength(2);
+      expect(paragraphs[0]).toHaveTextContent(/^Tagline line$/);
+      expect(paragraphs[1]).toHaveTextContent(/^First paragraph\.$/);
+      const lists = body.querySelectorAll('ul');
+      expect(lists).toHaveLength(1);
+      const items = within(lists[0]).getAllByRole('listitem');
+      expect(items.map(li => li.textContent)).toEqual(['First tenet', 'Second tenet']);
+      expect(body.textContent).not.toContain('- ');
+    });
+
     it('leaves an SRD subclass unbadged', () => {
       renderSection([
         makeSubclass({ contentSource: 'srd', createdById: null, source: 'SRD 5.2.1' }),
