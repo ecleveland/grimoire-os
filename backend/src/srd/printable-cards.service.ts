@@ -71,9 +71,27 @@ function dropGfmTables(text: string): string {
   return kept.join('\n');
 }
 
-/** Flatten markdown a card would otherwise print verbatim into compact plain text. */
+/** A line that opens an inlined option list, as class features such as Eldritch Invocations carry. */
+const OPTIONS_HEADING = /^\s*\*\*Options\*\*\s*$/;
+
+/**
+ * Cut a feature's inlined option list, which runs far past the ten lines a card
+ * holds, and drop any leftover line that starts with a pipe. Table rows without
+ * a delimiter row get past dropGfmTables, and a card has no use for either.
+ */
+function dropOptionsAndPipeLines(text: string): string {
+  const lines = text.split('\n');
+  const optionsAt = lines.findIndex(line => OPTIONS_HEADING.test(line));
+  const prose = optionsAt === -1 ? lines : lines.slice(0, optionsAt);
+  return prose.filter(line => !line.trimStart().startsWith('|')).join('\n');
+}
+
+/**
+ * Flatten markdown a card would otherwise print verbatim into compact plain
+ * text. Paragraph breaks become a single space through the whitespace collapse.
+ */
 function flattenCardText(text: string): string {
-  return dropGfmTables(text)
+  return dropOptionsAndPipeLines(dropGfmTables(text))
     .replace(/^\s*[-*•]\s+/gm, '') // bullet markers — items read as plain sentences
     .replace(/\*\*([^*\n]+)\*\*/g, '$1') // **bold**
     .replace(/\*([^*\n]+)\*/g, '$1') // *italic*

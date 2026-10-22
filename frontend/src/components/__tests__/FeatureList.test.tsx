@@ -1,9 +1,23 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FeatureList from '@/components/FeatureList';
 import { PrintTrayProvider } from '@/lib/print-tray-context';
 import type { ClassFeature } from '@/lib/types';
+
+const MARKDOWN =
+  '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+
+/** The MARKDOWN description rendered as markup inside `scope`, with no literal syntax left. */
+function expectRenderedMarkdown(scope: HTMLElement) {
+  expect(within(scope).getByText('Cantrips.', { selector: 'strong' })).toBeInTheDocument();
+  expect(scope.querySelectorAll('p')).toHaveLength(2);
+  expect(scope.querySelector('p p')).toBeNull();
+  expect(within(scope).getByRole('table')).toBeInTheDocument();
+  expect(within(scope).getByRole('cell', { name: '2' })).toBeInTheDocument();
+  expect(scope.textContent).not.toContain('**');
+  expect(scope.textContent).not.toContain('|');
+}
 
 function renderList(
   features: ClassFeature[],
@@ -55,10 +69,16 @@ describe('FeatureList', () => {
     expect(screen.getByText('You fight with primal ferocity.')).toBeInTheDocument();
   });
 
-  it('keeps the line breaks an author typed into a description', () => {
+  it('reflows a single line break in a description as a space, as markdown does', () => {
     renderList([{ id: 'cf-rage', name: 'Rage', level: 1, description: 'First line.\nSecond.' }]);
 
-    expect(screen.getByText(/First line\./)).toHaveClass('whitespace-pre-line');
+    expect(screen.getByText('First line. Second.')).toBeInTheDocument();
+  });
+
+  it('renders a markdown description as bold run-in heads, paragraphs and a table', () => {
+    renderList([{ id: 'cf-spellcasting', name: 'Spellcasting', level: 1, description: MARKDOWN }]);
+
+    expectRenderedMarkdown(document.getElementById('cf-spellcasting')!);
   });
 
   it('renders no description paragraph for a row without one', () => {

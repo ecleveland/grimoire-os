@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import Badge from '@/components/Badge';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import FeatureList from '@/components/FeatureList';
+import Markdown from '@/components/Markdown';
 import Skeleton from '@/components/Skeleton';
 import SubclassForm from '@/components/SubclassForm';
 import { ApiError, apiFetch } from '@/lib/api';
@@ -330,9 +331,7 @@ function SubclassCard({ sc, canManage, onEdit, onDelete }: SubclassCardProps) {
             </Badge>
           )}
         </h3>
-        {sc.description && (
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{sc.description}</p>
-        )}
+        {sc.description && <Markdown className="mt-1">{sc.description}</Markdown>}
         <FeatureList features={features} defaultOpen className="mt-2" />
       </div>
       {canManage && (

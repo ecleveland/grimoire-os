@@ -32,7 +32,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
     // Author a homebrew "Fighter" so the name collides with the SRD Fighter.
     // Both rows now ride this owner's /srd/classes catalog. The d12 hit die and
     // the level-6 feature are the observable difference from the SRD row (d10,
-    // "Extra Attack") — they name which row the sheet actually resolved.
+    // "Ability Score Improvement"). They name which row the sheet resolved.
     const created = await page.request.post(`${BACKEND}/api/srd/classes`, {
       data: {
         name: 'Fighter',
@@ -89,9 +89,12 @@ test.describe('character class id round-trip (VEG-524)', () => {
     await section.getByRole('button', { name: 'Level Up' }).click();
     const dialog = page.getByRole('dialog');
 
-    // The homebrew feature is offered and the SRD one is not: the id won.
+    // The homebrew feature is offered and the SRD one is not: the id won. The
+    // SRD Fighter's level-6 grant is Ability Score Improvement.
     await expect(dialog.getByRole('checkbox', { name: /blood frenzy/i })).toBeVisible();
-    await expect(dialog.getByRole('checkbox', { name: /extra attack/i })).toHaveCount(0);
+    await expect(dialog.getByRole('checkbox', { name: /ability score improvement/i })).toHaveCount(
+      0
+    );
 
     // And the hit die follows it. d12 average is 7, +2 CON = +9 HP; resolving to
     // the SRD Fighter would read d10 → +8. This is the number that gets written
@@ -190,9 +193,9 @@ test.describe('character class id round-trip (VEG-524)', () => {
 
     // No classId, and the case deliberately does not match the catalog's
     // "Fighter". Before VEG-528 this row kept classId null forever.
-    // Level 8, so the level-up targets 9 — the SRD Fighter's Indomitable. The
-    // class has no level-6 grant at all (Extra Attack is at 5), so a 5 → 6
-    // transition would prove nothing about feature resolution either way.
+    // Level 8, so the level-up targets 9, where the SRD Fighter gains Indomitable
+    // and Tactical Master. Indomitable is a name only the Fighter grants, so its
+    // checkbox proves the dialog read the SRD Fighter's features.
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Lowercase Fighter',

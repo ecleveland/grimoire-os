@@ -5,8 +5,12 @@ import {
   validateMagicItemData,
   validateSpeciesData,
   validateEquipmentData,
+  validateClassData,
+  validateSubclassData,
   loadEquipmentFromJson,
   loadMagicItemsFromJson,
+  loadClassFeaturesFromJson,
+  loadSubclassesFromJson,
 } from './srd-json.loader';
 import { assertUniqueSeedNames } from './seed-guards';
 
@@ -204,6 +208,72 @@ describe('SRD PDF-extracted data integrity', () => {
 
     it('passes the free-text + table-reference guards with no anomalies', () => {
       expect(() => validateSpeciesData(species)).not.toThrow();
+    });
+  });
+
+  describe('classes.json and subclasses.json (SRD 5.2.1 class chapter)', () => {
+    const classes = read<{ classes: Parameters<typeof validateClassData>[0] }>(
+      'classes.json'
+    ).classes;
+    const subclasses = read<{ subclasses: Parameters<typeof validateSubclassData>[0] }>(
+      'subclasses.json'
+    ).subclasses;
+    const featuresOf = (className: string) => {
+      const cls = classes.find(c => c.name === className);
+      if (!cls) throw new Error(`classes.json has no ${className}`);
+      return cls.features;
+    };
+    const feature = (className: string, name: string, level: number) =>
+      featuresOf(className).find(f => f.name === name && f.level === level);
+
+    it('contains 12 classes, 223 class features and 12 subclasses', () => {
+      expect(classes).toHaveLength(12);
+      expect(classes.reduce((n, c) => n + c.features.length, 0)).toBe(223);
+      expect(subclasses).toHaveLength(12);
+    });
+
+    it('passes the class validator', () => {
+      expect(() => validateClassData(classes)).not.toThrow();
+    });
+
+    it('passes the subclass validator', () => {
+      expect(() => validateSubclassData(subclasses)).not.toThrow();
+    });
+
+    it('keeps the Eldritch Invocations rules blocks on the level 1 Warlock row', () => {
+      const invocations = feature('Warlock', 'Eldritch Invocations', 1);
+      expect(invocations?.description).toContain('**Prerequisites.**');
+      expect(invocations?.description).toContain('**Replacing and Gaining Invocations.**');
+    });
+
+    it('lists Fighter Weapon Mastery at 1 and the Fighter-only Ability Score Improvement at 6', () => {
+      expect(feature('Fighter', 'Weapon Mastery', 1)).toBeDefined();
+      expect(feature('Fighter', 'Ability Score Improvement', 6)).toBeDefined();
+    });
+
+    it('lists Rogue Cunning Strike at 5', () => {
+      expect(feature('Rogue', 'Cunning Strike', 5)).toBeDefined();
+    });
+
+    it('carries the Known Forms table in Druid Wild Shape', () => {
+      const wildShape = featuresOf('Druid').find(f => f.name === 'Wild Shape');
+      expect(wildShape?.description).toContain('| Druid Level | Known Forms |');
+    });
+
+    it('lists Mystic Arcanum at Warlock levels 11, 13, 15 and 17', () => {
+      const levels = featuresOf('Warlock')
+        .filter(f => f.name === 'Mystic Arcanum')
+        .map(f => f.level)
+        .sort((a, b) => a - b);
+      expect(levels).toEqual([11, 13, 15, 17]);
+    });
+
+    it('loads through the seed loaders with the same counts', () => {
+      const byClass = loadClassFeaturesFromJson();
+      expect(byClass.size).toBe(12);
+      expect([...byClass.values()].reduce((n, c) => n + c.features.length, 0)).toBe(223);
+      expect([...byClass.values()].every(c => c.subclassLevel === 3)).toBe(true);
+      expect(loadSubclassesFromJson()).toHaveLength(12);
     });
   });
 });

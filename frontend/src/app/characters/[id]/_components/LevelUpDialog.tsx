@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Character, DieType, HitDieType, SrdClass } from '@/lib/types';
 import { asHitDie, DEFAULT_HIT_DIE, HIT_DIE_TYPES } from '@/lib/types';
+import Markdown from '@/components/Markdown';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
 import { resolveClass } from '@/lib/class-selection';
@@ -305,16 +306,12 @@ export default function LevelUpDialog({
                   onChange={() => toggleFeature(characterFeatureIdentity(feature))}
                   className="mt-0.5"
                 />
-                <span>
+                <div>
                   <span className="font-medium text-gray-900 dark:text-gray-100">
                     {feature.name}
                   </span>
-                  {feature.description && (
-                    <span className="block text-gray-500 dark:text-gray-400">
-                      {feature.description}
-                    </span>
-                  )}
-                </span>
+                  {feature.description && <Markdown>{feature.description}</Markdown>}
+                </div>
               </label>
             ))}
           </div>

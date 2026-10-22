@@ -17,6 +17,20 @@ import { SEARCH_KINDS } from '@grimoire-os/shared';
 
 const mockApiFetch = vi.fn();
 
+const MARKDOWN =
+  '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+
+/** The MARKDOWN description rendered as markup inside `scope`, with no literal syntax left. */
+function expectRenderedMarkdown(scope: HTMLElement) {
+  expect(within(scope).getByText('Cantrips.', { selector: 'strong' })).toBeInTheDocument();
+  expect(scope.querySelectorAll('p')).toHaveLength(2);
+  expect(scope.querySelector('p p')).toBeNull();
+  expect(within(scope).getByRole('table')).toBeInTheDocument();
+  expect(within(scope).getByRole('cell', { name: '2' })).toBeInTheDocument();
+  expect(scope.textContent).not.toContain('**');
+  expect(scope.textContent).not.toContain('|');
+}
+
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
@@ -382,6 +396,20 @@ describe('SrdSearchPage', () => {
       expect(screen.getByText(/Once per turn, deal extra damage/)).toBeInTheDocument();
       const drilldown = screen.getByRole('link', { name: /Open Rogue/i });
       expect(drilldown).toHaveAttribute('href', '/srd/classes/cls-1#cf-1');
+    });
+
+    it('renders a markdown feature description as bold run-in heads, paragraphs and a table', async () => {
+      mockApiFetch.mockResolvedValue(
+        paginated([{ kind: 'feature', data: { ...sneakAttackFeature, description: MARKDOWN } }])
+      );
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Sneak Attack')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Sneak Attack'));
+
+      const drilldown = screen.getByRole('link', { name: /Open Rogue/i });
+      expectRenderedMarkdown(drilldown.parentElement!);
     });
 
     // A subclass has no page of its own, so the drilldown puts the class id in

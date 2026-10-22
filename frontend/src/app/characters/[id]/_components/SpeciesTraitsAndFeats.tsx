@@ -1,3 +1,4 @@
+import Markdown from '@/components/Markdown';
 import type { Character } from '@/lib/types';
 import { featureRenderKey } from '@/lib/character-features';
 
@@ -41,11 +42,7 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feature.name}
               </span>
-              {feature.description && (
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  {feature.description}
-                </p>
-              )}
+              {feature.description && <Markdown className="mt-1">{feature.description}</Markdown>}
             </div>
           ))}
         </div>
@@ -73,11 +70,7 @@ export default function SpeciesTraitsAndFeats({ character }: SpeciesTraitsAndFea
               <span className="text-sm font-bold text-gray-900 dark:text-gray-100">
                 {feature.name}
               </span>
-              {feature.description && (
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  {feature.description}
-                </p>
-              )}
+              {feature.description && <Markdown className="mt-1">{feature.description}</Markdown>}
             </div>
           ))}
         </div>

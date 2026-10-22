@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { SeedService } from './seed.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { Prisma } from '../generated/prisma/client';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
 import { srdBackgrounds } from './data/backgrounds';
 import { srdSubclasses } from './data/subclasses';
@@ -15,6 +16,8 @@ jest.mock('./srd-json.loader', () => ({
   loadMagicItemsFromJson: jest.fn(),
   loadEquipmentFromJson: jest.fn(),
   loadSpeciesAsRacesFromJson: jest.fn(),
+  loadClassFeaturesFromJson: jest.fn(),
+  loadSubclassesFromJson: jest.fn(),
 }));
 
 import {
@@ -23,7 +26,10 @@ import {
   loadMagicItemsFromJson,
   loadEquipmentFromJson,
   loadSpeciesAsRacesFromJson,
+  loadClassFeaturesFromJson,
+  loadSubclassesFromJson,
 } from './srd-json.loader';
+import { srdClasses } from './data/classes';
 
 const mockLoadSpells = loadSpellsFromJson as jest.MockedFunction<typeof loadSpellsFromJson>;
 const mockLoadMonsters = loadMonstersFromJson as jest.MockedFunction<typeof loadMonstersFromJson>;
@@ -36,6 +42,48 @@ const mockLoadEquipment = loadEquipmentFromJson as jest.MockedFunction<
 const mockLoadSpecies = loadSpeciesAsRacesFromJson as jest.MockedFunction<
   typeof loadSpeciesAsRacesFromJson
 >;
+const mockLoadClassFeatures = loadClassFeaturesFromJson as jest.MockedFunction<
+  typeof loadClassFeaturesFromJson
+>;
+const mockLoadSubclasses = loadSubclassesFromJson as jest.MockedFunction<
+  typeof loadSubclassesFromJson
+>;
+
+// classes.json stand-in: one feature per class, plus a recurring name on the
+// Warlock so the (name, level) key is what tells rows apart.
+const classFeaturesFixture = () =>
+  new Map(
+    srdClasses.map(c => [
+      c.name,
+      {
+        subclassLevel: 3,
+        features:
+          c.name === 'Warlock'
+            ? [
+                { name: 'Pact Magic', level: 1, description: 'You cast pact spells.' },
+                { name: 'Mystic Arcanum', level: 11, description: 'A level 6 spell.' },
+                { name: 'Mystic Arcanum', level: 13, description: 'A level 7 spell.' },
+              ]
+            : [{ name: `${c.name} Gift`, level: 1, description: 'You gain a gift.' }],
+      },
+    ])
+  );
+
+// subclasses.json stand-in: two SRD 5.2.1 subclasses.
+const subclassesFixture = () => [
+  {
+    name: 'Champion',
+    className: 'Fighter',
+    description: 'Raw physical power.',
+    features: [{ name: 'Improved Critical', level: 3, description: 'You crit on a 19.' }],
+  },
+  {
+    name: 'Fiend Patron',
+    className: 'Warlock',
+    description: 'A pact with a fiend.',
+    features: [{ name: 'Dark One’s Blessing', level: 3, description: 'You gain temp HP.' }],
+  },
+];
 
 describe('SeedService', () => {
   let service: SeedService;
@@ -93,8 +141,11 @@ describe('SeedService', () => {
     prisma.condition.createMany.mockResolvedValue({ count: 0 });
     prisma.skill.createMany.mockResolvedValue({ count: 0 });
     prisma.language.createMany.mockResolvedValue({ count: 0 });
-    prisma.classFeature.createMany.mockResolvedValue({ count: 0 });
-    prisma.subclassFeature.createMany.mockResolvedValue({ count: 0 });
+    prisma.classFeature.upsert.mockResolvedValue({});
+    prisma.classFeature.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.subclassFeature.upsert.mockResolvedValue({});
+    prisma.subclassFeature.deleteMany.mockResolvedValue({ count: 0 });
+    prisma.subclass.deleteMany.mockResolvedValue({ count: 0 });
     prisma.raceTrait.createMany.mockResolvedValue({ count: 0 });
     prisma.raceTrait.upsert.mockResolvedValue({});
     prisma.backgroundFeature.createMany.mockResolvedValue({ count: 0 });
@@ -279,6 +330,8 @@ describe('SeedService', () => {
         sizeDescription: 'about 5 feet tall',
       },
     ]);
+    mockLoadClassFeatures.mockReturnValue(classFeaturesFixture());
+    mockLoadSubclasses.mockReturnValue(subclassesFixture());
   });
 
   afterEach(() => {
@@ -660,22 +713,225 @@ describe('SeedService', () => {
 
   // ── Normalized feature tables ──────────────────────────
 
-  it('seeds class features into class_features with FK to parent class', async () => {
-    await service.seed();
+  // ── Class and subclass features: upsert plus retire ────
+  //
+  // createMany(skipDuplicates) left an edited description stale on every seeded
+  // database and never removed a feature the source dropped. Each row now
+  // upserts on its (parent, name, level) key, and SRD rows absent from the
+  // source are deleted, scoped to the parents the srd partition resolved.
+  describe('class features from classes.json', () => {
+    it('upserts every JSON row on classId_name_level and updates only the description', async () => {
+      await service.seed();
 
-    expect(prisma.classFeature.createMany).toHaveBeenCalled();
-    const call = prisma.classFeature.createMany.mock.calls[0][0];
-    expect(call).toHaveProperty('skipDuplicates', true);
-    expect(Array.isArray(call.data)).toBe(true);
-    expect(call.data.length).toBeGreaterThan(0);
-    for (const row of call.data) {
-      expect(row).toMatchObject({
-        name: expect.any(String),
-        level: expect.any(Number),
-        description: expect.any(String),
-        classId: expect.stringMatching(/^id-/),
+      expect(prisma.classFeature.createMany).not.toHaveBeenCalled();
+      const calls = prisma.classFeature.upsert.mock.calls.map(([args]: [any]) => args);
+      // 11 classes with one row each, plus the Warlock's three.
+      expect(calls).toHaveLength(14);
+      const arcanum13 = calls.find(
+        c => c.where.classId_name_level.name === 'Mystic Arcanum' && c.create.level === 13
+      );
+      expect(arcanum13).toEqual({
+        where: {
+          classId_name_level: { classId: 'id-Warlock', name: 'Mystic Arcanum', level: 13 },
+        },
+        create: {
+          classId: 'id-Warlock',
+          name: 'Mystic Arcanum',
+          level: 13,
+          description: 'A level 7 spell.',
+        },
+        update: { description: 'A level 7 spell.' },
       });
-    }
+    });
+
+    it('retires SRD class features absent from the JSON, one class at a time', async () => {
+      await service.seed();
+
+      expect(prisma.classFeature.deleteMany).toHaveBeenCalledWith({
+        where: {
+          classId: 'id-Warlock',
+          NOT: {
+            OR: [
+              { name: 'Pact Magic', level: 1 },
+              { name: 'Mystic Arcanum', level: 11 },
+              { name: 'Mystic Arcanum', level: 13 },
+            ],
+          },
+        },
+      });
+    });
+
+    it('scopes every retire to a class id resolved from the srd partition, never a bare deleteMany', async () => {
+      await service.seed();
+
+      const srdLookup = prisma.srdClass.findMany.mock.calls.find(
+        ([args]: [any]) => args.where.contentSource === 'srd'
+      );
+      expect(srdLookup).toBeDefined();
+      const resolvedIds = new Set(srdClasses.map(c => `id-${c.name}`));
+      expect(prisma.classFeature.deleteMany).toHaveBeenCalledTimes(srdClasses.length);
+      for (const [args] of prisma.classFeature.deleteMany.mock.calls) {
+        expect(resolvedIds.has(args.where.classId)).toBe(true);
+        expect(args.where.NOT.OR.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('skips a class the srd partition did not resolve, writing and deleting nothing for it', async () => {
+      prisma.srdClass.findMany.mockImplementation((args: any) => {
+        const names = ((args?.where?.name?.in ?? []) as string[]).filter(n => n !== 'Warlock');
+        return Promise.resolve(names.map(name => ({ id: `id-${name}`, name })));
+      });
+
+      await service.seed();
+
+      for (const [args] of prisma.classFeature.upsert.mock.calls) {
+        expect(args.create.classId).not.toBe('id-Warlock');
+      }
+      for (const [args] of prisma.classFeature.deleteMany.mock.calls) {
+        expect(args.where.classId).not.toBe('id-Warlock');
+      }
+    });
+
+    it('logs the entry and retired counts', async () => {
+      prisma.classFeature.deleteMany.mockResolvedValue({ count: 1 });
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await service.seed();
+
+      expect(log.mock.calls.map(c => c.join(' '))).toContain(
+        `  Class Features: 14 entries, ${srdClasses.length} retired`
+      );
+    });
+
+    it('aborts before writing when classes.json has no entry for a seeded class', async () => {
+      const partial = classFeaturesFixture();
+      partial.delete('Bard');
+      mockLoadClassFeatures.mockReturnValue(partial);
+
+      await expect(service.seed()).rejects.toThrow(/Bard/);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('subclasses from subclasses.json plus the two 2014 entries', () => {
+    const createdSubclasses = () =>
+      new Map(
+        prisma.subclass.create.mock.calls.map(([args]: [any]) => [args.data.name, args.data])
+      );
+
+    it('writes the JSON subclasses with source SRD 5.2.1', async () => {
+      await service.seed();
+
+      expect(createdSubclasses().get('Champion')).toMatchObject({
+        classId: 'id-Fighter',
+        source: 'SRD 5.2.1',
+        contentSource: 'srd',
+      });
+      expect(createdSubclasses().get('Fiend Patron')).toMatchObject({ source: 'SRD 5.2.1' });
+    });
+
+    it('writes Eldritch Knight and Arcane Trickster with source SRD 5.1', async () => {
+      await service.seed();
+
+      for (const sc of srdSubclasses) {
+        expect(createdSubclasses().get(sc.name)).toMatchObject({
+          source: 'SRD 5.1',
+          spellcasting: sc.spellcasting,
+        });
+      }
+    });
+
+    it('clears a spell list the source no longer carries', async () => {
+      await service.seed();
+
+      expect(createdSubclasses().get('Champion')?.spellList).toBe(Prisma.DbNull);
+    });
+
+    it('carries source on the update branch too, so a re-seed retags existing rows', async () => {
+      prisma.subclass.findMany.mockImplementation((args: any) => {
+        const names = (args?.where?.name?.in ?? []) as string[];
+        return Promise.resolve(names.map(name => ({ id: `sub-${name}`, name })));
+      });
+
+      await service.seed();
+
+      expect(prisma.subclass.create).not.toHaveBeenCalled();
+      const updates = new Map(
+        prisma.subclass.update.mock.calls.map(([args]: [any]) => [args.where.id, args.data])
+      );
+      expect(updates.get('sub-Champion')).toMatchObject({ source: 'SRD 5.2.1' });
+      expect(updates.get('sub-Eldritch Knight')).toMatchObject({ source: 'SRD 5.1' });
+    });
+
+    it('guards the combined subclass list for duplicate names, per source file', async () => {
+      const guard = jest.spyOn(seedGuards, 'assertUniqueSeedNames');
+
+      await service.seed();
+
+      expect(guard).toHaveBeenCalledWith('subclass', {
+        'subclasses.json': ['Champion', 'Fiend Patron'],
+        'subclasses.ts': srdSubclasses.map(sc => sc.name),
+      });
+    });
+
+    it('aborts when a JSON subclass reuses a hand-authored name', async () => {
+      mockLoadSubclasses.mockReturnValue([{ ...subclassesFixture()[0], name: 'Eldritch Knight' }]);
+
+      await expect(service.seed()).rejects.toThrow(/Eldritch Knight/);
+    });
+
+    it('retires SRD subclasses absent from both sources, scoped to the srd partition', async () => {
+      prisma.subclass.deleteMany.mockResolvedValue({ count: 4 });
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+
+      await service.seed();
+
+      expect(prisma.subclass.deleteMany).toHaveBeenCalledTimes(1);
+      expect(prisma.subclass.deleteMany).toHaveBeenCalledWith({
+        where: {
+          contentSource: 'srd',
+          name: { notIn: ['Champion', 'Fiend Patron', 'Eldritch Knight', 'Arcane Trickster'] },
+        },
+      });
+      expect(log.mock.calls.map(c => c.join(' '))).toContain('  Subclasses: 4 entries, 4 retired');
+    });
+
+    it('upserts subclass features on subclassId_name_level and retires the rest per subclass', async () => {
+      await service.seed();
+
+      expect(prisma.subclassFeature.createMany).not.toHaveBeenCalled();
+      expect(prisma.subclassFeature.upsert).toHaveBeenCalledWith({
+        where: {
+          subclassId_name_level: {
+            subclassId: 'sub-Champion',
+            name: 'Improved Critical',
+            level: 3,
+          },
+        },
+        create: {
+          subclassId: 'sub-Champion',
+          name: 'Improved Critical',
+          level: 3,
+          description: 'You crit on a 19.',
+        },
+        update: { description: 'You crit on a 19.' },
+      });
+      expect(prisma.subclassFeature.deleteMany).toHaveBeenCalledWith({
+        where: {
+          subclassId: 'sub-Champion',
+          NOT: { OR: [{ name: 'Improved Critical', level: 3 }] },
+        },
+      });
+      // One retire per subclass written, each pinned to that subclass's id.
+      const retiredFor = prisma.subclassFeature.deleteMany.mock.calls.map(
+        ([args]: [any]) => args.where.subclassId
+      );
+      expect(retiredFor.sort()).toEqual(
+        ['Arcane Trickster', 'Champion', 'Eldritch Knight', 'Fiend Patron']
+          .map(n => `sub-${n}`)
+          .sort()
+      );
+    });
   });
 
   it('does not write features field on srd_classes anymore', async () => {
@@ -684,23 +940,6 @@ describe('SeedService', () => {
     for (const [args] of prisma.srdClass.upsert.mock.calls) {
       expect(args.create).not.toHaveProperty('features');
       expect(args.update).not.toHaveProperty('features');
-    }
-  });
-
-  it('seeds subclass features into subclass_features with FK to parent subclass', async () => {
-    await service.seed();
-
-    expect(prisma.subclassFeature.createMany).toHaveBeenCalled();
-    const call = prisma.subclassFeature.createMany.mock.calls[0][0];
-    expect(call).toHaveProperty('skipDuplicates', true);
-    expect(Array.isArray(call.data)).toBe(true);
-    for (const row of call.data) {
-      expect(row).toMatchObject({
-        name: expect.any(String),
-        level: expect.any(Number),
-        description: expect.any(String),
-        subclassId: expect.stringMatching(/^sub-/),
-      });
     }
   });
 

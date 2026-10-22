@@ -81,10 +81,14 @@ test.describe('Feature search links (VEG-558)', () => {
   test('a class feature hit scrolls to its row on the class page', async ({ page }) => {
     // Mystic Arcanum, not Pact Magic. Pact Magic is a level 1 Warlock row, so
     // it sits just under the proficiencies and can already be on screen at
-    // scroll 0. Mystic Arcanum is the fifth row, at level 11, below the fold.
+    // scroll 0. The level 11 Mystic Arcanum follows seven rows, Eldritch
+    // Invocations and its option list among them, so it sits below the fold.
     await searchFeatures(page, 'class', 'Mystic Arcanum');
 
-    const hit = page.getByRole('button', { name: /^Mystic Arcanum/ }).first();
+    // The Warlock lists Mystic Arcanum at 11, 13, 15 and 17. The hit's subtitle
+    // ("Class: Warlock · Level 11") is part of the button's name, so this picks
+    // the level 11 row.
+    const hit = page.getByRole('button', { name: /^Mystic Arcanum.*\bLevel 11\b/ }).first();
     await expect(hit).toBeVisible({ timeout: 10_000 });
     await hit.click();
 
@@ -97,6 +101,7 @@ test.describe('Feature search links (VEG-558)', () => {
     const row = page.locator(`[id="${fragment}"]`);
     await expect(row).toBeInViewport({ timeout: 10_000 });
     await expect(row).toContainText('Mystic Arcanum');
+    await expect(row).toContainText('Level 11');
     // The row being on screen only proves the page scrolled if the page moved.
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   });
@@ -113,7 +118,7 @@ test.describe('Feature search links (VEG-558)', () => {
     const detail = await page.request.get(`${BACKEND}/api/srd/classes/${warlock!.id}`);
     expect(detail.ok(), `Warlock detail failed: ${detail.status()}`).toBeTruthy();
     const { features } = (await detail.json()) as {
-      features: { name: string; description: string }[];
+      features: { id: string; name: string; description: string }[];
     };
     const pactMagic = features.find(f => f.name === 'Pact Magic');
     expect(pactMagic, 'Warlock has no Pact Magic feature').toBeDefined();
@@ -123,7 +128,13 @@ test.describe('Feature search links (VEG-558)', () => {
       timeout: 10_000,
     });
 
-    await expect(page.getByText(pactMagic!.description.slice(0, 40))).toBeVisible();
+    // The description is markdown split into paragraphs, so the check reads the
+    // row by its id and looks for the first sentence, which no paragraph break
+    // can split.
+    const firstSentence = pactMagic!.description.split('. ')[0];
+    const row = page.locator(`[id="${pactMagic!.id}"]`);
+    await expect(row).toBeVisible();
+    await expect(row).toContainText(firstSentence);
   });
 
   // Seeded backgrounds carry no feature rows and the create DTO rejects

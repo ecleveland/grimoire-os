@@ -80,14 +80,14 @@ describe('SRD class seed data — spell slot progression', () => {
       }
     });
 
-    it.each(HALF_CASTERS)('%s should have no spell slots at level 1', name => {
+    it.each(HALF_CASTERS)('%s should start with 2 first-level slots at level 1', name => {
       const prog = getClass(name).spellcasting!.spellSlotProgression!;
-      expect(Object.keys(prog[1]).length).toBe(0);
+      expect(prog[1]).toEqual({ 1: 2 });
     });
 
-    it.each(HALF_CASTERS)('%s should start gaining slots at level 2', name => {
+    it.each(HALF_CASTERS)('%s should still have 2 first-level slots at level 2', name => {
       const prog = getClass(name).spellcasting!.spellSlotProgression!;
-      expect(prog[2][1]).toBe(2);
+      expect(prog[2]).toEqual({ 1: 2 });
     });
 
     it.each(HALF_CASTERS)('%s should max at 5th-level slots (no 6th+)', name => {
@@ -254,12 +254,21 @@ describe('SRD class seed data — spells known / prepared formula', () => {
       expect(getClass(name).spellcasting?.preparedFormula).toBeUndefined();
     });
 
-    it('Ranger should have 0 spells known at level 1', () => {
-      expect(getClass('Ranger').spellcasting!.spellsKnown![1]).toBe(0);
+    it('Ranger should know 2 spells at level 1', () => {
+      expect(getClass('Ranger').spellcasting!.spellsKnown![1]).toBe(2);
     });
 
-    it('Ranger should start knowing spells at level 2', () => {
-      expect(getClass('Ranger').spellcasting!.spellsKnown![2]).toBeGreaterThan(0);
+    // The SRD 5.2.1 class tables call this column "Prepared Spells". The key
+    // stays spellsKnown because the character sheet reads it under that name.
+    const column = (values: number[]) =>
+      Object.fromEntries(values.map((count, i) => [i + 1, count]));
+    it.each([
+      ['Bard', [4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22]],
+      ['Ranger', [2, 3, 4, 5, 6, 6, 7, 7, 9, 9, 10, 10, 11, 11, 12, 12, 14, 14, 15, 15]],
+      ['Sorcerer', [2, 4, 6, 7, 9, 10, 11, 12, 14, 15, 16, 16, 17, 17, 18, 18, 19, 20, 21, 22]],
+      ['Warlock', [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15]],
+    ])('%s spellsKnown matches the SRD 5.2.1 Prepared Spells column', (name, values) => {
+      expect(getClass(name).spellcasting!.spellsKnown).toEqual(column(values));
     });
   });
 
@@ -480,6 +489,16 @@ describe('SRD class seed data — multiclassing', () => {
       const prereqs = getClass('Barbarian').multiclassing.prerequisites;
       expect(prereqs).toEqual([{ ability: 'Strength', minimum: 13 }]);
     });
+  });
+});
+
+describe('SRD class seed data, subclasses and features', () => {
+  it.each(ALL_CLASSES)('%s has subclassLevel 3', name => {
+    expect(getClass(name).subclassLevel).toBe(3);
+  });
+
+  it.each(ALL_CLASSES)('%s carries no features array, since classes.json owns them', name => {
+    expect(getClass(name)).not.toHaveProperty('features');
   });
 });
 

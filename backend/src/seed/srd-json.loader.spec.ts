@@ -13,6 +13,10 @@ import {
   validateSpellData,
   validateMagicItemData,
   validateSpeciesData,
+  validateClassData,
+  validateSubclassData,
+  loadClassFeaturesFromJson,
+  loadSubclassesFromJson,
 } from './srd-json.loader';
 
 jest.mock('fs');
@@ -1240,6 +1244,196 @@ describe('generic free-text guards', () => {
           ]),
         ])
       ).toThrow(/fragment/);
+    });
+  });
+});
+
+describe('class and subclass guards', () => {
+  const CLASS_NAMES = [
+    'Barbarian',
+    'Bard',
+    'Cleric',
+    'Druid',
+    'Fighter',
+    'Monk',
+    'Paladin',
+    'Ranger',
+    'Rogue',
+    'Sorcerer',
+    'Warlock',
+    'Wizard',
+  ];
+
+  type Feature = { name: string; level: number; description: string };
+
+  // One feature per class at level 1, named after the class so every title is
+  // distinct, and a table that lists it there. Tests mutate a copy.
+  const validClasses = () =>
+    CLASS_NAMES.map(name => ({
+      name,
+      subclassLevel: 3,
+      table: Array.from({ length: 20 }, (_, i) => ({
+        level: i + 1,
+        proficiencyBonus: 2 + Math.floor(i / 4),
+        features: i === 0 ? [`${name} Gift`] : [],
+      })),
+      features: [{ name: `${name} Gift`, level: 1, description: 'You gain a gift.' }] as Feature[],
+    }));
+
+  const subclass = (over: Record<string, unknown> = {}) => ({
+    name: 'Champion',
+    className: 'Fighter',
+    description: 'A fighter who hones raw physical power.',
+    features: [{ name: 'Improved Critical', level: 3, description: 'You crit on a 19.' }],
+    ...over,
+  });
+
+  describe('validateClassData', () => {
+    it('accepts twelve well-formed classes', () => {
+      expect(() => validateClassData(validClasses())).not.toThrow();
+    });
+
+    it('rejects a class list missing one of the twelve', () => {
+      expect(() => validateClassData(validClasses().slice(1))).toThrow(/12 classes.*Barbarian/s);
+    });
+
+    it('rejects a class name it does not know', () => {
+      const classes = validClasses();
+      classes[0].name = 'Artificer';
+      expect(() => validateClassData(classes)).toThrow(/unknown class "Artificer"/);
+    });
+
+    it('rejects a table that skips or repeats a level', () => {
+      const classes = validClasses();
+      classes[1].table[19].level = 19;
+      expect(() => validateClassData(classes)).toThrow(/Bard: table level 19 appears 2 times/);
+    });
+
+    it('rejects a feature with an empty name or description', () => {
+      const classes = validClasses();
+      classes[2].features.push({ name: '', level: 1, description: '' });
+      expect(() => validateClassData(classes)).toThrow(/Cleric: feature at level 1 has no name/);
+    });
+
+    it('rejects a feature level outside 1..20 or not an integer', () => {
+      const classes = validClasses();
+      classes[3].features[0].level = 21;
+      classes[4].features[0].level = 1.5;
+      expect(() => validateClassData(classes)).toThrow(/Druid Gift.*level 21.*Fighter Gift.*1\.5/s);
+    });
+
+    it('rejects the same feature name twice at one level', () => {
+      const classes = validClasses();
+      classes[5].features.push({ name: 'Monk Gift', level: 1, description: 'Again.' });
+      expect(() => validateClassData(classes)).toThrow(
+        /Monk: duplicate feature "Monk Gift" at level 1/
+      );
+    });
+
+    it('rejects a feature the class table does not list at that level', () => {
+      const classes = validClasses();
+      classes[6].features.push({ name: 'Lay On Hands', level: 2, description: 'You heal.' });
+      expect(() => validateClassData(classes)).toThrow(
+        /Paladin: feature "Lay On Hands" at level 2 is not in the class table/
+      );
+    });
+
+    it('matches a feature to a table entry that carries a trailing qualifier', () => {
+      const classes = validClasses();
+      classes[4].table[1].features = ['Action Surge (one use)'];
+      classes[4].features.push({ name: 'Action Surge', level: 2, description: 'You act again.' });
+      expect(() => validateClassData(classes)).not.toThrow();
+    });
+
+    it('reports free-text corruption in a feature description', () => {
+      const classes = validClasses();
+      classes[7].features[0].description = 'You gain a gift.\n\nRogue Gift';
+      expect(() => validateClassData(classes)).toThrow(/Ranger \/ Ranger Gift.*Rogue Gift/);
+    });
+
+    it('accepts an Options block and treats its option names as foreign titles', () => {
+      const classes = validClasses();
+      classes[10].features[0].description = [
+        'You gain invocations of your choice.',
+        '**Options**',
+        '**Agonizing Blast**',
+        'Choose one of your known Warlock cantrips that deals damage.',
+        '**Armor of Shadows**',
+        'You can cast Mage Armor on yourself.',
+      ].join('\n\n');
+      expect(() => validateClassData(classes)).not.toThrow();
+
+      classes[11].features[0].description = 'You gain a gift.\n\nArmor of Shadows';
+      expect(() => validateClassData(classes)).toThrow(/Wizard \/ Wizard Gift.*Armor of Shadows/);
+    });
+  });
+
+  describe('validateSubclassData', () => {
+    it('accepts a subclass of a known class', () => {
+      expect(() => validateSubclassData([subclass()])).not.toThrow();
+    });
+
+    it('rejects a subclass whose class it does not know', () => {
+      expect(() => validateSubclassData([subclass({ className: 'Artificer' })])).toThrow(
+        /Champion: unknown class "Artificer"/
+      );
+    });
+
+    it('rejects a subclass with no name or description', () => {
+      expect(() => validateSubclassData([subclass({ name: '', description: '' })])).toThrow(
+        /subclass of Fighter has no name.*has no description/s
+      );
+    });
+
+    it('rejects the same feature name twice at one level', () => {
+      const twice = { name: 'Improved Critical', level: 3, description: 'Again.' };
+      expect(() =>
+        validateSubclassData([subclass({ features: [...subclass().features, twice] })])
+      ).toThrow(/Champion: duplicate feature "Improved Critical" at level 3/);
+    });
+
+    it('reports free-text corruption in a subclass feature', () => {
+      expect(() =>
+        validateSubclassData([
+          subclass({
+            features: [{ name: 'Improved Critical', level: 3, description: 'You crit on a\nn' }],
+          }),
+        ])
+      ).toThrow(/Champion \/ Improved Critical.*fragment/);
+    });
+  });
+
+  describe('loaders', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('keys class features by class name with the subclass level', () => {
+      mockJsonFile('classes.json', { classes: validClasses() });
+
+      const byClass = loadClassFeaturesFromJson();
+
+      expect(byClass.size).toBe(12);
+      expect(byClass.get('Warlock')).toEqual({
+        subclassLevel: 3,
+        features: [{ name: 'Warlock Gift', level: 1, description: 'You gain a gift.' }],
+      });
+    });
+
+    it('validates classes.json before returning it', () => {
+      mockJsonFile('classes.json', { classes: validClasses().slice(2) });
+
+      expect(() => loadClassFeaturesFromJson()).toThrow(/12 classes/);
+    });
+
+    it('returns subclasses with their parent class and features', () => {
+      mockJsonFile('subclasses.json', { subclasses: [subclass()] });
+
+      expect(loadSubclassesFromJson()).toEqual([subclass()]);
+    });
+
+    it('validates subclasses.json before returning it', () => {
+      mockJsonFile('subclasses.json', { subclasses: [subclass({ className: 'Nobody' })] });
+
+      expect(() => loadSubclassesFromJson()).toThrow(/unknown class "Nobody"/);
     });
   });
 });

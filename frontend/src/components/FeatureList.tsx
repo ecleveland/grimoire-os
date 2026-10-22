@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { classFeatureIdentity } from '@grimoire-os/shared';
+import Markdown from '@/components/Markdown';
 import PrintToggle from '@/components/PrintToggle';
 import type { ClassFeature } from '@/lib/types';
 
@@ -60,11 +61,7 @@ export default function FeatureList({ features, defaultOpen, className }: Featur
               <span className="text-xs text-gray-500 dark:text-gray-400">Level {f.level}</span>
               {f.id && <PrintToggle type="feature" id={f.id} name={f.name} />}
             </span>
-            {f.description && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 whitespace-pre-line">
-                {f.description}
-              </p>
-            )}
+            {f.description && <Markdown>{f.description}</Markdown>}
           </div>
         ))}
       </div>

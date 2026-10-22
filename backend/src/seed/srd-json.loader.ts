@@ -513,6 +513,166 @@ export function validateSpeciesData(species: JsonSpecies[]): void {
   raiseIfAnomalies('species', errors);
 }
 
+// ── Classes and subclasses ─────────────────────────────
+// docs/extracted-srd-json/classes.json and subclasses.json, written by
+// scripts/extract-srd-classes.mjs from the SRD 5.2.1 class chapter. Feature rows
+// follow the class table, so a name recurs once per level the table lists it
+// (Ability Score Improvement, Mystic Arcanum) and never twice at one level.
+
+export interface JsonFeature {
+  name: string;
+  level: number;
+  description: string;
+}
+
+export interface JsonClass {
+  name: string;
+  subclassLevel: number;
+  table: { level: number; proficiencyBonus: number; features: string[] }[];
+  features: JsonFeature[];
+}
+
+export interface JsonSubclass {
+  name: string;
+  className: string;
+  description: string;
+  features: JsonFeature[];
+}
+
+const SRD_CLASS_NAMES = [
+  'Barbarian',
+  'Bard',
+  'Cleric',
+  'Druid',
+  'Fighter',
+  'Monk',
+  'Paladin',
+  'Ranger',
+  'Rogue',
+  'Sorcerer',
+  'Warlock',
+  'Wizard',
+];
+const SRD_CLASS_NAME_SET = new Set(SRD_CLASS_NAMES);
+
+// Eldritch Invocations and Metamagic end with an `**Options**` block that heads
+// each option with a line holding only its bold name. Those names join the
+// foreign-title set, so a description that ends on one counts as a bleed like
+// any other feature name.
+const BOLD_NAME_LINE = /^\*\*[^*]+\*\*$/;
+function optionNames(description: string): string[] {
+  const optionsAt = description.indexOf('**Options**');
+  if (optionsAt < 0) return [];
+  return description
+    .slice(optionsAt)
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => BOLD_NAME_LINE.test(l) && l !== '**Options**')
+    .map(l => l.slice(2, -2));
+}
+
+// Shape checks shared by class and subclass feature lists.
+function featureShapeErrors(parent: string, features: JsonFeature[]): string[] {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  for (const f of features) {
+    if (!f.name?.trim()) errors.push(`${parent}: feature at level ${f.level} has no name`);
+    if (!f.description?.trim()) {
+      errors.push(`${parent}: feature "${f.name}" at level ${f.level} has no description`);
+    }
+    if (!Number.isInteger(f.level) || f.level < 1 || f.level > 20) {
+      errors.push(`${parent}: feature "${f.name}" has invalid level ${f.level}`);
+    }
+    const key = `${f.name}\u0000${f.level}`;
+    if (seen.has(key)) {
+      errors.push(`${parent}: duplicate feature "${f.name}" at level ${f.level}`);
+    }
+    seen.add(key);
+  }
+  return errors;
+}
+
+// Run the free-text predicates over every feature of every parent, with one
+// title space made of every feature and option name in the dataset.
+function featureFreeTextErrors(parents: { name: string; features: JsonFeature[] }[]): string[] {
+  const titles = new Set<string>();
+  for (const p of parents) {
+    for (const f of p.features) {
+      titles.add(f.name);
+      for (const option of optionNames(f.description ?? '')) titles.add(option);
+    }
+  }
+  // A feature's own name is not foreign to it. The label is "Parent / Name", so
+  // findFreeTextAnomalies cannot drop the name by label; each entry gets the
+  // title set minus its own feature name instead.
+  return parents.flatMap(p =>
+    p.features.flatMap(f => {
+      const foreign = new Set(titles);
+      foreign.delete(f.name);
+      return findFreeTextAnomalies(
+        [{ label: `${p.name} / ${f.name}`, text: f.description ?? '' }],
+        foreign
+      );
+    })
+  );
+}
+
+export function validateClassData(classes: JsonClass[]): void {
+  const errors: string[] = [];
+
+  const names = new Set(classes.map(c => c.name));
+  const missing = SRD_CLASS_NAMES.filter(n => !names.has(n));
+  if (classes.length !== SRD_CLASS_NAMES.length || missing.length > 0) {
+    errors.push(
+      `expected the 12 classes, got ${classes.length}` +
+        (missing.length ? ` (missing ${missing.join(', ')})` : '')
+    );
+  }
+
+  for (const cls of classes) {
+    if (!SRD_CLASS_NAME_SET.has(cls.name)) errors.push(`unknown class "${cls.name}"`);
+
+    const levelCounts = new Map<number, number>();
+    for (const row of cls.table) levelCounts.set(row.level, (levelCounts.get(row.level) ?? 0) + 1);
+    for (let level = 1; level <= 20; level++) {
+      const count = levelCounts.get(level) ?? 0;
+      if (count !== 1) errors.push(`${cls.name}: table level ${level} appears ${count} times`);
+    }
+
+    errors.push(...featureShapeErrors(cls.name, cls.features));
+
+    // The table prints some entries with a qualifier the feature row does not
+    // carry: "Action Surge (two uses)", "Mystic Arcanum (level 7 spell)".
+    for (const f of cls.features) {
+      const row = cls.table.find(r => r.level === f.level);
+      const listed = (row?.features ?? []).map(t => t.replace(/\s*\([^)]*\)$/, ''));
+      if (!listed.includes(f.name)) {
+        errors.push(
+          `${cls.name}: feature "${f.name}" at level ${f.level} is not in the class table`
+        );
+      }
+    }
+  }
+
+  errors.push(...featureFreeTextErrors(classes));
+  raiseIfAnomalies('class', errors);
+}
+
+export function validateSubclassData(subclasses: JsonSubclass[]): void {
+  const errors: string[] = [];
+  for (const sc of subclasses) {
+    const label = sc.name?.trim() ? sc.name : `subclass of ${sc.className}`;
+    if (!sc.name?.trim()) errors.push(`${label} has no name`);
+    if (!sc.description?.trim()) errors.push(`${label} has no description`);
+    if (!SRD_CLASS_NAME_SET.has(sc.className)) {
+      errors.push(`${label}: unknown class "${sc.className}"`);
+    }
+    errors.push(...featureShapeErrors(label, sc.features));
+  }
+  errors.push(...featureFreeTextErrors(subclasses));
+  raiseIfAnomalies('subclass', errors);
+}
+
 interface JsonMagicItem {
   name: string;
   category: string;
@@ -773,6 +933,40 @@ function traitDescriptionWithOptions(trait: JsonSpeciesTrait): string {
     return `${trait.description}\n\n${renderTraitOptionsMarkdown(trait.options!)}`;
   }
   return trait.description;
+}
+
+/**
+ * Class features from classes.json, keyed by class name. The class rows
+ * themselves (hit die, proficiencies, spellcasting) stay hand-authored in
+ * data/classes.ts; the seed merges these features and the subclass level in.
+ */
+export function loadClassFeaturesFromJson(): Map<
+  string,
+  { subclassLevel: number; features: JsonFeature[] }
+> {
+  const data = readJsonFile<{ classes: JsonClass[] }>('classes.json');
+  validateClassData(data.classes);
+  return new Map(
+    data.classes.map(c => [
+      c.name,
+      {
+        subclassLevel: c.subclassLevel,
+        features: c.features.map(({ name, level, description }) => ({ name, level, description })),
+      },
+    ])
+  );
+}
+
+/** The SRD 5.2.1 subclasses from subclasses.json, one per class. */
+export function loadSubclassesFromJson(): JsonSubclass[] {
+  const data = readJsonFile<{ subclasses: JsonSubclass[] }>('subclasses.json');
+  validateSubclassData(data.subclasses);
+  return data.subclasses.map(sc => ({
+    name: sc.name,
+    className: sc.className,
+    description: sc.description,
+    features: sc.features.map(({ name, level, description }) => ({ name, level, description })),
+  }));
 }
 
 export function loadSpeciesAsRacesFromJson() {

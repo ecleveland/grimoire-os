@@ -1,8 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import ClassFeatures from '../ClassFeatures';
 import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
+
+const MARKDOWN =
+  '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+
+/** The MARKDOWN description rendered as markup inside `scope`, with no literal syntax left. */
+function expectRenderedMarkdown(scope: HTMLElement) {
+  expect(within(scope).getByText('Cantrips.', { selector: 'strong' })).toBeInTheDocument();
+  expect(scope.querySelectorAll('p')).toHaveLength(2);
+  expect(scope.querySelector('p p')).toBeNull();
+  expect(within(scope).getByRole('table')).toBeInTheDocument();
+  expect(within(scope).getByRole('cell', { name: '2' })).toBeInTheDocument();
+  expect(scope.textContent).not.toContain('**');
+  expect(scope.textContent).not.toContain('|');
+}
 
 const baseCharacter = makeCharacter({
   features: [
@@ -31,6 +45,18 @@ describe('ClassFeatures', () => {
     render(<ClassFeatures character={baseCharacter} />);
     expect(screen.getByText('Regain HP as a bonus action.')).toBeInTheDocument();
     expect(screen.getByText('Take an additional action.')).toBeInTheDocument();
+  });
+
+  it('renders a markdown description as bold run-in heads, paragraphs and a table', () => {
+    render(
+      <ClassFeatures
+        character={{
+          ...baseCharacter,
+          features: [{ name: 'Spellcasting', source: 'Fighter', description: MARKDOWN }],
+        }}
+      />
+    );
+    expectRenderedMarkdown(screen.getByTestId('class-features'));
   });
 
   it('renders source tags on features', () => {
