@@ -101,6 +101,32 @@ test.describe('Refresh token flow', () => {
     await expect(page.getByRole('link', { name: 'Refresh User' })).toBeVisible({ timeout: 10_000 });
   });
 
+  test('a live session whose session hint is missing recovers instead of sticking on /login', async ({
+    page,
+  }) => {
+    await registerPlayer(page);
+
+    // Another tab's late dead-session expiry can delete session_present while
+    // the access and refresh cookies are still valid. The middleware then
+    // sends the visit to /login, and hydration must repair the hint so the
+    // bounce back to next sticks.
+    const allCookies = await page.context().cookies();
+    const withoutHint = allCookies.filter(c => c.name !== 'session_present');
+    await page.context().clearCookies();
+    await page.context().addCookies(withoutHint);
+
+    await page.goto('/campaigns');
+
+    await expect(page).toHaveURL(/\/campaigns$/, { timeout: 10_000 });
+    await expect(page.getByRole('link', { name: 'Refresh User' })).toBeVisible({ timeout: 10_000 });
+
+    await expect
+      .poll(async () => (await page.context().cookies()).some(c => c.name === 'session_present'), {
+        timeout: 10_000,
+      })
+      .toBe(true);
+  });
+
   test('two tabs loading at once after the access cookie expires both stay signed in and share one refresh', async ({
     page,
   }) => {

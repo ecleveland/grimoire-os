@@ -172,6 +172,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (res.ok) {
           const profile = (await res.json()) as User & { id: string };
+          // A live session without the session_present hint gets sent to
+          // /login by the middleware on every private route. The server owns
+          // the cookies, so one refresh repairs the hint rather than a client
+          // write. Its outcome changes nothing here: a success re-issues the
+          // cookies and anything else leaves them as they were.
+          if (!getSessionCookieSnapshot()) {
+            await refreshSession().catch(() => undefined);
+            if (cancelled) return;
+          }
           setUser(toUserInfo(profile));
         } else if (res.status === 401 && getSessionCookieSnapshot()) {
           // The access cookie is present-but-invalid and a refresh couldn't
