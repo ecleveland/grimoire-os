@@ -61,7 +61,8 @@ export function cantripCount(sc: ClassSpellcasting, level: number): number {
 /** Does the class have any spell slots at this level per its progression table? */
 function castsAtLevel(sc: ClassSpellcasting, level: number): boolean {
   // Absent progression data → assume it casts (don't zero out a caster we lack
-  // slot data for); present-but-empty (half-casters at level 1) → it does not.
+  // slot data for); present-but-empty (a homebrew class with no slots at a
+  // level, or a third-caster subclass at levels 1 and 2) → it does not.
   if (!sc.spellSlotProgression) return true;
   return Object.keys(sc.spellSlotProgression[level] ?? {}).length > 0;
 }
@@ -71,9 +72,9 @@ function castsAtLevel(sc: ClassSpellcasting, level: number): boolean {
  * Warlock) read the spells-known table verbatim; prepared casters (Cleric/Druid/
  * Paladin/Wizard) evaluate `preparedFormula` (`level [/ 2] + <ability> modifier`)
  * with the spellcasting-ability `abilityMod`, clamped to a minimum of 1 — but only
- * once the class actually casts. A half-caster with no slots yet (e.g. a level-1
- * Paladin) prepares 0, since the min-1 clamp must not invent spells for a class
- * that can't cast at this level.
+ * once the class actually casts. A class with no slots yet at this level (a
+ * homebrew half-caster that starts casting at level 2) prepares 0, since the
+ * min-1 clamp must not invent spells for a class that can't cast at this level.
  */
 export function leveledSpellAllowance(
   sc: ClassSpellcasting,

@@ -11,6 +11,9 @@ import {
   loadMagicItemsFromJson,
   loadEquipmentFromJson,
   loadSpeciesAsRacesFromJson,
+  loadClassFeaturesFromJson,
+  loadSubclassesFromJson,
+  type JsonFeature,
 } from './srd-json.loader';
 import { assertUniqueSeedNames } from './seed-guards';
 import { LOOT_GAME_RULE_CATEGORY } from '../loot/loot-game-rules';
@@ -92,6 +95,18 @@ function parseOriginFeat(display: string): { featName: string; option: string | 
     : { featName: display.trim(), option: null };
 }
 
+// One SRD subclass as the seed writes it, from either source: subclasses.json
+// (SRD 5.2.1) or the two 2014 entries in data/subclasses.ts (SRD 5.1).
+interface SeedSubclass {
+  name: string;
+  className: string;
+  description: string;
+  source: string;
+  features: JsonFeature[];
+  spellList?: Prisma.InputJsonValue;
+  spellcasting?: Prisma.InputJsonValue;
+}
+
 // All SRD data, loaded and transformed into Prisma input shapes, ready to write.
 interface SeedData {
   spells: Prisma.SpellCreateManyInput[];
@@ -101,7 +116,16 @@ interface SeedData {
   races: ReturnType<typeof loadSpeciesAsRacesFromJson>;
   backgrounds: Prisma.BackgroundCreateManyInput[];
   feats: Prisma.FeatCreateManyInput[];
+  classFeatures: Map<string, JsonFeature[]>;
+  subclassSources: { json: SeedSubclass[]; ts: SeedSubclass[] };
 }
+
+// Retire filter for a child feature table: every row under the parent whose
+// (name, level) is not in the source. An empty source list leaves `OR: []`,
+// which matches nothing, so NOT of it deletes every row the parent has.
+const absentFrom = (rows: JsonFeature[]) => ({
+  NOT: { OR: rows.map(r => ({ name: r.name, level: r.level })) },
+});
 
 @Injectable()
 export class SeedService {
@@ -135,10 +159,10 @@ export class SeedService {
         await this.seedSimpleReferenceTables(tx);
         await this.seedClasses(tx);
         await this.seedRaces(tx, data);
-        await this.seedClassFeatures(tx);
+        await this.seedClassFeatures(tx, data);
         await this.seedRaceTraits(tx, data);
         await this.seedBackgroundFeatures(tx);
-        await this.seedSubclasses(tx);
+        await this.seedSubclasses(tx, data);
         await this.seedNpcReferenceData(tx);
         await this.seedSubraces(tx);
       },
@@ -199,7 +223,38 @@ export class SeedService {
       repeatable: f.repeatable ?? false,
     }));
 
-    return { spells, monsters, items, equipment, races, backgrounds, feats };
+    // Every hand-authored class row needs its features from classes.json. A
+    // missing entry would make the retire step delete all of that class's
+    // features, so it fails here, before the transaction opens.
+    const jsonClasses = loadClassFeaturesFromJson();
+    const classFeatures = new Map<string, JsonFeature[]>();
+    for (const cls of srdClasses) {
+      const entry = jsonClasses.get(cls.name);
+      if (!entry) {
+        throw new Error(`Seed aborted: class "${cls.name}" has no entry in classes.json`);
+      }
+      classFeatures.set(cls.name, entry.features);
+    }
+
+    const subclassSources = {
+      json: loadSubclassesFromJson().map(sc => ({ ...sc, source: 'SRD 5.2.1' })),
+      ts: srdSubclasses.map(sc => ({
+        ...sc,
+        spellcasting: sc.spellcasting,
+      })),
+    };
+
+    return {
+      spells,
+      monsters,
+      items,
+      equipment,
+      races,
+      backgrounds,
+      feats,
+      classFeatures,
+      subclassSources,
+    };
   }
 
   // ── Shared write helpers ─────────────────────────────
@@ -442,8 +497,8 @@ export class SeedService {
   // ── Classes / races (parents) and their child tables ──
 
   private async seedClasses(tx: Prisma.TransactionClient): Promise<void> {
-    // Strip embedded feature arrays before writing; those live in their own
-    // table, seeded by seedClassFeatures().
+    // The class rows carry no features: those come from classes.json and live
+    // in their own table, seeded by seedClassFeatures().
     //
     // Rides seedSrdByName since VEG-505 tiered SrdClass: upsert-by-name is gone
     // because `name` is no longer globally unique, and a bare by-name write
@@ -452,9 +507,8 @@ export class SeedService {
     // edits on re-seed (the insert-only no-op VEG-480 fixed), still preserves
     // the row id that child ClassFeature and Subclass FKs resolve back to, and
     // runs the duplicate-name guard every other by-name table uses.
-    const classRows = srdClasses.map(({ features: _features, ...rest }) => rest);
-    await this.seedSrdByName(srdDelegate(tx.srdClass), classRows, 'class');
-    this.logger.log(`  Classes: ${classRows.length} entries`);
+    await this.seedSrdByName(srdDelegate(tx.srdClass), srdClasses, 'class');
+    this.logger.log(`  Classes: ${srdClasses.length} entries`);
   }
 
   private async seedRaces(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
@@ -473,32 +527,39 @@ export class SeedService {
     this.logger.log(`  Races: ${raceRows.length} entries`);
   }
 
-  private async seedClassFeatures(tx: Prisma.TransactionClient): Promise<void> {
+  // Class features from classes.json. Each row upserts on its
+  // (classId, name, level) key, so an edited description reaches a seeded
+  // database and the row id survives. Rows under an SRD class that the source no
+  // longer lists are then deleted, so a renamed or dropped feature does not
+  // linger beside its replacement.
+  private async seedClassFeatures(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
     // Scoped to the srd partition (VEG-505): an unscoped name lookup could
     // resolve a homebrew class of the same name and hang SRD feature rows off
-    // a user's class.
+    // a user's class. The retire below inherits the same scoping, because it
+    // only ever runs for a class id this lookup returned.
     const classIdByName = await this.resolveIdsByName(
       nameLookupDelegate(tx.srdClass),
       srdClasses.map(c => c.name),
       'srd'
     );
-    const classFeatureRows: Prisma.ClassFeatureCreateManyInput[] = [];
+    let entries = 0;
+    let retired = 0;
     for (const cls of srdClasses) {
       const classId = classIdByName.get(cls.name);
       if (!classId) continue;
-      for (const f of cls.features ?? []) {
-        classFeatureRows.push({
-          classId,
-          name: f.name,
-          level: f.level,
-          description: f.description,
+      const rows = data.classFeatures.get(cls.name) ?? [];
+      for (const f of rows) {
+        await tx.classFeature.upsert({
+          where: { classId_name_level: { classId, name: f.name, level: f.level } },
+          create: { classId, name: f.name, level: f.level, description: f.description },
+          update: { description: f.description },
         });
+        entries++;
       }
+      const result = await tx.classFeature.deleteMany({ where: { classId, ...absentFrom(rows) } });
+      retired += result.count;
     }
-    if (classFeatureRows.length) {
-      await tx.classFeature.createMany({ data: classFeatureRows, skipDuplicates: true });
-    }
-    this.logger.log(`  Class Features: ${classFeatureRows.length} entries`);
+    this.logger.log(`  Class Features: ${entries} entries, ${retired} retired`);
   }
 
   private async seedRaceTraits(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
@@ -554,73 +615,98 @@ export class SeedService {
     this.logger.log(`  Background Features: ${backgroundFeatureRows.length} entries`);
   }
 
-  // Both lookups below are scoped to the srd partition (VEG-505). `name` is no
-  // longer globally unique on either table, so an unscoped parent lookup could
-  // resolve a user's homebrew class, and an unscoped subclass lookup could
-  // overwrite a homebrew subclass that reuses an SRD name. Written inline
-  // rather than through seedSrdByName because the subclass id is needed to
-  // attach its feature rows, which that helper does not return.
+  // Subclasses come from subclasses.json (SRD 5.2.1) plus the two 2014 entries in
+  // data/subclasses.ts (SRD 5.1). Each row records which edition it is in
+  // `source`.
+  //
   // Both lookups are scoped to the srd partition (VEG-505). `name` is no longer
   // globally unique on either table, so an unscoped parent lookup could resolve
   // a user's homebrew class, and an unscoped subclass lookup could overwrite a
-  // homebrew subclass that reuses an SRD name.
+  // homebrew subclass that reuses an SRD name. Written inline rather than
+  // through seedSrdByName because the subclass id is needed to attach its
+  // feature rows, which that helper does not return.
   //
   // Resolved in two upfront queries rather than per row: this runs inside the
   // single interactive seed transaction that already carries a raised
   // SEED_TX_TIMEOUT_MS, and a query per subclass for the parent plus another
   // for the row itself made that 2N round trips. seedClassFeatures resolves its
   // whole FK map the same way.
-  private async seedSubclasses(tx: Prisma.TransactionClient): Promise<void> {
-    // The only by-name seed write path that lacked the duplicate guard: two
-    // entries sharing a name would silently merge into one row, the second
+  private async seedSubclasses(tx: Prisma.TransactionClient, data: SeedData): Promise<void> {
+    const { json, ts } = data.subclassSources;
+    const subclasses = [...json, ...ts];
+    // Two entries sharing a name would silently merge into one row, the second
     // overwriting the first's columns while both sets of features attach to it.
-    // Every other by-name table asserts this, and classes gained it when they
-    // moved onto seedSrdByName.
-    assertUniqueSeedNames('subclass', { subclass: srdSubclasses.map(sc => sc.name) });
+    // Keyed by file so a collision says which source each copy came from.
+    assertUniqueSeedNames('subclass', {
+      'subclasses.json': json.map(sc => sc.name),
+      'subclasses.ts': ts.map(sc => sc.name),
+    });
+    const names = subclasses.map(sc => sc.name);
 
     const classIdByName = await this.resolveIdsByName(
       nameLookupDelegate(tx.srdClass),
-      [...new Set(srdSubclasses.map(sc => sc.className))],
+      [...new Set(subclasses.map(sc => sc.className))],
       'srd'
     );
     const subclassIdByName = await this.resolveIdsByName(
       nameLookupDelegate(tx.subclass),
-      srdSubclasses.map(sc => sc.name),
+      names,
       'srd'
     );
 
-    let subclassFeatureCount = 0;
-    for (const sc of srdSubclasses) {
+    let featureEntries = 0;
+    let featuresRetired = 0;
+    for (const sc of subclasses) {
       const classId = classIdByName.get(sc.className);
       if (!classId) {
         this.logger.warn(`  WARNING: Class "${sc.className}" not found for subclass "${sc.name}"`);
         continue;
       }
-      const data = {
+      // DbNull rather than undefined: a subclass whose source carries no spell
+      // list must clear one an older seed wrote, not keep it.
+      const row = {
         name: sc.name,
         classId,
         description: sc.description,
-        spellList: sc.spellList,
-        spellcasting: sc.spellcasting,
+        spellList: sc.spellList ?? Prisma.DbNull,
+        spellcasting: sc.spellcasting ?? Prisma.DbNull,
+        source: sc.source,
         contentSource: 'srd' as const,
       };
       const existingId = subclassIdByName.get(sc.name);
       const subclass = existingId
-        ? await tx.subclass.update({ where: { id: existingId }, data })
-        : await tx.subclass.create({ data });
-      const features: Prisma.SubclassFeatureCreateManyInput[] = (sc.features ?? []).map(f => ({
-        subclassId: subclass.id,
-        name: f.name,
-        level: f.level,
-        description: f.description,
-      }));
-      if (features.length) {
-        await tx.subclassFeature.createMany({ data: features, skipDuplicates: true });
-        subclassFeatureCount += features.length;
+        ? await tx.subclass.update({ where: { id: existingId }, data: row })
+        : await tx.subclass.create({ data: row });
+      for (const f of sc.features) {
+        await tx.subclassFeature.upsert({
+          where: {
+            subclassId_name_level: { subclassId: subclass.id, name: f.name, level: f.level },
+          },
+          create: {
+            subclassId: subclass.id,
+            name: f.name,
+            level: f.level,
+            description: f.description,
+          },
+          update: { description: f.description },
+        });
+        featureEntries++;
       }
+      const result = await tx.subclassFeature.deleteMany({
+        where: { subclassId: subclass.id, ...absentFrom(sc.features) },
+      });
+      featuresRetired += result.count;
     }
-    this.logger.log(`  Subclasses: ${srdSubclasses.length} entries`);
-    this.logger.log(`  Subclass Features: ${subclassFeatureCount} entries`);
+
+    // Retire SRD subclasses neither source lists any more, such as the 2014
+    // names SRD 5.2.1 renamed (The Fiend is now Fiend Patron). Scoped to
+    // contentSource 'srd', so shared and homebrew subclasses are untouchable.
+    // Their feature rows cascade.
+    const retired = await tx.subclass.deleteMany({
+      where: { contentSource: 'srd', name: { notIn: names } },
+    });
+    this.logger.log(`  Subclasses: ${subclasses.length} entries, ${retired.count} retired`);
+    this.logger.log(`  Subclass Features: ${featureEntries} entries, ${featuresRetired} retired`);
   }
 
   // ── NPC Generator reference data ─────────────────────

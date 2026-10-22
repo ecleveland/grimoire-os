@@ -1,8 +1,27 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import SpeciesTraitsAndFeats from '../SpeciesTraitsAndFeats';
 import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
+
+const MARKDOWN =
+  '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+
+/** The MARKDOWN description rendered as markup inside `scope`, with no literal syntax left. */
+function expectRenderedMarkdown(scope: HTMLElement) {
+  expect(within(scope).getByText('Cantrips.', { selector: 'strong' })).toBeInTheDocument();
+  expect(scope.querySelectorAll('p')).toHaveLength(2);
+  expect(scope.querySelector('p p')).toBeNull();
+  expect(within(scope).getByRole('table')).toBeInTheDocument();
+  expect(within(scope).getByRole('cell', { name: '2' })).toBeInTheDocument();
+  expect(scope.textContent).not.toContain('**');
+  expect(scope.textContent).not.toContain('|');
+}
+
+/** The card under a section heading, so a markdown assertion stays inside one column. */
+function sectionCard(heading: string): HTMLElement {
+  return screen.getByText(heading).parentElement!;
+}
 
 const baseCharacter = makeCharacter({
   features: [
@@ -34,6 +53,19 @@ describe('SpeciesTraitsAndFeats', () => {
       render(<SpeciesTraitsAndFeats character={baseCharacter} />);
       expect(screen.getByText('See in dim light within 60 feet.')).toBeInTheDocument();
       expect(screen.getByText('Advantage on poison saves.')).toBeInTheDocument();
+    });
+
+    it('renders a markdown trait description as bold run-in heads, paragraphs and a table', () => {
+      render(
+        <SpeciesTraitsAndFeats
+          character={{
+            ...baseCharacter,
+            feats: [],
+            features: [{ name: 'Elven Lineage', source: 'Dwarf', description: MARKDOWN }],
+          }}
+        />
+      );
+      expectRenderedMarkdown(sectionCard('Species Traits'));
     });
   });
 
@@ -81,6 +113,19 @@ describe('SpeciesTraitsAndFeats', () => {
       expect(screen.getByText('Great Weapon Master')).toBeInTheDocument();
       expect(screen.getByText('Bonus attack on crit.')).toBeInTheDocument();
       expect(screen.getByText('Homebrew Ability')).toBeInTheDocument();
+    });
+
+    it('renders a markdown legacy feat description as bold run-in heads, paragraphs and a table', () => {
+      render(
+        <SpeciesTraitsAndFeats
+          character={{
+            ...baseCharacter,
+            feats: [],
+            features: [{ name: 'Magic Initiate', source: 'Feat', description: MARKDOWN }],
+          }}
+        />
+      );
+      expectRenderedMarkdown(sectionCard('Feats'));
     });
 
     it('does not double-list a feat present in both feats and features', () => {

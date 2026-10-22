@@ -1,3 +1,4 @@
+import Markdown from '@/components/Markdown';
 import type { Character } from '@/lib/types';
 import { featureRenderKey } from '@/lib/character-features';
 
@@ -34,9 +35,7 @@ export default function ClassFeatures({ character }: ClassFeaturesProps) {
                 </span>
               )}
             </div>
-            {feature.description && (
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{feature.description}</p>
-            )}
+            {feature.description && <Markdown className="mt-1">{feature.description}</Markdown>}
           </div>
         ))}
       </div>

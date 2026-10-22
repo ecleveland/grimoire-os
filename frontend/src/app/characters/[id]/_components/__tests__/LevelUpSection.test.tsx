@@ -56,6 +56,20 @@ const fighterWithRecurringAsi: SrdClass = {
   ],
 };
 
+const MARKDOWN =
+  '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
+
+/** The MARKDOWN description rendered as markup inside `scope`, with no literal syntax left. */
+function expectRenderedMarkdown(scope: HTMLElement) {
+  expect(within(scope).getByText('Cantrips.', { selector: 'strong' })).toBeInTheDocument();
+  expect(scope.querySelectorAll('p')).toHaveLength(2);
+  expect(scope.querySelector('p p')).toBeNull();
+  expect(within(scope).getByRole('table')).toBeInTheDocument();
+  expect(within(scope).getByRole('cell', { name: '2' })).toBeInTheDocument();
+  expect(scope.textContent).not.toContain('**');
+  expect(scope.textContent).not.toContain('|');
+}
+
 const onPatch = vi.fn();
 // The API sends `class: null` for a classless row, while the shared type only
 // allows undefined.
@@ -757,6 +771,23 @@ describe('LevelUpSection', () => {
       });
       const dialog = await openDialog(user);
       expect(within(dialog).getByRole('checkbox', { name: /extra attack/i })).toBeInTheDocument();
+    });
+
+    it('renders an offered feature description as bold run-in heads, paragraphs and a table', async () => {
+      mockUseApiQuery.mockReturnValue({
+        data: [
+          {
+            ...fighterClass,
+            features: [{ name: 'Spellcasting', level: 6, description: MARKDOWN }],
+          },
+        ],
+      });
+      const user = userEvent.setup();
+      renderSection();
+      const dialog = await openDialog(user);
+
+      const checkbox = within(dialog).getByRole('checkbox', { name: 'Spellcasting' });
+      expectRenderedMarkdown(checkbox.closest('label')!);
     });
 
     it('can be cancelled without patching', async () => {

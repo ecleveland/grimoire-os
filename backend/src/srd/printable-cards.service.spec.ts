@@ -478,6 +478,48 @@ describe('PrintableCardsService', () => {
       expect(card.description).toBe(DRACONIC_ANCESTRY_FLATTENED);
     });
 
+    describe('class feature descriptions', () => {
+      const featureCardDescription = async (description: string) => {
+        srdService.findFeaturesByIds.mockResolvedValue([{ ...FEATURE_DATA, description }]);
+        const result = await service.hydrate([{ type: 'feature', ids: ['feat-1'] }]);
+        return (result.groups[0].cards[0] as { description: string }).description;
+      };
+
+      it('joins paragraphs with a single space and drops the bold run-in markers', async () => {
+        const description = await featureCardDescription(
+          '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\nThird paragraph.'
+        );
+
+        expect(description).toBe(
+          'Cantrips. You know two cantrips. Second paragraph. Third paragraph.'
+        );
+      });
+
+      it('drops every line that starts with a pipe, delimiter row or not', async () => {
+        const description = await featureCardDescription(
+          'Before the table.\n\n| Level | Slots |\n| --- | --- |\n| 1 | 2 |\n\nBetween.\n\n| stray | row |\n  | indented | row |\n\nAfter the table.'
+        );
+
+        expect(description).toBe('Before the table. Between. After the table.');
+      });
+
+      it('drops everything from an Options line to the end', async () => {
+        const description = await featureCardDescription(
+          'You gain one invocation of your choice.\n\n**Options**\n\n**Agonizing Blast.** Add your modifier.\n\n- **Armor of Shadows.** Cast Mage Armor.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |'
+        );
+
+        expect(description).toBe('You gain one invocation of your choice.');
+      });
+
+      it('keeps text that merely mentions options in bold', async () => {
+        const description = await featureCardDescription(
+          'Choose from the **Options** below.\n\n**Options:** Agonizing Blast.'
+        );
+
+        expect(description).toBe('Choose from the Options below. Options: Agonizing Blast.');
+      });
+    });
+
     it('flattens markdown in background feature descriptions', async () => {
       prisma.background.findMany.mockResolvedValue([
         {
