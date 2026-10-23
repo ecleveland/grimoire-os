@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { classFeatureIdentity } from '@grimoire-os/shared';
 import { clampIntToRange } from '@/lib/form-helpers';
 import { MAX_LEVEL } from '@/lib/character-level';
@@ -94,6 +94,9 @@ interface ClassFeaturesEditorProps {
  */
 export default function ClassFeaturesEditor({ value, onChange }: ClassFeaturesEditorProps) {
   const dupes = duplicateIndices(value);
+  // Derived per mount, because the class page can hold the class form and a
+  // subclass form at once.
+  const hintId = useId();
 
   // Stable per-row React keys, following ShopStockEditor. Index keys break a
   // list that reorders: React keeps the DOM node at each position and swaps only
@@ -153,6 +156,12 @@ export default function ClassFeaturesEditor({ value, onChange }: ClassFeaturesEd
   return (
     <div>
       <span className={labelClasses}>Features</span>
+      <p id={hintId} className="text-sm text-gray-500 dark:text-gray-400 mb-2">
+        Markdown. To give a feature a list of options, put <code>**Options**</code> on a line of its
+        own, then each option as a <code>**Name**</code> line, an optional
+        {' "Prerequisite:" or "Cost:" '}line, and its text. They show as a collapsible group
+        wherever the feature&apos;s text appears.
+      </p>
       {value.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
           No features yet. Add one for each level that grants something.
@@ -230,6 +239,7 @@ export default function ClassFeaturesEditor({ value, onChange }: ClassFeaturesEd
               </div>
               <textarea
                 aria-label="Feature description"
+                aria-describedby={hintId}
                 placeholder="Description"
                 rows={2}
                 value={f.description ?? ''}

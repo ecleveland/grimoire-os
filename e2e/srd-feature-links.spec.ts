@@ -137,6 +137,42 @@ test.describe('Feature search links (VEG-558)', () => {
     await expect(row).toContainText(firstSentence);
   });
 
+  test("the class page folds a feature's options into a group", async ({ page }) => {
+    const list = await page.request.get(`${BACKEND}/api/srd/classes`);
+    expect(list.ok(), `classes list failed: ${list.status()}`).toBeTruthy();
+    const classes = (await list.json()) as { id: string; name: string }[];
+    const warlock = classes.find(c => c.name === 'Warlock');
+    expect(warlock, 'Warlock is not seeded').toBeDefined();
+
+    const detail = await page.request.get(`${BACKEND}/api/srd/classes/${warlock!.id}`);
+    expect(detail.ok(), `Warlock detail failed: ${detail.status()}`).toBeTruthy();
+    const { features } = (await detail.json()) as { features: { id: string; name: string }[] };
+    const invocations = features.find(f => f.name === 'Eldritch Invocations');
+    expect(invocations, 'Warlock has no Eldritch Invocations feature').toBeDefined();
+
+    await page.goto(`/srd/classes/${warlock!.id}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Warlock' })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const row = page.locator(`[id="${invocations!.id}"]`);
+    const toggle = row.getByRole('button', { name: /^Show \d+ options$/ });
+    await expect(toggle).toBeVisible();
+    await expect(row.getByText('Agonizing Blast')).toHaveCount(0);
+
+    await toggle.click();
+
+    await expect(row.getByText('Agonizing Blast')).toBeVisible();
+    await expect(row.getByText(/^Prerequisite:/).first()).toBeVisible();
+    await expect(row.getByRole('button', { name: 'Hide options' })).toBeVisible();
+
+    // The open list must wrap on a phone rather than widen the page.
+    await page.setViewportSize({ width: 375, height: 800 });
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBe(true);
+  });
+
   // Seeded backgrounds carry no feature rows and the create DTO rejects
   // features, so no search hit reaches a background page today. Visiting one
   // directly is the coverage until a background can own a feature.
