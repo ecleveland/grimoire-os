@@ -1,4 +1,5 @@
 import { isPublicPath, loginPathFor } from './public-paths';
+import { SESSION_PRESENT_COOKIE_NAME } from './session-cookie';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
@@ -60,6 +61,10 @@ function isOnPublicPath(): boolean {
  * middleware's presence-only check from disagreeing with the dead session and
  * ping-ponging `/login` ↔ `/`.
  *
+ * The middleware reads `session_present`, which is not httpOnly, so the client
+ * expires it itself before navigating. The middleware then stops seeing a
+ * session even when the logout round-trip fails or is throttled.
+ *
  * Deduped via `inflightEndSession` so concurrent terminal 401s trigger exactly
  * one logout + one navigation. The logout failure is swallowed: the redirect
  * must escape the loop regardless. Navigation is skipped on public paths (no
@@ -81,6 +86,10 @@ export function endDeadSession(): Promise<void> {
         );
       } catch {
         // Best-effort: navigate even if the logout round-trip fails.
+      }
+      if (typeof document !== 'undefined') {
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `${SESSION_PRESENT_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax${secure}`;
       }
       if (typeof window !== 'undefined' && !isOnPublicPath()) {
         const { pathname, search } = window.location;

@@ -1,19 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { withNext } from '@/lib/public-paths';
+import { resolveNextPath, withNext } from '@/lib/public-paths';
 import { useNextParam } from '@/lib/use-next-param';
 import FormField from '@/components/FormField';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
   const next = useNextParam();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading && isAuthenticated) router.replace(resolveNextPath(next));
+  }, [isLoading, isAuthenticated, next, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

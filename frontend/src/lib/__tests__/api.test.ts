@@ -21,10 +21,13 @@ describe('apiFetch', () => {
   const originalLocation = window.location;
   const originalCookie = Object.getOwnPropertyDescriptor(document, 'cookie');
 
+  // The no-op setter absorbs endDeadSession's session_present expiry, which
+  // would throw against a getter-only property.
   function setCookie(value: string) {
     Object.defineProperty(document, 'cookie', {
       configurable: true,
       get: () => value,
+      set: () => {},
     });
   }
 
@@ -754,6 +757,46 @@ describe('apiFetch', () => {
       setLocation('/srdx');
       await endSessionViaTerminal401();
       expect(window.location.replace).toHaveBeenCalledWith('/login?next=%2Fsrdx');
+    });
+  });
+
+  describe('dead-session cookie cleanup', () => {
+    // These cases need jsdom's real cookie jar. The getter stub above is an own
+    // property of document, so deleting it exposes the Document.prototype accessor.
+    beforeEach(() => {
+      Reflect.deleteProperty(document, 'cookie');
+      document.cookie = 'session_present=1; path=/';
+    });
+
+    afterEach(() => {
+      document.cookie = 'session_present=; Max-Age=0; path=/';
+    });
+
+    it('expires session_present client-side when the logout POST fails', async () => {
+      vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'));
+
+      await endDeadSession();
+
+      expect(document.cookie).not.toContain('session_present=1');
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('expires session_present client-side when the logout POST is throttled', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(429) as unknown as Response);
+
+      await endDeadSession();
+
+      expect(document.cookie).not.toContain('session_present=1');
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
+    });
+
+    it('expires session_present client-side when the logout POST succeeds', async () => {
+      vi.mocked(fetch).mockResolvedValue(mockResponse(204) as unknown as Response);
+
+      await endDeadSession();
+
+      expect(document.cookie).not.toContain('session_present=1');
+      expect(window.location.replace).toHaveBeenCalledWith('/login');
     });
   });
 

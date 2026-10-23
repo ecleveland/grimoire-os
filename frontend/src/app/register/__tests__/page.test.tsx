@@ -6,11 +6,19 @@ import RegisterPage from '../page';
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
 const mockRegister = vi.fn();
+const mockReplace = vi.fn();
+let mockIsAuthenticated = false;
+let mockIsLoading = false;
 
 vi.mock('@/lib/auth-context', () => ({
   useAuth: () => ({
     register: mockRegister,
+    isAuthenticated: mockIsAuthenticated,
+    isLoading: mockIsLoading,
   }),
+}));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ replace: mockReplace, push: vi.fn() }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -58,7 +66,45 @@ async function fillRequiredFields(
 describe('RegisterPage', () => {
   beforeEach(() => {
     mockRegister.mockReset();
+    mockReplace.mockReset();
+    mockIsAuthenticated = false;
+    mockIsLoading = false;
     window.history.replaceState({}, '', '/register');
+  });
+
+  describe('signed-in visitor', () => {
+    it('renders the form and stays put when not signed in', () => {
+      render(<RegisterPage />);
+      expect(screen.getByRole('button', { name: /create account/i })).toBeInTheDocument();
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('waits while the session is still loading', () => {
+      mockIsLoading = true;
+      mockIsAuthenticated = true;
+      render(<RegisterPage />);
+      expect(mockReplace).not.toHaveBeenCalled();
+    });
+
+    it('replaces the page with next once signed in', () => {
+      mockIsAuthenticated = true;
+      window.history.replaceState({}, '', '/register?next=%2Fcampaigns%2F1');
+      render(<RegisterPage />);
+      expect(mockReplace).toHaveBeenCalledWith('/campaigns/1');
+    });
+
+    it('replaces the page with / when there is no next', () => {
+      mockIsAuthenticated = true;
+      render(<RegisterPage />);
+      expect(mockReplace).toHaveBeenCalledWith('/');
+    });
+
+    it('replaces the page with / when next leaves the site', () => {
+      mockIsAuthenticated = true;
+      window.history.replaceState({}, '', '/register?next=https%3A%2F%2Fevil.com');
+      render(<RegisterPage />);
+      expect(mockReplace).toHaveBeenCalledWith('/');
+    });
   });
 
   describe('rendering', () => {

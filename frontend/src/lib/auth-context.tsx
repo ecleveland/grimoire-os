@@ -22,6 +22,7 @@ import {
   withRefreshLock,
 } from './api';
 import { resolveNextPath } from './public-paths';
+import { SESSION_PRESENT_COOKIE_NAME } from './session-cookie';
 import { Role } from './types';
 import type { User } from './types';
 
@@ -78,9 +79,6 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
-
-// Must match SESSION_PRESENT_COOKIE_NAME in backend/src/auth/auth-cookie.config.ts.
-const SESSION_PRESENT_COOKIE_NAME = 'session_present';
 
 // `likelyAuthenticated` is read through useSyncExternalStore so the server
 // snapshot is a stable `false` — matching the anonymous-first HTML that the
@@ -174,6 +172,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (res.ok) {
           const profile = (await res.json()) as User & { id: string };
+          // A live session without the session_present hint gets sent to
+          // /login by the middleware on every private route. The server owns
+          // the cookies, so one refresh repairs the hint rather than a client
+          // write. Its outcome changes nothing here: a success re-issues the
+          // cookies and anything else leaves them as they were.
+          if (!getSessionCookieSnapshot()) {
+            await refreshSession().catch(() => undefined);
+            if (cancelled) return;
+          }
           setUser(toUserInfo(profile));
         } else if (res.status === 401 && getSessionCookieSnapshot()) {
           // The access cookie is present-but-invalid and a refresh couldn't

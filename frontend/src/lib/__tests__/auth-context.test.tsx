@@ -478,6 +478,65 @@ describe('AuthProvider', () => {
     });
   });
 
+  describe('session hint repair', () => {
+    // A live session can lose session_present, for example when another tab's
+    // late dead-session expiry deletes the cookie a fresh login just set. The
+    // middleware then sends every private route to /login, so hydration asks
+    // the server to re-issue the cookies with one refresh.
+    function mockHydration(refreshStatus: number) {
+      vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+        const href = String(url);
+        if (href.endsWith('/users/me')) return mockFetchResponse(200, TEST_PROFILE);
+        if (href.endsWith('/auth/refresh')) return mockFetchResponse(refreshStatus);
+        throw new Error(`unexpected fetch ${href}`);
+      });
+    }
+
+    const refreshCalls = () =>
+      vi.mocked(fetch).mock.calls.filter(c => String(c[0]).endsWith('/auth/refresh'));
+
+    it('posts one refresh when /users/me succeeds without session_present, then reports the user', async () => {
+      mockHydration(200);
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+      });
+      expect(refreshCalls()).toHaveLength(1);
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    });
+
+    it('posts no refresh when session_present is already set', async () => {
+      document.cookie = 'session_present=1';
+      mockHydration(200);
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+      });
+      expect(refreshCalls()).toHaveLength(0);
+    });
+
+    it('keeps the user from the first profile when the repair refresh fails', async () => {
+      mockHydration(500);
+
+      renderWithProvider();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('isLoading')).toHaveTextContent('false');
+      });
+      expect(refreshCalls()).toHaveLength(1);
+      expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+      expect(screen.getByTestId('username')).toHaveTextContent('testuser');
+      expect(mockEndDeadSession).not.toHaveBeenCalled();
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(mockReplace).not.toHaveBeenCalled();
+      expect(mockAssign).not.toHaveBeenCalled();
+    });
+  });
+
   describe('login', () => {
     beforeEach(() => {
       vi.mocked(fetch)
@@ -781,6 +840,9 @@ describe('AuthProvider', () => {
 
   describe('logout', () => {
     beforeEach(() => {
+      // A signed-in browser carries the session hint, so hydration does not
+      // spend a repair refresh that these cases hold open or count.
+      document.cookie = 'session_present=1';
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration (authenticated)
         .mockResolvedValue(mockFetchResponse(204)); // POST /auth/logout
@@ -974,6 +1036,7 @@ describe('AuthProvider', () => {
     });
 
     it('clears the cache when another user logs in', async () => {
+      document.cookie = 'session_present=1';
       vi.mocked(fetch)
         .mockResolvedValueOnce(mockFetchResponse(200, TEST_PROFILE)) // hydration as user-1
         .mockResolvedValueOnce(mockFetchResponse(200, { user: OTHER_PROFILE })); // login as user-2
