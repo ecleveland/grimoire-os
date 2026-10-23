@@ -29,6 +29,26 @@ describe('ClassFeaturesEditor', () => {
     });
   });
 
+  describe('description hint', () => {
+    it('explains the options syntax even before a row exists', () => {
+      render(<ClassFeaturesEditor value={[]} onChange={vi.fn()} />);
+
+      const hint = screen.getByText(/list of options/);
+      expect(hint).toHaveTextContent(
+        'Markdown. To give a feature a list of options, put **Options** on a line of its own, then each option as a **Name** line, an optional "Prerequisite:" or "Cost:" line, and its text. They show as a collapsible group wherever the feature\'s text appears.'
+      );
+      expect(hint.querySelectorAll('code')).toHaveLength(2);
+    });
+
+    it('describes every description box with the hint', () => {
+      render(<ClassFeaturesEditor value={[f(), f({ level: 2 })]} onChange={vi.fn()} />);
+
+      for (const box of screen.getAllByLabelText('Feature description')) {
+        expect(box).toHaveAccessibleDescription(/list of options/);
+      }
+    });
+  });
+
   describe('add, edit, remove', () => {
     it('appends a blank row at level 1', async () => {
       const onChange = vi.fn();

@@ -5,6 +5,9 @@ import FeatureList from '@/components/FeatureList';
 import { PrintTrayProvider } from '@/lib/print-tray-context';
 import type { ClassFeature } from '@/lib/types';
 
+const WITH_OPTIONS =
+  'Pick two invocations.\n\n**Options**\n\n**Agonizing Blast**\n\nPrerequisite: Level 2+ Warlock\n\nAdd your Charisma modifier.\n\n**Armor of Shadows**\n\nMage Armor at will.';
+
 const MARKDOWN =
   '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
 
@@ -79,6 +82,17 @@ describe('FeatureList', () => {
     renderList([{ id: 'cf-spellcasting', name: 'Spellcasting', level: 1, description: MARKDOWN }]);
 
     expectRenderedMarkdown(document.getElementById('cf-spellcasting')!);
+  });
+
+  it("puts a description's option list behind a collapsed toggle", () => {
+    renderList([
+      { id: 'cf-invocations', name: 'Eldritch Invocations', level: 1, description: WITH_OPTIONS },
+    ]);
+
+    const row = document.getElementById('cf-invocations')!;
+    expect(within(row).getByText('Pick two invocations.')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'Show 2 options' })).toBeInTheDocument();
+    expect(within(row).queryByText('Agonizing Blast')).not.toBeInTheDocument();
   });
 
   it('renders no description paragraph for a row without one', () => {

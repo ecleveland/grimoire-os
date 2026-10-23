@@ -1,4 +1,4 @@
-import Markdown from '@/components/Markdown';
+import FeatureText from '@/components/FeatureText';
 import type { Character } from '@/lib/types';
 import { featureRenderKey } from '@/lib/character-features';
 
@@ -35,7 +35,9 @@ export default function ClassFeatures({ character }: ClassFeaturesProps) {
                 </span>
               )}
             </div>
-            {feature.description && <Markdown className="mt-1">{feature.description}</Markdown>}
+            {feature.description && (
+              <FeatureText className="mt-1" description={feature.description} />
+            )}
           </div>
         ))}
       </div>

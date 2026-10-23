@@ -787,7 +787,36 @@ describe('LevelUpSection', () => {
       const dialog = await openDialog(user);
 
       const checkbox = within(dialog).getByRole('checkbox', { name: 'Spellcasting' });
-      expectRenderedMarkdown(checkbox.closest('label')!);
+      expectRenderedMarkdown(checkbox.closest('label')!.parentElement!);
+    });
+
+    it("opens an offered feature's option list without toggling its checkbox", async () => {
+      mockUseApiQuery.mockReturnValue({
+        data: [
+          {
+            ...fighterClass,
+            features: [
+              {
+                name: 'Eldritch Invocations',
+                level: 6,
+                description:
+                  'Pick two invocations.\n\n**Options**\n\n**Agonizing Blast**\n\nPrerequisite: Level 2+ Warlock\n\nAdd your Charisma modifier.',
+              },
+            ],
+          },
+        ],
+      });
+      const user = userEvent.setup();
+      renderSection();
+      const dialog = await openDialog(user);
+      const checkbox = within(dialog).getByRole('checkbox', { name: 'Eldritch Invocations' });
+      expect(checkbox).toBeChecked();
+      expect(within(dialog).queryByText('Agonizing Blast')).not.toBeInTheDocument();
+
+      await user.click(within(dialog).getByRole('button', { name: 'Show 1 option' }));
+
+      expect(within(dialog).getByText('Agonizing Blast')).toBeInTheDocument();
+      expect(checkbox).toBeChecked();
     });
 
     it('can be cancelled without patching', async () => {
