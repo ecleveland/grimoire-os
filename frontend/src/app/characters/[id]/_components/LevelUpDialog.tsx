@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Character, DieType, HitDieType, SrdClass } from '@/lib/types';
 import { asHitDie, DEFAULT_HIT_DIE, HIT_DIE_TYPES } from '@/lib/types';
-import Markdown from '@/components/Markdown';
+import FeatureText from '@/components/FeatureText';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
 import { resolveClass } from '@/lib/class-selection';
@@ -294,25 +294,33 @@ export default function LevelUpDialog({
         {suggestedFeatures.length > 0 && (
           <div className="space-y-2">
             <h3 className={sectionTitleClass}>New Features at Level {newLevel}</h3>
+            {/* The label wraps only the checkbox and the name, so a click on
+                the description's options toggle cannot flip the checkbox. The
+                label is a subgrid of the row, which keeps the description in
+                the name's column. */}
             {suggestedFeatures.map((feature, i) => (
-              <label
+              <div
                 key={featureRenderKey(feature, i)}
-                className="flex items-start gap-2 text-sm text-gray-700 dark:text-gray-300"
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 text-sm text-gray-700 dark:text-gray-300"
               >
-                <input
-                  type="checkbox"
-                  aria-label={feature.name}
-                  checked={!unchecked.has(characterFeatureIdentity(feature))}
-                  onChange={() => toggleFeature(characterFeatureIdentity(feature))}
-                  className="mt-0.5"
-                />
-                <div>
+                <label className="col-span-2 grid grid-cols-subgrid items-start">
+                  <input
+                    type="checkbox"
+                    aria-label={feature.name}
+                    checked={!unchecked.has(characterFeatureIdentity(feature))}
+                    onChange={() => toggleFeature(characterFeatureIdentity(feature))}
+                    className="mt-0.5"
+                  />
                   <span className="font-medium text-gray-900 dark:text-gray-100">
                     {feature.name}
                   </span>
-                  {feature.description && <Markdown>{feature.description}</Markdown>}
-                </div>
-              </label>
+                </label>
+                {feature.description && (
+                  <div className="col-start-2">
+                    <FeatureText description={feature.description} />
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}

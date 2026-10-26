@@ -412,6 +412,27 @@ describe('SrdSearchPage', () => {
       expectRenderedMarkdown(drilldown.parentElement!);
     });
 
+    it("puts a feature description's option list behind a collapsed toggle", async () => {
+      const description =
+        'Pick two invocations.\n\n**Options**\n\n**Agonizing Blast**\n\nPrerequisite: Level 2+ Warlock\n\nAdd your Charisma modifier.\n\n**Armor of Shadows**\n\nMage Armor at will.';
+      mockApiFetch.mockResolvedValue(
+        paginated([{ kind: 'feature', data: { ...sneakAttackFeature, description } }])
+      );
+      const user = userEvent.setup();
+      renderPage();
+      await waitFor(() => expect(screen.getByText('Sneak Attack')).toBeInTheDocument());
+
+      await user.click(screen.getByText('Sneak Attack'));
+
+      expect(screen.getByText('Pick two invocations.')).toBeInTheDocument();
+      expect(screen.queryByText('Agonizing Blast')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+
+      expect(screen.getByText('Agonizing Blast')).toBeInTheDocument();
+      expect(screen.getByText('Prerequisite: Level 2+ Warlock')).toBeInTheDocument();
+    });
+
     // A subclass has no page of its own, so the drilldown puts the class id in
     // the path (VEG-558) and the feature id in the anchor (VEG-618).
     it('points a subclass feature at its row on the class page', async () => {

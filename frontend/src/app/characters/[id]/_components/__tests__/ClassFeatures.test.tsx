@@ -4,6 +4,9 @@ import ClassFeatures from '../ClassFeatures';
 import type { Character } from '@/lib/types';
 import { makeCharacter } from '@/test-utils/character';
 
+const WITH_OPTIONS =
+  'Pick two invocations.\n\n**Options**\n\n**Agonizing Blast**\n\nPrerequisite: Level 2+ Warlock\n\nAdd your Charisma modifier.\n\n**Armor of Shadows**\n\nMage Armor at will.';
+
 const MARKDOWN =
   '**Cantrips.** You know two cantrips.\n\nSecond paragraph.\n\n| A | B |\n| --- | --- |\n| 1 | 2 |';
 
@@ -57,6 +60,23 @@ describe('ClassFeatures', () => {
       />
     );
     expectRenderedMarkdown(screen.getByTestId('class-features'));
+  });
+
+  it("puts a description's option list behind a collapsed toggle", () => {
+    render(
+      <ClassFeatures
+        character={{
+          ...baseCharacter,
+          features: [
+            { name: 'Eldritch Invocations', source: 'Fighter', description: WITH_OPTIONS },
+          ],
+        }}
+      />
+    );
+    const section = screen.getByTestId('class-features');
+    expect(within(section).getByText('Pick two invocations.')).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Show 2 options' })).toBeInTheDocument();
+    expect(within(section).queryByText('Agonizing Blast')).not.toBeInTheDocument();
   });
 
   it('renders source tags on features', () => {

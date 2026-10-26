@@ -19,7 +19,7 @@ import Pagination from '@/components/Pagination';
 import Badge from '@/components/Badge';
 import LoadError from '@/components/LoadError';
 import LoadingState from '@/components/LoadingState';
-import Markdown from '@/components/Markdown';
+import FeatureText from '@/components/FeatureText';
 import SpellDetail from '@/components/SpellDetail';
 import FeatDetail from '@/components/FeatDetail';
 import ItemDetail from '@/components/ItemDetail';
@@ -337,7 +337,7 @@ function ClassSummary({ cls }: { cls: UnifiedClassHitData }) {
 function FeatureDetail({ feature }: { feature: UnifiedFeatureData }) {
   return (
     <div className="space-y-3">
-      <Markdown>{feature.description}</Markdown>
+      <FeatureText description={feature.description} />
       <Link
         href={featureDetailHref(feature)}
         className="inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"
