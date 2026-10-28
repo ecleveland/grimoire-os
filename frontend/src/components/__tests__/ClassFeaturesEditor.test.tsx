@@ -22,10 +22,75 @@ describe('ClassFeaturesEditor', () => {
       expect(screen.queryByLabelText('Feature name')).toBeNull();
     });
 
+    it('keeps the empty-state copy to a single short sentence', () => {
+      render(<ClassFeaturesEditor value={[]} onChange={vi.fn()} />);
+
+      expect(screen.getByText(/no features yet/i)).toHaveTextContent(/^No features yet\.$/);
+    });
+
     it('drops the empty-state copy once a row exists', () => {
       render(<ClassFeaturesEditor value={[f()]} onChange={vi.fn()} />);
 
       expect(screen.queryByText(/no features yet/i)).toBeNull();
+    });
+  });
+
+  describe('section heading', () => {
+    it('reads "Features by level"', () => {
+      render(<ClassFeaturesEditor value={[]} onChange={vi.fn()} />);
+
+      expect(screen.getByText('Features by level')).toBeInTheDocument();
+    });
+  });
+
+  describe('row labels', () => {
+    // The visible text is short, but the accessible name keeps the "Feature"
+    // prefix so it does not collide with the host form's own Name and
+    // Description fields. This checks the text is on screen and tied to the
+    // control, not only present as an attribute.
+    it("renders each row's labels as visible text tied to its control", () => {
+      render(<ClassFeaturesEditor value={[f(), f({ level: 2 })]} onChange={vi.fn()} />);
+
+      const pairs: [string, string][] = [
+        ['Level', 'Feature level'],
+        ['Name', 'Feature name'],
+        ['Description', 'Feature description'],
+      ];
+      for (const [text, accessibleName] of pairs) {
+        const labels = screen.getAllByText(text, { selector: 'label' });
+        const controls = screen.getAllByLabelText(accessibleName);
+        expect(labels).toHaveLength(2);
+        expect(controls).toHaveLength(2);
+        labels.forEach((label, i) => {
+          expect(controls[i].id).not.toBe('');
+          expect(label.getAttribute('for')).toBe(controls[i].id);
+        });
+      }
+    });
+
+    it('drops the placeholders now that each control has a visible label', () => {
+      render(<ClassFeaturesEditor value={[f()]} onChange={vi.fn()} />);
+
+      for (const name of ['Feature level', 'Feature name', 'Feature description']) {
+        expect(screen.getByLabelText(name)).not.toHaveAttribute('placeholder');
+      }
+    });
+
+    it('gives the glyph buttons a tooltip', () => {
+      render(<ClassFeaturesEditor value={[f()]} onChange={vi.fn()} />);
+
+      expect(screen.getByRole('button', { name: 'Move feature 1 up' })).toHaveAttribute(
+        'title',
+        'Move up'
+      );
+      expect(screen.getByRole('button', { name: 'Move feature 1 down' })).toHaveAttribute(
+        'title',
+        'Move down'
+      );
+      expect(screen.getByRole('button', { name: 'Remove feature 1' })).toHaveAttribute(
+        'title',
+        'Remove'
+      );
     });
   });
 
@@ -35,9 +100,17 @@ describe('ClassFeaturesEditor', () => {
 
       const hint = screen.getByText(/list of options/);
       expect(hint).toHaveTextContent(
-        'Markdown. To give a feature a list of options, put **Options** on a line of its own, then each option as a **Name** line, an optional "Prerequisite:" or "Cost:" line, and its text. They show as a collapsible group wherever the feature\'s text appears.'
+        'Add one for each level that grants something. Descriptions are markdown. To give a feature a list of options, put **Options** on a line of its own, then each option as a **Name** line, an optional "Prerequisite:" or "Cost:" line, and its text. They show as a collapsible group wherever the feature\'s text appears.'
       );
       expect(hint.querySelectorAll('code')).toHaveLength(2);
+    });
+
+    it('keeps the hint once rows exist', () => {
+      render(<ClassFeaturesEditor value={[f()]} onChange={vi.fn()} />);
+
+      expect(screen.getByText(/list of options/)).toHaveTextContent(
+        /^Add one for each level that grants something\./
+      );
     });
 
     it('describes every description box with the hint', () => {

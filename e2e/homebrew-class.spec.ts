@@ -71,6 +71,7 @@ test.describe('Homebrew class pages (VEG-508)', () => {
     await chip(page, 'Skill choices', 'Survival').click();
     await page.getByLabel('Number of skill choices', { exact: true }).fill('2');
     await page.getByRole('button', { name: '+ Add feature', exact: true }).click();
+    await expect(page.getByText('Level', { exact: true })).toBeVisible();
     await page.getByLabel('Feature name', { exact: true }).fill(featureName);
     await page.getByRole('button', { name: 'Create class', exact: true }).click();
 

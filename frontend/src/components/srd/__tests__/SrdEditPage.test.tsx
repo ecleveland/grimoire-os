@@ -292,13 +292,13 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
 
     mockUseAuth.mockReturnValue(OWNER_AUTH);
     rerender(<SrdEditPage kind={kind} />);
-    expect(await screen.findByLabelText(renameField)).toHaveValue(name);
+    expect(await screen.findByRole('textbox', { name: renameField })).toHaveValue(name);
   });
 
   it('loads the row from its detail path and prefills the form for its owner', async () => {
     renderPage(kind);
 
-    expect(await screen.findByLabelText(renameField)).toHaveValue(name);
+    expect(await screen.findByRole('textbox', { name: renameField })).toHaveValue(name);
     expect(screen.getByRole('heading', { name: `Edit ${entry.label}` })).toBeInTheDocument();
     expect(mockApiFetch).toHaveBeenCalledWith(detail);
   });
@@ -314,7 +314,7 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
       entry.listPath
     );
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(renameField)).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: renameField })).not.toBeInTheDocument();
     expect(toast.error).not.toHaveBeenCalled();
   });
 
@@ -348,7 +348,7 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(`Failed to load ${kind}`, { id: `load-${kind}` })
     );
-    expect(screen.queryByLabelText(renameField)).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: renameField })).not.toBeInTheDocument();
   });
 
   it('renders the form after Retry once the next load succeeds', async () => {
@@ -362,7 +362,7 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
 
     await user.click(await screen.findByRole('button', { name: 'Retry' }));
 
-    expect(await screen.findByLabelText(renameField)).toHaveValue(name);
+    expect(await screen.findByRole('textbox', { name: renameField })).toHaveValue(name);
     expect(get).toHaveBeenCalledTimes(2);
   });
 
@@ -383,7 +383,9 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
 
   it('keeps the loaded form and its unsaved edits when a background reload fails', async () => {
     const { client } = renderPage(kind);
-    fireEvent.change(await screen.findByLabelText(renameField), { target: { value: renamed } });
+    fireEvent.change(await screen.findByRole('textbox', { name: renameField }), {
+      target: { value: renamed },
+    });
 
     routeApi(kind, () => Promise.reject(new ApiError(503, 'Service Unavailable')));
     await act(() => client.refetchQueries({ queryKey: ['api', detail] }));
@@ -393,7 +395,7 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
       expect(toast.error).toHaveBeenCalledWith(`Failed to load ${kind}`, { id: `load-${kind}` })
     );
     expect(screen.queryByText(`Failed to load ${kind}.`)).not.toBeInTheDocument();
-    expect(screen.getByLabelText(renameField)).toHaveValue(renamed);
+    expect(screen.getByRole('textbox', { name: renameField })).toHaveValue(renamed);
   });
 
   it.each([
@@ -415,7 +417,7 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
       'href',
       entry.listPath
     );
-    expect(screen.queryByLabelText(renameField)).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: renameField })).not.toBeInTheDocument();
   });
 
   it('lets an admin edit a shared row', async () => {
@@ -425,7 +427,7 @@ describe.each(SRD_KINDS)('SrdEditPage for a %s', kind => {
     );
     renderPage(kind);
 
-    expect(await screen.findByLabelText(renameField)).toHaveValue(name);
+    expect(await screen.findByRole('textbox', { name: renameField })).toHaveValue(name);
   });
 });
 
@@ -444,7 +446,9 @@ describe.each(SRD_KINDS)('SrdEditPage saving a %s', kind => {
     const user = userEvent.setup();
     renderPage(kind);
 
-    fireEvent.change(await screen.findByLabelText(renameField), { target: { value: renamed } });
+    fireEvent.change(await screen.findByRole('textbox', { name: renameField }), {
+      target: { value: renamed },
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith(entry.listPath));
@@ -457,7 +461,7 @@ describe.each(SRD_KINDS)('SrdEditPage saving a %s', kind => {
     const user = userEvent.setup();
     const { client } = renderPage(kind);
     client.setQueryData(listKey, { data: [], total: 0, page: 1, lastPage: 1 });
-    await screen.findByLabelText(renameField);
+    await screen.findByRole('textbox', { name: renameField });
     const invalidate = vi.spyOn(client, 'invalidateQueries');
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
@@ -478,7 +482,7 @@ describe.each(SRD_KINDS)('SrdEditPage saving a %s', kind => {
     );
     const user = userEvent.setup();
     renderPage(kind);
-    await screen.findByLabelText(renameField);
+    await screen.findByRole('textbox', { name: renameField });
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -497,7 +501,7 @@ describe.each(SRD_KINDS)('SrdEditPage saving a %s', kind => {
     );
     const user = userEvent.setup();
     renderPage(kind);
-    await screen.findByLabelText(renameField);
+    await screen.findByRole('textbox', { name: renameField });
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
@@ -508,7 +512,7 @@ describe.each(SRD_KINDS)('SrdEditPage saving a %s', kind => {
   it('keeps Save disabled after a successful save so a second click cannot re-PATCH', async () => {
     const user = userEvent.setup();
     renderPage(kind);
-    await screen.findByLabelText(renameField);
+    await screen.findByRole('textbox', { name: renameField });
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith(entry.listPath));
@@ -522,7 +526,7 @@ describe.each(SRD_KINDS)('SrdEditPage saving a %s', kind => {
   it('goes back when Cancel is pressed', async () => {
     const user = userEvent.setup();
     renderPage(kind);
-    await screen.findByLabelText(renameField);
+    await screen.findByRole('textbox', { name: renameField });
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
@@ -557,7 +561,9 @@ describe('SrdEditPage form rules', () => {
     const user = userEvent.setup();
     renderPage('class');
 
-    fireEvent.change(await screen.findByLabelText(/^Name/), { target: { value: 'Grove Warden' } });
+    fireEvent.change(await screen.findByRole('textbox', { name: /^Name/ }), {
+      target: { value: 'Grove Warden' },
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/srd/classes'));
@@ -569,7 +575,7 @@ describe('SrdEditPage form rules', () => {
     routeApi('class', () => Promise.resolve(makeClass()));
     const user = userEvent.setup();
     renderPage('class');
-    await screen.findByLabelText(/^Name/);
+    await screen.findByRole('textbox', { name: /^Name/ });
 
     fireEvent.change(screen.getAllByLabelText('Feature name')[1], {
       target: { value: 'Grove Stride' },
@@ -598,7 +604,7 @@ describe('SrdEditPage form rules', () => {
     );
     const user = userEvent.setup();
     renderPage('class');
-    await screen.findByLabelText(/^Name/);
+    await screen.findByRole('textbox', { name: /^Name/ });
 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 

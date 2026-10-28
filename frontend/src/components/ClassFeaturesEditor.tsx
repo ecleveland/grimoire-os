@@ -8,6 +8,7 @@ import { MAX_LEVEL } from '@/lib/character-level';
 const cell =
   'px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
 const labelClasses = 'block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1';
+const rowLabel = 'block text-xs font-medium text-gray-500 dark:text-gray-400 mb-0.5';
 const moveButton =
   'text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-30 disabled:hover:text-gray-400 leading-none';
 
@@ -97,6 +98,7 @@ export default function ClassFeaturesEditor({ value, onChange }: ClassFeaturesEd
   // Derived per mount, because the class page can hold the class form and a
   // subclass form at once.
   const hintId = useId();
+  const rowIdBase = useId();
 
   // Stable per-row React keys, following ShopStockEditor. Index keys break a
   // list that reorders: React keeps the DOM node at each position and swaps only
@@ -155,105 +157,128 @@ export default function ClassFeaturesEditor({ value, onChange }: ClassFeaturesEd
 
   return (
     <div>
-      <span className={labelClasses}>Features</span>
+      <span className={labelClasses}>Features by level</span>
       <p id={hintId} className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-        Markdown. To give a feature a list of options, put <code>**Options**</code> on a line of its
-        own, then each option as a <code>**Name**</code> line, an optional
+        Add one for each level that grants something. Descriptions are markdown. To give a feature a
+        list of options, put <code>**Options**</code> on a line of its own, then each option as a{' '}
+        <code>**Name**</code> line, an optional
         {' "Prerequisite:" or "Cost:" '}line, and its text. They show as a collapsible group
         wherever the feature&apos;s text appears.
       </p>
       {value.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-          No features yet. Add one for each level that grants something.
-        </p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">No features yet.</p>
       ) : (
         <div className="space-y-3 mb-2">
-          {value.map((f, i) => (
-            <div
-              key={keys[i]}
-              className="space-y-1 rounded-lg border border-gray-200 dark:border-gray-700 p-2"
-            >
-              <div className="grid grid-cols-12 gap-2 items-center">
-                <input
-                  aria-label="Feature level"
-                  type="number"
-                  min={1}
-                  max={MAX_LEVEL}
-                  placeholder="Lvl"
-                  // A blank box is allowed through as a draft; only a parseable
-                  // value is clamped and written. Clamping a cleared box straight
-                  // back to 1 is what makes "select all, backspace, type 5" save
-                  // level 15 — a legal value, so nothing downstream objects. The
-                  // character editor's number inputs take the same
-                  // `'' ? '' : clamp(...)` shape for the same reason.
-                  value={Number.isNaN(f.level) ? '' : f.level}
-                  onChange={e =>
-                    update(i, {
-                      level:
-                        e.target.value === ''
-                          ? Number.NaN
-                          : clampIntToRange(e.target.value, 1, MAX_LEVEL),
-                    })
-                  }
-                  // A row left blank commits to level 1 rather than submitting
-                  // NaN, which the DTO would refuse with a message about a field
-                  // the author never knowingly touched.
-                  onBlur={() => Number.isNaN(f.level) && update(i, { level: 1 })}
-                  className={`${cell} col-span-2`}
-                />
-                <input
-                  aria-label="Feature name"
-                  placeholder="Name"
-                  value={f.name}
-                  onChange={e => update(i, { name: e.target.value })}
-                  className={`${cell} col-span-7`}
-                />
-                <div className="col-span-3 flex items-center justify-end gap-1">
-                  <button
-                    type="button"
-                    aria-label={`Move feature ${i + 1} up`}
-                    disabled={!canMove(i, -1)}
-                    onClick={() => move(i, -1)}
-                    className={moveButton}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Move feature ${i + 1} down`}
-                    disabled={!canMove(i, 1)}
-                    onClick={() => move(i, 1)}
-                    className={moveButton}
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`Remove feature ${i + 1}`}
-                    onClick={() => remove(i)}
-                    className="text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-                  >
-                    ×
-                  </button>
+          {value.map((f, i) => {
+            const levelId = `${rowIdBase}-${keys[i]}-level`;
+            const nameId = `${rowIdBase}-${keys[i]}-name`;
+            const descriptionId = `${rowIdBase}-${keys[i]}-description`;
+            return (
+              <div
+                key={keys[i]}
+                className="space-y-1 rounded-lg border border-gray-200 dark:border-gray-700 p-2"
+              >
+                {/* The host forms carry their own Name and Description fields, so
+                    each control's accessible name keeps the "Feature" prefix
+                    while the visible label text stays short. */}
+                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)_auto] gap-2 items-end">
+                  <div>
+                    <label htmlFor={levelId} className={rowLabel}>
+                      Level
+                    </label>
+                    <input
+                      id={levelId}
+                      aria-label="Feature level"
+                      type="number"
+                      min={1}
+                      max={MAX_LEVEL}
+                      // A blank box is allowed through as a draft; only a parseable
+                      // value is clamped and written. Clamping a cleared box straight
+                      // back to 1 is what makes "select all, backspace, type 5" save
+                      // level 15 — a legal value, so nothing downstream objects. The
+                      // character editor's number inputs take the same
+                      // `'' ? '' : clamp(...)` shape for the same reason.
+                      value={Number.isNaN(f.level) ? '' : f.level}
+                      onChange={e =>
+                        update(i, {
+                          level:
+                            e.target.value === ''
+                              ? Number.NaN
+                              : clampIntToRange(e.target.value, 1, MAX_LEVEL),
+                        })
+                      }
+                      // A row left blank commits to level 1 rather than submitting
+                      // NaN, which the DTO would refuse with a message about a field
+                      // the author never knowingly touched.
+                      onBlur={() => Number.isNaN(f.level) && update(i, { level: 1 })}
+                      className={`${cell} w-full`}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor={nameId} className={rowLabel}>
+                      Name
+                    </label>
+                    <input
+                      id={nameId}
+                      aria-label="Feature name"
+                      value={f.name}
+                      onChange={e => update(i, { name: e.target.value })}
+                      className={`${cell} w-full`}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      aria-label={`Move feature ${i + 1} up`}
+                      title="Move up"
+                      disabled={!canMove(i, -1)}
+                      onClick={() => move(i, -1)}
+                      className={`${moveButton} p-1`}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move feature ${i + 1} down`}
+                      title="Move down"
+                      disabled={!canMove(i, 1)}
+                      onClick={() => move(i, 1)}
+                      className={`${moveButton} p-1`}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Remove feature ${i + 1}`}
+                      title="Remove"
+                      onClick={() => remove(i)}
+                      className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
+                <label htmlFor={descriptionId} className={rowLabel}>
+                  Description
+                </label>
+                <textarea
+                  id={descriptionId}
+                  aria-label="Feature description"
+                  aria-describedby={hintId}
+                  rows={2}
+                  value={f.description ?? ''}
+                  onChange={e => update(i, { description: e.target.value })}
+                  className={`${cell} w-full`}
+                />
+                {dupes.has(i) && (
+                  <p className="text-sm text-red-600 dark:text-red-400">
+                    This name is already used at this level. Change the name or the level — the same
+                    name at a different level is fine.
+                  </p>
+                )}
               </div>
-              <textarea
-                aria-label="Feature description"
-                aria-describedby={hintId}
-                placeholder="Description"
-                rows={2}
-                value={f.description ?? ''}
-                onChange={e => update(i, { description: e.target.value })}
-                className={`${cell} w-full`}
-              />
-              {dupes.has(i) && (
-                <p className="text-sm text-red-600 dark:text-red-400">
-                  This name is already used at this level. Change the name or the level — the same
-                  name at a different level is fine.
-                </p>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       <button

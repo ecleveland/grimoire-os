@@ -47,16 +47,16 @@ describe('SubclassForm', () => {
   it('starts blank with no features on a new subclass', () => {
     renderForm();
 
-    expect(screen.getByLabelText(/^Name/)).toHaveValue('');
-    expect(screen.getByLabelText('Description')).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('');
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('');
     expect(screen.queryByLabelText('Feature name')).not.toBeInTheDocument();
   });
 
   it('prefills every control from the subclass being edited', () => {
     renderForm({ initial: makeSubclass(), submitLabel: 'Save changes' });
 
-    expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
-    expect(screen.getByLabelText('Description')).toHaveValue('A patient marksman.');
+    expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Deadeye');
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('A patient marksman.');
     expect(screen.getByLabelText('Feature name')).toHaveValue('Steady Aim');
     expect(screen.getByLabelText('Feature level')).toHaveValue(3);
     expect(screen.getByLabelText('Feature description')).toHaveValue('Hold the shot.');
@@ -66,8 +66,10 @@ describe('SubclassForm', () => {
     const user = userEvent.setup();
     renderForm();
 
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Deadeye' } });
-    fireEvent.change(screen.getByLabelText('Description'), {
+    fireEvent.change(screen.getByRole('textbox', { name: /^Name/ }), {
+      target: { value: 'Deadeye' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
       target: { value: 'A patient marksman.' },
     });
     await user.click(screen.getByRole('button', { name: 'Create subclass' }));
@@ -101,7 +103,9 @@ describe('SubclassForm', () => {
     const user = userEvent.setup();
     renderForm({ initial: makeSubclass(), submitLabel: 'Save changes' });
 
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Fixed a typo.' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+      target: { value: 'Fixed a typo.' },
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     // Strict, so a `name` or `features` key fails it whatever its value.
@@ -114,7 +118,7 @@ describe('SubclassForm', () => {
     const user = userEvent.setup();
     renderForm();
 
-    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: '   ' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /^Name/ }), { target: { value: '   ' } });
     await user.click(screen.getByRole('button', { name: 'Create subclass' }));
 
     expect(toast.error).toHaveBeenCalledWith('Name is required');
@@ -177,7 +181,7 @@ describe('SubclassForm', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
+    expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Deadeye');
     // Compared against the subclass that loaded, the untouched form is unchanged,
     // so nothing is sent. A baseline taken from the refetched prop would see the
     // name and the features differ, and send both.

@@ -156,7 +156,7 @@ function cardFor(name: string): HTMLElement {
 /** Open the create form and fill in a name. */
 async function startCreate(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(screen.getByRole('button', { name: 'Add subclass' }));
-  fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: name } });
+  fireEvent.change(screen.getByRole('textbox', { name: /^Name/ }), { target: { value: name } });
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -370,7 +370,9 @@ describe('SubclassesSection', () => {
 
       renderSection([]);
       await startCreate(user, 'Deadeye');
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Patient.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Patient.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Create subclass' }));
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Created Deadeye'));
@@ -422,7 +424,7 @@ describe('SubclassesSection', () => {
       expect(mockInvalidateApiPath).not.toHaveBeenCalled();
       expect(mockToast.success).not.toHaveBeenCalled();
       // The form stays open with the author's work in it.
-      expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
+      expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Deadeye');
     });
 
     it('toasts fallback copy for a non-Error create rejection', async () => {
@@ -468,7 +470,7 @@ describe('SubclassesSection', () => {
       );
       expect(mockInvalidateApiPath).not.toHaveBeenCalled();
       // The author's work is still in the form, ready to be corrected.
-      expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
+      expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Deadeye');
     });
   });
 
@@ -481,8 +483,10 @@ describe('SubclassesSection', () => {
       await user.click(screen.getByRole('button', { name: 'Edit' }));
 
       expect(queryHeadingFor('Deadeye')).not.toBeInTheDocument();
-      expect(screen.getByLabelText(/^Name/)).toHaveValue('Deadeye');
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Deadeye');
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
@@ -506,7 +510,9 @@ describe('SubclassesSection', () => {
 
       renderSection([makeSubclass()]);
       await user.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Nope'));
@@ -519,7 +525,9 @@ describe('SubclassesSection', () => {
 
       renderSection(twoRows());
       await user.click(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Steady.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Steady.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Sharpshooter'));
@@ -540,7 +548,9 @@ describe('SubclassesSection', () => {
 
       renderSection(twoRows());
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
@@ -567,14 +577,20 @@ describe('SubclassesSection', () => {
 
       renderSection([makeSubclass()]);
       await user.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
 
       await user.click(await screen.findByRole('button', { name: 'Edit' }));
       // Seeded from the stale card.
-      expect(screen.getByLabelText('Description')).toHaveValue('A patient marksman.');
-      fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Dead Eye' } });
+      expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue(
+        'A patient marksman.'
+      );
+      fireEvent.change(screen.getByRole('textbox', { name: /^Name/ }), {
+        target: { value: 'Dead Eye' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Dead Eye'));
@@ -591,7 +607,9 @@ describe('SubclassesSection', () => {
 
       renderSection([makeSubclass()]);
       await user.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() =>
@@ -626,7 +644,9 @@ describe('SubclassesSection', () => {
 
       renderSection(twoRows());
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() =>
@@ -654,7 +674,9 @@ describe('SubclassesSection', () => {
 
       renderSection([makeSubclass()]);
       await user.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() =>
@@ -677,7 +699,9 @@ describe('SubclassesSection', () => {
 
       renderSection(twoRows());
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Updated Deadeye'));
@@ -694,7 +718,9 @@ describe('SubclassesSection', () => {
 
       renderSection([makeSubclass()]);
       await user.click(screen.getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith('Subclass not found'));
@@ -760,7 +786,9 @@ describe('SubclassesSection', () => {
 
       renderSection(twoRows());
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       await waitFor(() =>
@@ -778,7 +806,7 @@ describe('SubclassesSection', () => {
       // Another tab deletes Deadeye, and the refetch drops it from the list.
       rerender(sectionElement([makeSubclass({ id: 'sc-sharp', name: 'Sharpshooter' })]));
 
-      expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox', { name: /^Name/ })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Add subclass' })).toBeInTheDocument();
       expect(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Edit' })).toBeVisible();
     });
@@ -818,7 +846,7 @@ describe('SubclassesSection', () => {
       await user.click(within(cardFor('Sharpshooter')).getByRole('button', { name: 'Delete' }));
       await user.click(screen.getByRole('button', { name: 'Delete subclass' }));
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), {
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
         target: { value: 'Half written.' },
       });
 
@@ -828,7 +856,7 @@ describe('SubclassesSection', () => {
       del.resolve();
 
       await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith('Deleted Sharpshooter'));
-      expect(screen.getByLabelText('Description')).toHaveValue('Half written.');
+      expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue('Half written.');
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
     });
 
@@ -842,7 +870,9 @@ describe('SubclassesSection', () => {
 
       renderSection(twoRows());
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
@@ -864,7 +894,9 @@ describe('SubclassesSection', () => {
 
       const { rerender } = renderSection(twoRows());
       await user.click(within(cardFor('Deadeye')).getByRole('button', { name: 'Edit' }));
-      fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Reworded.' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+        target: { value: 'Reworded.' },
+      });
       await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
       rerender(sectionElement([makeSubclass({ id: 'sc-sharp', name: 'Sharpshooter' })]));
