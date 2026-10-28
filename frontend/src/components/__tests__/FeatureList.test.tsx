@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FeatureList from '@/components/FeatureList';
-import { PrintTrayProvider } from '@/lib/print-tray-context';
+import { PrintTrayProvider, PRINT_TRAY_STORAGE_KEY } from '@/lib/print-tray-context';
 import type { ClassFeature } from '@/lib/types';
 
 const WITH_OPTIONS =
@@ -93,6 +93,20 @@ describe('FeatureList', () => {
     expect(within(row).getByText('Pick two invocations.')).toBeInTheDocument();
     expect(within(row).getByRole('button', { name: 'Show 2 options' })).toBeInTheDocument();
     expect(within(row).queryByText('Agonizing Blast')).not.toBeInTheDocument();
+  });
+
+  it("gives each option a print toggle keyed on the row's feature id", async () => {
+    const user = userEvent.setup();
+    renderList([
+      { id: 'cf-invocations', name: 'Eldritch Invocations', level: 1, description: WITH_OPTIONS },
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+    await user.click(screen.getByRole('button', { name: 'Add Agonizing Blast to print set' }));
+
+    expect(JSON.parse(localStorage.getItem(PRINT_TRAY_STORAGE_KEY)!)).toEqual([
+      { type: 'feature-option', id: 'cf-invocations::Agonizing Blast' },
+    ]);
   });
 
   it('renders no description paragraph for a row without one', () => {

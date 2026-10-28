@@ -4,6 +4,8 @@ import {
   PRINTABLE_MONSTER_ACTION_CAP,
   PRINTABLE_MONSTER_TRAIT_CAP,
   PRINTABLE_TRAIT_SUMMARY_CAP,
+  parseFeatureOptionCardId,
+  splitFeatureOptions,
 } from '@grimoire-os/shared';
 import type {
   HydratePrintableCardsResponse,
@@ -191,6 +193,8 @@ export class PrintableCardsService {
         return this.hydrateBackgrounds(ids, userId);
       case 'feature':
         return this.hydrateFeatures(ids, userId);
+      case 'feature-option':
+        return this.hydrateFeatureOptions(ids, userId);
     }
   }
 
@@ -353,5 +357,44 @@ export class PrintableCardsService {
       ...(feature.level !== undefined ? { level: feature.level } : {}),
       description: flattenCardText(feature.description),
     }));
+  }
+
+  // An option card id is `${featureId}::${optionName}`, so the features load
+  // through findFeaturesByIds and inherit its visibility scoping. An id that
+  // does not parse, names an unknown feature or names an option the feature
+  // does not list is dropped silently. That is the batch contract for every
+  // card type, and the print page reports the missing count to the user.
+  private async hydrateFeatureOptions(ids: string[], userId?: string): Promise<PrintableCard[]> {
+    const requested = ids
+      .map(id => ({ id, parsed: parseFeatureOptionCardId(id) }))
+      .filter(
+        (entry): entry is { id: string; parsed: { featureId: string; optionName: string } } =>
+          entry.parsed !== null
+      );
+    if (requested.length === 0) return [];
+
+    const featureIds = [...new Set(requested.map(entry => entry.parsed.featureId))];
+    const features = await this.srdService.findFeaturesByIds(featureIds, userId);
+    const featuresById = new Map(features.map(feature => [feature.id, feature]));
+
+    const cards: PrintableCard[] = [];
+    for (const { id, parsed } of requested) {
+      const feature = featuresById.get(parsed.featureId);
+      if (!feature) continue;
+      const option = splitFeatureOptions(feature.description).options.find(
+        candidate => candidate.name === parsed.optionName
+      );
+      if (!option) continue;
+      cards.push({
+        type: 'feature-option',
+        id,
+        name: option.name,
+        feature: { id: feature.id, name: feature.name },
+        parent: { kind: feature.parent.kind, id: feature.parent.id, name: feature.parent.name },
+        ...(option.meta ? { meta: option.meta.trim() } : {}),
+        description: flattenCardText(option.description),
+      });
+    }
+    return cards;
   }
 }

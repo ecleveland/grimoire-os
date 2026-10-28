@@ -76,6 +76,18 @@ describe('print tray store', () => {
     vi.mocked(console.error).mockRestore();
   });
 
+  it('keeps a stored feature-option item with a composite id and drops its duplicate', () => {
+    const item = {
+      type: 'feature-option',
+      id: '6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f::Agonizing Blast',
+    };
+    localStorage.setItem(PRINT_TRAY_STORAGE_KEY, JSON.stringify([item, item]));
+
+    hydrate();
+
+    expect(getSnapshot().items).toEqual([item]);
+  });
+
   it('persists and notifies on setItems', () => {
     hydrate();
     const listener = vi.fn();

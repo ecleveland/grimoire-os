@@ -431,6 +431,10 @@ describe('SrdSearchPage', () => {
 
       expect(screen.getByText('Agonizing Blast')).toBeInTheDocument();
       expect(screen.getByText('Prerequisite: Level 2+ Warlock')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Add Agonizing Blast to print set' }));
+
+      expect(storedTray()).toEqual([{ type: 'feature-option', id: 'cf-1::Agonizing Blast' }]);
     });
 
     // A subclass has no page of its own, so the drilldown puts the class id in

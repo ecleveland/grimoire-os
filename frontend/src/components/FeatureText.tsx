@@ -2,12 +2,53 @@
 
 import { useState } from 'react';
 import Markdown from '@/components/Markdown';
-import { splitFeatureOptions } from '@/lib/feature-options';
+import { featureOptionCardId, splitFeatureOptions } from '@grimoire-os/shared';
+import type { FeatureOption } from '@grimoire-os/shared';
+import PrintToggle from '@/components/PrintToggle';
+import { usePrintTray } from '@/lib/print-tray-context';
 
 interface FeatureTextProps {
   description: string;
   /** Goes on the body's Markdown wrapper. */
   className?: string;
+  /**
+   * The feature's id. When set, each option gets a print toggle and the open
+   * panel gets an add-all button, because an option card is addressed through
+   * its feature's id. Callers without a printable feature leave it out.
+   */
+  featureId?: string;
+}
+
+/**
+ * Adds every option of a feature to the print set, or removes them all once
+ * every one is in it. A component of its own so FeatureText with no feature id
+ * never reads the tray, and the character sheet specs can render it without a
+ * tray provider.
+ */
+function AllOptionsPrintToggle({
+  featureId,
+  options,
+}: {
+  featureId: string;
+  options: FeatureOption[];
+}) {
+  const tray = usePrintTray();
+  const items = options.map(option => ({
+    type: 'feature-option' as const,
+    id: featureOptionCardId(featureId, option.name),
+  }));
+  const allIn = items.every(item => tray.has(item.type, item.id));
+  const count = items.length;
+
+  return (
+    <button
+      type="button"
+      onClick={() => (allIn ? tray.removeMany(items) : tray.addMany(items))}
+      className="mt-2 block text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700"
+    >
+      {allIn ? `Remove all ${count} from print set` : `Add all ${count} to print set`}
+    </button>
+  );
 }
 
 /**
@@ -18,7 +59,7 @@ interface FeatureTextProps {
  * The option panel mounts only while open, because Eldritch Invocations alone
  * carries 28 options.
  */
-export default function FeatureText({ description, className }: FeatureTextProps) {
+export default function FeatureText({ description, className, featureId }: FeatureTextProps) {
   const [open, setOpen] = useState(false);
   const { body, options } = splitFeatureOptions(description);
   const count = options.length;
@@ -41,15 +82,25 @@ export default function FeatureText({ description, className }: FeatureTextProps
       >
         {open ? 'Hide options' : `Show ${count} ${count === 1 ? 'option' : 'options'}`}
       </button>
+      {open && featureId && <AllOptionsPrintToggle featureId={featureId} options={options} />}
       {open && (
         <ul className="mt-2 border-l-2 border-indigo-200 dark:border-indigo-800 pl-3 space-y-3 min-w-0">
           {/* Keyed by position, because the list never reorders and a
               homebrew author can repeat an option name. */}
           {options.map((option, i) => (
             <li key={i}>
-              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                {option.name}
-              </span>
+              {featureId ? (
+                <span className="inline-flex items-center gap-2">
+                  <OptionName name={option.name} />
+                  <PrintToggle
+                    type="feature-option"
+                    id={featureOptionCardId(featureId, option.name)}
+                    name={option.name}
+                  />
+                </span>
+              ) : (
+                <OptionName name={option.name} />
+              )}
               {option.meta && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">{option.meta}</p>
               )}
@@ -60,4 +111,8 @@ export default function FeatureText({ description, className }: FeatureTextProps
       )}
     </div>
   );
+}
+
+function OptionName({ name }: { name: string }) {
+  return <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{name}</span>;
 }

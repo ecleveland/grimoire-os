@@ -1,7 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FeatureText from '@/components/FeatureText';
+import { PrintTrayProvider, usePrintTray } from '@/lib/print-tray-context';
+import { resetPrintTrayStore } from '@/lib/print-tray-store';
 
 const BODY = "You can't pick the same invocation more than once.";
 
@@ -117,5 +119,93 @@ describe('FeatureText', () => {
     render(<FeatureText className="mt-1" description={TWO_OPTIONS} />);
 
     expect(screen.getByText(BODY).parentElement).toHaveClass('mt-1');
+  });
+
+  describe('print controls', () => {
+    const FEATURE_ID = 'feat-ei';
+
+    function TrayItems() {
+      const { items } = usePrintTray();
+      return <output aria-label="tray items">{JSON.stringify(items)}</output>;
+    }
+
+    function renderWithTray(featureId?: string) {
+      return render(
+        <PrintTrayProvider>
+          <FeatureText description={TWO_OPTIONS} featureId={featureId} />
+          <TrayItems />
+        </PrintTrayProvider>
+      );
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+      resetPrintTrayStore();
+    });
+
+    it('gives each option its own print toggle', async () => {
+      const user = userEvent.setup();
+      renderWithTray(FEATURE_ID);
+
+      await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+
+      expect(
+        screen.getByRole('button', { name: 'Add Agonizing Blast to print set' })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Add Armor of Shadows to print set' })
+      ).toBeInTheDocument();
+    });
+
+    it('adds every option to the tray from the add-all button', async () => {
+      const user = userEvent.setup();
+      renderWithTray(FEATURE_ID);
+
+      await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+      await user.click(screen.getByRole('button', { name: 'Add all 2 to print set' }));
+
+      expect(JSON.parse(screen.getByLabelText('tray items').textContent!)).toEqual([
+        { type: 'feature-option', id: 'feat-ei::Agonizing Blast' },
+        { type: 'feature-option', id: 'feat-ei::Armor of Shadows' },
+      ]);
+      expect(
+        screen.getByRole('button', { name: 'Remove Agonizing Blast from print set' })
+      ).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('keeps offering add-all while only some options are in the tray', async () => {
+      const user = userEvent.setup();
+      renderWithTray(FEATURE_ID);
+
+      await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+      await user.click(screen.getByRole('button', { name: 'Add Armor of Shadows to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Add all 2 to print set' }));
+
+      expect(JSON.parse(screen.getByLabelText('tray items').textContent!)).toEqual([
+        { type: 'feature-option', id: 'feat-ei::Armor of Shadows' },
+        { type: 'feature-option', id: 'feat-ei::Agonizing Blast' },
+      ]);
+    });
+
+    it('turns into remove-all once every option is in the tray', async () => {
+      const user = userEvent.setup();
+      renderWithTray(FEATURE_ID);
+
+      await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+      await user.click(screen.getByRole('button', { name: 'Add all 2 to print set' }));
+      await user.click(screen.getByRole('button', { name: 'Remove all 2 from print set' }));
+
+      expect(screen.getByLabelText('tray items')).toHaveTextContent('[]');
+      expect(screen.getByRole('button', { name: 'Add all 2 to print set' })).toBeInTheDocument();
+    });
+
+    it('renders no print controls without a feature id', async () => {
+      const user = userEvent.setup();
+      renderWithTray();
+
+      await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
+
+      expect(screen.queryByRole('button', { name: /print set/ })).not.toBeInTheDocument();
+    });
   });
 });

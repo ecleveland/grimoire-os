@@ -51,6 +51,10 @@ interface PrintTrayContextType {
   remove: (type: PrintableCardType, id: string) => void;
   toggle: (type: PrintableCardType, id: string) => void;
   has: (type: PrintableCardType, id: string) => boolean;
+  /** Appends every item not already in the set, in one write. */
+  addMany: (items: PrintTrayItem[]) => void;
+  /** Removes every listed item, in one write. */
+  removeMany: (items: PrintTrayItem[]) => void;
   clear: () => void;
 }
 
@@ -91,6 +95,27 @@ export function PrintTrayProvider({ children }: { children: ReactNode }) {
     [items]
   );
 
+  const addMany = useCallback((toAdd: PrintTrayItem[]) => {
+    setItems(prev => {
+      const missing = toAdd.filter(
+        (candidate, index) =>
+          !prev.some(item => item.type === candidate.type && item.id === candidate.id) &&
+          toAdd.findIndex(other => other.type === candidate.type && other.id === candidate.id) ===
+            index
+      );
+      // Returning prev unchanged lets the store skip the write and the render.
+      return missing.length === 0
+        ? prev
+        : [...prev, ...missing.map(({ type, id }) => ({ type, id }))];
+    });
+  }, []);
+
+  const removeMany = useCallback((toRemove: PrintTrayItem[]) => {
+    setItems(prev =>
+      prev.filter(item => !toRemove.some(other => other.type === item.type && other.id === item.id))
+    );
+  }, []);
+
   const clear = useCallback(() => {
     setItems(() => []);
   }, []);
@@ -119,9 +144,11 @@ export function PrintTrayProvider({ children }: { children: ReactNode }) {
       remove,
       toggle,
       has,
+      addMany,
+      removeMany,
       clear,
     }),
-    [items, grouped, hydrated, add, remove, toggle, has, clear]
+    [items, grouped, hydrated, add, remove, toggle, has, addMany, removeMany, clear]
   );
 
   return <PrintTrayContext.Provider value={contextValue}>{children}</PrintTrayContext.Provider>;

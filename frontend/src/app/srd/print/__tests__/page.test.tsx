@@ -10,6 +10,7 @@ import type {
   HydratePrintableCardsResponse,
   PrintableBackgroundCard,
   PrintableFeatureCard,
+  PrintableFeatureOptionCard,
   PrintableItemCard,
   PrintableMonsterCard,
   PrintableRaceCard,
@@ -113,6 +114,25 @@ const rageCard: PrintableFeatureCard = {
   parent: { kind: 'class', id: 'c1', name: 'Barbarian' },
   level: 1,
   description: 'Enter a battle fury granting damage bonuses and resistance.',
+};
+
+const agonizingBlastCard: PrintableFeatureOptionCard = {
+  type: 'feature-option',
+  id: 'f-ei::Agonizing Blast',
+  name: 'Agonizing Blast',
+  feature: { id: 'f-ei', name: 'Eldritch Invocations' },
+  parent: { kind: 'class', id: 'c2', name: 'Warlock' },
+  meta: 'Prerequisite: Level 2+ Warlock',
+  description: 'Add your Charisma modifier to the damage.',
+};
+
+const armorOfShadowsCard: PrintableFeatureOptionCard = {
+  type: 'feature-option',
+  id: 'f-ei::Armor of Shadows',
+  name: 'Armor of Shadows',
+  feature: { id: 'f-ei', name: 'Eldritch Invocations' },
+  parent: { kind: 'class', id: 'c2', name: 'Warlock' },
+  description: 'You can cast Mage Armor on yourself.',
 };
 
 /** Tray selection matching the three fixture cards, in insertion order. */
@@ -304,6 +324,40 @@ describe('SrdPrintPage', () => {
       expect(within(groups[0]).getByText('Goblin')).toBeInTheDocument();
       expect(within(groups[1]).getByText('Fireball')).toBeInTheDocument();
       expect(within(groups[2]).getByText('Bag of Holding')).toBeInTheDocument();
+    });
+
+    it('prints feature options under their own heading, right after the features', async () => {
+      seedTray([
+        { type: 'feature-option', id: armorOfShadowsCard.id },
+        { type: 'feature-option', id: agonizingBlastCard.id },
+        { type: 'feature', id: 'f1' },
+        { type: 'monster', id: 'm1' },
+      ]);
+      mockApiFetch.mockResolvedValue({
+        groups: [
+          { type: 'feature-option', cards: [armorOfShadowsCard, agonizingBlastCard] },
+          { type: 'feature', cards: [rageCard] },
+          { type: 'monster', cards: [goblinCard] },
+        ],
+      } satisfies HydratePrintableCardsResponse);
+
+      renderPage();
+      await screen.findByText('Goblin');
+
+      const groups = screen.getAllByTestId('print-group');
+      expect(groups.map(g => g.getAttribute('data-card-type'))).toEqual([
+        'feature',
+        'feature-option',
+        'monster',
+      ]);
+      const options = groups[1];
+      expect(within(options).getByRole('heading', { name: 'Feature options' })).toBeInTheDocument();
+      const cards = within(options).getAllByTestId('print-card');
+      expect(
+        cards.map(card => within(card).getByRole('heading', { level: 3 }).textContent)
+      ).toEqual(['Agonizing Blast', 'Armor of Shadows']);
+      expect(within(cards[0]).getByText('Prerequisite: Level 2+ Warlock')).toBeInTheDocument();
+      expect(screen.queryByTestId('missing-cards-warning')).not.toBeInTheDocument();
     });
 
     it('puts a page break after every group except the last', async () => {

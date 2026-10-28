@@ -5,6 +5,7 @@ export * from './coin';
 export * from './computed';
 export * from './death-saves';
 export * from './encounter-difficulty';
+export * from './feature-options';
 export * from './gear';
 export * from './entities';
 export * from './loot';

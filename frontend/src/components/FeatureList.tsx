@@ -61,7 +61,7 @@ export default function FeatureList({ features, defaultOpen, className }: Featur
               <span className="text-xs text-gray-500 dark:text-gray-400">Level {f.level}</span>
               {f.id && <PrintToggle type="feature" id={f.id} name={f.name} />}
             </span>
-            {f.description && <FeatureText description={f.description} />}
+            {f.description && <FeatureText description={f.description} featureId={f.id} />}
           </div>
         ))}
       </div>

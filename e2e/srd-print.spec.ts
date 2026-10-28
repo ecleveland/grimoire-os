@@ -188,3 +188,45 @@ test.describe('SRD print golden path (VEG-269)', () => {
     await page.emulateMedia({ media: null });
   });
 });
+
+// Feature option cards (VEG-636): an option from a feature's option list, here
+// two of the Warlock's Eldritch Invocations, prints as a card of its own. The
+// options are added from the class list card's nested options group, and the
+// cards print under a "Feature options" group sorted by option name.
+test.describe('Feature option cards (VEG-636)', () => {
+  test('prints two Eldritch Invocations as one card each', async ({ page }) => {
+    await registerAndLogin(page);
+
+    await page.goto('/srd/classes');
+    const warlockToggle = page
+      .getByRole('button')
+      .filter({ has: page.getByRole('heading', { level: 2, name: 'Warlock', exact: true }) });
+    await expect(warlockToggle).toBeVisible({ timeout: 10_000 });
+    await warlockToggle.click();
+    await page.getByRole('button', { name: /^Show \d+ features?$/ }).click();
+
+    // The feature row is the nearest ancestor carrying the feature id, so the
+    // options toggle is looked up inside the Eldritch Invocations row only.
+    const invocationsRow = page
+      .getByText('Eldritch Invocations', { exact: true })
+      .first()
+      .locator('xpath=ancestor::div[@id][1]');
+    await invocationsRow.getByRole('button', { name: /^Show \d+ options$/ }).click();
+
+    await page.getByRole('button', { name: 'Add Agonizing Blast to print set' }).click();
+    await page.getByRole('button', { name: 'Add Armor of Shadows to print set' }).click();
+
+    await page.getByRole('link', { name: 'Print (2)' }).click();
+    await expect(page).toHaveURL('/srd/print');
+
+    const optionGroup = page.locator('[data-card-type="feature-option"]');
+    await expect(optionGroup).toHaveCount(1, { timeout: 10_000 });
+    await expect(page.getByRole('heading', { name: 'Feature options' })).toBeVisible();
+
+    const optionCards = optionGroup.getByTestId('print-card');
+    await expect(optionCards).toHaveCount(2);
+    await expect(optionCards.nth(0)).toContainText('Agonizing Blast');
+    await expect(optionCards.nth(0)).toContainText('Prerequisite');
+    await expect(optionCards.nth(1)).toContainText('Armor of Shadows');
+  });
+});
