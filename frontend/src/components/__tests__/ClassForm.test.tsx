@@ -87,9 +87,11 @@ describe('ClassForm', () => {
   it('prefills every control from the class being edited', () => {
     renderForm({ initial: makeClass(), submitLabel: 'Save changes' });
 
-    expect(screen.getByLabelText(/^Name/)).toHaveValue('Warden');
+    expect(screen.getByRole('textbox', { name: /^Name/ })).toHaveValue('Warden');
     expect(screen.getByLabelText('Hit die')).toHaveValue('d10');
-    expect(screen.getByLabelText('Description')).toHaveValue('A sworn protector of wild places.');
+    expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue(
+      'A sworn protector of wild places.'
+    );
 
     // Both ability groups have a Strength chip, so every chip check is scoped to its group.
     const primary = within(screen.getByRole('group', { name: 'Primary abilities' }));
@@ -212,7 +214,7 @@ describe('ClassForm', () => {
     const user = userEvent.setup();
     renderForm({ initial: makeClass(), submitLabel: 'Save changes' });
 
-    fireEvent.change(screen.getByLabelText('Description'), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
       target: { value: 'Keeps the old roads.' },
     });
     await user.click(
@@ -253,7 +255,9 @@ describe('ClassForm', () => {
     const user = userEvent.setup();
     renderForm({ initial: makeClass(), submitLabel: 'Save changes' });
 
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Fixed a typo.' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+      target: { value: 'Fixed a typo.' },
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
@@ -280,7 +284,9 @@ describe('ClassForm', () => {
       submitLabel: 'Save changes',
     });
 
-    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Fixed a typo.' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Description' }), {
+      target: { value: 'Fixed a typo.' },
+    });
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(toast.error).not.toHaveBeenCalled();
