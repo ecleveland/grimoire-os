@@ -18,6 +18,11 @@ vi.mock('../CharacterSheetHeader', () => ({
 vi.mock('../LevelUpSection', () => ({
   default: () => <div data-testid="LevelUpSection" />,
 }));
+vi.mock('../CharacterHistorySection', () => ({
+  default: ({ isOwner }: { isOwner: boolean }) => (
+    <div data-testid="CharacterHistorySection" data-owner={isOwner} />
+  ),
+}));
 vi.mock('../CombatBar', () => ({
   default: () => <div data-testid="CombatBar" />,
 }));
@@ -164,6 +169,25 @@ describe('CharacterSheet', () => {
     it('passes isOwner=false to CharacterSheetHeader', () => {
       render(<CharacterSheet character={mockCharacter} isOwner={false} />);
       expect(screen.getByTestId('CharacterSheetHeader')).toHaveAttribute('data-owner', 'false');
+    });
+
+    it.each([true, false])(
+      'renders the history section below level-up with isOwner=%s (VEG-644)',
+      isOwner => {
+        render(<CharacterSheet character={mockCharacter} isOwner={isOwner} />);
+        const history = screen.getByTestId('CharacterHistorySection');
+        expect(history).toHaveAttribute('data-owner', String(isOwner));
+        expect(screen.getByTestId('LevelUpSection').nextElementSibling).toBe(history);
+      }
+    );
+
+    it('does not render the history section on the Spells & Details tab (VEG-644)', async () => {
+      const user = userEvent.setup();
+      render(<CharacterSheet character={mockCharacter} isOwner={true} />);
+
+      await user.click(screen.getByRole('tab', { name: 'Spells & Details' }));
+
+      expect(screen.queryByTestId('CharacterHistorySection')).not.toBeInTheDocument();
     });
   });
 

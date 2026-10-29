@@ -154,6 +154,19 @@ describe('useCharacterMutation', () => {
     expect(mockToastError).not.toHaveBeenCalled();
   });
 
+  it('invalidates the snapshot list too, so a level-up auto-snapshot shows without a reload (VEG-644)', async () => {
+    mockApiFetch.mockResolvedValue(makeCharacter({ version: 8 }));
+    const client = makeClient();
+    const snapshotsKey = ['api', '/characters/char-1/snapshots'];
+    client.setQueryData(snapshotsKey, []);
+    const { result } = renderMutation(makeCharacter(), client);
+
+    expect(client.getQueryState(snapshotsKey)?.isInvalidated).toBe(false);
+    act(() => result.current.patch({ level: 2 }));
+
+    await waitFor(() => expect(client.getQueryState(snapshotsKey)?.isInvalidated).toBe(true));
+  });
+
   it('surfaces a concurrent-edit toast and refetches on 409', async () => {
     const { ApiError } = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
     mockApiFetch.mockRejectedValue(new ApiError(409, 'Conflict', { currentVersion: 9 }));
