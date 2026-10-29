@@ -1,6 +1,7 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
@@ -27,7 +28,8 @@ function describeSnapshot(snapshot: CharacterSnapshotSummary): string {
 
 /**
  * The owner's saved copies of this sheet, newest first. The backend keeps one
- * automatically at every level-up, and the owner can save or delete more here.
+ * automatically at every level-up, and the owner can save more here, open any
+ * one as a read-only sheet, or delete it.
  * Level-ups refresh the list because the character write invalidates every
  * cached path under `/characters/:id`, this one included.
  */
@@ -140,15 +142,24 @@ export default function CharacterHistorySection({
               className="flex items-center justify-between gap-2 py-2 text-sm"
             >
               <span className="text-gray-900 dark:text-gray-100">{describeSnapshot(snapshot)}</span>
-              <button
-                type="button"
-                onClick={() => setPendingDelete(snapshot)}
-                disabled={busy}
-                aria-label={`Delete snapshot ${describeSnapshot(snapshot)}`}
-                className="px-2 py-1 text-xs font-medium rounded text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-50"
-              >
-                Delete
-              </button>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/characters/${character.id}/history/${snapshot.id}`}
+                  aria-label={`View snapshot ${describeSnapshot(snapshot)}`}
+                  className="px-2 py-1 text-xs font-medium rounded text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20"
+                >
+                  View
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setPendingDelete(snapshot)}
+                  disabled={busy}
+                  aria-label={`Delete snapshot ${describeSnapshot(snapshot)}`}
+                  className="px-2 py-1 text-xs font-medium rounded text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              </div>
             </li>
           ))}
         </ul>
