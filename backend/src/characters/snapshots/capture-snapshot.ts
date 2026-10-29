@@ -15,6 +15,14 @@ export const SNAPSHOT_OMITTED_COLUMNS = [
   'updatedAt',
 ] as const;
 
+/** The summary columns of a newly captured snapshot. */
+export type CapturedSnapshot = {
+  id: string;
+  level: number;
+  label: string | null;
+  takenAt: Date;
+};
+
 /** Accepts either the root client or a `$transaction` client. */
 export type SnapshotClient =
   Pick<PrismaService, 'character' | 'characterSnapshot'> | Prisma.TransactionClient;
@@ -31,7 +39,7 @@ export async function captureCharacterSnapshot(
   client: SnapshotClient,
   characterId: string,
   label?: string
-): Promise<{ id: string }> {
+): Promise<CapturedSnapshot> {
   const row: Record<string, unknown> = await client.character.findUniqueOrThrow({
     where: { id: characterId },
   });
@@ -48,6 +56,6 @@ export async function captureCharacterSnapshot(
       // JSON blob.
       data: data as unknown as Prisma.InputJsonValue,
     },
-    select: { id: true },
+    select: { id: true, level: true, label: true, takenAt: true },
   });
 }

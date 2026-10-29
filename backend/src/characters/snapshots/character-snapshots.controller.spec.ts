@@ -9,14 +9,14 @@ const SNAPSHOT_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
 
 describe('CharacterSnapshotsController', () => {
   let controller: CharacterSnapshotsController;
-  let service: Record<'list' | 'get' | 'remove', jest.Mock>;
+  let service: Record<'create' | 'list' | 'get' | 'remove', jest.Mock>;
 
   const mockReq = {
     user: { userId: USER_ID, username: 'testuser', role: Role.PLAYER },
   } as AuthenticatedRequest;
 
   beforeEach(async () => {
-    service = { list: jest.fn(), get: jest.fn(), remove: jest.fn() };
+    service = { create: jest.fn(), list: jest.fn(), get: jest.fn(), remove: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CharacterSnapshotsController],
@@ -24,6 +24,16 @@ describe('CharacterSnapshotsController', () => {
     }).compile();
 
     controller = module.get(CharacterSnapshotsController);
+  });
+
+  it('create delegates with the character id, userId and body (VEG-644)', async () => {
+    const summary = { id: SNAPSHOT_ID, level: 4, label: 'x', takenAt: new Date() };
+    service.create.mockResolvedValue(summary);
+
+    const result = await controller.create(CHARACTER_ID, { label: 'x' }, mockReq);
+
+    expect(service.create).toHaveBeenCalledWith(CHARACTER_ID, USER_ID, { label: 'x' });
+    expect(result).toBe(summary);
   });
 
   it('list delegates with the character id and userId (VEG-643)', async () => {

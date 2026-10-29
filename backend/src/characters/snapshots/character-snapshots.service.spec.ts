@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { CharacterSnapshotsService } from './character-snapshots.service';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { CHARACTER_SNAPSHOT_CAP, CharacterSnapshotsService } from './character-snapshots.service';
 import {
   CharacterSnapshotDto,
   CharacterSnapshotSummaryDto,
@@ -17,6 +17,7 @@ import { CHARACTER_ID, USER_ID, USER_ID_2, mockCharacter } from '../../test/fixt
 
 const SNAPSHOT_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
 const TAKEN_AT = new Date('2026-10-01T12:00:00Z');
+const SUMMARY_SELECT = { id: true, level: true, label: true, takenAt: true };
 
 // The live row the ownership read returns. Its createdAt differs from the
 // fixture's so the test can tell which side a rebuilt field came from.
@@ -91,6 +92,7 @@ describe('CharacterSnapshotsService', () => {
       ['list', (s: CharacterSnapshotsService) => s.list(CHARACTER_ID, USER_ID)],
       ['get', (s: CharacterSnapshotsService) => s.get(CHARACTER_ID, SNAPSHOT_ID, USER_ID)],
       ['remove', (s: CharacterSnapshotsService) => s.remove(CHARACTER_ID, SNAPSHOT_ID, USER_ID)],
+      ['create', (s: CharacterSnapshotsService) => s.create(CHARACTER_ID, USER_ID)],
     ])('%s answers 404 for an unknown character (VEG-643)', async (_name, call) => {
       prisma.character.findUnique.mockResolvedValue(null);
 
@@ -98,17 +100,22 @@ describe('CharacterSnapshotsService', () => {
       expect(prisma.characterSnapshot.findMany).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.findFirst).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.characterSnapshot.count).not.toHaveBeenCalled();
+      expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
     });
 
     it.each([
       ['list', (s: CharacterSnapshotsService) => s.list(CHARACTER_ID, USER_ID_2)],
       ['get', (s: CharacterSnapshotsService) => s.get(CHARACTER_ID, SNAPSHOT_ID, USER_ID_2)],
       ['remove', (s: CharacterSnapshotsService) => s.remove(CHARACTER_ID, SNAPSHOT_ID, USER_ID_2)],
+      ['create', (s: CharacterSnapshotsService) => s.create(CHARACTER_ID, USER_ID_2)],
     ])('%s answers 403 for another user (VEG-643)', async (_name, call) => {
       await expect(call(service)).rejects.toThrow(ForbiddenException);
       expect(prisma.characterSnapshot.findMany).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.findFirst).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.characterSnapshot.count).not.toHaveBeenCalled();
+      expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
     });
   });
 
@@ -216,6 +223,68 @@ describe('CharacterSnapshotsService', () => {
     });
   });
 
+  describe('create', () => {
+    const summaryRow = (label: string | null) => ({
+      id: SNAPSHOT_ID,
+      level: 5,
+      label,
+      takenAt: TAKEN_AT,
+    });
+
+    beforeEach(() => {
+      prisma.character.findUniqueOrThrow.mockResolvedValue(mockCharacter);
+    });
+
+    it('captures through the root client below the cap and returns the summary (VEG-644)', async () => {
+      prisma.characterSnapshot.count.mockResolvedValue(CHARACTER_SNAPSHOT_CAP - 1);
+      prisma.characterSnapshot.create.mockResolvedValue(summaryRow('Before the dragon'));
+
+      const result = await service.create(CHARACTER_ID, USER_ID, { label: 'Before the dragon' });
+
+      expect(prisma.characterSnapshot.count).toHaveBeenCalledWith({
+        where: { characterId: CHARACTER_ID },
+      });
+      expect(prisma.character.findUniqueOrThrow).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+      });
+      expect(prisma.characterSnapshot.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          characterId: CHARACTER_ID,
+          level: 5,
+          label: 'Before the dragon',
+        }),
+        select: SUMMARY_SELECT,
+      });
+      expect(result).toBeInstanceOf(CharacterSnapshotSummaryDto);
+      expect({ ...result }).toEqual(summaryRow('Before the dragon'));
+    });
+
+    it('saves a null label when none is given (VEG-644)', async () => {
+      prisma.characterSnapshot.count.mockResolvedValue(0);
+      prisma.characterSnapshot.create.mockResolvedValue(summaryRow(null));
+
+      const result = await service.create(CHARACTER_ID, USER_ID);
+
+      expect(prisma.characterSnapshot.create.mock.calls[0][0].data.label).toBeNull();
+      expect(result.label).toBeNull();
+    });
+
+    it('caps a character at 50 snapshots (VEG-644)', () => {
+      expect(CHARACTER_SNAPSHOT_CAP).toBe(50);
+    });
+
+    it('answers 400 naming the cap once the character has 50 snapshots (VEG-644)', async () => {
+      prisma.characterSnapshot.count.mockResolvedValue(50);
+
+      const attempt = service.create(CHARACTER_ID, USER_ID, { label: 'One too many' });
+
+      await expect(attempt).rejects.toThrow(BadRequestException);
+      await expect(attempt).rejects.toThrow(/50/);
+      expect(prisma.character.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('capture', () => {
     it('writes through the transaction client it is handed (VEG-643)', async () => {
       const tx = createMockPrismaService();
@@ -231,7 +300,7 @@ describe('CharacterSnapshotsService', () => {
       expect(result).toEqual({ id: SNAPSHOT_ID });
       expect(tx.characterSnapshot.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ level: 5, label: 'Before the dragon' }),
-        select: { id: true },
+        select: SUMMARY_SELECT,
       });
       expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
     });
@@ -244,7 +313,7 @@ describe('CharacterSnapshotsService', () => {
 
       expect(prisma.characterSnapshot.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ characterId: CHARACTER_ID, label: null }),
-        select: { id: true },
+        select: SUMMARY_SELECT,
       });
     });
   });

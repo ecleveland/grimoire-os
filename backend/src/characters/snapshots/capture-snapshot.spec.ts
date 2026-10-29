@@ -55,7 +55,7 @@ describe('captureCharacterSnapshot (VEG-643)', () => {
 
     expect(client.characterSnapshot.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ characterId: CHARACTER_ID, level: 4, label: 'Level 4' }),
-      select: { id: true },
+      select: { id: true, level: true, label: true, takenAt: true },
     });
     expect(result).toEqual({ id: 'snap-1' });
   });

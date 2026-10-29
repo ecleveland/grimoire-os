@@ -6,7 +6,18 @@ import {
   skillBonus,
   SKILL_ABILITY_MAP,
   ABILITY_SKILLS_MAP,
+  formatSnapshotDate,
 } from '../utils';
+
+describe('formatSnapshotDate (VEG-644)', () => {
+  // Midday UTC, so no local time zone can push the date onto a neighbouring day.
+  it.each([
+    ['2026-10-12T12:00:00Z', '12 Oct 2026'],
+    ['2026-09-01T12:00:00Z', '1 Sept 2026'],
+  ])('%s reads as "%s"', (iso, expected) => {
+    expect(formatSnapshotDate(iso)).toBe(expected);
+  });
+});
 
 describe('abilityModifier', () => {
   it.each([

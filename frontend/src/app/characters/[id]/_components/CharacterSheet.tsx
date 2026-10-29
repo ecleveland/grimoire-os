@@ -5,6 +5,7 @@ import type { Character } from '@/lib/types';
 import { useCharacterMutation, type PlayControlProps } from './useCharacterMutation';
 import CharacterSheetHeader from './CharacterSheetHeader';
 import LevelUpSection from './LevelUpSection';
+import CharacterHistorySection from './CharacterHistorySection';
 import CombatBar from './CombatBar';
 import StatusTracker from './StatusTracker';
 import ResourceTracker from './ResourceTracker';
@@ -63,6 +64,7 @@ export default function CharacterSheet({ character, isOwner }: CharacterSheetPro
         <div className="space-y-6">
           <CharacterSheetHeader character={character} isOwner={isOwner} />
           <LevelUpSection character={character} {...controls} />
+          <CharacterHistorySection character={character} isOwner={isOwner} />
           <CombatBar character={character} {...controls} />
           <StatusTracker character={character} {...controls} />
           <ResourceTracker character={character} {...controls} />

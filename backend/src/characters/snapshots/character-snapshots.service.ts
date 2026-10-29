@@ -1,15 +1,27 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CharactersService } from '../characters.service';
 import { toDto, toDtoArray } from '../../common/serialization/to-dto';
-import { captureCharacterSnapshot, type SnapshotClient } from './capture-snapshot';
+import {
+  captureCharacterSnapshot,
+  type CapturedSnapshot,
+  type SnapshotClient,
+} from './capture-snapshot';
 import {
   CharacterSnapshotDto,
   CharacterSnapshotSummaryDto,
 } from './dto/character-snapshot-response.dto';
 
-/** Reads and deletes a character's snapshots. Only the character's owner may. */
+/** The most snapshots one character keeps, hand-saved and level-up ones together. */
+export const CHARACTER_SNAPSHOT_CAP = 50;
+
+/** Saves, reads and deletes a character's snapshots. Only the character's owner may. */
 @Injectable()
 export class CharacterSnapshotsService {
   constructor(
@@ -44,8 +56,34 @@ export class CharacterSnapshotsService {
     characterId: string,
     { label }: { label?: string } = {},
     tx?: SnapshotClient
-  ): Promise<{ id: string }> {
+  ): Promise<CapturedSnapshot> {
     return captureCharacterSnapshot(tx ?? this.prisma, characterId, label);
+  }
+
+  /**
+   * Save a snapshot by hand. 400 once the character holds
+   * `CHARACTER_SNAPSHOT_CAP` snapshots.
+   *
+   * The cap guards this route only. The level-up snapshot stays unconditional,
+   * because refusing a level-up over a full history would block play, but it
+   * still counts toward the cap. Count and insert are two statements with no
+   * transaction, so two concurrent saves can land one row over the cap, which
+   * is harmless for a soft guard.
+   */
+  async create(
+    characterId: string,
+    userId: string,
+    { label }: { label?: string } = {}
+  ): Promise<CharacterSnapshotSummaryDto> {
+    await this.assertOwnership(characterId, userId);
+    const count = await this.prisma.characterSnapshot.count({ where: { characterId } });
+    if (count >= CHARACTER_SNAPSHOT_CAP) {
+      throw new BadRequestException(
+        `A character can keep at most ${CHARACTER_SNAPSHOT_CAP} snapshots. Delete one to save another.`
+      );
+    }
+    const row = await captureCharacterSnapshot(this.prisma, characterId, label);
+    return toDto(CharacterSnapshotSummaryDto, row);
   }
 
   /** The character's snapshots, newest first, without their stored sheets. */

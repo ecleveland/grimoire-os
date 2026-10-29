@@ -1,7 +1,9 @@
 import {
   Controller,
   Get,
+  Post,
   Delete,
+  Body,
   Param,
   UseGuards,
   Req,
@@ -11,7 +13,9 @@ import {
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../../auth/interfaces/jwt-payload.interface';
-import { CharacterSnapshotsService } from './character-snapshots.service';
+import { CHARACTER_SNAPSHOT_CAP, CharacterSnapshotsService } from './character-snapshots.service';
+import { CreateCharacterSnapshotDto } from './dto/create-character-snapshot.dto';
+import { CharacterSnapshotSummaryDto } from './dto/character-snapshot-response.dto';
 
 @ApiTags('Characters')
 @ApiBearerAuth()
@@ -19,6 +23,21 @@ import { CharacterSnapshotsService } from './character-snapshots.service';
 @UseGuards(JwtAuthGuard)
 export class CharacterSnapshotsController {
   constructor(private readonly snapshotsService: CharacterSnapshotsService) {}
+
+  @Post()
+  @ApiOperation({ summary: 'Save a snapshot of the character as it stands now' })
+  @ApiResponse({ status: 201, type: CharacterSnapshotSummaryDto })
+  @ApiResponse({
+    status: 400,
+    description: `The character already has ${CHARACTER_SNAPSHOT_CAP} snapshots`,
+  })
+  create(
+    @Param('id') id: string,
+    @Body() dto: CreateCharacterSnapshotDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return this.snapshotsService.create(id, req.user.userId, dto);
+  }
 
   @Get()
   @ApiOperation({ summary: "List a character's snapshots, newest first" })
