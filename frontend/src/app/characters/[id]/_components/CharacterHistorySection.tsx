@@ -9,6 +9,7 @@ import { invalidateApiPath, useApiMutation, useApiQuery } from '@/lib/query';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import Modal from '@/components/Modal';
 import type { Character, CharacterSnapshotSummary } from '@/lib/types';
+import PlayCopyDialog from './PlayCopyDialog';
 import { formatSnapshotDate } from './utils';
 
 interface CharacterHistorySectionProps {
@@ -29,7 +30,7 @@ function describeSnapshot(snapshot: CharacterSnapshotSummary): string {
 /**
  * The owner's saved copies of this sheet, newest first. The backend keeps one
  * automatically at every level-up, and the owner can save more here, open any
- * one as a read-only sheet, or delete it.
+ * one as a read-only sheet, start a new character from it, or delete it.
  * Level-ups refresh the list because the character write invalidates every
  * cached path under `/characters/:id`, this one included.
  */
@@ -42,6 +43,7 @@ export default function CharacterHistorySection({
   const [saveOpen, setSaveOpen] = useState(false);
   const [label, setLabel] = useState('');
   const [pendingDelete, setPendingDelete] = useState<CharacterSnapshotSummary | null>(null);
+  const [pendingCopy, setPendingCopy] = useState<CharacterSnapshotSummary | null>(null);
 
   const path = `/characters/${character.id}/snapshots`;
   const snapshotsQuery = useApiQuery<CharacterSnapshotSummary[]>(path, {
@@ -152,6 +154,15 @@ export default function CharacterHistorySection({
                 </Link>
                 <button
                   type="button"
+                  onClick={() => setPendingCopy(snapshot)}
+                  disabled={busy}
+                  aria-label={`Play a copy of ${describeSnapshot(snapshot)}`}
+                  className="px-2 py-1 text-xs font-medium rounded text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-900/20 disabled:opacity-50"
+                >
+                  Play a copy
+                </button>
+                <button
+                  type="button"
                   onClick={() => setPendingDelete(snapshot)}
                   disabled={busy}
                   aria-label={`Delete snapshot ${describeSnapshot(snapshot)}`}
@@ -209,6 +220,15 @@ export default function CharacterHistorySection({
             </div>
           </form>
         </Modal>
+      )}
+
+      {pendingCopy && (
+        <PlayCopyDialog
+          characterId={character.id}
+          characterName={character.name}
+          snapshot={pendingCopy}
+          onClose={() => setPendingCopy(null)}
+        />
       )}
 
       <ConfirmDialog

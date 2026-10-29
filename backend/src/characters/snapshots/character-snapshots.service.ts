@@ -4,15 +4,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { ValidationError, validate } from 'class-validator';
 import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CharactersService } from '../characters.service';
 import { toDto, toDtoArray } from '../../common/serialization/to-dto';
+import { GLOBAL_VALIDATION_PIPE_OPTIONS, VALIDATOR_STRICTNESS } from '../../bootstrap-config';
+import { CharacterDto } from '../dto/character-response.dto';
+import { CreateCharacterDto } from '../dto/create-character.dto';
 import {
   captureCharacterSnapshot,
   type CapturedSnapshot,
   type SnapshotClient,
 } from './capture-snapshot';
+import { buildCopyInput } from './copy-snapshot';
 import {
   CharacterSnapshotDto,
   CharacterSnapshotSummaryDto,
@@ -20,6 +26,15 @@ import {
 
 /** The most snapshots one character keeps, hand-saved and level-up ones together. */
 export const CHARACTER_SNAPSHOT_CAP = 50;
+
+// Flattens nested validation errors so the 400 names the failing field instead
+// of arriving empty.
+function collectMessages(errors: ValidationError[]): string[] {
+  return errors.flatMap(e => [
+    ...Object.values(e.constraints ?? {}),
+    ...collectMessages(e.children ?? []),
+  ]);
+}
 
 /** Saves, reads and deletes a character's snapshots. Only the character's owner may. */
 @Injectable()
@@ -148,5 +163,47 @@ export class CharacterSnapshotsService {
     if (count === 0) {
       throw new NotFoundException(`Snapshot "${snapshotId}" not found`);
     }
+  }
+
+  /**
+   * Create a new character for the caller from a snapshot's stored sheet, with
+   * play state reset by `buildCopyInput`. 404 when the snapshot does not exist
+   * under this character, 400 naming the field when the stored sheet no longer
+   * passes `CreateCharacterDto`.
+   *
+   * The sheet goes through the DTO and `CharactersService.create` rather than a
+   * raw insert, so the copy gets the same treatment as any other new character.
+   * Unknown keys are refused, a campaign id needs the caller's membership, the
+   * class id is checked or derived again, and the inventory gets fresh gear
+   * snapshots. Validation mirrors the global pipe. The copy starts with no
+   * snapshots of its own.
+   */
+  async copy(
+    characterId: string,
+    snapshotId: string,
+    userId: string,
+    { name, campaignId }: { name?: string; campaignId?: string } = {}
+  ): Promise<CharacterDto> {
+    await this.assertOwnership(characterId, userId);
+    const snapshot = await this.prisma.characterSnapshot.findFirst({
+      where: { id: snapshotId, characterId },
+      select: { level: true, data: true },
+    });
+    if (!snapshot) {
+      throw new NotFoundException(`Snapshot "${snapshotId}" not found`);
+    }
+    // Cast needed: the JSON column is untyped. Safe because capture always
+    // stores an object.
+    const input = buildCopyInput(snapshot.data as Record<string, unknown>, snapshot.level, name);
+    const dto = plainToInstance(
+      CreateCharacterDto,
+      { ...input, ...(campaignId && { campaignId }) },
+      GLOBAL_VALIDATION_PIPE_OPTIONS.transformOptions
+    );
+    const errors = await validate(dto, VALIDATOR_STRICTNESS);
+    if (errors.length > 0) {
+      throw new BadRequestException(collectMessages(errors));
+    }
+    return this.characters.create(userId, dto);
   }
 }

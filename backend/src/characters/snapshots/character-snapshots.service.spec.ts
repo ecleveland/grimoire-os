@@ -8,6 +8,7 @@ import {
 import { SNAPSHOT_OMITTED_COLUMNS } from './capture-snapshot';
 import { CharactersService } from '../characters.service';
 import { CharacterDto } from '../dto/character-response.dto';
+import { CreateCharacterDto } from '../dto/create-character.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignAuthService } from '../../auth/campaign-auth.service';
 import { InventoryResolverService } from '../inventory/inventory-resolver.service';
@@ -16,6 +17,7 @@ import { createMockPrismaService, MockPrismaService } from '../../test/prisma-mo
 import { CHARACTER_ID, USER_ID, USER_ID_2, mockCharacter } from '../../test/fixtures';
 
 const SNAPSHOT_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
+const CAMPAIGN_ID = 'f6a7b8c9-d0e1-4234-8fab-456789012345';
 const TAKEN_AT = new Date('2026-10-01T12:00:00Z');
 const SUMMARY_SELECT = { id: true, level: true, label: true, takenAt: true };
 
@@ -49,6 +51,7 @@ const snapshotRow = (over: Record<string, unknown> = {}) => ({
 describe('CharacterSnapshotsService', () => {
   let service: CharacterSnapshotsService;
   let prisma: MockPrismaService;
+  let createCharacter: jest.SpyInstance;
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
@@ -67,6 +70,7 @@ describe('CharacterSnapshotsService', () => {
     }).compile();
 
     service = module.get(CharacterSnapshotsService);
+    createCharacter = jest.spyOn(module.get(CharactersService), 'create');
 
     prisma.character.findUnique.mockResolvedValue(liveCharacter);
     // The fixture's class as a non-caster catalog row, for the computed block.
@@ -93,6 +97,7 @@ describe('CharacterSnapshotsService', () => {
       ['get', (s: CharacterSnapshotsService) => s.get(CHARACTER_ID, SNAPSHOT_ID, USER_ID)],
       ['remove', (s: CharacterSnapshotsService) => s.remove(CHARACTER_ID, SNAPSHOT_ID, USER_ID)],
       ['create', (s: CharacterSnapshotsService) => s.create(CHARACTER_ID, USER_ID)],
+      ['copy', (s: CharacterSnapshotsService) => s.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID)],
     ])('%s answers 404 for an unknown character (VEG-643)', async (_name, call) => {
       prisma.character.findUnique.mockResolvedValue(null);
 
@@ -102,6 +107,7 @@ describe('CharacterSnapshotsService', () => {
       expect(prisma.characterSnapshot.deleteMany).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.count).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+      expect(createCharacter).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -109,6 +115,7 @@ describe('CharacterSnapshotsService', () => {
       ['get', (s: CharacterSnapshotsService) => s.get(CHARACTER_ID, SNAPSHOT_ID, USER_ID_2)],
       ['remove', (s: CharacterSnapshotsService) => s.remove(CHARACTER_ID, SNAPSHOT_ID, USER_ID_2)],
       ['create', (s: CharacterSnapshotsService) => s.create(CHARACTER_ID, USER_ID_2)],
+      ['copy', (s: CharacterSnapshotsService) => s.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID_2)],
     ])('%s answers 403 for another user (VEG-643)', async (_name, call) => {
       await expect(call(service)).rejects.toThrow(ForbiddenException);
       expect(prisma.characterSnapshot.findMany).not.toHaveBeenCalled();
@@ -116,6 +123,7 @@ describe('CharacterSnapshotsService', () => {
       expect(prisma.characterSnapshot.deleteMany).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.count).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+      expect(createCharacter).not.toHaveBeenCalled();
     });
   });
 
@@ -282,6 +290,97 @@ describe('CharacterSnapshotsService', () => {
       await expect(attempt).rejects.toThrow(/50/);
       expect(prisma.character.findUniqueOrThrow).not.toHaveBeenCalled();
       expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('copy', () => {
+    // The stored sheet mid-fight, so the test can see the resets land.
+    const midFightData = () => ({
+      ...storedData(),
+      hitPoints: { max: 44, current: 9, temporary: 5 },
+      conditions: ['Poisoned'],
+      concentration: { spell: 'Bless' },
+      exhaustion: 2,
+    });
+    const created = { id: 'new-character' };
+
+    beforeEach(() => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue({ level: 4, data: midFightData() });
+      createCharacter.mockResolvedValue(created);
+    });
+
+    it('answers 404 for an unknown snapshot without creating anything (VEG-646)', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue(null);
+
+      await expect(service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID)).rejects.toThrow(
+        NotFoundException
+      );
+      expect(prisma.characterSnapshot.findFirst).toHaveBeenCalledWith({
+        where: { id: SNAPSHOT_ID, characterId: CHARACTER_ID },
+        select: { level: true, data: true },
+      });
+      expect(createCharacter).not.toHaveBeenCalled();
+    });
+
+    it('creates the reset sheet through CharactersService.create for the caller (VEG-646)', async () => {
+      await service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID, { campaignId: CAMPAIGN_ID });
+
+      expect(createCharacter).toHaveBeenCalledTimes(1);
+      const [userId, dto] = createCharacter.mock.calls[0];
+      expect(userId).toBe(USER_ID);
+      expect(dto).toBeInstanceOf(CreateCharacterDto);
+      expect(dto).toMatchObject({
+        name: `${mockCharacter.name} (level 4)`,
+        class: mockCharacter.class,
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        conditions: [],
+        concentration: null,
+        exhaustion: null,
+        campaignId: CAMPAIGN_ID,
+      });
+    });
+
+    it('leaves the campaign unset when none is given (VEG-646)', async () => {
+      await service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      expect(createCharacter.mock.calls[0][1].campaignId).toBeUndefined();
+    });
+
+    it('uses a supplied name (VEG-646)', async () => {
+      await service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID, { name: 'Thorn the Second' });
+
+      expect(createCharacter.mock.calls[0][1].name).toBe('Thorn the Second');
+    });
+
+    it('answers 400 naming the field when the stored sheet no longer validates (VEG-646)', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue({
+        level: 4,
+        data: { ...midFightData(), bogus: true },
+      });
+
+      const attempt = service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      await expect(attempt).rejects.toThrow(BadRequestException);
+      await expect(attempt).rejects.toMatchObject({
+        response: { message: expect.arrayContaining([expect.stringContaining('bogus')]) },
+      });
+      expect(createCharacter).not.toHaveBeenCalled();
+    });
+
+    it('names a failing nested field in the 400 (VEG-646)', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue({
+        level: 4,
+        data: { ...midFightData(), hitDice: { dieType: 'd7', total: 5, spent: 2 } },
+      });
+
+      await expect(service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID)).rejects.toMatchObject({
+        response: { message: expect.arrayContaining([expect.stringContaining('dieType')]) },
+      });
+      expect(createCharacter).not.toHaveBeenCalled();
+    });
+
+    it('returns what CharactersService.create returns (VEG-646)', async () => {
+      await expect(service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID)).resolves.toBe(created);
     });
   });
 
