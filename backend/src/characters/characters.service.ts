@@ -25,6 +25,7 @@ import {
   resolveByUniqueName,
   resolveCatalogRef,
 } from '../srd/resolve-catalog-ref';
+import { captureCharacterSnapshot } from './snapshots/capture-snapshot';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -62,13 +63,15 @@ export class CharactersService {
   // the computed block. `class` rides along because `update` needs the stored name
   // to tell a real class change from a re-save of the same one, and `classId`
   // because a re-save can only safely heal a key that is currently absent.
+  // `level` tells `update` whether the PATCH is a one-level bump that takes a
+  // snapshot.
   private async assertOwnership(
     id: string,
     userId: string
-  ): Promise<{ userId: string; class: string | null; classId: string | null }> {
+  ): Promise<{ userId: string; class: string | null; classId: string | null; level: number }> {
     const character = await this.prisma.character.findUnique({
       where: { id },
-      select: { userId: true, class: true, classId: true },
+      select: { userId: true, class: true, classId: true, level: true },
     });
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
@@ -271,10 +274,9 @@ export class CharactersService {
   }
 
   // Single place every detail read/write funnels through so the authoritative
-  // `computed` block is always attached (VEG-346).
-  private async toCharacterDto(
-    character: Prisma.CharacterGetPayload<object>
-  ): Promise<CharacterDto> {
+  // `computed` block is always attached (VEG-346). Public because a snapshot read
+  // runs its rebuilt row through the same builder.
+  async toCharacterDto(character: Prisma.CharacterGetPayload<object>): Promise<CharacterDto> {
     // An unrecognized value (typo / bad import) would compute a confidently-wrong
     // save DC. Surface it. Still needed after VEG-493/494 closed the API write
     // boundary (@IsIn(ABILITY_NAMES) on the create + update DTOs): the column
@@ -505,21 +507,45 @@ export class CharactersService {
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.
     const data = changes as unknown as Prisma.CharacterUncheckedUpdateInput;
 
+    // A bump of exactly one level keeps a copy of the sheet as it stood at the
+    // old level. The copy and the write share a transaction, so a write that
+    // fails, including a stale-version 409, leaves no snapshot behind. A jump of
+    // several levels, a level going down, or any other PATCH takes none.
+    const levelsUp = changes.level !== undefined && changes.level === existing.level + 1;
+    const character = levelsUp
+      ? await this.prisma.$transaction(async tx => {
+          await captureCharacterSnapshot(tx, id, `Level ${existing.level}`);
+          return this.writeCharacter(tx, id, data, expectedVersion);
+        })
+      : await this.writeCharacter(this.prisma, id, data, expectedVersion);
+    return this.toCharacterDto(character);
+  }
+
+  /**
+   * Apply an update, guarded by `expectedVersion` when the caller sent one, and
+   * return the updated row. Pass a transaction client to make the write part of
+   * the caller's transaction; the 409 and 404 throw inside it.
+   */
+  private async writeCharacter(
+    client: Pick<PrismaService, 'character'> | Prisma.TransactionClient,
+    id: string,
+    data: Prisma.CharacterUncheckedUpdateInput,
+    expectedVersion: number | undefined
+  ): Promise<Prisma.CharacterGetPayload<object>> {
     // No expectedVersion → caller opts out of optimistic locking (VEG-137).
     if (expectedVersion === undefined) {
-      const character = await this.prisma.character.update({ where: { id }, data });
-      return this.toCharacterDto(character);
+      return client.character.update({ where: { id }, data });
     }
 
     // Guarded write: only succeeds if the row is still at expectedVersion.
     // `version` is non-unique, so updateMany with a compound where + atomic
     // increment is the correct primitive (plain update can't match on version).
-    const { count } = await this.prisma.character.updateMany({
+    const { count } = await client.character.updateMany({
       where: { id, version: expectedVersion },
       data: { ...data, version: { increment: 1 } },
     });
     if (count === 0) {
-      const current = await this.prisma.character.findUnique({
+      const current = await client.character.findUnique({
         where: { id },
         select: { version: true },
       });
@@ -531,11 +557,11 @@ export class CharactersService {
         currentVersion: current.version,
       });
     }
-    const character = await this.prisma.character.findUnique({ where: { id } });
+    const character = await client.character.findUnique({ where: { id } });
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return this.toCharacterDto(character);
+    return character;
   }
 
   async remove(id: string, userId: string): Promise<void> {

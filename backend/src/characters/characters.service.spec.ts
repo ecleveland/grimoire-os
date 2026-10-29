@@ -122,6 +122,12 @@ describe('CharactersService', () => {
     // The id lookup is its own query since VEG-528. Defaulting it to "no such
     // row" keeps every name-path test exercising the name path.
     prisma.srdClass.findFirst.mockResolvedValue(null);
+    // A PATCH from the level-5 fixture to level 6 is a one-level bump, which
+    // copies the row into a snapshot before the write (VEG-643). Defaulting the
+    // read and the insert keeps the update tests that send `level: 6` on the
+    // write behaviour they assert.
+    prisma.character.findUniqueOrThrow.mockResolvedValue(mockCharacter);
+    prisma.characterSnapshot.create.mockResolvedValue({ id: 'snap-1' });
   });
 
   describe('create', () => {
@@ -1438,7 +1444,7 @@ describe('CharactersService', () => {
       // Ownership is a lightweight userId-only read (no full DTO / class lookup).
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
-        select: { userId: true, class: true, classId: true },
+        select: { userId: true, class: true, classId: true, level: true },
       });
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
@@ -1995,6 +2001,142 @@ describe('CharactersService', () => {
     });
   });
 
+  describe('auto-snapshot on level-up (VEG-643)', () => {
+    // A level-4 sheet with play state worth keeping. The PATCH overwrites all of
+    // it, so the snapshot has to carry the values from before the write.
+    const levelFour = {
+      ...mockCharacter,
+      level: 4,
+      hitPoints: { max: 36, current: 20, temporary: 0 },
+      features: [{ name: 'Action Surge', source: 'Fighter', description: 'One extra action' }],
+      inventory: [{ name: 'Shortsword', quantity: 2, equipped: true }],
+    };
+
+    const snapshotData = () => prisma.characterSnapshot.create.mock.calls[0][0].data;
+
+    beforeEach(() => {
+      prisma.character.findUnique.mockResolvedValue(levelFour);
+      prisma.character.findUniqueOrThrow.mockResolvedValue(levelFour);
+      prisma.characterSnapshot.create.mockResolvedValue({ id: 'snap-1' });
+      prisma.character.update.mockResolvedValue({ ...levelFour, level: 5 });
+    });
+
+    it('selects the stored level in the ownership read (VEG-643)', async () => {
+      await service.update(CHARACTER_ID, USER_ID, { name: 'Renamed' });
+
+      expect(prisma.character.findUnique).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        select: { userId: true, class: true, classId: true, level: true },
+      });
+    });
+
+    it('captures the pre-update row labelled with the old level on a 4 to 5 PATCH (VEG-643)', async () => {
+      const result = await service.update(CHARACTER_ID, USER_ID, { level: 5 });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.characterSnapshot.create).toHaveBeenCalledTimes(1);
+      const created = snapshotData();
+      expect(created).toMatchObject({ characterId: CHARACTER_ID, level: 4, label: 'Level 4' });
+      expect(created.data.hitPoints).toEqual(levelFour.hitPoints);
+      expect(created.data.features).toEqual(levelFour.features);
+      expect(created.data.inventory).toEqual(levelFour.inventory);
+      expect(created.data).not.toHaveProperty('id');
+      expect(created.data).not.toHaveProperty('userId');
+      expect(created.data).not.toHaveProperty('version');
+      expect(result.level).toBe(5);
+    });
+
+    it('captures before the write on a guarded 4 to 5 PATCH (VEG-643)', async () => {
+      prisma.character.findUnique
+        .mockResolvedValueOnce(levelFour) // ownership read
+        .mockResolvedValueOnce({ ...levelFour, level: 5, version: 1 }); // post-write re-fetch
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+
+      const result = await service.update(CHARACTER_ID, USER_ID, { level: 5, expectedVersion: 0 });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.characterSnapshot.create).toHaveBeenCalledTimes(1);
+      expect(snapshotData()).toMatchObject({ level: 4, label: 'Level 4' });
+      expect(snapshotData().data.hitPoints).toEqual(levelFour.hitPoints);
+      expect(prisma.characterSnapshot.create.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.character.updateMany.mock.invocationCallOrder[0]
+      );
+      expect(result.version).toBe(1);
+    });
+
+    it('reads, captures and writes through the transaction client (VEG-643)', async () => {
+      const tx = createMockPrismaService();
+      tx.character.findUniqueOrThrow.mockResolvedValue(levelFour);
+      tx.characterSnapshot.create.mockResolvedValue({ id: 'snap-1' });
+      tx.character.update.mockResolvedValue({ ...levelFour, level: 5 });
+      prisma.$transaction.mockImplementation((fn: (client: MockPrismaService) => unknown) =>
+        Promise.resolve(fn(tx))
+      );
+
+      await service.update(CHARACTER_ID, USER_ID, { level: 5 });
+
+      expect(tx.character.findUniqueOrThrow).toHaveBeenCalledTimes(1);
+      expect(tx.characterSnapshot.create).toHaveBeenCalledTimes(1);
+      expect(tx.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: { level: 5 },
+      });
+      expect(prisma.character.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+      expect(prisma.character.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a jump of two levels', { level: 6 }],
+      ['a level going down', { level: 3 }],
+      ['the same level re-sent', { level: 4 }],
+      ['a PATCH without a level', { name: 'Renamed' }],
+    ])('takes no snapshot and opens no transaction for %s (VEG-643)', async (_label, dto) => {
+      await service.update(CHARACTER_ID, USER_ID, dto);
+
+      expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+      expect(prisma.character.findUniqueOrThrow).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: dto,
+      });
+    });
+
+    it('takes no snapshot on a guarded 5 to 4 PATCH (VEG-643)', async () => {
+      prisma.character.findUnique
+        .mockResolvedValueOnce({ ...levelFour, level: 5 })
+        .mockResolvedValueOnce(levelFour);
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.update(CHARACTER_ID, USER_ID, { level: 4, expectedVersion: 0 });
+
+      expect(prisma.characterSnapshot.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('throws 409 inside the transaction so a stale level-up keeps no snapshot (VEG-643)', async () => {
+      prisma.character.findUnique
+        .mockResolvedValueOnce(levelFour) // ownership read
+        .mockResolvedValueOnce({ ...levelFour, version: 3 }); // current-version probe
+      prisma.character.updateMany.mockResolvedValue({ count: 0 });
+
+      const err = await service
+        .update(CHARACTER_ID, USER_ID, { level: 5, expectedVersion: 0 })
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({ currentVersion: 3 });
+      // The snapshot insert ran inside the callback, and the callback's promise
+      // rejected, which is what rolls the insert back on a real database.
+      expect(prisma.characterSnapshot.create).toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      await expect(prisma.$transaction.mock.results[0].value).rejects.toBeInstanceOf(
+        ConflictException
+      );
+    });
+  });
+
   describe('UpdateCharacterDto mass assignment protection', () => {
     it('should reject campaignId as a non-whitelisted property', async () => {
       const dto = plainToInstance(UpdateCharacterDto, {
@@ -2055,7 +2197,7 @@ describe('CharactersService', () => {
         where: { id: CHARACTER_ID },
         // `class` rides along for update()'s class/classId invariant; remove()
         // ignores it (VEG-524 follow-up).
-        select: { userId: true, class: true, classId: true },
+        select: { userId: true, class: true, classId: true, level: true },
       });
       expect(prisma.character.delete).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },

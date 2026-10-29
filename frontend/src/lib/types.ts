@@ -98,6 +98,8 @@ export type {
   User,
   Campaign,
   Character,
+  CharacterSnapshot,
+  CharacterSnapshotSummary,
   Note,
   Encounter,
   // List projections

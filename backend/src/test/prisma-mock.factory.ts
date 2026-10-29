@@ -2,6 +2,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 type MockModel = {
   findUnique: jest.Mock;
+  findUniqueOrThrow: jest.Mock;
   findFirst: jest.Mock;
   findMany: jest.Mock;
   create: jest.Mock;
@@ -17,6 +18,7 @@ type MockModel = {
 function mockModel(): MockModel {
   return {
     findUnique: jest.fn(),
+    findUniqueOrThrow: jest.fn(),
     findFirst: jest.fn(),
     findMany: jest.fn(),
     create: jest.fn(),
@@ -37,6 +39,7 @@ export type MockPrismaService = {
       | 'campaign'
       | 'campaignPlayer'
       | 'character'
+      | 'characterSnapshot'
       | 'note'
       | 'encounter'
       | 'spell'
@@ -80,6 +83,7 @@ export function createMockPrismaService(): MockPrismaService {
     campaign: mockModel(),
     campaignPlayer: mockModel(),
     character: mockModel(),
+    characterSnapshot: mockModel(),
     note: mockModel(),
     encounter: mockModel(),
     spell: mockModel(),
