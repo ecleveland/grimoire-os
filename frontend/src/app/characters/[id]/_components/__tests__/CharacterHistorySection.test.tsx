@@ -121,6 +121,21 @@ describe('CharacterHistorySection (VEG-644)', () => {
     expect(screen.queryByText(/no snapshots yet/i)).toBeNull();
   });
 
+  it('links each row to its snapshot view (VEG-645)', async () => {
+    routeApiFetch({ list: () => Promise.resolve([newest, oldest]) });
+    renderSection();
+
+    expect(
+      await screen.findByRole('link', {
+        name: 'View snapshot Level 5 · Before the dragon · 12 Oct 2026',
+      })
+    ).toHaveAttribute('href', '/characters/char-1/history/snap-2');
+    expect(
+      screen.getByRole('link', { name: 'View snapshot Level 4 · 1 Sept 2026' })
+    ).toHaveAttribute('href', '/characters/char-1/history/snap-1');
+    expect(screen.getAllByRole('link', { name: /^view snapshot/i })).toHaveLength(2);
+  });
+
   it('toasts a failed list fetch and shows neither rows nor the empty state', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     routeApiFetch({ list: () => Promise.reject(new Error('boom')) });
