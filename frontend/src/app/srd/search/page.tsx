@@ -337,7 +337,7 @@ function ClassSummary({ cls }: { cls: UnifiedClassHitData }) {
 function FeatureDetail({ feature }: { feature: UnifiedFeatureData }) {
   return (
     <div className="space-y-3">
-      <FeatureText description={feature.description} />
+      <FeatureText description={feature.description} featureId={feature.id} />
       <Link
         href={featureDetailHref(feature)}
         className="inline-block text-sm text-indigo-600 dark:text-indigo-400 hover:underline"

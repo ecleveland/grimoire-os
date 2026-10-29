@@ -30,6 +30,7 @@ export const PRINTABLE_CARD_TYPES = [
   'background',
   'species',
   'feature',
+  'feature-option',
 ] as const;
 
 export type PrintableCardType = (typeof PRINTABLE_CARD_TYPES)[number];
@@ -193,6 +194,52 @@ export interface PrintableFeatureCard {
 }
 
 /**
+ * Feature option: one entry from a feature's `**Options**` list, such as a
+ * single Eldritch Invocation or Metamagic option, printed as its own card.
+ */
+export interface PrintableFeatureOptionCard {
+  type: 'feature-option';
+  /** `featureOptionCardId(feature.id, name)`. */
+  id: string;
+  /** The option's name. */
+  name: string;
+  /** The feature the option belongs to, e.g. Eldritch Invocations. */
+  feature: { id: string; name: string };
+  parent: PrintableFeatureParent;
+  /** The option's Prerequisite or Cost line, label included; omitted when it has none. */
+  meta?: string;
+  description: string;
+}
+
+/** Joins a feature id and an option name into a feature-option card id. */
+export const FEATURE_OPTION_ID_SEPARATOR = '::';
+
+/**
+ * Builds the id of a feature-option card. The tray and the batch endpoint key
+ * every card on one id string, so the feature id and the option name share it.
+ */
+export function featureOptionCardId(featureId: string, optionName: string): string {
+  return `${featureId}${FEATURE_OPTION_ID_SEPARATOR}${optionName}`;
+}
+
+/**
+ * Splits a feature-option card id back into its feature id and option name.
+ * It splits on the first separator only, because feature ids are uuids and an
+ * option name may itself hold the separator. Returns null when the id has no
+ * separator or either half is empty.
+ */
+export function parseFeatureOptionCardId(
+  id: string
+): { featureId: string; optionName: string } | null {
+  const at = id.indexOf(FEATURE_OPTION_ID_SEPARATOR);
+  if (at === -1) return null;
+  const featureId = id.slice(0, at);
+  const optionName = id.slice(at + FEATURE_OPTION_ID_SEPARATOR.length);
+  if (featureId === '' || optionName === '') return null;
+  return { featureId, optionName };
+}
+
+/**
  * The full printable-card contract: a discriminated union keyed by `type`, so
  * the print route and card components can switch over it type-safely. Every
  * member of {@link PRINTABLE_CARD_TYPES} has exactly one variant here.
@@ -204,7 +251,8 @@ export type PrintableCard =
   | PrintableRaceCard
   | PrintableSpeciesCard
   | PrintableBackgroundCard
-  | PrintableFeatureCard;
+  | PrintableFeatureCard
+  | PrintableFeatureOptionCard;
 
 // ── Batch hydrate contract (VEG-263) ───────────────────────────────────────
 

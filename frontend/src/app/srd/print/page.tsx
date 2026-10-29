@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api';
 import { apiQueryKey } from '@/lib/query';
 import { usePrintTray } from '@/lib/print-tray-context';
+import { orderPrintGroups } from '@/lib/print-group-order';
 import type {
   HydratePrintableCardsResponse,
   PrintableCard,
@@ -16,6 +17,7 @@ import PrintMonsterCard from '@/components/PrintMonsterCard';
 import PrintSpellCard from '@/components/PrintSpellCard';
 import PrintItemCard from '@/components/PrintItemCard';
 import PrintFeatureCard from '@/components/PrintFeatureCard';
+import PrintFeatureOptionCard from '@/components/PrintFeatureOptionCard';
 import PrintTraitsCard from '@/components/PrintTraitsCard';
 import LoadError from '@/components/LoadError';
 import LoadingState from '@/components/LoadingState';
@@ -30,6 +32,7 @@ const GROUP_LABELS: Record<PrintableCardType, string> = {
   species: 'Species',
   background: 'Backgrounds',
   feature: 'Features',
+  'feature-option': 'Feature options',
 };
 
 /**
@@ -75,6 +78,8 @@ function CardForType({ card }: { card: PrintableCard }) {
       return <PrintItemCard card={card} />;
     case 'feature':
       return <PrintFeatureCard card={card} />;
+    case 'feature-option':
+      return <PrintFeatureOptionCard card={card} />;
     case 'race':
     case 'species':
     case 'background':
@@ -125,7 +130,7 @@ export default function SrdPrintPage() {
     // The cards must reflect edits and deletes made on other pages.
     staleTime: 0,
   });
-  const groups = query.data?.groups;
+  const groups = query.data && orderPrintGroups(query.data.groups);
 
   if (hydrated && count === 0) {
     return (

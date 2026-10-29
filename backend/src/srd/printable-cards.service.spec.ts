@@ -368,6 +368,127 @@ describe('PrintableCardsService', () => {
     });
   });
 
+  describe('feature option cards', () => {
+    const INVOCATIONS = {
+      id: 'feat-ei',
+      name: 'Eldritch Invocations',
+      level: 1,
+      description: [
+        'Prose about invocations.',
+        '',
+        '**Options**',
+        '',
+        '**Agonizing Blast**',
+        '',
+        'Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage',
+        '',
+        "Choose one of your known Warlock cantrips that deals damage. You can add your Charisma modifier to that spell's damage rolls.",
+        '',
+        '**Armor of Shadows**',
+        '',
+        'You can cast Mage Armor on yourself without expending a spell slot.',
+      ].join('\n'),
+      parent: { kind: 'class' as const, id: 'cls-wl', name: 'Warlock', classId: 'cls-wl' },
+    };
+    const AGONIZING = 'feat-ei::Agonizing Blast';
+    const ARMOR = 'feat-ei::Armor of Shadows';
+
+    it('hydrates two options of one feature into one card each', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([INVOCATIONS]);
+
+      const result = await service.hydrate([{ type: 'feature-option', ids: [AGONIZING, ARMOR] }]);
+
+      expect(result.groups).toEqual([
+        {
+          type: 'feature-option',
+          cards: [
+            {
+              type: 'feature-option',
+              id: AGONIZING,
+              name: 'Agonizing Blast',
+              feature: { id: 'feat-ei', name: 'Eldritch Invocations' },
+              parent: { kind: 'class', id: 'cls-wl', name: 'Warlock' },
+              meta: 'Prerequisite: Level 2+ Warlock, a Warlock Cantrip That Deals Damage',
+              description:
+                "Choose one of your known Warlock cantrips that deals damage. You can add your Charisma modifier to that spell's damage rolls.",
+            },
+            {
+              type: 'feature-option',
+              id: ARMOR,
+              name: 'Armor of Shadows',
+              feature: { id: 'feat-ei', name: 'Eldritch Invocations' },
+              parent: { kind: 'class', id: 'cls-wl', name: 'Warlock' },
+              description: 'You can cast Mage Armor on yourself without expending a spell slot.',
+            },
+          ],
+        },
+      ]);
+    });
+
+    it('leaves out meta for an option with no Prerequisite or Cost line', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([INVOCATIONS]);
+
+      const result = await service.hydrate([{ type: 'feature-option', ids: [ARMOR] }]);
+
+      expect(result.groups[0].cards[0]).not.toHaveProperty('meta');
+    });
+
+    it('drops an id whose option name the feature does not list', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([INVOCATIONS]);
+
+      const result = await service.hydrate([
+        { type: 'feature-option', ids: ['feat-ei::Pact of the Blade', AGONIZING] },
+      ]);
+
+      expect(result.groups[0].cards.map(c => c.id)).toEqual([AGONIZING]);
+    });
+
+    it('drops an id for a feature whose description has no options list', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([FEATURE_DATA]);
+
+      const result = await service.hydrate([
+        { type: 'feature-option', ids: ['feat-1::Action Surge'] },
+      ]);
+
+      expect(result.groups[0].cards).toEqual([]);
+    });
+
+    it('drops a malformed id without asking for its feature', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([INVOCATIONS]);
+
+      const result = await service.hydrate([
+        { type: 'feature-option', ids: ['feat-ei', '::Agonizing Blast', 'feat-ei::', ARMOR] },
+      ]);
+
+      expect(srdService.findFeaturesByIds).toHaveBeenCalledWith(['feat-ei'], undefined);
+      expect(result.groups[0].cards.map(c => c.id)).toEqual([ARMOR]);
+    });
+
+    it('skips the feature lookup when no id parses', async () => {
+      const result = await service.hydrate([{ type: 'feature-option', ids: ['feat-ei'] }]);
+
+      expect(srdService.findFeaturesByIds).not.toHaveBeenCalled();
+      expect(result.groups[0].cards).toEqual([]);
+    });
+
+    it('returns cards in request id order', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([INVOCATIONS]);
+
+      const result = await service.hydrate([{ type: 'feature-option', ids: [ARMOR, AGONIZING] }]);
+
+      expect(result.groups[0].cards.map(c => c.id)).toEqual([ARMOR, AGONIZING]);
+    });
+
+    it('passes the caller to findFeaturesByIds and asks once per feature', async () => {
+      srdService.findFeaturesByIds.mockResolvedValue([INVOCATIONS]);
+
+      await service.hydrate([{ type: 'feature-option', ids: [AGONIZING, ARMOR] }], 'u1');
+
+      expect(srdService.findFeaturesByIds).toHaveBeenCalledTimes(1);
+      expect(srdService.findFeaturesByIds).toHaveBeenCalledWith(['feat-ei'], 'u1');
+    });
+  });
+
   describe('markdown flattening (VEG-276)', () => {
     const raceWithTrait = (description: string) => ({
       ...RACE_ROW,

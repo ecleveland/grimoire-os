@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { splitFeatureOptions } from '@/lib/feature-options';
+import {
+  featureOptionCardId,
+  parseFeatureOptionCardId,
+  splitFeatureOptions,
+} from '@grimoire-os/shared';
 
 const INTRO = "You can't pick the same invocation more than once.";
 
@@ -167,5 +171,37 @@ describe('splitFeatureOptions', () => {
       { name: 'Armor of Shadows', meta: 'Prerequisite: Level 2+ Warlock', description: '' },
       { name: 'Fiendish Vigor', description: '' },
     ]);
+  });
+});
+
+describe('feature option card ids', () => {
+  const FEATURE_ID = '6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f';
+
+  it('round-trips a feature id and an option name', () => {
+    const id = featureOptionCardId(FEATURE_ID, 'Agonizing Blast');
+
+    expect(id).toBe(`${FEATURE_ID}::Agonizing Blast`);
+    expect(parseFeatureOptionCardId(id)).toEqual({
+      featureId: FEATURE_ID,
+      optionName: 'Agonizing Blast',
+    });
+  });
+
+  it('splits on the first separator, so the option name may hold one', () => {
+    const id = featureOptionCardId(FEATURE_ID, 'Odd::Name');
+
+    expect(parseFeatureOptionCardId(id)).toEqual({
+      featureId: FEATURE_ID,
+      optionName: 'Odd::Name',
+    });
+  });
+
+  it.each([
+    ['has no separator', FEATURE_ID],
+    ['has an empty feature id', '::Agonizing Blast'],
+    ['has an empty option name', `${FEATURE_ID}::`],
+    ['is empty', ''],
+  ])('returns null for an id that %s', (_case, id) => {
+    expect(parseFeatureOptionCardId(id)).toBeNull();
   });
 });

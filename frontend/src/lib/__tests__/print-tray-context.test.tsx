@@ -16,6 +16,12 @@ vi.mock('sonner', () => ({
   toast: { error: vi.fn() },
 }));
 
+const MANY: PrintTrayItem[] = [
+  { type: 'monster', id: 'goblin' },
+  { type: 'feature-option', id: 'feat-ei::Agonizing Blast' },
+  { type: 'feature-option', id: 'feat-ei::Armor of Shadows' },
+];
+
 function TestConsumer() {
   const tray = usePrintTray();
   return (
@@ -32,6 +38,9 @@ function TestConsumer() {
       <button onClick={() => tray.remove('monster', 'goblin')}>Remove goblin</button>
       <button onClick={() => tray.toggle('monster', 'goblin')}>Toggle goblin</button>
       <button onClick={() => tray.clear()}>Clear</button>
+      <button onClick={() => tray.addMany(MANY)}>Add many</button>
+      <button onClick={() => tray.removeMany(MANY)}>Remove many</button>
+      <button onClick={() => tray.addMany([...MANY, ...MANY])}>Add many twice</button>
     </div>
   );
 }
@@ -190,6 +199,67 @@ describe('PrintTrayProvider', () => {
         { type: 'feature', ids: ['action-surge'] },
       ])
     );
+  });
+});
+
+describe('addMany and removeMany', () => {
+  it('addMany appends only the missing items, in order, with one storage write', async () => {
+    const user = userEvent.setup();
+    renderWithProvider();
+    await user.click(screen.getByRole('button', { name: 'Add fireball' }));
+    await user.click(screen.getByRole('button', { name: 'Add goblin' }));
+    const setItemSpy = vi.spyOn(storageMethodOwner('setItem'), 'setItem');
+
+    await user.click(screen.getByRole('button', { name: 'Add many' }));
+
+    expect(setItemSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('items')).toHaveTextContent(
+      JSON.stringify([
+        { type: 'spell', id: 'fireball' },
+        { type: 'monster', id: 'goblin' },
+        { type: 'feature-option', id: 'feat-ei::Agonizing Blast' },
+        { type: 'feature-option', id: 'feat-ei::Armor of Shadows' },
+      ])
+    );
+    setItemSpy.mockRestore();
+  });
+
+  it('addMany writes nothing when every item is already in the set', async () => {
+    const user = userEvent.setup();
+    renderWithProvider();
+    await user.click(screen.getByRole('button', { name: 'Add many' }));
+    const setItemSpy = vi.spyOn(storageMethodOwner('setItem'), 'setItem');
+
+    await user.click(screen.getByRole('button', { name: 'Add many' }));
+
+    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('count')).toHaveTextContent('3');
+    setItemSpy.mockRestore();
+  });
+
+  it('addMany adds an item listed twice only once', async () => {
+    const user = userEvent.setup();
+    renderWithProvider();
+
+    await user.click(screen.getByRole('button', { name: 'Add many twice' }));
+
+    expect(screen.getByTestId('items')).toHaveTextContent(JSON.stringify(MANY));
+  });
+
+  it('removeMany drops the listed items with one storage write and keeps the rest', async () => {
+    const user = userEvent.setup();
+    renderWithProvider();
+    await user.click(screen.getByRole('button', { name: 'Add many' }));
+    await user.click(screen.getByRole('button', { name: 'Add fireball' }));
+    const setItemSpy = vi.spyOn(storageMethodOwner('setItem'), 'setItem');
+
+    await user.click(screen.getByRole('button', { name: 'Remove many' }));
+
+    expect(setItemSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('items')).toHaveTextContent(
+      JSON.stringify([{ type: 'spell', id: 'fireball' }])
+    );
+    setItemSpy.mockRestore();
   });
 });
 
