@@ -145,7 +145,7 @@ describe('CharacterSnapshotPage read only (VEG-645)', () => {
     expect(screen.getByText('Poisoned')).toBeInTheDocument();
     expect(screen.getByText('Arcane Recovery')).toBeInTheDocument();
     expectNoWriteControls();
-    expect(buttonNames()).toEqual(['Show 2 options']);
+    expect(buttonNames()).toEqual(['Play a copy', 'Show 2 options']);
   });
 
   it('shows no write control on the Spells & Details tab', async () => {
@@ -156,7 +156,7 @@ describe('CharacterSnapshotPage read only (VEG-645)', () => {
     expect(screen.getByText('Ring of Protection')).toBeInTheDocument();
     expect(screen.getByText('Quarterstaff')).toBeInTheDocument();
     expectNoWriteControls();
-    expect(buttonNames()).toEqual(['View Light details', 'View Fireball details']);
+    expect(buttonNames()).toEqual(['Play a copy', 'View Light details', 'View Fireball details']);
   });
 
   it('sends only GET requests when every rendered control is used', async () => {
@@ -164,7 +164,7 @@ describe('CharacterSnapshotPage read only (VEG-645)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Show 2 options' }));
     expect(screen.getByText('Agonizing Blast')).toBeInTheDocument();
-    expect(buttonNames()).toEqual(['Hide options']);
+    expect(buttonNames()).toEqual(['Play a copy', 'Hide options']);
     await user.click(screen.getByRole('button', { name: 'Hide options' }));
 
     await user.click(screen.getByRole('tab', { name: 'Spells & Details' }));

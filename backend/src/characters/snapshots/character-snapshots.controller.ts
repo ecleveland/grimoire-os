@@ -15,6 +15,8 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../../auth/interfaces/jwt-payload.interface';
 import { CHARACTER_SNAPSHOT_CAP, CharacterSnapshotsService } from './character-snapshots.service';
 import { CreateCharacterSnapshotDto } from './dto/create-character-snapshot.dto';
+import { CopyCharacterSnapshotDto } from './dto/copy-character-snapshot.dto';
+import { CharacterDto } from '../dto/character-response.dto';
 import { CharacterSnapshotSummaryDto } from './dto/character-snapshot-response.dto';
 
 @ApiTags('Characters')
@@ -53,6 +55,24 @@ export class CharacterSnapshotsController {
     @Req() req: AuthenticatedRequest
   ) {
     return this.snapshotsService.get(id, snapshotId, req.user.userId);
+  }
+
+  @Post(':snapshotId/copy')
+  @ApiOperation({ summary: 'Create a new character from a snapshot' })
+  @ApiResponse({ status: 201, type: CharacterDto })
+  @ApiResponse({ status: 400, description: 'The stored sheet no longer passes validation' })
+  @ApiResponse({
+    status: 403,
+    description: 'Not the owner of the character, or not a member of the campaign',
+  })
+  @ApiResponse({ status: 404, description: 'Character or snapshot not found' })
+  copy(
+    @Param('id') id: string,
+    @Param('snapshotId') snapshotId: string,
+    @Body() dto: CopyCharacterSnapshotDto,
+    @Req() req: AuthenticatedRequest
+  ) {
+    return this.snapshotsService.copy(id, snapshotId, req.user.userId, dto);
   }
 
   @Delete(':snapshotId')

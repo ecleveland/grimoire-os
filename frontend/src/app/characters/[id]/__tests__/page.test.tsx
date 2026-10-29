@@ -48,6 +48,7 @@ beforeEach(() => {
   mockApiFetch.mockReset();
   mockUseAuth.mockReset();
   mockUseAuth.mockReturnValue({ user: { userId: 'user-1' } });
+  sessionStorage.clear();
 });
 
 describe('CharacterSheetPage', () => {
@@ -80,6 +81,27 @@ describe('CharacterSheetPage', () => {
     await waitFor(() =>
       expect(screen.getByTestId('character-sheet')).toHaveAttribute('data-owner', 'false')
     );
+  });
+
+  it('notes once where a copied character came from (VEG-646)', async () => {
+    sessionStorage.setItem('copied-from:char-1', JSON.stringify({ name: 'Vex', level: 5 }));
+    mockApiFetch.mockResolvedValue(character);
+    renderPage();
+
+    await screen.findByTestId('character-sheet');
+    expect(screen.getByTestId('copied-from-note')).toHaveTextContent('Copied from Vex at level 5.');
+    expect(screen.getByRole('status')).toBe(screen.getByTestId('copied-from-note'));
+    expect(sessionStorage.getItem('copied-from:char-1')).toBeNull();
+  });
+
+  it('shows no copied-from note without a session note for this id (VEG-646)', async () => {
+    sessionStorage.setItem('copied-from:char-2', JSON.stringify({ name: 'Vex', level: 5 }));
+    mockApiFetch.mockResolvedValue(character);
+    renderPage();
+
+    await screen.findByTestId('character-sheet');
+    expect(screen.queryByTestId('copied-from-note')).toBeNull();
+    expect(sessionStorage.getItem('copied-from:char-2')).not.toBeNull();
   });
 
   it('shows a not-found message when the character fails to load', async () => {

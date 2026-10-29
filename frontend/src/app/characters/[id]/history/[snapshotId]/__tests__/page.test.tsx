@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import CharacterSnapshotPage from '../page';
 import type { Character, CharacterSnapshot } from '@/lib/types';
@@ -22,6 +23,32 @@ vi.mock('../../../_components/CharacterSheet', () => ({
   default: ({ character, isOwner }: { character: Character; isOwner: boolean }) => (
     <div data-testid="character-sheet" data-owner={isOwner}>
       {character.name}
+    </div>
+  ),
+}));
+// The dialog has its own spec. This stand-in shows the props the banner passes.
+vi.mock('../../../_components/PlayCopyDialog', () => ({
+  default: ({
+    characterId,
+    characterName,
+    snapshot,
+    onClose,
+  }: {
+    characterId: string;
+    characterName: string;
+    snapshot: { id: string; level: number };
+    onClose: () => void;
+  }) => (
+    <div
+      data-testid="play-copy-dialog"
+      data-character={characterId}
+      data-name={characterName}
+      data-level={snapshot.level}
+      data-snapshot={snapshot.id}
+    >
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
     </div>
   ),
 }));
@@ -117,12 +144,24 @@ describe('CharacterSnapshotPage (VEG-645)', () => {
     );
   });
 
-  it('offers no way to play a copy yet', async () => {
-    mockApiFetch.mockResolvedValue(makeSnapshot());
+  it('opens the play-a-copy dialog for this snapshot from the banner (VEG-646)', async () => {
+    mockApiFetch.mockResolvedValue(
+      makeSnapshot({ level: 3, data: makeCharacter({ name: 'Vex', level: 3 }) })
+    );
+    const user = userEvent.setup();
     renderWithQueryClient(<CharacterSnapshotPage />);
 
-    await screen.findByTestId('snapshot-banner');
-    expect(screen.queryByRole('link', { name: /play a copy/i })).toBeNull();
-    expect(screen.queryByRole('button', { name: /play a copy/i })).toBeNull();
+    const banner = await screen.findByTestId('snapshot-banner');
+    expect(screen.queryByTestId('play-copy-dialog')).toBeNull();
+    await user.click(within(banner).getByRole('button', { name: 'Play a copy' }));
+
+    const dialog = screen.getByTestId('play-copy-dialog');
+    expect(dialog).toHaveAttribute('data-character', 'char-1');
+    expect(dialog).toHaveAttribute('data-name', 'Vex');
+    expect(dialog).toHaveAttribute('data-snapshot', 'snap-1');
+    expect(dialog).toHaveAttribute('data-level', '3');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+    expect(screen.queryByTestId('play-copy-dialog')).toBeNull();
   });
 });

@@ -19,6 +19,22 @@ vi.mock('sonner', () => ({
     success: (...args: unknown[]) => mockToastSuccess(...args),
   },
 }));
+// The dialog has its own spec. This stand-in shows which snapshot the row opened.
+vi.mock('../PlayCopyDialog', () => ({
+  default: ({
+    snapshot,
+    onClose,
+  }: {
+    snapshot: { id: string; level: number };
+    onClose: () => void;
+  }) => (
+    <div data-testid="play-copy-dialog" data-level={snapshot.level} data-snapshot={snapshot.id}>
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  ),
+}));
 
 const PATH = '/characters/char-1/snapshots';
 const CAP_MESSAGE = 'A character can keep at most 50 snapshots. Delete one to save another.';
@@ -257,6 +273,58 @@ describe('CharacterHistorySection (VEG-644)', () => {
         PATH,
         expect.objectContaining({ method: 'POST' })
       );
+    });
+  });
+
+  describe('play a copy (VEG-646)', () => {
+    it("opens the dialog with the row's snapshot and closes it again", async () => {
+      routeApiFetch({ list: () => Promise.resolve([newest, oldest]) });
+      const user = userEvent.setup();
+      renderSection();
+      await screen.findByText('Level 4 · 1 Sept 2026');
+
+      expect(screen.queryByTestId('play-copy-dialog')).toBeNull();
+      await user.click(
+        screen.getByRole('button', { name: 'Play a copy of Level 4 · 1 Sept 2026' })
+      );
+
+      const dialog = screen.getByTestId('play-copy-dialog');
+      expect(dialog).toHaveAttribute('data-snapshot', 'snap-1');
+      expect(dialog).toHaveAttribute('data-level', '4');
+
+      await user.click(within(dialog).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByTestId('play-copy-dialog')).toBeNull();
+    });
+
+    it('sits between View and Delete in each row', async () => {
+      routeApiFetch({ list: () => Promise.resolve([newest, oldest]) });
+      renderSection();
+      await screen.findByText('Level 4 · 1 Sept 2026');
+
+      const row = screen.getAllByTestId('snapshot-row')[0];
+      const actions = Array.from(row.querySelectorAll('a, button')).map(el => el.textContent);
+      expect(actions).toEqual(['View', 'Play a copy', 'Delete']);
+    });
+
+    it('disables the button while a save is in flight', async () => {
+      routeApiFetch({
+        list: () => Promise.resolve([oldest]),
+        post: () => new Promise(() => {}),
+      });
+      const user = userEvent.setup();
+      renderSection();
+      await screen.findByText('Level 4 · 1 Sept 2026');
+
+      const playCopy = screen.getByRole('button', {
+        name: 'Play a copy of Level 4 · 1 Sept 2026',
+      });
+      expect(playCopy).toBeEnabled();
+      await user.click(screen.getByRole('button', { name: 'Save snapshot' }));
+      await user.click(
+        within(screen.getByTestId('save-snapshot-dialog')).getByRole('button', { name: 'Save' })
+      );
+
+      await waitFor(() => expect(playCopy).toBeDisabled());
     });
   });
 

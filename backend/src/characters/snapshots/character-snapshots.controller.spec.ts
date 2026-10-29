@@ -9,14 +9,20 @@ const SNAPSHOT_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
 
 describe('CharacterSnapshotsController', () => {
   let controller: CharacterSnapshotsController;
-  let service: Record<'create' | 'list' | 'get' | 'remove', jest.Mock>;
+  let service: Record<'create' | 'list' | 'get' | 'remove' | 'copy', jest.Mock>;
 
   const mockReq = {
     user: { userId: USER_ID, username: 'testuser', role: Role.PLAYER },
   } as AuthenticatedRequest;
 
   beforeEach(async () => {
-    service = { create: jest.fn(), list: jest.fn(), get: jest.fn(), remove: jest.fn() };
+    service = {
+      create: jest.fn(),
+      list: jest.fn(),
+      get: jest.fn(),
+      remove: jest.fn(),
+      copy: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CharacterSnapshotsController],
@@ -62,5 +68,16 @@ describe('CharacterSnapshotsController', () => {
     await controller.remove(CHARACTER_ID, SNAPSHOT_ID, mockReq);
 
     expect(service.remove).toHaveBeenCalledWith(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+  });
+
+  it('copy delegates with the character id, snapshot id, userId and body (VEG-646)', async () => {
+    const character = { id: 'new-character' };
+    service.copy.mockResolvedValue(character);
+    const body = { name: 'Thorn the Second' };
+
+    const result = await controller.copy(CHARACTER_ID, SNAPSHOT_ID, body, mockReq);
+
+    expect(service.copy).toHaveBeenCalledWith(CHARACTER_ID, SNAPSHOT_ID, USER_ID, body);
+    expect(result).toBe(character);
   });
 });

@@ -68,5 +68,22 @@ test.describe('character sheet history', () => {
     await confirm.getByRole('button', { name: 'Delete' }).click();
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText('Level 1');
+
+    // VEG-646. Playing a copy of the level-1 snapshot opens a new level-1
+    // character at full HP, and the original stays at level 2.
+    await history.getByRole('button', { name: /play a copy of level 1/i }).click();
+    const copyDialog = page.getByTestId('play-copy-dialog');
+    await expect(copyDialog.getByLabel('Name')).toHaveValue('Rook Ashfall (level 1)');
+    await copyDialog.getByRole('button', { name: 'Create' }).click();
+    await expect(page).toHaveURL(new RegExp('/characters/(?!' + characterId + ')[0-9a-f-]{36}$'));
+    await expect(page.getByRole('heading', { name: 'Rook Ashfall (level 1)' })).toBeVisible();
+    await expect(page.getByTestId('level-badge')).toHaveText('1');
+    await expect(page.getByTestId('copied-from-note')).toHaveText(
+      'Copied from Rook Ashfall at level 1.'
+    );
+    await expect(page.getByTestId('hp-block').getByText('12/12')).toBeVisible();
+
+    await page.goto(`/characters/${characterId}`);
+    await expect(page.getByTestId('level-badge')).toHaveText('2');
   });
 });
