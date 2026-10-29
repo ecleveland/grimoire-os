@@ -247,12 +247,31 @@ model Character {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  campaign Campaign? @relation(fields: [campaignId], references: [id])
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  campaign  Campaign?           @relation(fields: [campaignId], references: [id])
+  snapshots CharacterSnapshot[]
 
   @@index([userId])
   @@index([campaignId])
   @@map("characters")
+}
+
+// A copy of a character row as it stood at one moment. A level-up PATCH writes
+// one, labelled with the level being left, in the same transaction as the bump.
+// `data` is the stored row minus id, userId, campaignId, version, createdAt and
+// updatedAt, so reading one back takes those from the live character.
+model CharacterSnapshot {
+  id          String   @id @default(uuid())
+  characterId String
+  level       Int
+  label       String?
+  data        Json
+  takenAt     DateTime @default(now())
+
+  character Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+
+  @@index([characterId, takenAt])
+  @@map("character_snapshots")
 }
 
 // ── Notes ──────────────────────────────────────────────

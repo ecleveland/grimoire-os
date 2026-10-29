@@ -183,6 +183,28 @@ export interface CharacterListItem {
 }
 
 /**
+ * One row of GET /characters/:id/snapshots, newest first. `level` is the level
+ * the character was at when the copy was taken, and `label` is free text such
+ * as "Level 4".
+ */
+export interface CharacterSnapshotSummary {
+  id: string;
+  level: number;
+  label: string | null;
+  takenAt: string;
+}
+
+/**
+ * GET /characters/:id/snapshots/:snapshotId. `data` is the sheet as it stood
+ * when the copy was taken, with `computed` worked out from those values. Its
+ * id, userId and campaignId are the live character's, `version` is 0 and
+ * `updatedAt` equals `takenAt`.
+ */
+export interface CharacterSnapshot extends CharacterSnapshotSummary {
+  data: Character;
+}
+
+/**
  * Slim party-roster projection returned by GET /campaigns/:id/characters
  * (VEG-283): the combatant-relevant snapshot (AC/HP, initiative modifier)
  * plus display fields. Deliberately omits the rest of the sheet — members
