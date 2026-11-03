@@ -2,6 +2,7 @@ import { Expose } from 'class-transformer';
 import type {
   AbilityScores,
   AttunedItem,
+  CharacterClass,
   CharacterFeat,
   CharacterResource,
   CombatantConcentration,
@@ -29,10 +30,17 @@ export class CharacterDto {
   @Expose() campaignId!: string | null;
   @Expose() name!: string;
   @Expose() race!: string | null;
+  /** Classes held, first taken first. The written and read shape. */
+  @Expose() classes!: CharacterClass[];
+  /** @deprecated Read-only projection of classes[0].name. Read `classes`. */
   @Expose() class!: string | null;
+  /** @deprecated Read-only projection of classes[0].classId. Read `classes`. */
   @Expose() classId!: string | null;
   @Expose() level!: number;
+  /** @deprecated Read-only projection of classes[0].subclass. Read `classes`. */
   @Expose() subclass!: string | null;
+  /** @deprecated Read-only projection of classes[0].subclassId. Read `classes`. */
+  @Expose() subclassId!: string | null;
   @Expose() background!: string | null;
   @Expose() backgroundId!: string | null;
   @Expose() alignment!: string | null;
@@ -66,7 +74,8 @@ export class CharacterDto {
   @Expose() avatarUrl!: string | null;
   @Expose() size!: string | null;
   @Expose() heroicInspiration!: boolean;
-  @Expose() hitDice!: HitDice | null;
+  /** One pool per die type; null when none is recorded. */
+  @Expose() hitDice!: HitDice[] | null;
   @Expose() armorTraining!: string[];
   @Expose() weapons!: Weapon[] | null;
   // PC status tracking (VEG-408).
@@ -89,7 +98,10 @@ export class CharacterDto {
   @Expose() computed!: ComputedStats;
 }
 
-/** Slim character shape for list views (VEG-125 projection, VEG-128 DTO). */
+/**
+ * Slim character shape for list views (VEG-125 projection, VEG-128 DTO). `class`
+ * is the first class's name.
+ */
 export class CharacterListItemDto {
   @Expose() id!: string;
   @Expose() userId!: string;

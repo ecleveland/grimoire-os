@@ -14,7 +14,7 @@ test.describe('Add party PCs to an encounter (VEG-283)', () => {
       data: {
         name: 'Thia',
         race: 'Elf',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 5 }],
         level: 5,
         armorClass: 12,
         initiative: 2,

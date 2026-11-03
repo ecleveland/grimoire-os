@@ -16,7 +16,7 @@ test.describe('character sheet — equipment-derived AC & weapons', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Sable Quickstep',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 3 }],
         level: 3,
         abilityScores: { strength: 16, dexterity: 14, constitution: 14 },
         hitPoints: { max: 28, current: 28, temporary: 0 },

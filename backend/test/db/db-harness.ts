@@ -76,8 +76,16 @@ function guardTestDatabase(): void {
  * semicolon inside a string literal or a `$$`-quoted body would break it, and
  * only whole-line `--` comments are stripped. Every migration replayed so far is
  * plain DML. Harden this, in one place, when one is not.
+ *
+ * `skip` drops every statement it matches, so a spec can replay part of a
+ * migration against a schema that already has the rest, or replay one statement
+ * twice to prove it is idempotent.
  */
-export async function applyMigration(prisma: PrismaService, migrationDir: string): Promise<void> {
+export async function applyMigration(
+  prisma: PrismaService,
+  migrationDir: string,
+  { skip }: { skip?: RegExp } = {}
+): Promise<void> {
   const sql = readFileSync(
     join(__dirname, '../../prisma/migrations', migrationDir, 'migration.sql'),
     'utf8'
@@ -88,7 +96,8 @@ export async function applyMigration(prisma: PrismaService, migrationDir: string
     .join('\n')
     .split(';')
     .map(statement => statement.trim())
-    .filter(statement => statement.length > 0);
+    .filter(statement => statement.length > 0)
+    .filter(statement => !skip?.test(statement));
   for (const statement of statements) {
     await prisma.$executeRawUnsafe(statement);
   }

@@ -10,8 +10,8 @@ const resetUses = (value: unknown) =>
  * Turn a snapshot's stored sheet into the body for a new character.
  *
  * The copy is a fresh character at that level, not one caught mid-fight. So it
- * starts at full hit points with no temporary ones, every hit die, spell slot
- * and resource use restored, death saves at zero, and no conditions,
+ * starts at full hit points with no temporary ones, every hit die in every
+ * pool, spell slot and resource use restored, death saves at zero, and no conditions,
  * concentration or exhaustion. A null pool stays null, because null means the
  * sheet has none. Everything else copies as stored.
  *
@@ -34,7 +34,9 @@ export function buildCopyInput(
     hitPoints: isRecord(hitPoints)
       ? { ...hitPoints, current: hitPoints.max, temporary: 0 }
       : hitPoints,
-    hitDice: isRecord(hitDice) ? { ...hitDice, spent: 0 } : hitDice,
+    hitDice: Array.isArray(hitDice)
+      ? hitDice.map((pool: object) => ({ ...pool, spent: 0 }))
+      : hitDice,
     deathSaves: isRecord(deathSaves) ? { successes: 0, failures: 0 } : deathSaves,
     spellSlots: resetUses(input.spellSlots),
     resources: resetUses(input.resources),

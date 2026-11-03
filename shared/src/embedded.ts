@@ -189,12 +189,15 @@ export interface Currency {
  * came from — the class name, the species name, or something else, which is how
  * the sheet groups them into Class Features / Species Traits / Feats.
  *
- * `level` records the character level the grant arrived at, and is what tells one
- * occurrence of a recurring name from the next: since VEG-507 a class may carry
- * "Ability Score Improvement" at 4, 8, 12, 16 and 19, and without the level those
- * five are indistinguishable. Absent on species traits and on anything typed by
- * hand in the editor, neither of which has a granting level, so it narrows an
- * identity rather than defining one (VEG-454).
+ * `level` records the class level the grant arrived at, the level in the class
+ * named by `source`, not the character level (VEG-671). For every single-class
+ * character stored before multiclassing the two were equal, so nothing stored
+ * changed. The level is what tells one occurrence of a recurring name from the
+ * next: since VEG-507 a class may carry "Ability Score Improvement" at 4, 8, 12,
+ * 16 and 19, and without the level those five are indistinguishable. Absent on
+ * species traits and on anything typed by hand in the editor, neither of which
+ * has a granting level, so it narrows an identity rather than defining one
+ * (VEG-454).
  */
 export interface Feature {
   name: string;
@@ -426,6 +429,124 @@ export interface HitDice {
  */
 export function hitDicePoolFor(dieType: HitDieType, level: number | undefined): HitDice {
   return { dieType, total: Math.max(1, level ?? 1), spent: 0 };
+}
+
+/** The first stored pool, or null when there is none (VEG-671). */
+export function firstPool(hitDice: readonly HitDice[] | null | undefined): HitDice | null {
+  return hitDice?.[0] ?? null;
+}
+
+/** Hit dice held across every pool; 0 when none are recorded. */
+export function hitDiceTotal(hitDice: readonly HitDice[] | null | undefined): number {
+  return (hitDice ?? []).reduce((sum, pool) => sum + pool.total, 0);
+}
+
+/** Hit dice spent across every pool; 0 when none are recorded. */
+export function hitDiceSpent(hitDice: readonly HitDice[] | null | undefined): number {
+  return (hitDice ?? []).reduce((sum, pool) => sum + pool.spent, 0);
+}
+
+/**
+ * Rebuilds the hit-dice pools from a character's classes (VEG-671). Each die gets
+ * one pool holding the summed levels of the classes that use it, floored at one
+ * like {@link hitDicePoolFor}. Spent dice carry over from the stored pool of the
+ * same die, clamped to the new total. A stored pool whose die no class produces
+ * was picked by the player or granted by the DM, so it is kept unchanged after
+ * the derived ones. A class whose die fails {@link isHitDie} contributes nothing.
+ *
+ * Returns an empty array when no pool results. Callers store null for that.
+ */
+export function hitDicePoolsFor(
+  classes: readonly { hitDie: string; level: number }[],
+  carried: readonly HitDice[] | null | undefined
+): HitDice[] {
+  const levelsByDie = new Map<HitDieType, number>();
+  for (const entry of classes) {
+    if (!isHitDie(entry.hitDie)) continue;
+    levelsByDie.set(entry.hitDie, (levelsByDie.get(entry.hitDie) ?? 0) + entry.level);
+  }
+  const stored = carried ?? [];
+  const derived: HitDice[] = [...levelsByDie].map(([dieType, levels]) => {
+    const total = Math.max(1, levels);
+    const spent = stored.find(pool => pool.dieType === dieType)?.spent ?? 0;
+    return { dieType, total, spent: Math.min(total, Math.max(0, spent)) };
+  });
+  const leftovers = stored.filter(pool => !levelsByDie.has(pool.dieType as HitDieType));
+  return [...derived, ...leftovers];
+}
+
+/**
+ * One class a character holds levels in (VEG-671). The first entry of
+ * `Character.classes` is the class taken at level 1. It grants the starting
+ * proficiencies and saving throws, and the API projects it onto the deprecated
+ * `class`, `classId`, `subclass` and `subclassId` response fields.
+ */
+export interface CharacterClass {
+  /** Soft reference to the class row, same contract as the old Character.classId: null for a free-typed name or an unresolved one. */
+  classId: string | null;
+  /** Display name, authoritative for free-typed classes. */
+  name: string;
+  /** Levels held in this class, at least 1. The sum over `classes` equals Character.level. */
+  level: number;
+  subclass: string | null;
+  /** Soft reference to the subclass row. Always null until a later ticket writes it. */
+  subclassId: string | null;
+}
+
+/**
+ * Whether the class levels add up to the character level. An empty list passes,
+ * because a character with no class recorded has nothing to check.
+ */
+export function classesSumToLevel(
+  classes: readonly Pick<CharacterClass, 'level'>[],
+  level: number
+): boolean {
+  if (classes.length === 0) return true;
+  return classes.reduce((sum, entry) => sum + entry.level, 0) === level;
+}
+
+/**
+ * The first entry that repeats an earlier one, by trimmed case-folded name or by
+ * equal non-null classId. Returns its name, or its classId when the name is
+ * blank, and null when every entry is distinct.
+ */
+export function duplicateClassEntry(
+  classes: readonly Pick<CharacterClass, 'classId' | 'name'>[]
+): string | null {
+  const names = new Set<string>();
+  const ids = new Set<string>();
+  for (const entry of classes) {
+    const key = entry.name.trim().toLowerCase();
+    if (names.has(key) || (entry.classId !== null && ids.has(entry.classId))) {
+      return entry.name || entry.classId;
+    }
+    names.add(key);
+    if (entry.classId !== null) ids.add(entry.classId);
+  }
+  return null;
+}
+
+/** The name of the class taken at level 1, or null when no class is recorded. */
+export function firstClassName(
+  classes: readonly CharacterClass[] | null | undefined
+): string | null {
+  return classes?.[0]?.name ?? null;
+}
+
+/** The deprecated scalar class fields, projected from the first class. */
+export function projectClassScalars(classes: readonly CharacterClass[] | null | undefined): {
+  class: string | null;
+  classId: string | null;
+  subclass: string | null;
+  subclassId: string | null;
+} {
+  const first = classes?.[0];
+  return {
+    class: first?.name ?? null,
+    classId: first?.classId ?? null,
+    subclass: first?.subclass ?? null,
+    subclassId: first?.subclassId ?? null,
+  };
 }
 
 /**

@@ -5,6 +5,7 @@
 // a database tests a where clause. The stranger case is the one that matters: a
 // guessed id must not pin a character to someone else's homebrew, and it must
 // land exactly where a junk id lands so the caller learns nothing either way.
+import type { CharacterClass } from '@grimoire-os/shared';
 import {
   createSeedContext,
   teardownSeedContext,
@@ -40,12 +41,25 @@ describe('client-supplied classId validation on a real DB (VEG-531)', () => {
   let ownerHomebrewWizardId: string;
   let strangerHomebrewFighterId: string;
 
-  const storedClassId = async (id: string) =>
-    (await ctx.prisma.character.findUniqueOrThrow({ where: { id }, select: { classId: true } }))
-      .classId;
+  // The key pinned on the character's first class entry.
+  const storedClassId = async (id: string) => {
+    const { classes } = await ctx.prisma.character.findUniqueOrThrow({
+      where: { id },
+      select: { classes: true },
+    });
+    return (classes as unknown as CharacterClass[])[0]?.classId ?? null;
+  };
+
+  const entry = (name: string, classId: string | null = null): CharacterClass => ({
+    classId,
+    name,
+    level: 3,
+    subclass: null,
+    subclassId: null,
+  });
 
   const createAs = (cls: string, classId?: string) =>
-    characters.create(ownerId, { name: `Probe ${cls}`, class: cls, level: 3, classId });
+    characters.create(ownerId, { name: `Probe ${cls}`, classes: [entry(cls, classId)], level: 3 });
 
   beforeAll(async () => {
     ctx = await createSeedContext();
@@ -114,14 +128,14 @@ describe('client-supplied classId validation on a real DB (VEG-531)', () => {
       // Same outcome, down to the seeded die, so nothing distinguishes the two.
       expect(stranger.classId).toBe(junk.classId);
       expect(stranger.hitDice).toEqual(junk.hitDice);
-      expect(stranger.hitDice).toEqual({ dieType: 'd10', total: 3, spent: 0 });
+      expect(stranger.hitDice).toEqual([{ dieType: 'd10', total: 3, spent: 0 }]);
     });
 
     it('keeps a visible id that disambiguates a duplicate name', async () => {
       const created = await createAs('Wizard', ownerHomebrewWizardId);
 
       expect(await storedClassId(created.id)).toBe(ownerHomebrewWizardId);
-      expect(created.hitDice).toEqual({ dieType: 'd12', total: 3, spent: 0 });
+      expect(created.hitDice).toEqual([{ dieType: 'd12', total: 3, spent: 0 }]);
     });
 
     it('stores no key when a junk id meets a name the owner has duplicated', async () => {
@@ -132,10 +146,10 @@ describe('client-supplied classId validation on a real DB (VEG-531)', () => {
   });
 
   describe('update', () => {
-    it('discards a junk id and derives from the stored name', async () => {
+    it('discards a junk id and derives from the entry’s name', async () => {
       const created = await createAs('Fighter');
 
-      await characters.update(created.id, ownerId, { classId: 'anything' });
+      await characters.update(created.id, ownerId, { classes: [entry('Fighter', 'anything')] });
 
       expect(await storedClassId(created.id)).toBe(srdFighterId);
     });
@@ -144,8 +158,7 @@ describe('client-supplied classId validation on a real DB (VEG-531)', () => {
       const created = await createAs('Fighter');
 
       await characters.update(created.id, ownerId, {
-        class: 'Fighter',
-        classId: strangerHomebrewFighterId,
+        classes: [entry('Fighter', strangerHomebrewFighterId)],
       });
 
       expect(await storedClassId(created.id)).toBe(srdFighterId);
@@ -155,11 +168,22 @@ describe('client-supplied classId validation on a real DB (VEG-531)', () => {
       const created = await createAs('Wizard', srdWizardId);
 
       await characters.update(created.id, ownerId, {
-        class: 'Wizard',
-        classId: ownerHomebrewWizardId,
+        classes: [entry('Wizard', ownerHomebrewWizardId)],
       });
 
       expect(await storedClassId(created.id)).toBe(ownerHomebrewWizardId);
+    });
+
+    // An empty pool list must land as SQL NULL, the "none recorded" state every
+    // reader handles, and never as `[]` or a jsonb null.
+    it('stores SQL NULL when the new classes yield no pool', async () => {
+      const created = await createAs('Bloodbinder');
+
+      await characters.update(created.id, ownerId, { classes: [entry('Spellsinger')] });
+
+      const [row] = await ctx.prisma.$queryRaw<Array<{ none: boolean }>>`
+        SELECT "hitDice" IS NULL AS none FROM "characters" WHERE id = ${created.id}`;
+      expect(row.none).toBe(true);
     });
   });
 });

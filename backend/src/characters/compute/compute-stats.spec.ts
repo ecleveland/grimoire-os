@@ -20,11 +20,13 @@ import {
 } from '@grimoire-os/shared';
 import { srdGameRules } from '../../seed/data/game-rules';
 import { srdSkills } from '../../seed/data/skills';
+import { srdClasses } from '../../seed/data/classes';
 import {
   abilityModifier,
   proficiencyBonus,
   computeCharacterStats,
   CharacterComputeInput,
+  ResolvedClassData,
 } from './compute-stats';
 
 const BASE_SCORES: AbilityScores = {
@@ -52,9 +54,18 @@ function input(over: Partial<CharacterComputeInput> = {}): CharacterComputeInput
     exhaustion: null,
     speed: null,
     size: null,
+    classes: [],
     ...over,
   };
 }
+
+// What the service resolves from the class catalog. `spellcastingLevel` null
+// means the slots are read at the character level.
+const classData = (
+  spellcasting: ClassSpellcasting | null,
+  weaponProficiencies: string[] = [],
+  spellcastingLevel: number | null = null
+): ResolvedClassData => ({ spellcasting, spellcastingLevel, weaponProficiencies });
 
 // Full caster: minimal progression with the level-5 row plus a level-20 row
 // whose highest key is 9 (so the caster is classified "full").
@@ -414,7 +425,7 @@ describe('computeCharacterStats', () => {
 
   it('derives spell save DC and attack bonus from the class spellcasting ability', () => {
     // Charisma mod -1, prof 3 at level 5: DC = 8 + 3 + (-1) = 10; attack = 3 + (-1) = 2
-    const stats = computeCharacterStats(input(), FULL_CASTER);
+    const stats = computeCharacterStats(input(), classData(FULL_CASTER));
     expect(stats.spellcasting).toEqual({
       ability: 'Charisma',
       modifier: -1,
@@ -425,7 +436,10 @@ describe('computeCharacterStats', () => {
 
   it('prefers an explicit spellcastingAbility column over the class default', () => {
     // Character column says Wisdom (mod 1) even though class is Charisma.
-    const stats = computeCharacterStats(input({ spellcastingAbility: 'Wisdom' }), FULL_CASTER);
+    const stats = computeCharacterStats(
+      input({ spellcastingAbility: 'Wisdom' }),
+      classData(FULL_CASTER)
+    );
     expect(stats.spellcasting).toEqual({
       ability: 'Wisdom',
       modifier: 1,
@@ -447,17 +461,17 @@ describe('computeCharacterStats', () => {
   });
 
   it('exposes full-caster spell slot maxima at the character level', () => {
-    const stats = computeCharacterStats(input({ level: 5 }), FULL_CASTER);
+    const stats = computeCharacterStats(input({ level: 5 }), classData(FULL_CASTER));
     expect(stats.spellSlots).toEqual({ caster: 'full', maxByLevel: { 1: 4, 2: 3, 3: 2 } });
   });
 
   it('classifies a half caster and its slot maxima', () => {
-    const stats = computeCharacterStats(input({ level: 5 }), HALF_CASTER);
+    const stats = computeCharacterStats(input({ level: 5 }), classData(HALF_CASTER));
     expect(stats.spellSlots).toEqual({ caster: 'half', maxByLevel: { 1: 4, 2: 2 } });
   });
 
   it('classifies pact magic with a single slot tier', () => {
-    const stats = computeCharacterStats(input({ level: 5 }), PACT_CASTER);
+    const stats = computeCharacterStats(input({ level: 5 }), classData(PACT_CASTER));
     expect(stats.spellSlots).toEqual({ caster: 'pact', maxByLevel: { 3: 2 } });
   });
 
@@ -583,10 +597,10 @@ describe('computeCharacterStats', () => {
     });
 
     it('unions class weapon proficiencies into the grants (VEG-463)', () => {
-      const stats = computeCharacterStats(input({ inventory: [tieredLongsword] }), null, [
-        'Simple weapons',
-        'Longswords',
-      ]);
+      const stats = computeCharacterStats(
+        input({ inventory: [tieredLongsword] }),
+        classData(null, ['Simple weapons', 'Longswords'])
+      );
       expect(stats.weapons[0]).toMatchObject({ attackBonus: '+6' });
     });
   });
@@ -610,7 +624,7 @@ describe('computeCharacterStats', () => {
     it.each([null, 0])('leaves every derived value unpenalized at exhaustion %p', level => {
       const stats = computeCharacterStats(
         input({ exhaustion: level, savingThrows: ['Dexterity'], skills: ['Perception'] }),
-        FULL_CASTER
+        classData(FULL_CASTER)
       );
       expect(stats.exhaustion).toBeNull();
       // Dex 12 → +1, level 5 → prof +3.
@@ -636,7 +650,7 @@ describe('computeCharacterStats', () => {
     ])('level %i applies %i to d20 Tests and −%i ft Speed', (level, d20Penalty, speedPenalty) => {
       const stats = computeCharacterStats(
         input({ exhaustion: level, savingThrows: ['Dexterity'], skills: ['Perception'] }),
-        FULL_CASTER
+        classData(FULL_CASTER)
       );
 
       expect(stats.exhaustion).toEqual({ level, d20Penalty, speedPenalty, dead: false });
@@ -724,10 +738,10 @@ describe('computeCharacterStats', () => {
     });
 
     it('leaves values that are not d20 Tests unchanged', () => {
-      const base = computeCharacterStats(input({ inventory: [dagger] }), FULL_CASTER);
+      const base = computeCharacterStats(input({ inventory: [dagger] }), classData(FULL_CASTER));
       const worn = computeCharacterStats(
         input({ exhaustion: 4, inventory: [dagger] }),
-        FULL_CASTER
+        classData(FULL_CASTER)
       );
 
       // The penalty applies to the roll, not the modifier — and the level-up /
@@ -1050,5 +1064,57 @@ describe('exhaustion rule data', () => {
       expect(effects[String(level)].length).toBeGreaterThan(0);
     }
     expect(effects['6']).toMatch(/death/i);
+  });
+});
+
+// The service resolves spellcasting from the first caster class and reads its
+// slots at that class's own level. For a single class that level is the
+// character level, so the output has to match the character-level path exactly.
+describe('spell slots at the caster class level', () => {
+  const casters = srdClasses.flatMap(cls =>
+    'spellcasting' in cls && cls.spellcasting
+      ? [{ name: cls.name, spellcasting: cls.spellcasting }]
+      : []
+  );
+  const levels = Array.from({ length: 20 }, (_, i) => i + 1);
+  const single = (name: string, level: number) =>
+    input({
+      level,
+      classes: [{ classId: null, name, level, subclass: null, subclassId: null }],
+    });
+
+  it('covers every SRD caster', () => {
+    expect(casters.map(c => c.name)).toEqual(
+      expect.arrayContaining(['Bard', 'Cleric', 'Paladin', 'Warlock', 'Wizard'])
+    );
+  });
+
+  it.each(casters.flatMap(c => levels.map(level => [c.name, level, c.spellcasting] as const)))(
+    'leaves a single-class %s at level %i unchanged',
+    (name, level, spellcasting) => {
+      expect(
+        computeCharacterStats(single(name, level), classData(spellcasting, [], level))
+      ).toEqual(computeCharacterStats(single(name, level), classData(spellcasting)));
+    }
+  );
+
+  it('reads slots at the caster class level when it differs from the character level', () => {
+    const wizard = casters.find(c => c.name === 'Wizard')!.spellcasting;
+    const fighterWizard = input({
+      level: 5,
+      classes: [
+        { classId: null, name: 'Fighter', level: 3, subclass: null, subclassId: null },
+        { classId: null, name: 'Wizard', level: 2, subclass: null, subclassId: null },
+      ],
+    });
+
+    const stats = computeCharacterStats(fighterWizard, classData(wizard, [], 2));
+
+    expect(stats.spellSlots).toEqual({ caster: 'full', maxByLevel: { 1: 3 } });
+    expect(stats.spellSlots).toEqual(
+      computeCharacterStats(input({ level: 2 }), classData(wizard)).spellSlots
+    );
+    // Proficiency still follows the character level.
+    expect(stats.proficiencyBonus).toBe(3);
   });
 });

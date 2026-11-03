@@ -5,7 +5,7 @@ import {
   IsCatalogArray,
   IsOptionalStringArray,
 } from '../../common/validators/optional-array.decorators';
-import { CreateCharacterDto } from './create-character.dto';
+import { CreateCharacterDto, readOnlyProjection } from './create-character.dto';
 
 /**
  * The non-null `String[]` columns, redeclared here rather than inherited.
@@ -31,6 +31,14 @@ const REDECLARED_ARRAY_FIELDS = [
   'armorTraining',
 ] as const;
 
+/**
+ * The deprecated scalar class fields, redeclared for the same reason as the
+ * arrays above. Inherited, `PartialType`'s `@IsOptional()` would let
+ * `class: null` past the `Equals(undefined)` rule and on to Prisma as an unknown
+ * column, which 500s instead of answering 400.
+ */
+const REDECLARED_PROJECTION_FIELDS = ['class', 'classId', 'subclass', 'subclassId'] as const;
+
 export class UpdateCharacterDto extends PartialType(
   // autoEquipStartingGear is a create-only control flag (VEG-483): omitting it
   // here keeps it off PATCH, where the service spreads the DTO straight into
@@ -39,8 +47,45 @@ export class UpdateCharacterDto extends PartialType(
     'campaignId',
     'autoEquipStartingGear',
     ...REDECLARED_ARRAY_FIELDS,
+    ...REDECLARED_PROJECTION_FIELDS,
   ] as const)
 ) {
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @ApiPropertyOptional({
+    type: String,
+    deprecated: true,
+    description: 'Read-only. Write classes instead.',
+  })
+  @readOnlyProjection('class')
+  class?: never;
+
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @ApiPropertyOptional({
+    type: String,
+    deprecated: true,
+    description: 'Read-only. Write classes instead.',
+  })
+  @readOnlyProjection('classId')
+  classId?: never;
+
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @ApiPropertyOptional({
+    type: String,
+    deprecated: true,
+    description: 'Read-only. Write classes instead.',
+  })
+  @readOnlyProjection('subclass')
+  subclass?: never;
+
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @ApiPropertyOptional({
+    type: String,
+    deprecated: true,
+    description: 'Read-only. Write classes instead.',
+  })
+  @readOnlyProjection('subclassId')
+  subclassId?: never;
+
   @ApiPropertyOptional({ enum: SKILL_NAMES, isArray: true, example: ['Athletics', 'Intimidation'] })
   @IsCatalogArray(SKILL_NAMES, 'skill')
   skills?: string[];

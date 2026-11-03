@@ -223,33 +223,170 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
   });
 
   describe('hitDice', () => {
-    it('accepts a valid HitDice object', async () => {
-      const dto = toDto({ ...baseDto, hitDice: { dieType: 'd10', total: 8, spent: 2 } });
-      const errors = await validate(dto);
+    const pool = (over: Record<string, unknown> = {}) => ({
+      dieType: 'd10',
+      total: 8,
+      spent: 2,
+      ...over,
+    });
+
+    it('accepts one pool per die as an array', async () => {
+      const dto = toDto({ ...baseDto, hitDice: [pool(), pool({ dieType: 'd8', total: 3 })] });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
       expect(errors.filter(e => e.property === 'hitDice')).toHaveLength(0);
     });
 
     it.each(['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd100'])(
       'accepts %s as a valid dieType',
       async dieType => {
-        const dto = toDto({ ...baseDto, hitDice: { dieType, total: 1, spent: 0 } });
+        const dto = toDto({ ...baseDto, hitDice: [{ dieType, total: 1, spent: 0 }] });
         const errors = await validate(dto);
         expect(errors.filter(e => e.property === 'hitDice')).toHaveLength(0);
       }
     );
 
-    it('rejects an invalid dieType string', async () => {
-      const dto = toDto({ ...baseDto, hitDice: { dieType: 'd3', total: 1, spent: 0 } });
+    it('rejects an invalid dieType in the second pool', async () => {
+      const dto = toDto({ ...baseDto, hitDice: [pool(), pool({ dieType: 'd3' })] });
       const errors = await validate(dto);
       const hitDiceError = errors.find(e => e.property === 'hitDice');
-      expect(hitDiceError).toBeDefined();
+      expect(hitDiceError?.children?.[0]?.property).toBe('1');
     });
 
-    it('rejects hitDice with invalid nested fields', async () => {
-      const dto = toDto({ ...baseDto, hitDice: { dieType: 123, total: 'bad', spent: 'bad' } });
+    it('rejects a pool with invalid nested fields', async () => {
+      const dto = toDto({
+        ...baseDto,
+        hitDice: [{ dieType: 123, total: 'bad', spent: 'bad' }],
+      });
       const errors = await validate(dto);
-      const hitDiceError = errors.find(e => e.property === 'hitDice');
-      expect(hitDiceError).toBeDefined();
+      expect(errors.find(e => e.property === 'hitDice')).toBeDefined();
+    });
+
+    it('rejects the single-object shape', async () => {
+      const dto = toDto({ ...baseDto, hitDice: pool() });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'hitDice')?.constraints).toHaveProperty('isArray');
+    });
+
+    it('rejects more than five pools', async () => {
+      const dto = toDto({ ...baseDto, hitDice: Array.from({ length: 6 }, () => pool()) });
+      const errors = await validate(dto);
+      expect(errors.find(e => e.property === 'hitDice')?.constraints).toHaveProperty(
+        'arrayMaxSize'
+      );
+    });
+  });
+
+  describe('classes', () => {
+    const entry = (over: Record<string, unknown> = {}) => ({
+      classId: null,
+      name: 'Fighter',
+      level: 3,
+      subclass: null,
+      subclassId: null,
+      ...over,
+    });
+    const classErrors = async (plain: Record<string, unknown>) =>
+      (await validate(toDto({ ...baseDto, ...plain }), VALIDATOR_STRICTNESS)).filter(
+        e => e.property === 'classes'
+      );
+    const messagesOf = (errors: { constraints?: Record<string, string> }[]) =>
+      errors.flatMap(e => Object.values(e.constraints ?? {}));
+
+    it('accepts entries whose levels sum to the character level', async () => {
+      expect(
+        await classErrors({ level: 5, classes: [entry(), entry({ name: 'Paladin', level: 2 })] })
+      ).toHaveLength(0);
+    });
+
+    it('rejects entries whose levels do not sum to the character level', async () => {
+      const errors = await classErrors({ level: 5, classes: [entry({ level: 4 })] });
+      expect(messagesOf(errors)).toContain('classes levels sum to 4 but level is 5');
+    });
+
+    it('accepts an empty list with any level', async () => {
+      expect(await classErrors({ level: 7, classes: [] })).toHaveLength(0);
+    });
+
+    it('accepts classes when level is absent', async () => {
+      expect(await classErrors({ classes: [entry({ level: 4 })] })).toHaveLength(0);
+    });
+
+    it('rejects a repeated name, folding case and whitespace', async () => {
+      const errors = await classErrors({
+        level: 5,
+        classes: [entry(), entry({ name: ' fighter ', level: 2 })],
+      });
+      expect(messagesOf(errors).join(' ')).toMatch(/duplicate class " fighter "/);
+    });
+
+    it('rejects a repeated classId under different names', async () => {
+      const errors = await classErrors({
+        level: 5,
+        classes: [
+          entry({ classId: 'cls-1' }),
+          entry({ classId: 'cls-1', name: 'Knight', level: 2 }),
+        ],
+      });
+      expect(messagesOf(errors).join(' ')).toMatch(/duplicate class "Knight"/);
+    });
+
+    it('accepts two free-typed entries that both carry a null classId', async () => {
+      expect(
+        await classErrors({ level: 5, classes: [entry(), entry({ name: 'Knight', level: 2 })] })
+      ).toHaveLength(0);
+    });
+
+    it('rejects more than twenty entries', async () => {
+      const classes = Array.from({ length: 21 }, (_, i) => entry({ name: `Class ${i}`, level: 1 }));
+      const errors = await classErrors({ classes });
+      expect(errors[0]?.constraints).toHaveProperty('arrayMaxSize');
+    });
+
+    it.each([
+      ['a blank name', { name: '  ' }],
+      ['a level of zero', { level: 0 }],
+      ['a level over twenty', { level: 21 }],
+      ['a fractional level', { level: 1.5 }],
+      ['a numeric classId', { classId: 7 }],
+      ['a numeric subclass', { subclass: 7 }],
+    ])('rejects an entry with %s', async (_label, over) => {
+      expect(await classErrors({ classes: [entry(over)] })).not.toHaveLength(0);
+    });
+
+    it('rejects an entry carrying an unknown key', async () => {
+      expect(await classErrors({ classes: [{ ...entry(), bogus: true }] })).not.toHaveLength(0);
+    });
+
+    it('rejects a non-array value', async () => {
+      const errors = await classErrors({ classes: entry() });
+      expect(errors[0]?.constraints).toHaveProperty('isArray');
+    });
+  });
+
+  // The scalar class fields are a read-only projection of classes[0]. A write
+  // that still carries one is told which field to use instead, which the
+  // whitelist's "property class should not exist" would not do.
+  describe.each([
+    ['CreateCharacterDto', CreateCharacterDto, { name: 'x' }],
+    ['UpdateCharacterDto', UpdateCharacterDto, {}],
+  ] as const)('deprecated class scalars on %s', (_label, Dto, base) => {
+    it.each([
+      ['class', 'Fighter'],
+      ['classId', 'cls-srd-fighter'],
+      ['subclass', 'Champion'],
+      ['subclassId', 'sub-champion'],
+      ['class', null],
+      ['classId', null],
+    ])('rejects %s: %p with a message naming classes', async (field, value) => {
+      const dto = plainToInstance(Dto as new () => object, { ...base, [field]: value });
+      const errors = await validate(dto, VALIDATOR_STRICTNESS);
+      const error = errors.find(e => e.property === field);
+      expect(Object.values(error?.constraints ?? {}).join(' ')).toContain('write classes instead');
+    });
+
+    it('accepts a body that carries none of them', async () => {
+      const dto = plainToInstance(Dto as new () => object, base);
+      expect(await validate(dto, VALIDATOR_STRICTNESS)).toHaveLength(0);
     });
   });
 
@@ -1453,7 +1590,7 @@ describe('CreateCharacterDto — spellcastingAbility (VEG-493 review)', () => {
     const errors = await validate(
       toDto({
         name: 'Grunk',
-        class: 'Fighter',
+        classes: [{ classId: null, name: 'Fighter', level: 1, subclass: null, subclassId: null }],
         spellcastingAbility: '',
         skills: ['Athletics', 'Intimidation'],
         savingThrows: ['Strength', 'Constitution'],
@@ -1634,7 +1771,13 @@ describe('UpdateCharacterDto — inherited spellcastingAbility catalog (VEG-494)
   // Fighter's sheet edit actually sends, so a regression is a 400 on every save.
   it('accepts a non-caster PATCH through the production pipe', async () => {
     await expect(
-      pipe.transform({ class: 'Fighter', spellcastingAbility: '' }, updateMeta)
+      pipe.transform(
+        {
+          classes: [{ classId: null, name: 'Fighter', level: 1, subclass: null, subclassId: null }],
+          spellcastingAbility: '',
+        },
+        updateMeta
+      )
     ).resolves.toMatchObject({ spellcastingAbility: '' });
   });
 

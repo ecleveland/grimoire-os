@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   Logger,
   NotFoundException,
@@ -6,8 +7,19 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
-import type { AbilityScores, ClassSpellcasting, HitDice, Weapon } from '@grimoire-os/shared';
-import { hitDicePoolFor, inventoryFromJson, isHitDie } from '@grimoire-os/shared';
+import type {
+  AbilityScores,
+  CharacterClass,
+  ClassSpellcasting,
+  HitDice,
+  Weapon,
+} from '@grimoire-os/shared';
+import {
+  firstClassName,
+  hitDicePoolsFor,
+  inventoryFromJson,
+  projectClassScalars,
+} from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -16,7 +28,11 @@ import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
 import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
-import { computeCharacterStats, isKnownAbilityName } from './compute/compute-stats';
+import {
+  computeCharacterStats,
+  isKnownAbilityName,
+  type ResolvedClassData,
+} from './compute/compute-stats';
 import { InventoryResolverService } from './inventory/inventory-resolver.service';
 import { autoEquipStartingArmor } from './inventory/auto-equip';
 import { ContentAccessService } from '../srd/content-access.service';
@@ -26,6 +42,7 @@ import {
   resolveCatalogRef,
 } from '../srd/resolve-catalog-ref';
 import { captureCharacterSnapshot } from './snapshots/capture-snapshot';
+import { classLevelMismatch } from '../common/validators/classes-sum-to-level.decorator';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -34,17 +51,57 @@ const characterListSelect = {
   userId: true,
   name: true,
   race: true,
-  class: true,
+  classes: true,
   level: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.CharacterSelect;
 
-/** Project a resolved class row onto the two grants loadClassData returns. */
-const classDataFrom = (row: { spellcasting: unknown; weaponProficiencies: string[] | null }) => ({
-  spellcasting: (row.spellcasting as ClassSpellcasting | null) ?? null,
-  weaponProficiencies: row.weaponProficiencies ?? [],
-});
+/** The class row fields loadClassData reads. */
+type ClassGrantRow = {
+  id: string;
+  name: string;
+  spellcasting: unknown;
+  weaponProficiencies: string[] | null;
+};
+
+/** A class entry with the visible catalog row its name and id resolved to, if any. */
+type ResolvedEntry = { entry: CharacterClass; row: { id: string; hitDie: string } | null };
+
+/**
+ * The stored classes column as entries. The column is NOT NULL with a `[]`
+ * default, so anything but an array is a row written outside the API and reads
+ * as no class.
+ */
+const classesFrom = (value: Prisma.JsonValue): CharacterClass[] =>
+  Array.isArray(value) ? (value as unknown as CharacterClass[]) : [];
+
+/** The stored pools, or null for none and for anything that is not an array. */
+const poolsFrom = (value: Prisma.JsonValue | null | undefined): HitDice[] | null =>
+  Array.isArray(value) ? (value as unknown as HitDice[]) : null;
+
+/** 400 when non-empty class levels do not add up to the character level. */
+function assertClassesSumToLevel(classes: readonly CharacterClass[], level: number): void {
+  const mismatch = classLevelMismatch(classes, level);
+  if (mismatch) throw new BadRequestException(mismatch);
+}
+
+/** The entries as stored: each `classId` pinned to its resolved row, absent fields null. */
+const pinnedClasses = (resolved: readonly ResolvedEntry[]): CharacterClass[] =>
+  resolved.map(({ entry, row }) => ({
+    classId: row?.id ?? null,
+    name: entry.name,
+    level: entry.level,
+    subclass: entry.subclass ?? null,
+    subclassId: entry.subclassId ?? null,
+  }));
+
+/** The pools the resolved classes produce, with spent dice carried from `carried`. */
+const poolsForClasses = (resolved: readonly ResolvedEntry[], carried: HitDice[] | null) =>
+  hitDicePoolsFor(
+    resolved.flatMap(({ entry, row }) => (row ? [{ hitDie: row.hitDie, level: entry.level }] : [])),
+    carried
+  );
 
 @Injectable()
 export class CharactersService {
@@ -60,18 +117,22 @@ export class CharactersService {
   // Lightweight ownership/existence guard for write paths (VEG-346). Deliberately
   // still a narrow projection — update/remove don't pay for a full computed DTO +
   // class lookup just to authorize; the detail read path (findOneForUser) returns
-  // the computed block. `class` rides along because `update` needs the stored name
-  // to tell a real class change from a re-save of the same one, and `classId`
-  // because a re-save can only safely heal a key that is currently absent.
-  // `level` tells `update` whether the PATCH is a one-level bump that takes a
-  // snapshot.
+  // the computed block. `classes` and `level` ride along because `update` checks
+  // the sum rule against the stored value of whichever one a PATCH leaves out,
+  // and `level` also tells it whether the PATCH is a one-level bump that takes a
+  // snapshot. `hitDice` carries the spent dice into a rebuilt pool.
   private async assertOwnership(
     id: string,
     userId: string
-  ): Promise<{ userId: string; class: string | null; classId: string | null; level: number }> {
+  ): Promise<{
+    userId: string;
+    classes: Prisma.JsonValue;
+    level: number;
+    hitDice: Prisma.JsonValue | null;
+  }> {
     const character = await this.prisma.character.findUnique({
       where: { id },
-      select: { userId: true, class: true, classId: true, level: true },
+      select: { userId: true, classes: true, level: true, hitDice: true },
     });
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
@@ -82,33 +143,46 @@ export class CharactersService {
     return character;
   }
 
-  // Spell-slot maxima need the class's progression table (VEG-346) and weapon
-  // proficiency grants need its weapon list (VEG-463) — one lookup serves both.
+  // Spell-slot maxima need a class's progression table and weapon proficiency
+  // grants need its weapon list; one lookup per class entry serves both.
   //
-  // Resolved id-first since VEG-524. `Character.classId` is a soft ref, not an
-  // FK, written whenever the picker resolved a catalog row; `Character.class`
-  // (free text) remains the display value and the only key a pre-VEG-524
-  // character or a free-typed name has.
+  // Each entry resolves id-first. Its `classId` is a soft ref, not an FK, pinned
+  // on every write that carries `classes`; its `name` is the display value and
+  // the only key a free-typed class has.
   //
-  // Scoped to `ownerId`'s visible content since VEG-505 tiered SrdClass: the
-  // name is no longer globally unique, so two users may each own a homebrew
-  // "Fighter" alongside the SRD one. An unscoped read would let whichever row
-  // Postgres returned first — possibly a stranger's homebrew — drive this
-  // character's spell slots and weapon proficiencies. Unknown classes resolve to
-  // nothing, in which case slots are omitted and weapon grants fall back to the
-  // character's own proficiencies column.
+  // Scoped to `ownerId`'s visible content, because a class name is not globally
+  // unique: two users may each own a homebrew "Fighter" alongside the SRD one,
+  // and an unscoped read would let a stranger's homebrew drive this character's
+  // spell slots and weapon proficiencies. A name resolves only when it matches
+  // exactly one visible row, compared case-insensitively, the same rule the
+  // client applies. An entry that resolves to nothing contributes nothing.
   //
-  // VEG-528 settled the two questions VEG-524 left answered differently here and
-  // on the client. Both resolvers now fold case, and both refuse a name matching
-  // zero or many visible rows. See `deriveClassId` for the write half.
+  // Spellcasting comes from the first entry whose row has any, with the slots
+  // read at that class's own level. Weapon proficiencies are the union over
+  // every resolved entry.
   private async loadClassData(
-    className: string | null,
-    classId: string | null,
+    classes: readonly CharacterClass[],
     characterId: string,
     ownerId: string
-  ): Promise<{ spellcasting: ClassSpellcasting | null; weaponProficiencies: string[] }> {
-    const none = { spellcasting: null, weaponProficiencies: [] };
-    if (!className && !classId) return none;
+  ): Promise<ResolvedClassData> {
+    const rows = await Promise.all(
+      classes.map(entry => this.resolveClassRow(entry, characterId, ownerId))
+    );
+    const casterIndex = rows.findIndex(row => row?.spellcasting);
+    const caster = casterIndex >= 0 ? rows[casterIndex] : null;
+    return {
+      spellcasting: (caster?.spellcasting as ClassSpellcasting | undefined) ?? null,
+      spellcastingLevel: caster ? classes[casterIndex].level : null,
+      weaponProficiencies: [...new Set(rows.flatMap(row => row?.weaponProficiencies ?? []))],
+    };
+  }
+
+  /** The visible class row one entry names, or null with a warning when there is none. */
+  private async resolveClassRow(
+    entry: CharacterClass,
+    characterId: string,
+    ownerId: string
+  ): Promise<ClassGrantRow | null> {
     const select = { id: true, name: true, spellcasting: true, weaponProficiencies: true };
 
     // The id is looked up on its own, BEFORE the name, and that split is a
@@ -117,72 +191,58 @@ export class CharactersService {
     // one branch is not indexable: measured on a 5,000-row srd_classes, the
     // `(id = $1 OR name ILIKE $2)` form planned as a sequential scan at 0.836 ms
     // and never touched the primary key, against 0.026 ms for a BitmapOr of both
-    // indexes. Since the backfill most characters carry an id, so the common read
-    // is now a primary-key hit that never evaluates the name predicate at all,
-    // and only an id-less or stale-id character pays for the scan.
+    // indexes. Most entries carry an id, so the common read is a primary-key hit
+    // that never evaluates the name predicate at all, and only an id-less or
+    // stale-id entry pays for the scan.
     //
     // Scoped to `ownerId`'s visible content in both branches. The id is
     // client-supplied with no FK behind it, so an unscoped read would hand a
     // guessed id a stranger's homebrew class.
-    if (classId) {
+    if (entry.classId) {
       const byId = await this.prisma.srdClass.findFirst({
-        where: { AND: [{ id: classId }, this.contentAccess.visibleTo(ownerId)] },
+        where: { AND: [{ id: entry.classId }, this.contentAccess.visibleTo(ownerId)] },
         select,
       });
-      // A resolved id is authoritative — it records the row the picker actually
+      // A resolved id is authoritative: it records the row the picker actually
       // landed on, so it outranks any name reasoning. A stale or unknown id falls
       // through to the name path rather than clearing the class, so a character
       // keeps its grants for as long as the name stays unique.
-      if (byId) return classDataFrom(byId);
+      if (byId) return byId;
     }
-    if (!className) return this.warnUnresolvedClass(characterId, className, classId, 0);
+    if (!entry.name) return this.warnUnresolvedClass(characterId, entry, 0);
 
-    // Name fallback, for a character with no stored id (pre-VEG-524, or a
-    // free-typed name) and for one whose id went stale when its homebrew row was
-    // deleted. Scoping narrows the ambiguity but does not remove it: once this
-    // owner has a homebrew "Fighter", it and the SRD row both match.
-    //
-    // It resolves only when the name matches exactly one visible row. VEG-524
-    // shipped a tier preference here (homebrew ?? shared ?? srd), which meant
-    // authoring a homebrew "Wizard" retroactively repointed every one of this
-    // owner's id-less Wizards at it and deleting it flipped them back, with
-    // nothing on the sheet saying so. It also disagreed with the client, which
-    // has always refused. VEG-528 chose refusal for both: a wrong spell-slot
-    // progression is worse than an absent one, and the accompanying backfill
-    // pinned an id on every character whose name resolves cleanly today.
+    // Name fallback, for an entry with no stored id (a free-typed name) and for
+    // one whose id went stale when its homebrew row was deleted. Scoping narrows
+    // the ambiguity but does not remove it: once this owner has a homebrew
+    // "Fighter", it and the SRD row both match, and the entry resolves to
+    // nothing. A wrong spell-slot progression is worse than an absent one.
     const candidates = await this.prisma.srdClass.findMany({
-      where: { AND: [catalogNameWhere(className), this.contentAccess.visibleTo(ownerId)] },
+      where: { AND: [catalogNameWhere(entry.name), this.contentAccess.visibleTo(ownerId)] },
       select,
     });
-    const cls = resolveByUniqueName(candidates, className);
-    if (!cls) {
-      return this.warnUnresolvedClass(characterId, className, classId, candidates.length);
-    }
-    return classDataFrom(cls);
+    const cls = resolveByUniqueName(candidates, entry.name);
+    if (!cls) return this.warnUnresolvedClass(characterId, entry, candidates.length);
+    return cls;
   }
 
   /**
-   * Log why a class resolved to nothing, and return the empty grant.
+   * Log why a class entry resolved to nothing, and return null.
    *
    * Both reasons drop spell slots, so the message says which one: an unknown name
    * is a typo to fix, a collision is a class the owner can re-pick in the editor.
-   * The colliding ids are listed because they are the one fact that makes the
-   * warning actionable — an operator otherwise cannot tell the owner which two
-   * rows to choose between. Without any of this the sheet simply presents as an
-   * inexplicably slot-less caster.
+   * Without this the sheet simply presents as an inexplicably slot-less caster.
    */
   private warnUnresolvedClass(
     characterId: string,
-    className: string | null,
-    classId: string | null,
+    entry: CharacterClass,
     matchCount: number
-  ): { spellcasting: null; weaponProficiencies: string[] } {
+  ): null {
     const reason =
       matchCount > 1 ? `matches ${matchCount} visible classes` : 'not found in srd_classes';
     this.logger.warn(
-      `Character ${characterId}: class "${className}"${classId ? ` (id ${classId})` : ''} ${reason}; spell slots and class weapon proficiencies omitted`
+      `Character ${characterId}: class "${entry.name}"${entry.classId ? ` (id ${entry.classId})` : ''} ${reason}; spell slots and class weapon proficiencies omitted`
     );
-    return { spellcasting: null, weaponProficiencies: [] };
+    return null;
   }
 
   /**
@@ -206,9 +266,9 @@ export class CharactersService {
    * which is what let a class named "Wizar_" derive and permanently persist the
    * SRD Wizard's id. The fetch is bounded by the visibility scope anyway.
    *
-   * Returns the row rather than the bare id since VEG-530: `create` seeds the
-   * hit-dice pool from `hitDie`, and that column is free in a query that was
-   * already running and already discarding everything but the id.
+   * Returns the row rather than the bare id: the hit-dice pools are built from
+   * `hitDie`, and that column is free in a query that was already running and
+   * already discarding everything but the id.
    *
    * VEG-531 adds the verify half. A client-supplied id joins the same query as
    * an `OR` branch, under the same visibility fragment, and `resolveCatalogRef`
@@ -241,36 +301,25 @@ export class CharactersService {
   }
 
   /**
-   * The hit-dice pool a newly created character starts with, or undefined when
-   * there is no class to take a die from (VEG-530).
+   * Resolve every class entry to the visible row its name and id name, one
+   * `deriveClass` query per entry. The stored `classId` of each entry is that
+   * row's id, or null when it names none or several.
    *
-   * Nothing wrote this column server-side before, so every character created
-   * through the API arrived on the sheet with a null pool, and four separate
-   * clients each invented their own d8 for it — including the classic editor,
-   * which then persisted that guess the next time the player saved any unrelated
-   * field. That silently outranked the VEG-528 level-up picker, so the one place
-   * designed to *ask* which die a character uses stopped appearing.
-   *
-   * A level-N character owns N hit dice, all unspent, which is fully derivable —
-   * unlike hit points, where the roll is the player's.
-   *
-   * The die is checked against `HIT_DIE_TYPES` rather than trusted. `hitDie` is
-   * validated with `@IsIn(DIE_TYPES)`, which carries d20 and d100 for the roll
-   * vocabulary, and a d100 pool seeded here would feed +51 a level into a
-   * permanent HP maximum. An unusable die leaves the column null, which is a
-   * handled state: the level-up picker asks the player.
-   *
-   * `resolved` is the row `deriveClass` already fetched. Since VEG-531 a
-   * client-supplied id is resolved in that same query, so the row is in hand on
-   * every path and the pool needs no read of its own.
+   * `||` rather than `??` on the supplied id on purpose: `''` passes
+   * `@IsOptional() @IsString()` and means "no row", not "this row", so it falls
+   * through to derivation and is normalised away instead of being stored as a
+   * key that fails every id lookup while looking like one.
    */
-  private seedHitDice(
-    resolved: { hitDie: string } | null,
-    level: number | undefined
-  ): HitDice | undefined {
-    return resolved && isHitDie(resolved.hitDie)
-      ? hitDicePoolFor(resolved.hitDie, level)
-      : undefined;
+  private resolveClassEntries(
+    classes: readonly CharacterClass[],
+    ownerId: string
+  ): Promise<ResolvedEntry[]> {
+    return Promise.all(
+      classes.map(async entry => ({
+        entry,
+        row: await this.deriveClass(entry.name, ownerId, entry.classId || null),
+      }))
+    );
   }
 
   // Single place every detail read/write funnels through so the authoritative
@@ -287,12 +336,8 @@ export class CharactersService {
         `Character ${character.id}: unrecognized spellcastingAbility "${character.spellcastingAbility}"; spell stats computed with modifier 0`
       );
     }
-    const classData = await this.loadClassData(
-      character.class,
-      character.classId,
-      character.id,
-      character.userId
-    );
+    const classes = classesFrom(character.classes);
+    const classData = await this.loadClassData(classes, character.id, character.userId);
     const computed = computeCharacterStats(
       {
         level: character.level,
@@ -311,14 +356,21 @@ export class CharactersService {
         // Scales the carry thresholds (VEG-490); free text, so an unrecognized
         // value falls back to the ×1 multiplier rather than being trusted.
         size: character.size,
+        classes,
       },
-      classData.spellcasting,
-      classData.weaponProficiencies
+      classData
     );
-    return toDto(CharacterDto, { ...character, computed });
+    // The deprecated scalar class fields are read from the first entry.
+    return toDto(CharacterDto, { ...character, ...projectClassScalars(classes), computed });
   }
 
   async create(userId: string, dto: CreateCharacterDto) {
+    // A character with no level sent takes the sum of its class levels, or 1
+    // when it has no class, which is the column default.
+    const classes = dto.classes ?? [];
+    const level = dto.level ?? (classes.reduce((sum, entry) => sum + entry.level, 0) || 1);
+    assertClassesSumToLevel(classes, level);
+
     // campaignId is attacker-controlled input: without this check any
     // authenticated user could inject a character into an arbitrary campaign,
     // bypassing the POST /campaigns/:id/characters/:characterId guard (VEG-317).
@@ -326,8 +378,15 @@ export class CharactersService {
       await this.campaignAuth.assertCampaignMember(dto.campaignId, userId);
     }
     // autoEquipStartingGear is a transient control flag, not a column — pull it
-    // off before the DTO is spread into Prisma (VEG-483).
-    const { autoEquipStartingGear, ...persisted } = dto;
+    // off before the DTO is spread into Prisma (VEG-483). `classes` and
+    // `hitDice` are written from what the service resolves below.
+    const {
+      autoEquipStartingGear,
+      classes: _classes,
+      hitDice: suppliedPools,
+      level: _level,
+      ...persisted
+    } = dto;
 
     // Backfill catalog links + gear snapshots on starting equipment (VEG-462).
     // Applies to every create path, not just the guided builder: no
@@ -344,37 +403,20 @@ export class CharactersService {
       inventory = autoEquipStartingArmor(inventory);
     }
 
-    // Pin the resolution key when the client sent only a display name (VEG-528).
-    // Every API create used to land here with a null classId and never acquire
-    // one. A supplied id that names a row the creator can see is kept: the
-    // picker already said which row it meant, and overriding it would break
-    // picking a duplicate-named class. Any other supplied id is discarded and
-    // the name derives instead (VEG-531), so junk never persists as a key.
-    // `||` rather than `??` on purpose: `''` is legal under `@IsOptional()
-    // @IsString()` and means "no row", not "this row", so it falls through to
-    // derivation and is normalised away instead of being stored as a key that
-    // fails every id lookup while looking like one.
-    // A classless character carries no key. `classId` is the resolution key FOR
-    // `class`, so an id with no name to resolve is not a stricter reference, it
-    // is an incoherent one: loadClassData would grant that class's spell slots
-    // and weapon proficiencies to a sheet showing no class at all. update()
-    // already nulls the id when the name is cleared; this is the create half.
-    const resolvedClass = persisted.class
-      ? await this.deriveClass(persisted.class, userId, persisted.classId || null)
-      : null;
-    const classId = resolvedClass?.id ?? null;
+    // Pin each entry's resolution key. A supplied id that names a row the
+    // creator can see is kept: the picker already said which row it meant, and
+    // overriding it would break picking a duplicate-named class. Any other
+    // supplied id is discarded and the name derives instead, so junk never
+    // persists as a key. A name matching zero or several visible rows pins null.
+    const resolved = await this.resolveClassEntries(classes, userId);
 
-    // Seed the hit-dice pool from that same class (VEG-530). Gated on the DTO
-    // *omitting* the field rather than on it being falsy: an explicit null means
-    // "this sheet has no hit dice", and seeding over it would be the same silent
-    // invention this ticket removes, just from the other direction. Gating here
-    // also keeps the read off creates that already carry a pool, which is the
-    // guided builder and any classic-editor save where the player clicked
-    // "Apply <Class> traits".
-    const hitDice =
-      persisted.hitDice === undefined
-        ? this.seedHitDice(resolvedClass, persisted.level)
-        : undefined;
+    // A level-N class owns N hit dice of its die, all unspent unless the DTO
+    // sent a pool of that die to carry the spent count from. The die comes from
+    // the row resolved above, so the pools cost no query of their own. A class
+    // with no visible row, or with a die that is not a real hit die, adds no
+    // pool, and the level-up picker asks the player instead. A supplied pool
+    // for a die no class produces is kept as sent.
+    const pools = poolsForClasses(resolved, suppliedPools ?? null);
 
     const character = await this.prisma.character.create({
       // Cast needed: class-validator DTOs aren't structurally compatible with
@@ -383,8 +425,10 @@ export class CharactersService {
       data: {
         ...(persisted as unknown as Prisma.CharacterUncheckedCreateInput),
         ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
-        ...(hitDice && { hitDice: hitDice as unknown as Prisma.InputJsonValue }),
-        classId,
+        // Omitted when empty, which leaves the column at its SQL NULL default.
+        ...(pools.length > 0 && { hitDice: pools as unknown as Prisma.InputJsonValue }),
+        classes: pinnedClasses(resolved) as unknown as Prisma.InputJsonValue,
+        level,
         userId,
       },
     });
@@ -407,7 +451,12 @@ export class CharactersService {
       this.prisma.character.count({ where }),
     ]);
 
-    return buildPaginatedResponse(toDtoArray(CharacterListItemDto, data), total, page, limit);
+    // The list shows the first class as the class.
+    const rows = data.map(({ classes, ...row }) => ({
+      ...row,
+      class: firstClassName(classesFrom(classes)),
+    }));
+    return buildPaginatedResponse(toDtoArray(CharacterListItemDto, rows), total, page, limit);
   }
 
   async findOne(id: string) {
@@ -430,78 +479,28 @@ export class CharactersService {
     const existing = await this.assertOwnership(id, userId);
     const { expectedVersion, ...changes } = dto;
 
-    // `class` and `classId` are a pair — the id is the resolution key FOR that
-    // name (VEG-524), not an independent pointer. Both are optional fields on the
-    // DTO, so a PATCH can legally move one and not the other, and this is the
-    // only place they can drift apart.
-    //
-    // It has to be fixed here rather than on read, because once they disagree the
-    // read path has no way to tell which side went stale: a class renamed out from
-    // under a character produces exactly the same disagreement as a name PATCHed
-    // without a new id, and preferring either one silently corrupts the other
-    // case. Preferring the id made a character PATCHed to "Wizard" keep computing
-    // as a Fighter; preferring the name made a renamed homebrew class resolve to
-    // the SRD row that still carries its old name. Neither warned.
-    //
-    // So: changing the name without supplying a new key drops the key. The class
-    // then resolves by name — ambiguously if it collides, which the resolvers
-    // handle — instead of confidently resolving to the wrong row. A re-save of the
-    // same name is not a change and keeps its key.
-    //
-    // VEG-528 turns the drop into a re-derivation. Dropping alone was half a fix:
-    // it stopped the id naming the wrong row but left the character on the name
-    // heuristic forever. Re-deriving does both, and still yields null when the
-    // new name collides — the case with no answer.
-    //
-    // The explicit-null branch matters more than it looks. The editor sends
-    // `classId: null` for anything the picker did not land on, which since
-    // VEG-527 includes a name the user merely typed, so honouring the null
-    // literally would make every keystroke-then-save decay the column.
-    //
-    // Both branches are gated on the payload actually concerning the class, so a
-    // level-up or hit-point PATCH pays for no extra query — and, critically, a
-    // PATCH that omits `classId` entirely never overwrites a stored id this
-    // method cannot see (assertOwnership does not select it).
-    const renamedWithoutKey =
-      changes.class !== undefined &&
-      changes.classId === undefined &&
-      changes.class !== existing.class;
-    // `''` groups with `null`, not with a real id: both mean "the picker landed
-    // on no row", and `create` normalises them the same way. Storing the empty
-    // string leaves a value that fails every id lookup, that the backfill's
-    // `classId IS NULL` skips, and that no repair path can reach.
-    const clearedKey = changes.classId !== undefined && !changes.classId;
-    // A re-save of the SAME name heals a key that is currently absent. Without
-    // this the schema comment's claim that "an edit heals the column" held only
-    // for the browser editor, which happens to send `classId: null` on every
-    // save; an API client re-sending the same name never healed, and that is
-    // precisely the population the ticket exists for.
-    //
-    // Gated on the STORED key being empty, which is why `assertOwnership` selects
-    // it. Re-deriving unconditionally would be destructive, not merely wasteful:
-    // for an owner whose homebrew "Wizard" collides with the SRD one, derivation
-    // returns null, so a plain `PATCH {"class":"Wizard"}` would erase the very id
-    // that was pinning their character to the right row.
-    const healsAbsentKey =
-      changes.class !== undefined && changes.classId === undefined && !existing.classId;
-    // A supplied key is checked, not trusted (VEG-531). It is the key for the
-    // name this PATCH leaves on the row, so it is resolved against that name in
-    // one scoped query. A visible id survives as sent; junk, a deleted row, or a
-    // stranger's homebrew degrades to deriving from the name, exactly as if the
-    // key had been cleared. Before this, such a key was stored as-is and none of
-    // the three branches above could ever reach it again.
-    const suppliedKey = changes.classId ? changes.classId : null;
-    if (renamedWithoutKey || clearedKey || healsAbsentKey || suppliedKey) {
-      // `!== undefined`, not `??`. @IsOptional() skips validation for null as
-      // well as undefined, so `class: null` arrives as a real value meaning
-      // "this character has no class" — and `??` would have read straight past
-      // it to the OLD name, pinning that row's id onto a now-classless sheet.
-      // loadClassData resolves a present id first, so the character would have
-      // gone on computing its old class's spell slots forever.
-      const name = changes.class !== undefined ? changes.class : existing.class;
-      changes.classId = name
-        ? ((await this.deriveClass(name, userId, suppliedKey))?.id ?? null)
-        : null;
+    // A PATCH carrying `classes` or `level` is checked against the stored value
+    // of whichever one it leaves out, and rebuilds the hit-dice pools from the
+    // effective classes. One carrying neither, a rest or a spend that sends only
+    // `hitDice` included, is stored as sent and pays for no class query.
+    if (changes.classes !== undefined || changes.level !== undefined) {
+      const classes = changes.classes ?? classesFrom(existing.classes);
+      const level = changes.level ?? existing.level;
+      assertClassesSumToLevel(classes, level);
+
+      // Every entry is re-pinned whenever `classes` is sent, so a key can never
+      // outlive the name it was resolved for. A visible id sent back with its
+      // entry is kept, so a re-save does not lose a key that disambiguates a
+      // colliding name; a renamed entry, a junk id or a stranger's homebrew id
+      // derives from the name instead.
+      const resolved = await this.resolveClassEntries(classes, userId);
+      if (changes.classes !== undefined) {
+        changes.classes = pinnedClasses(resolved);
+      }
+      // Spent dice carry from the pools this PATCH sends, else the stored ones.
+      // No pool at all is SQL NULL. A plain null would store a jsonb null.
+      const pools = poolsForClasses(resolved, changes.hitDice ?? poolsFrom(existing.hitDice));
+      changes.hitDice = pools.length > 0 ? pools : (Prisma.DbNull as unknown as undefined);
     }
     // Cast needed for JSON field compatibility (see create method comment).
     // Safe because UpdateCharacterDto uses OmitType to exclude campaignId.

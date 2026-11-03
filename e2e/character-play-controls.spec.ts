@@ -13,11 +13,11 @@ test.describe('character sheet — in-sheet play controls', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Lyra Quickblade',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 5 }],
         level: 5,
         abilityScores: { strength: 16, dexterity: 16, constitution: 14 },
         hitPoints: { max: 30, current: 30, temporary: 0 },
-        hitDice: { dieType: 'd10', total: 5, spent: 0 },
+        hitDice: [{ dieType: 'd10', total: 5, spent: 0 }],
         heroicInspiration: false,
         // A spellcasting ability is what makes SpellcastingSection (and the slot
         // pips) render at all.

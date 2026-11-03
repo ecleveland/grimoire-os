@@ -15,13 +15,13 @@ test.describe('character sheet — level up', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Milo Quillwick',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 4 }],
         level: 4,
         // 100 XP short of the 6,500 threshold for level 5.
         experiencePoints: 6400,
         abilityScores: { strength: 8, dexterity: 14, constitution: 14, intelligence: 16 },
         hitPoints: { max: 22, current: 15, temporary: 0 },
-        hitDice: { dieType: 'd6', total: 4, spent: 1 },
+        hitDice: [{ dieType: 'd6', total: 4, spent: 1 }],
         spellcastingAbility: 'Intelligence',
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
       },
@@ -108,11 +108,11 @@ test.describe('character sheet — level up', () => {
     const charRes = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Bryn Oakenshield',
-        class: className,
+        classes: [{ name: className, level: 2 }],
         level: 2,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
         hitPoints: { max: 20, current: 20, temporary: 0 },
-        hitDice: { dieType: 'd10', total: 2, spent: 0 },
+        hitDice: [{ dieType: 'd10', total: 2, spent: 0 }],
         features: [
           {
             name: 'Ability Score Improvement',
