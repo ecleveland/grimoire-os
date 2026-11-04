@@ -310,7 +310,13 @@ describe('GuidedCharacterPage — wizard shell', () => {
     await user.click(screen.getByRole('button', { name: /create character/i }));
 
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
-    expect(lastPostBody()).toMatchObject({ name: 'Mialee', class: 'Fighter' });
+    // A typed name with no catalog match goes out as one free-typed entry.
+    expect(lastPostBody()).toMatchObject({
+      name: 'Mialee',
+      level: 1,
+      classes: [{ classId: null, name: 'Fighter', level: 1, subclass: null, subclassId: null }],
+    });
+    expect(lastPostBody()).not.toHaveProperty('class');
     expect(mockToastSuccess).toHaveBeenCalledWith('Character created!');
   });
 
@@ -371,7 +377,7 @@ describe('GuidedCharacterPage — wizard shell', () => {
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/characters/char-new'));
     expect(lastPostBody()).toMatchObject({
       name: 'Mialee',
-      class: 'Fighter',
+      classes: [{ classId: null, name: 'Fighter', level: 1, subclass: null, subclassId: null }],
       campaignId: 'camp-7',
     });
   });

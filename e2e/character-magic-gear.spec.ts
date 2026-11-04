@@ -16,7 +16,7 @@ test.describe('character sheet — magic-item gear (VEG-460)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Rune Warden',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 3 }],
         level: 3,
         abilityScores: { strength: 14, dexterity: 14, constitution: 14 },
         hitPoints: { max: 28, current: 28, temporary: 0 },

@@ -504,7 +504,10 @@ describe('CampaignsService', () => {
       campaignId: CAMPAIGN_ID,
       name: 'Thia',
       race: 'Elf',
-      class: 'Wizard',
+      classes: [
+        { classId: null, name: 'Wizard', level: 3, subclass: null, subclassId: null },
+        { classId: null, name: 'Cleric', level: 2, subclass: null, subclassId: null },
+      ],
       level: 5,
       armorClass: 12,
       initiative: 2,
@@ -532,7 +535,7 @@ describe('CampaignsService', () => {
           userId: true,
           name: true,
           race: true,
-          class: true,
+          classes: true,
           level: true,
           armorClass: true,
           initiative: true,
@@ -559,6 +562,15 @@ describe('CampaignsService', () => {
           hitPoints: { max: 22, current: 17, temporary: 0 },
         },
       ]);
+    });
+
+    it('lists a classless character with a null class', async () => {
+      campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
+      prisma.character.findMany.mockResolvedValue([{ ...fullCharacter, classes: [] }]);
+
+      const [roster] = await service.findCharactersForMember(CAMPAIGN_ID, USER_ID);
+
+      expect(roster.class).toBeNull();
     });
 
     // VEG-410: the stored armorClass column is now a usually-null manual
@@ -709,7 +721,7 @@ describe('CampaignsService', () => {
       userId: USER_ID_2,
       name: 'Borin',
       race: 'Dwarf',
-      class: 'Fighter',
+      classes: [{ classId: null, name: 'Fighter', level: 3, subclass: null, subclassId: null }],
       level: 3,
       armorClass: 16,
       // Dex 16 → +3, so the resolved initiative (+3 base plus the +1 stored
@@ -739,7 +751,7 @@ describe('CampaignsService', () => {
           userId: true,
           name: true,
           race: true,
-          class: true,
+          classes: true,
           level: true,
           armorClass: true,
           initiative: true,
@@ -772,6 +784,7 @@ describe('CampaignsService', () => {
 
       expect(row).not.toHaveProperty('backstory');
       expect(row).not.toHaveProperty('inventory');
+      expect(row).not.toHaveProperty('classes');
     });
 
     it('resolves a null initiative to the Dex-derived modifier (VEG-452)', async () => {

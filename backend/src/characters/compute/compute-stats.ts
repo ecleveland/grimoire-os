@@ -1,5 +1,6 @@
 import type {
   CarryingCapacityRule,
+  CharacterClass,
   CharacterStatsInput,
   CharacterStatsRules,
   ClassSpellcasting,
@@ -39,7 +40,29 @@ export interface CharacterComputeInput extends Required<CharacterStatsInput> {
   inventory: InventoryItem[];
   /** Stored manual weapon rows; a same-named equipped weapon derives no duplicate. */
   weapons: Weapon[];
+  /** Classes held, first taken first. */
+  classes: CharacterClass[];
 }
+
+/**
+ * What the service resolved from the class catalog for one character.
+ * `spellcasting` comes from the first class whose row has any, and
+ * `spellcastingLevel` is that class's own level, which the slot table is read
+ * at. Null reads the slots at the character level. Weapon proficiencies are the
+ * union over every resolved class.
+ */
+export interface ResolvedClassData {
+  spellcasting: ClassSpellcasting | null;
+  spellcastingLevel: number | null;
+  weaponProficiencies: string[];
+}
+
+/** A character whose classes resolve to nothing: no slots, no class grants. */
+export const EMPTY_CLASS_DATA: ResolvedClassData = {
+  spellcasting: null,
+  spellcastingLevel: null,
+  weaponProficiencies: [],
+};
 
 // ── Game-rules source (single source of truth, mirrors GET /srd/rules) ──
 // The proficiency-bonus table, skill→ability mappings, XP thresholds and
@@ -150,19 +173,21 @@ function resolveSpellSlots(
  */
 export function computeCharacterStats(
   character: CharacterComputeInput,
-  classSpellcasting?: ClassSpellcasting | null,
-  // Class-catalog data resolved by the service, like classSpellcasting; the
-  // union with the character's own list happens in the shared core so the
-  // grant semantics stay with the formulas (VEG-463).
-  classWeaponProficiencies: string[] = []
+  // Class-catalog data resolved by the service. The union of the class weapon
+  // proficiencies with the character's own list happens in the shared core so
+  // the grant semantics stay with the formulas (VEG-463).
+  classData: ResolvedClassData = EMPTY_CLASS_DATA
 ): ComputedStats {
   return {
     ...computeCoreCharacterStats(SEEDED_RULES, character, {
-      defaultSpellcastingAbility: classSpellcasting?.ability,
-      weaponProficiencies: classWeaponProficiencies,
+      defaultSpellcastingAbility: classData.spellcasting?.ability,
+      weaponProficiencies: classData.weaponProficiencies,
     }),
     // The only derivation the shared core can't do: it needs the class
     // catalog's slot progression, which no frontend consumer has.
-    spellSlots: resolveSpellSlots(character.level, classSpellcasting),
+    spellSlots: resolveSpellSlots(
+      classData.spellcastingLevel ?? character.level,
+      classData.spellcasting
+    ),
   };
 }

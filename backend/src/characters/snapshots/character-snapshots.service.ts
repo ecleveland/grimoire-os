@@ -19,6 +19,7 @@ import {
   type SnapshotClient,
 } from './capture-snapshot';
 import { buildCopyInput } from './copy-snapshot';
+import { foldLegacyCharacterRow } from './legacy-row';
 import {
   CharacterSnapshotDto,
   CharacterSnapshotSummaryDto,
@@ -134,9 +135,10 @@ export class CharacterSnapshotsService {
       throw new NotFoundException(`Snapshot "${snapshotId}" not found`);
     }
     // Cast needed: the JSON column is untyped. Safe because capture stores the
-    // full row minus exactly the columns set here.
+    // full row minus exactly the columns set here, and the fold brings a row
+    // captured before characters held a list of classes into the current shape.
     const row = {
-      ...(snapshot.data as object),
+      ...foldLegacyCharacterRow(snapshot.data as Record<string, unknown>),
       id: character.id,
       userId: character.userId,
       campaignId: character.campaignId,
@@ -194,7 +196,11 @@ export class CharacterSnapshotsService {
     }
     // Cast needed: the JSON column is untyped. Safe because capture always
     // stores an object.
-    const input = buildCopyInput(snapshot.data as Record<string, unknown>, snapshot.level, name);
+    const input = buildCopyInput(
+      foldLegacyCharacterRow(snapshot.data as Record<string, unknown>),
+      snapshot.level,
+      name
+    );
     const dto = plainToInstance(
       CreateCharacterDto,
       { ...input, ...(campaignId && { campaignId }) },

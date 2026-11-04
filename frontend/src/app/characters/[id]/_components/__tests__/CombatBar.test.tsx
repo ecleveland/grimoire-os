@@ -192,6 +192,27 @@ describe('CombatBar', () => {
       expect(within(hdBlock).getByText('d10')).toBeInTheDocument();
     });
 
+    it('renders one block per pool, the first under the plain test id', () => {
+      const char = makeCharacter({
+        hitDice: [
+          { dieType: 'd10', total: 5, spent: 1 },
+          { dieType: 'd6', total: 2, spent: 2 },
+        ],
+      });
+      render(<CombatBar character={char} />);
+      const first = screen.getByTestId('hd-block');
+      expect(within(first).getByText('1/5')).toBeInTheDocument();
+      expect(within(first).getByText('d10')).toBeInTheDocument();
+      const second = screen.getByTestId('hd-block-d6');
+      expect(within(second).getByText('2/2')).toBeInTheDocument();
+      expect(within(second).getByText('d6')).toBeInTheDocument();
+    });
+
+    it('does not render a Hit Dice block for an empty pool list', () => {
+      render(<CombatBar character={makeCharacter({ hitDice: [] })} />);
+      expect(screen.queryByTestId('hd-block')).toBeNull();
+    });
+
     it('does not render Hit Dice block when hitDice is undefined', () => {
       const char = { ...mockCharacter, hitDice: undefined };
       render(<CombatBar character={char} />);
@@ -342,15 +363,52 @@ describe('CombatBar', () => {
 
     it('spends and restores a hit die (clamped)', async () => {
       const user = userEvent.setup();
-      const onPatch = renderOwner({ hitDice: { dieType: 'd10', total: 8, spent: 3 } });
+      const onPatch = renderOwner({ hitDice: [{ dieType: 'd10', total: 8, spent: 3 }] });
       await user.click(screen.getByRole('button', { name: 'Spend hit die' }));
-      expect(onPatch).toHaveBeenCalledWith({ hitDice: { dieType: 'd10', total: 8, spent: 4 } });
+      expect(onPatch).toHaveBeenCalledWith({ hitDice: [{ dieType: 'd10', total: 8, spent: 4 }] });
       await user.click(screen.getByRole('button', { name: 'Restore hit die' }));
-      expect(onPatch).toHaveBeenCalledWith({ hitDice: { dieType: 'd10', total: 8, spent: 2 } });
+      expect(onPatch).toHaveBeenCalledWith({ hitDice: [{ dieType: 'd10', total: 8, spent: 2 }] });
+    });
+
+    it('spends and restores on the pool whose buttons were pressed', async () => {
+      const user = userEvent.setup();
+      const d10 = { dieType: 'd10' as const, total: 5, spent: 1 };
+      const d6 = { dieType: 'd6' as const, total: 2, spent: 1 };
+      const onPatch = renderOwner({ hitDice: [d10, d6] });
+      await user.click(screen.getByRole('button', { name: 'Spend d6 hit die' }));
+      expect(onPatch).toHaveBeenLastCalledWith({ hitDice: [d10, { ...d6, spent: 2 }] });
+      await user.click(screen.getByRole('button', { name: 'Restore d6 hit die' }));
+      expect(onPatch).toHaveBeenLastCalledWith({ hitDice: [d10, { ...d6, spent: 0 }] });
+      await user.click(screen.getByRole('button', { name: 'Spend hit die' }));
+      expect(onPatch).toHaveBeenLastCalledWith({ hitDice: [{ ...d10, spent: 2 }, d6] });
+    });
+
+    it('disables each pool at its own bounds', () => {
+      renderOwner({
+        hitDice: [
+          { dieType: 'd10', total: 5, spent: 0 },
+          { dieType: 'd6', total: 2, spent: 2 },
+        ],
+      });
+      expect(screen.getByRole('button', { name: 'Restore hit die' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Spend hit die' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Spend d6 hit die' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Restore d6 hit die' })).toBeEnabled();
+    });
+
+    it('keeps Short Rest enabled while a later pool still has dice', () => {
+      renderOwner({
+        hitDice: [
+          { dieType: 'd10', total: 5, spent: 5 },
+          { dieType: 'd6', total: 2, spent: 1 },
+        ],
+        resources: [],
+      });
+      expect(screen.getByRole('button', { name: 'Short Rest' })).toBeEnabled();
     });
 
     it('disables spend at total and restore at 0', () => {
-      renderOwner({ hitDice: { dieType: 'd10', total: 8, spent: 8 } });
+      renderOwner({ hitDice: [{ dieType: 'd10', total: 8, spent: 8 }] });
       expect(screen.getByRole('button', { name: 'Spend hit die' })).toBeDisabled();
       expect(screen.getByRole('button', { name: 'Restore hit die' })).toBeEnabled();
     });
@@ -374,7 +432,7 @@ describe('CombatBar', () => {
       const onPatch = renderOwner({
         hitPoints: { max: 44, current: 10, temporary: 7 },
         deathSaves: { successes: 1, failures: 2 },
-        hitDice: { dieType: 'd10', total: 8, spent: 6 },
+        hitDice: [{ dieType: 'd10', total: 8, spent: 6 }],
         spellSlots: [{ level: 1, total: 4, used: 4 }],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
@@ -382,7 +440,7 @@ describe('CombatBar', () => {
         {
           hitPoints: { max: 44, current: 44, temporary: 0 },
           deathSaves: { successes: 0, failures: 0 },
-          hitDice: { dieType: 'd10', total: 8, spent: 2 },
+          hitDice: [{ dieType: 'd10', total: 8, spent: 2 }],
           spellSlots: [{ level: 1, total: 4, used: 0 }],
         },
         expect.anything()
@@ -475,7 +533,7 @@ describe('CombatBar', () => {
     const fullyRested: Partial<Character> = {
       hitPoints: { max: 44, current: 44, temporary: 0 },
       deathSaves: { successes: 0, failures: 0 },
-      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      hitDice: [{ dieType: 'd10', total: 8, spent: 0 }],
       spellSlots: [{ level: 1, total: 4, used: 0 }],
       resources: [rage].map(r => ({ ...r, used: 0 })),
       exhaustion: null,
@@ -503,11 +561,11 @@ describe('CombatBar', () => {
       // off something coarser than "the patch is empty".
       const onPatch = renderOwner({
         ...fullyRested,
-        hitDice: { dieType: 'd10', total: 8, spent: 1 },
+        hitDice: [{ dieType: 'd10', total: 8, spent: 1 }],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Long Rest' }));
       expect(onPatch).toHaveBeenCalledWith(
-        { hitDice: { dieType: 'd10', total: 8, spent: 0 } },
+        { hitDice: [{ dieType: 'd10', total: 8, spent: 0 }] },
         expect.anything()
       );
     });
@@ -533,7 +591,7 @@ describe('CombatBar', () => {
 
     it('disables Short Rest when neither hit dice nor resources could change', () => {
       const onPatch = renderOwner({
-        hitDice: { dieType: 'd10', total: 8, spent: 8 },
+        hitDice: [{ dieType: 'd10', total: 8, spent: 8 }],
         resources: [rage, { ...ki, used: 0 }],
       });
       expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
@@ -543,7 +601,7 @@ describe('CombatBar', () => {
     });
 
     it('enables Short Rest on resources alone when every hit die is spent', () => {
-      renderOwner({ hitDice: { dieType: 'd10', total: 8, spent: 8 }, resources: [ki] });
+      renderOwner({ hitDice: [{ dieType: 'd10', total: 8, spent: 8 }], resources: [ki] });
       expect(screen.getByRole('button', { name: 'Short Rest' })).toBeEnabled();
     });
 
@@ -562,7 +620,7 @@ describe('CombatBar', () => {
     it('spends hit dice to heal through the dialog', async () => {
       const onPatch = renderOwner({
         hitPoints: { max: 44, current: 12, temporary: 0 },
-        hitDice: { dieType: 'd10', total: 8, spent: 3 },
+        hitDice: [{ dieType: 'd10', total: 8, spent: 3 }],
       });
       fireEvent.click(screen.getByRole('button', { name: 'Short Rest' }));
       // Average d10 (6) + 2 CON = 8 healing; one more die spent.
@@ -572,7 +630,7 @@ describe('CombatBar', () => {
       expect(onPatch).toHaveBeenCalledWith(
         expect.objectContaining({
           hitPoints: { max: 44, current: 20, temporary: 0 },
-          hitDice: { dieType: 'd10', total: 8, spent: 4 },
+          hitDice: [{ dieType: 'd10', total: 8, spent: 4 }],
         }),
         expect.anything()
       );
@@ -671,7 +729,7 @@ describe('null hitPoints / armorClass (VEG-425)', () => {
     // enabled on dice alone.
     const char = makeCharacter({
       hitPoints: null,
-      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      hitDice: [{ dieType: 'd10', total: 8, spent: 0 }],
     });
     render(<CombatBar character={char} editable onPatch={vi.fn()} isSaving={false} />);
     expect(screen.getByRole('button', { name: 'Short Rest' })).toBeDisabled();
@@ -680,7 +738,7 @@ describe('null hitPoints / armorClass (VEG-425)', () => {
   it('still allows a resource-only short rest on a null-HP sheet', () => {
     const char = makeCharacter({
       hitPoints: null,
-      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      hitDice: [{ dieType: 'd10', total: 8, spent: 0 }],
       resources: [{ name: 'Ki Points', max: 5, used: 2, recharge: 'short' }],
     });
     render(<CombatBar character={char} editable onPatch={vi.fn()} isSaving={false} />);

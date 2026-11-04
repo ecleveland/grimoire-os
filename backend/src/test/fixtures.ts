@@ -36,6 +36,8 @@ export const mockCharacter = {
   userId: USER_ID,
   campaignId: null,
   race: 'Dwarf',
+  classes: [{ classId: null, name: 'Fighter', level: 5, subclass: 'Champion', subclassId: null }],
+  // The read-only projection of classes[0] the response carries.
   class: 'Fighter',
   level: 5,
   subclass: 'Champion',
@@ -96,6 +98,6 @@ export const createUserDto = {
 export const createCharacterDto = {
   name: 'Thorn Ironforge',
   race: 'Dwarf',
-  class: 'Fighter',
+  classes: [{ classId: null, name: 'Fighter', level: 5, subclass: null, subclassId: null }],
   level: 5,
 };

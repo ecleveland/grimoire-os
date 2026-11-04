@@ -53,6 +53,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     userId: 'user-1',
     name: 'Thora Ironfist',
     race: 'Dwarf',
+    classes: [{ classId: null, name: 'Fighter', level: 7, subclass: 'Champion', subclassId: null }],
     class: 'Fighter',
     subclass: 'Champion',
     level: 7,
@@ -73,7 +74,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     speed: 25,
     initiative: 1,
     size: 'Medium',
-    hitDice: { dieType: 'd10', total: 7, spent: 2 },
+    hitDice: [{ dieType: 'd10', total: 7, spent: 2 }],
     proficiencies: [],
     languages: [],
     savingThrows: [],
@@ -199,13 +200,21 @@ describe('EditCharacterPage', () => {
     );
     expect(lastWriteBody()).toMatchObject({
       name: 'Renamed Hero',
-      subclass: 'Champion',
+      // The class goes out as its `classes` entry, at the character level.
+      classes: [
+        { classId: null, name: 'Fighter', level: 7, subclass: 'Champion', subclassId: null },
+      ],
+      level: 7,
       size: 'Medium',
       initiative: 4,
-      hitDice: { dieType: 'd10', total: 7, spent: 2 },
+      hitDice: [{ dieType: 'd10', total: 7, spent: 2 }],
       // The loaded version is sent so the backend can guard the write.
       expectedVersion: 3,
     });
+    // The API rejects a write that carries the read-only class projections.
+    expect(lastWriteBody()).not.toHaveProperty('class');
+    expect(lastWriteBody()).not.toHaveProperty('classId');
+    expect(lastWriteBody()).not.toHaveProperty('subclass');
     expect(mockPush).toHaveBeenCalledWith('/characters/char-1');
 
     // The save invalidates the shared `/characters/:id` cache (so the sheet

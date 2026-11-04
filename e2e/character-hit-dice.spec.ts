@@ -23,7 +23,7 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Seeded Fighter',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 5 }],
         level: 5,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 30, temporary: 0 },
@@ -43,7 +43,7 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     expect(srdFighter?.hitDie, 'SRD Fighter missing from the seeded catalog').toBe('d10');
 
     // A level-5 character owns five unspent dice.
-    expect(character.hitDice).toEqual({ dieType: 'd10', total: 5, spent: 0 });
+    expect(character.hitDice).toEqual([{ dieType: 'd10', total: 5, spent: 0 }]);
 
     // And it is on the sheet, which is the part the response DTO's @Expose list
     // has to carry. Before this the block simply did not render.
@@ -76,7 +76,7 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Off Catalog',
-        class: 'Bloodbinder',
+        classes: [{ name: 'Bloodbinder', level: 5 }],
         level: 5,
         experiencePoints: 14000,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
@@ -88,7 +88,7 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
     const character = await res.json();
 
-    expect(character.classId).toBeNull();
+    expect(character.classes[0].classId).toBeNull();
     expect(character.hitDice).toBeNull();
 
     await page.goto(`/characters/${character.id}`);
@@ -115,7 +115,7 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Silent D8',
-        class: 'Bloodbinder',
+        classes: [{ name: 'Bloodbinder', level: 5 }],
         level: 5,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 44, current: 44, temporary: 0 },
@@ -161,7 +161,7 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Picks A Die',
-        class: 'Bloodbinder',
+        classes: [{ name: 'Bloodbinder', level: 3 }],
         level: 3,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
         hitPoints: { max: 24, current: 24, temporary: 0 },
@@ -180,6 +180,6 @@ test.describe('hit dice are seeded from the resolved class (VEG-530)', () => {
     await expect(page.getByRole('heading', { name: 'Picks A Die' })).toBeVisible();
 
     const reloaded = await page.request.get(`${BACKEND}/api/characters/${character.id}`);
-    expect((await reloaded.json()).hitDice).toEqual({ dieType: 'd12', total: 3, spent: 0 });
+    expect((await reloaded.json()).hitDice).toEqual([{ dieType: 'd12', total: 3, spent: 0 }]);
   });
 });

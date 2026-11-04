@@ -140,6 +140,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     userId: 'user-1',
     name: 'Thora Ironfist',
     race: 'Dwarf',
+    classes: [{ classId: null, name: 'Fighter', level: 7, subclass: 'Champion', subclassId: null }],
     class: 'Fighter',
     subclass: 'Champion',
     level: 7,
@@ -160,7 +161,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     speed: 25,
     initiative: 1,
     size: 'Medium',
-    hitDice: { dieType: 'd10', total: 7, spent: 2 },
+    hitDice: [{ dieType: 'd10', total: 7, spent: 2 }],
     proficiencies: [],
     languages: [],
     savingThrows: [],
@@ -267,20 +268,69 @@ describe('pure helpers', () => {
     expect(v.classId).toBe('');
   });
 
-  it('characterFormPayload sends the selected classId', () => {
+  // The deprecated scalars are read-only projections of `classes[0]`, and the
+  // API rejects a write that carries them, so the class travels as one entry.
+  it('characterFormPayload sends the class as one classes entry at the form level', () => {
     const payload = characterFormPayload(
-      characterToFormValues(makeCharacter({ classId: 'cls-123' }))
+      characterToFormValues(makeCharacter({ classId: 'cls-123', level: 7 }))
     );
-    expect(payload.classId).toBe('cls-123');
+    expect(payload.classes).toEqual([
+      { classId: 'cls-123', name: 'Fighter', level: 7, subclass: 'Champion', subclassId: null },
+    ]);
   });
 
-  // Null, not '': a free-typed class has no catalog row, and the column is a
+  it('characterFormPayload never sends the deprecated class scalars', () => {
+    const payload = characterFormPayload(characterToFormValues(makeCharacter()));
+    expect(payload).not.toHaveProperty('class');
+    expect(payload).not.toHaveProperty('classId');
+    expect(payload).not.toHaveProperty('subclass');
+  });
+
+  it('characterFormPayload sends an entry level that follows a level edit', () => {
+    const values = { ...characterToFormValues(makeCharacter()), level: 9 };
+    expect(characterFormPayload(values).classes?.[0]?.level).toBe(9);
+  });
+
+  // Null, not '': a free-typed class has no catalog row, and the reference is a
   // soft ref that should hold an id or nothing.
-  it('characterFormPayload sends null for a free-typed class (no id)', () => {
+  it('characterFormPayload sends a null classId for a free-typed class (no id)', () => {
     const payload = characterFormPayload(
       characterToFormValues(makeCharacter({ classId: undefined }))
     );
-    expect(payload.classId).toBeNull();
+    expect(payload.classes?.[0]?.classId).toBeNull();
+  });
+
+  it('characterFormPayload sends a null subclass when none is set', () => {
+    const values = { ...characterToFormValues(makeCharacter()), subclass: '  ' };
+    expect(characterFormPayload(values).classes?.[0]?.subclass).toBeNull();
+  });
+
+  it('characterFormPayload sends classes: [] for a blank class', () => {
+    const values = { ...emptyCharacterFormValues(), name: 'Hero', class: '   ' };
+    const payload = characterFormPayload(values);
+    expect(payload.classes).toEqual([]);
+    expect(payload).not.toHaveProperty('class');
+  });
+
+  it('characterToFormValues reads the class from classes[0] when the projection is absent', () => {
+    const v = characterToFormValues(
+      makeCharacter({
+        class: undefined,
+        classId: undefined,
+        subclass: undefined,
+        classes: [
+          { classId: 'cls-9', name: 'Wizard', level: 7, subclass: 'Evoker', subclassId: null },
+        ],
+      })
+    );
+    expect(v).toMatchObject({ class: 'Wizard', classId: 'cls-9', subclass: 'Evoker' });
+  });
+
+  it('characterToFormValues leaves the class fields blank for a classless character', () => {
+    const v = characterToFormValues(
+      makeCharacter({ class: undefined, classId: undefined, subclass: undefined, classes: [] })
+    );
+    expect(v).toMatchObject({ class: '', classId: '', subclass: '' });
   });
 
   // VEG-476: a loaded character now carries backgroundId so its background
@@ -351,7 +401,7 @@ describe('pure helpers', () => {
     });
 
     it('characterFormPayload still round-trips a pool the character has', () => {
-      const hitDice = { dieType: 'd10' as const, total: 7, spent: 2 };
+      const hitDice = [{ dieType: 'd10' as const, total: 7, spent: 2 }];
       const payload = characterFormPayload(characterToFormValues(makeCharacter({ hitDice })));
       expect(payload.hitDice).toEqual(hitDice);
     });
@@ -365,7 +415,7 @@ describe('pure helpers', () => {
     it('applyClassGrants records a full pool sized to the level when there is none', () => {
       const base = { ...emptyCharacterFormValues(), level: 4 };
       const { values, added } = applyClassGrants(base, srdClasses[0]);
-      expect(values.hitDice).toEqual({ dieType: 'd10', total: 4, spent: 0 });
+      expect(values.hitDice).toEqual([{ dieType: 'd10', total: 4, spent: 0 }]);
       expect(added.find(a => a.label === 'Hit die')?.values).toEqual(['d10']);
     });
 
@@ -378,7 +428,7 @@ describe('pure helpers', () => {
     it('applyClassGrants floors the pool at one die when the level field is blank', () => {
       const base = { ...emptyCharacterFormValues(), level: 0 };
       const { values } = applyClassGrants(base, srdClasses[0]);
-      expect(values.hitDice).toEqual({ dieType: 'd10', total: 1, spent: 0 });
+      expect(values.hitDice).toEqual([{ dieType: 'd10', total: 1, spent: 0 }]);
     });
 
     // The pool a character already has is its own record, spent dice included. A
@@ -388,10 +438,10 @@ describe('pure helpers', () => {
       const base = {
         ...emptyCharacterFormValues(),
         level: 5,
-        hitDice: { dieType: 'd6' as const, total: 5, spent: 2 },
+        hitDice: [{ dieType: 'd6' as const, total: 5, spent: 2 }],
       };
       const { values, added } = applyClassGrants(base, { ...srdClasses[0], hitDie: 'd100' });
-      expect(values.hitDice).toEqual({ dieType: 'd6', total: 5, spent: 2 });
+      expect(values.hitDice).toEqual([{ dieType: 'd6', total: 5, spent: 2 }]);
       expect(added.find(a => a.label === 'Hit die')).toBeUndefined();
     });
 
@@ -400,10 +450,26 @@ describe('pure helpers', () => {
       const base = {
         ...emptyCharacterFormValues(),
         level: 4,
-        hitDice: { dieType: 'd6' as const, total: 9, spent: 5 },
+        hitDice: [{ dieType: 'd6' as const, total: 9, spent: 5 }],
       };
       const { values } = applyClassGrants(base, srdClasses[0]);
-      expect(values.hitDice).toEqual({ dieType: 'd10', total: 9, spent: 5 });
+      expect(values.hitDice).toEqual([{ dieType: 'd10', total: 9, spent: 5 }]);
+    });
+
+    it('applyClassGrants changes the first pool and keeps the later ones', () => {
+      const base = {
+        ...emptyCharacterFormValues(),
+        level: 4,
+        hitDice: [
+          { dieType: 'd6' as const, total: 3, spent: 1 },
+          { dieType: 'd8' as const, total: 1, spent: 0 },
+        ],
+      };
+      const { values } = applyClassGrants(base, srdClasses[0]);
+      expect(values.hitDice).toEqual([
+        { dieType: 'd10', total: 3, spent: 1 },
+        { dieType: 'd8', total: 1, spent: 0 },
+      ]);
     });
 
     // A class die the sheet cannot use must not become a pool, and must not be
@@ -506,7 +572,7 @@ describe('autofill helpers', () => {
     expect(values.savingThrows).toEqual(['Strength', 'Constitution']);
     expect(values.armorTraining).toEqual(['Light', 'Medium', 'Heavy', 'Shields']);
     expect(values.proficiencies).toEqual(['Simple', 'Martial']);
-    expect(values.hitDice?.dieType).toBe('d10');
+    expect(values.hitDice?.[0]?.dieType).toBe('d10');
     // Constitution was the only new save; Strength already present.
     expect(added.find(a => a.label === 'Saving throws')?.values).toEqual(['Constitution']);
   });
@@ -514,7 +580,7 @@ describe('autofill helpers', () => {
   it('applyClassGrants copies spellcasting ability when the class casts', () => {
     const { values } = applyClassGrants(emptyCharacterFormValues(), srdClasses[1]);
     expect(values.spellcastingAbility).toBe('Intelligence');
-    expect(values.hitDice?.dieType).toBe('d6');
+    expect(values.hitDice?.[0]?.dieType).toBe('d6');
   });
 
   it('applyClassGrants is idempotent — re-applying adds nothing', () => {
@@ -616,7 +682,7 @@ describe('CharacterEditorForm autofill', () => {
     const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
     expect(submitted.savingThrows).toEqual(['Strength', 'Constitution']);
     expect(submitted.armorTraining).toEqual(['Light', 'Medium', 'Heavy', 'Shields']);
-    expect(submitted.hitDice?.dieType).toBe('d10');
+    expect(submitted.hitDice?.[0]?.dieType).toBe('d10');
   });
 
   // The rendered half of VEG-530. The helper tests above pin the data shape; these
@@ -635,6 +701,31 @@ describe('CharacterEditorForm autofill', () => {
       expect(screen.getByLabelText(/hit dice total/i)).toHaveValue(null);
       expect(screen.getByLabelText(/hit dice total/i)).toBeDisabled();
       expect(screen.getByLabelText(/hit dice spent/i)).toBeDisabled();
+    });
+
+    // A free-typed class resolves to no catalog row, so the player's pool is
+    // the only record of its die and the controls stay live.
+    it('keeps the die and total editable for a class the catalog does not know', async () => {
+      renderForm({ initialValues: noDice(), submitLabel: 'Save Changes' });
+
+      expect(await screen.findByLabelText(/^hit die$/i)).toBeEnabled();
+      expect(screen.queryByText(/set from the class levels/i)).not.toBeInTheDocument();
+    });
+
+    // The server rebuilds the pools from the class levels on every save that
+    // carries classes, which the editor always does. Leaving these live would
+    // let a DM set a total the next read silently reverts.
+    it('locks the die and total to the catalog class, leaving spent editable', async () => {
+      renderForm({
+        initialValues: characterToFormValues(makeCharacter()),
+        submitLabel: 'Save Changes',
+      });
+
+      const select = await screen.findByLabelText(/^hit die$/i);
+      await waitFor(() => expect(select).toBeDisabled());
+      expect(screen.getByLabelText(/hit dice total/i)).toBeDisabled();
+      expect(screen.getByLabelText(/hit dice spent/i)).toBeEnabled();
+      expect(screen.getByText(/set from the class levels/i)).toBeInTheDocument();
     });
 
     // The whole point of the ticket: this is the save that used to write a d8.
@@ -671,7 +762,7 @@ describe('CharacterEditorForm autofill', () => {
 
       await user.click(screen.getByRole('button', { name: /save changes/i }));
       const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
-      expect(submitted.hitDice).toEqual({ dieType: 'd10', total: 3, spent: 0 });
+      expect(submitted.hitDice).toEqual([{ dieType: 'd10', total: 3, spent: 0 }]);
     });
 
     // The last un-narrowed recording path (found by the pre-commit review). Every
@@ -698,7 +789,7 @@ describe('CharacterEditorForm autofill', () => {
     it('keeps a stored die that is outside the offered list selectable', () => {
       renderForm({
         initialValues: characterToFormValues(
-          makeCharacter({ hitDice: { dieType: 'd100', total: 5, spent: 0 } })
+          makeCharacter({ hitDice: [{ dieType: 'd100', total: 5, spent: 0 }] })
         ),
         submitLabel: 'Save Changes',
       });
@@ -731,7 +822,7 @@ describe('CharacterEditorForm autofill', () => {
     it('changes only the die on a pool that already exists', async () => {
       const { onSubmit } = renderForm({
         initialValues: characterToFormValues(
-          makeCharacter({ level: 7, hitDice: { dieType: 'd8', total: 3, spent: 1 } })
+          makeCharacter({ level: 7, hitDice: [{ dieType: 'd8', total: 3, spent: 1 }] })
         ),
         submitLabel: 'Save Changes',
       });
@@ -741,7 +832,35 @@ describe('CharacterEditorForm autofill', () => {
       await user.click(screen.getByRole('button', { name: /save changes/i }));
 
       const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
-      expect(submitted.hitDice).toEqual({ dieType: 'd12', total: 3, spent: 1 });
+      expect(submitted.hitDice).toEqual([{ dieType: 'd12', total: 3, spent: 1 }]);
+    });
+
+    it('edits the first pool and carries a later pool through the save', async () => {
+      const { onSubmit } = renderForm({
+        initialValues: characterToFormValues(
+          makeCharacter({
+            hitDice: [
+              { dieType: 'd10', total: 5, spent: 1 },
+              { dieType: 'd6', total: 2, spent: 0 },
+            ],
+          })
+        ),
+        submitLabel: 'Save Changes',
+      });
+      const user = userEvent.setup();
+
+      expect(screen.getByLabelText(/^hit die$/i)).toHaveValue('d10');
+      expect(screen.getByLabelText(/hit dice total/i)).toHaveValue(5);
+      await user.selectOptions(screen.getByLabelText(/^hit die$/i), 'd12');
+      fireEvent.change(screen.getByLabelText(/hit dice total/i), { target: { value: '6' } });
+      fireEvent.change(screen.getByLabelText(/hit dice spent/i), { target: { value: '2' } });
+      await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+      const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
+      expect(submitted.hitDice).toEqual([
+        { dieType: 'd12', total: 6, spent: 2 },
+        { dieType: 'd6', total: 2, spent: 0 },
+      ]);
     });
 
     // Once a pool exists the placeholder is gone, so the control cannot be used
@@ -749,7 +868,7 @@ describe('CharacterEditorForm autofill', () => {
     it('drops the unrecorded option once a die is on the sheet', async () => {
       renderForm({
         initialValues: characterToFormValues(
-          makeCharacter({ hitDice: { dieType: 'd8', total: 3, spent: 1 } })
+          makeCharacter({ hitDice: [{ dieType: 'd8', total: 3, spent: 1 }] })
         ),
         submitLabel: 'Save Changes',
       });
@@ -876,7 +995,7 @@ describe('CharacterEditorForm autofill', () => {
       expect(submitted.classId).toBe('cls-fighter-hb');
       expect(submitted.class).toBe('Fighter');
       expect(submitted.savingThrows).toEqual(['Dexterity', 'Charisma']);
-      expect(submitted.hitDice?.dieType).toBe('d12');
+      expect(submitted.hitDice?.[0]?.dieType).toBe('d12');
     } finally {
       srdClasses.pop();
     }
@@ -907,7 +1026,7 @@ describe('CharacterEditorForm autofill', () => {
       const submitted = onSubmit.mock.calls[0][0] as CharacterFormValues;
       expect(submitted.classId).toBe('cls-fighter');
       expect(submitted.savingThrows).toEqual(['Strength', 'Constitution']);
-      expect(submitted.hitDice?.dieType).toBe('d10');
+      expect(submitted.hitDice?.[0]?.dieType).toBe('d10');
     } finally {
       srdClasses.shift();
     }

@@ -13,7 +13,7 @@ test.describe('character sheet — attunement management', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Sable Wardkeeper',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 5 }],
         level: 5,
         abilityScores: { strength: 10, dexterity: 14, constitution: 12 },
         hitPoints: { max: 22, current: 22, temporary: 0 },

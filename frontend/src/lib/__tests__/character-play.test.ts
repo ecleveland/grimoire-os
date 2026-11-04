@@ -6,6 +6,7 @@ import {
   setTempHitPoints,
   togglePip,
   adjustHitDiceSpent,
+  shortRestPool,
   deathSavesAfterRevive,
   hasDeathSaves,
   parseNonNegativeInt,
@@ -109,20 +110,50 @@ describe('togglePip', () => {
 });
 
 describe('adjustHitDiceSpent', () => {
-  const hd = { dieType: 'd10' as const, total: 8, spent: 3 };
+  const d10 = { dieType: 'd10' as const, total: 8, spent: 3 };
+  const d6 = { dieType: 'd6' as const, total: 2, spent: 1 };
 
   it('spends one (caps at total)', () => {
-    expect(adjustHitDiceSpent(hd, 1).spent).toBe(4);
-    expect(adjustHitDiceSpent({ ...hd, spent: 8 }, 1).spent).toBe(8);
+    expect(adjustHitDiceSpent([d10], 'd10', 1)).toEqual([{ ...d10, spent: 4 }]);
+    expect(adjustHitDiceSpent([{ ...d10, spent: 8 }], 'd10', 1)).toEqual([{ ...d10, spent: 8 }]);
   });
 
   it('restores one (floors at 0)', () => {
-    expect(adjustHitDiceSpent(hd, -1).spent).toBe(2);
-    expect(adjustHitDiceSpent({ ...hd, spent: 0 }, -1).spent).toBe(0);
+    expect(adjustHitDiceSpent([d10], 'd10', -1)).toEqual([{ ...d10, spent: 2 }]);
+    expect(adjustHitDiceSpent([{ ...d10, spent: 0 }], 'd10', -1)).toEqual([{ ...d10, spent: 0 }]);
   });
 
-  it('preserves dieType and total', () => {
-    expect(adjustHitDiceSpent(hd, 1)).toEqual({ dieType: 'd10', total: 8, spent: 4 });
+  it('changes only the pool of the named die', () => {
+    expect(adjustHitDiceSpent([d10, d6], 'd6', 1)).toEqual([d10, { ...d6, spent: 2 }]);
+    expect(adjustHitDiceSpent([d10, d6], 'd10', -1)).toEqual([{ ...d10, spent: 2 }, d6]);
+  });
+
+  it('clamps within the named pool rather than spilling into another', () => {
+    expect(adjustHitDiceSpent([d10, d6], 'd6', 5)).toEqual([d10, { ...d6, spent: 2 }]);
+  });
+
+  it('returns the pools unchanged when no pool has the named die', () => {
+    expect(adjustHitDiceSpent([d10], 'd12', 1)).toEqual([d10]);
+  });
+});
+
+describe('shortRestPool', () => {
+  const d10 = { dieType: 'd10' as const, total: 8, spent: 8 };
+  const d6 = { dieType: 'd6' as const, total: 2, spent: 1 };
+
+  it('picks the first pool with a die left', () => {
+    expect(shortRestPool([d10, d6])).toBe(d6);
+    expect(shortRestPool([d6, d10])).toBe(d6);
+  });
+
+  it('is null when every pool is exhausted', () => {
+    expect(shortRestPool([d10, { ...d6, spent: 2 }])).toBeNull();
+  });
+
+  it('is null when no pool is recorded', () => {
+    expect(shortRestPool(null)).toBeNull();
+    expect(shortRestPool(undefined)).toBeNull();
+    expect(shortRestPool([])).toBeNull();
   });
 });
 
@@ -220,7 +251,7 @@ describe('applyLongRest', () => {
   const base = {
     hitPoints: { max: 44, current: 12, temporary: 6 },
     spellSlots: [],
-    hitDice: { dieType: 'd10' as const, total: 8, spent: 5 },
+    hitDice: [{ dieType: 'd10' as const, total: 8, spent: 5 }],
   };
 
   it('restores HP to max and clears temp HP', () => {
@@ -249,18 +280,61 @@ describe('applyLongRest', () => {
 
   it('regains half the total hit dice (rounded down), capped at the number spent', () => {
     // total 8 → regain 4; spent 5 → 1 remaining spent
-    expect(applyLongRest(base).hitDice).toEqual({ dieType: 'd10', total: 8, spent: 1 });
+    expect(applyLongRest(base).hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 1 }]);
   });
 
   it('never restores more hit dice than were spent', () => {
     // total 8 → regain 4, but only 2 spent → floors at 0
-    const patch = applyLongRest({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 2 } });
-    expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 0 });
+    const patch = applyLongRest({ ...base, hitDice: [{ dieType: 'd10', total: 8, spent: 2 }] });
+    expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 0 }]);
   });
 
   it('regains at least one hit die for a level-1 character', () => {
-    const patch = applyLongRest({ ...base, hitDice: { dieType: 'd8', total: 1, spent: 1 } });
-    expect(patch.hitDice).toEqual({ dieType: 'd8', total: 1, spent: 0 });
+    const patch = applyLongRest({ ...base, hitDice: [{ dieType: 'd8', total: 1, spent: 1 }] });
+    expect(patch.hitDice).toEqual([{ dieType: 'd8', total: 1, spent: 0 }]);
+  });
+
+  // Half of the dice held across every pool come back, filled from the first
+  // pool onward, so a multiclass character regains the same count a single
+  // class of that level would.
+  it('regains across pools in order, from half the combined total', () => {
+    // total 8 + 4 = 12 → regain 6; the d10 pool gives back all 4, the d6 pool 2
+    const patch = applyLongRest({
+      ...base,
+      hitDice: [
+        { dieType: 'd10', total: 8, spent: 4 },
+        { dieType: 'd6', total: 4, spent: 3 },
+      ],
+    });
+    expect(patch.hitDice).toEqual([
+      { dieType: 'd10', total: 8, spent: 0 },
+      { dieType: 'd6', total: 4, spent: 1 },
+    ]);
+  });
+
+  it('skips a pool with nothing spent when spreading regained dice', () => {
+    const patch = applyLongRest({
+      ...base,
+      hitDice: [
+        { dieType: 'd10', total: 8, spent: 0 },
+        { dieType: 'd6', total: 4, spent: 3 },
+      ],
+    });
+    expect(patch.hitDice).toEqual([
+      { dieType: 'd10', total: 8, spent: 0 },
+      { dieType: 'd6', total: 4, spent: 0 },
+    ]);
+  });
+
+  it('omits hitDice when no pool has a spent die', () => {
+    const patch = applyLongRest({
+      ...base,
+      hitDice: [
+        { dieType: 'd10', total: 8, spent: 0 },
+        { dieType: 'd6', total: 4, spent: 0 },
+      ],
+    });
+    expect('hitDice' in patch).toBe(false);
   });
 
   it('omits hitDice from the patch when the character has none', () => {
@@ -311,7 +385,7 @@ describe('applyLongRest', () => {
     expect('hitPoints' in patch).toBe(false);
     // The rest still clears death saves and regains hit dice.
     expect(patch.deathSaves).toEqual({ successes: 0, failures: 0 });
-    expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 1 });
+    expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 1 }]);
   });
 
   // VEG-488 acceptance criterion: the whole point of the per-field guards is
@@ -321,7 +395,7 @@ describe('applyLongRest', () => {
   it('returns an empty patch for a character with nothing to recover', () => {
     const patch = applyLongRest({
       hitPoints: { max: 44, current: 44, temporary: 0 },
-      hitDice: { dieType: 'd10', total: 8, spent: 0 },
+      hitDice: [{ dieType: 'd10', total: 8, spent: 0 }],
       spellSlots: [{ level: 1, total: 4, used: 0 }],
       resources: [{ name: 'Rage', max: 3, used: 0, recharge: 'long' }],
       exhaustion: null,
@@ -468,13 +542,13 @@ describe('applyShortRest (VEG-409)', () => {
   describe('with spent hit dice', () => {
     const base = {
       hitPoints: { max: 44, current: 12, temporary: 0 },
-      hitDice: { dieType: 'd10' as const, total: 8, spent: 2 },
+      hitDice: [{ dieType: 'd10' as const, total: 8, spent: 2 }],
     };
 
     it('heals the summed dice and marks them spent', () => {
       const patch = applyShortRest(base, { healPerDie: [9, 5] });
       expect(patch.hitPoints).toEqual({ max: 44, current: 26, temporary: 0 });
-      expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 4 });
+      expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 4 }]);
     });
 
     it('clamps healing at max HP', () => {
@@ -488,10 +562,10 @@ describe('applyShortRest (VEG-409)', () => {
     it('never spends more dice than remain', () => {
       // 8 total, 7 already spent — only one die is actually available.
       const patch = applyShortRest(
-        { ...base, hitDice: { dieType: 'd10', total: 8, spent: 7 } },
+        { ...base, hitDice: [{ dieType: 'd10', total: 8, spent: 7 }] },
         { healPerDie: [6, 6, 6] }
       );
-      expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 8 });
+      expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 8 }]);
       // Only the die the clamp allowed may heal.
       expect(patch.hitPoints).toEqual({ max: 44, current: 18, temporary: 0 });
     });
@@ -500,7 +574,7 @@ describe('applyShortRest (VEG-409)', () => {
       // Otherwise the patch carries an identical hitDice block, which is
       // non-empty enough to look confirmable and burns a version for nothing.
       const patch = applyShortRest(
-        { ...base, hitDice: { dieType: 'd10', total: 8, spent: 8 } },
+        { ...base, hitDice: [{ dieType: 'd10', total: 8, spent: 8 }] },
         { healPerDie: [6, 6] }
       );
       expect(patch).toEqual({});
@@ -553,13 +627,68 @@ describe('applyShortRest (VEG-409)', () => {
       const patch = applyShortRest({ ...base, hitPoints: null }, { healPerDie: [7] });
       expect('hitPoints' in patch).toBe(false);
       // The dice are still marked spent.
-      expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 3 });
+      expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 3 }]);
     });
 
     it('omits hitDice when the character has none to spend', () => {
       const patch = applyShortRest({ ...base, hitDice: null }, { healPerDie: [7] });
       expect('hitDice' in patch).toBe(false);
       expect('hitPoints' in patch).toBe(false);
+    });
+
+    it('spends from the next pool once the first is exhausted', () => {
+      const patch = applyShortRest(
+        {
+          ...base,
+          hitDice: [
+            { dieType: 'd10', total: 8, spent: 8 },
+            { dieType: 'd6', total: 3, spent: 1 },
+          ],
+        },
+        { healPerDie: [4, 4] }
+      );
+      expect(patch.hitDice).toEqual([
+        { dieType: 'd10', total: 8, spent: 8 },
+        { dieType: 'd6', total: 3, spent: 3 },
+      ]);
+      expect(patch.hitPoints?.current).toBe(20);
+    });
+
+    it('clamps the spend at the chosen pool and heals only the dice it allowed', () => {
+      const patch = applyShortRest(
+        {
+          ...base,
+          hitDice: [
+            { dieType: 'd10', total: 8, spent: 7 },
+            { dieType: 'd6', total: 3, spent: 0 },
+          ],
+        },
+        { healPerDie: [6, 6] }
+      );
+      expect(patch.hitDice).toEqual([
+        { dieType: 'd10', total: 8, spent: 8 },
+        { dieType: 'd6', total: 3, spent: 0 },
+      ]);
+      expect(patch.hitPoints?.current).toBe(18);
+    });
+
+    it('omits hitDice when every pool is exhausted', () => {
+      const patch = applyShortRest(
+        {
+          ...base,
+          hitDice: [
+            { dieType: 'd10', total: 8, spent: 8 },
+            { dieType: 'd6', total: 3, spent: 3 },
+          ],
+        },
+        { healPerDie: [6] }
+      );
+      expect(patch).toEqual({});
+    });
+
+    it('omits hitDice for an empty pool list', () => {
+      const patch = applyShortRest({ ...base, hitDice: [] }, { healPerDie: [7] });
+      expect(patch).toEqual({});
     });
 
     it('recharges short-rest resources in the same composite patch', () => {
@@ -580,7 +709,7 @@ describe('applyShortRest (VEG-409)', () => {
       // would silently hand back a resource 5e says is gone. HP is left out of
       // the patch entirely, since an unchanged block is not worth a write.
       const patch = applyShortRest(base, { healPerDie: [0] });
-      expect(patch.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 3 });
+      expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 3 }]);
       expect('hitPoints' in patch).toBe(false);
     });
   });
@@ -588,7 +717,7 @@ describe('applyShortRest (VEG-409)', () => {
 
 describe('rest summaries (VEG-487)', () => {
   const hitPoints = { max: 44, current: 12, temporary: 6 };
-  const hitDice = { dieType: 'd10' as const, total: 8, spent: 5 };
+  const hitDice = [{ dieType: 'd10' as const, total: 8, spent: 5 }];
 
   describe('formatLongRestSummary', () => {
     it('reports HP healed, hit dice regained, slots, and exhaustion', () => {
@@ -605,11 +734,23 @@ describe('rest summaries (VEG-487)', () => {
       expect(summary).toContain('exhaustion');
     });
 
+    it('sums the dice regained across every pool', () => {
+      const character = {
+        hitPoints,
+        hitDice: [
+          { dieType: 'd10' as const, total: 8, spent: 4 },
+          { dieType: 'd6' as const, total: 4, spent: 3 },
+        ],
+      };
+      const summary = formatLongRestSummary(character, applyLongRest(character));
+      expect(summary).toContain('6 hit dice regained');
+    });
+
     it('omits what did not change', () => {
       // A fully-rested character: nothing to heal, nothing to regain.
       const character = {
         hitPoints: { max: 44, current: 44, temporary: 0 },
-        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        hitDice: [{ dieType: 'd10' as const, total: 8, spent: 0 }],
         spellSlots: [],
       };
       const summary = formatLongRestSummary(character, applyLongRest(character));
@@ -621,7 +762,7 @@ describe('rest summaries (VEG-487)', () => {
     it('does not claim spell slots were restored when none were spent', () => {
       const character = {
         hitPoints: { max: 44, current: 44, temporary: 0 },
-        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        hitDice: [{ dieType: 'd10' as const, total: 8, spent: 0 }],
         spellSlots: [{ level: 1, total: 4, used: 0 }],
       };
       const summary = formatLongRestSummary(character, applyLongRest(character));
@@ -633,7 +774,7 @@ describe('rest summaries (VEG-487)', () => {
       // said "already fully rested" while silently consuming a real resource.
       const character = {
         hitPoints: { max: 44, current: 44, temporary: 15 },
-        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        hitDice: [{ dieType: 'd10' as const, total: 8, spent: 0 }],
         spellSlots: [],
       };
       const summary = formatLongRestSummary(character, applyLongRest(character));
@@ -648,7 +789,7 @@ describe('rest summaries (VEG-487)', () => {
     it('reports death saves being cleared', () => {
       const character = {
         hitPoints: { max: 44, current: 44, temporary: 0 },
-        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        hitDice: [{ dieType: 'd10' as const, total: 8, spent: 0 }],
         spellSlots: [],
         deathSaves: { successes: 1, failures: 2 },
       };
@@ -660,7 +801,7 @@ describe('rest summaries (VEG-487)', () => {
     it('does not claim death saves were cleared when the track was already empty', () => {
       const character = {
         hitPoints: { max: 44, current: 44, temporary: 0 },
-        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        hitDice: [{ dieType: 'd10' as const, total: 8, spent: 0 }],
         spellSlots: [],
         deathSaves: { successes: 0, failures: 0 },
       };
@@ -674,7 +815,7 @@ describe('rest summaries (VEG-487)', () => {
       // "resources recharged" with nothing spent.
       const character = {
         hitPoints: { max: 44, current: 44, temporary: 0 },
-        hitDice: { dieType: 'd10' as const, total: 8, spent: 0 },
+        hitDice: [{ dieType: 'd10' as const, total: 8, spent: 0 }],
         spellSlots: [],
         resources: [{ name: 'Arcane Recovery', max: 1, used: 0, recharge: 'short' as const }],
       };
@@ -692,6 +833,21 @@ describe('rest summaries (VEG-487)', () => {
       );
       expect(summary).toContain('+14 HP');
       expect(summary).toContain('2 hit dice');
+    });
+
+    it('counts dice spent from a later pool', () => {
+      const character = {
+        hitPoints,
+        hitDice: [
+          { dieType: 'd10' as const, total: 8, spent: 8 },
+          { dieType: 'd6' as const, total: 3, spent: 0 },
+        ],
+      };
+      const summary = formatShortRestSummary(
+        character,
+        applyShortRest(character, { healPerDie: [3, 3] })
+      );
+      expect(summary).toContain('2 hit dice spent');
     });
 
     it('uses the singular for a single die', () => {

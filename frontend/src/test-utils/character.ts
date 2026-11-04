@@ -69,6 +69,8 @@ export function makeCharacter(over: Partial<Character> = {}): Character {
     userId: 'user-1',
     name: 'Thorin Ironforge',
     race: 'Dwarf',
+    classes: [{ classId: null, name: 'Fighter', level: 5, subclass: 'Champion', subclassId: null }],
+    // The API's read-only projection of `classes[0]`, which the sheet still reads.
     class: 'Fighter',
     level: 5,
     subclass: 'Champion',
@@ -105,7 +107,7 @@ export function makeCharacter(over: Partial<Character> = {}): Character {
     inventory: [],
     currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
     features: [],
-    hitDice: { dieType: 'd10', total: 8, spent: 3 },
+    hitDice: [{ dieType: 'd10', total: 8, spent: 3 }],
     conditions: [],
     concentration: null,
     exhaustion: null,

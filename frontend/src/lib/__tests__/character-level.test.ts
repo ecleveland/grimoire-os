@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_EXPERIENCE_POINTS } from '@grimoire-os/shared';
-import type { ComputedXp, SrdClass } from '@/lib/types';
+import type { CharacterClass, ComputedXp, SrdClass } from '@/lib/types';
 import {
   applyLevelUp,
   averageHpForDie,
@@ -141,19 +141,71 @@ describe('xpProgressPercent', () => {
 });
 
 describe('applyLevelUp', () => {
+  const fighter: CharacterClass = {
+    classId: 'cls-1',
+    name: 'Fighter',
+    level: 5,
+    subclass: 'Champion',
+    subclassId: null,
+  };
   const character: Parameters<typeof applyLevelUp>[0] = {
     level: 5,
+    classes: [fighter],
     hitPoints: { max: 44, current: 30, temporary: 3 },
-    hitDice: { dieType: 'd10', total: 5, spent: 2 },
+    hitDice: [{ dieType: 'd10', total: 5, spent: 2 }],
     features: [{ name: 'Second Wind', source: 'Fighter' }],
   };
 
   it('bumps level, applies the HP gain to max and current, and adds a hit die', () => {
     expect(applyLevelUp(character, { hpGain: 8, newFeatures: [], classHitDie: 'd10' })).toEqual({
       level: 6,
+      classes: [{ ...fighter, level: 6 }],
       hitPoints: { max: 52, current: 38, temporary: 3 },
-      hitDice: { dieType: 'd10', total: 6, spent: 2 },
+      hitDice: [{ dieType: 'd10', total: 6, spent: 2 }],
     });
+  });
+
+  // The server rejects a write whose class levels do not add up to `level`, so
+  // the patch has to carry the first class's level moving in step.
+  it('carries classes with the first entry one level higher and later entries untouched', () => {
+    const wizard: CharacterClass = {
+      classId: null,
+      name: 'Wizard',
+      level: 2,
+      subclass: null,
+      subclassId: null,
+    };
+    const patch = applyLevelUp(
+      { ...character, level: 7, classes: [fighter, wizard] },
+      { hpGain: 8, newFeatures: [], classHitDie: 'd10' }
+    );
+    expect(patch.level).toBe(8);
+    expect(patch.classes).toEqual([{ ...fighter, level: 6 }, wizard]);
+  });
+
+  it('omits classes for a character with no class recorded', () => {
+    const patch = applyLevelUp(
+      { ...character, classes: [] },
+      { hpGain: 8, newFeatures: [], classHitDie: 'd10' }
+    );
+    expect(patch).not.toHaveProperty('classes');
+  });
+
+  it('bumps only the pool whose die matches and leaves the others alone', () => {
+    const patch = applyLevelUp(
+      {
+        ...character,
+        hitDice: [
+          { dieType: 'd6', total: 2, spent: 1 },
+          { dieType: 'd10', total: 5, spent: 2 },
+        ],
+      },
+      { hpGain: 8, newFeatures: [], classHitDie: 'd10' }
+    );
+    expect(patch.hitDice).toEqual([
+      { dieType: 'd6', total: 2, spent: 1 },
+      { dieType: 'd10', total: 6, spent: 2 },
+    ]);
   });
 
   it('appends chosen features after the existing ones', () => {
@@ -183,27 +235,38 @@ describe('applyLevelUp', () => {
       { hpGain: 8, newFeatures: [], classHitDie: 'd10' }
     );
     // A level-6 character owns 6 hit dice, none spent.
-    expect(patch.hitDice).toEqual({ dieType: 'd10', total: 6, spent: 0 });
+    expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 6, spent: 0 }]);
+  });
+
+  it('seeds hit dice the same way from an empty pool list', () => {
+    const patch = applyLevelUp(
+      { ...character, hitDice: [] },
+      { hpGain: 8, newFeatures: [], classHitDie: 'd10' }
+    );
+    expect(patch.hitDice).toEqual([{ dieType: 'd10', total: 6, spent: 0 }]);
   });
 
   // The replacement for a test that used to assert a d8 fallback (VEG-530).
   // `classHitDie` is now required and non-nullable, so there is nothing left to
-  // fall back to: whatever die the caller resolved — the class's, or one the
-  // player picked in the dialog — is the die that gets written. A d6 here would
+  // fall back to: whatever die the caller resolved, the class's or one the
+  // player picked in the dialog, is the die that gets written. A d6 here would
   // silently have become a d8 under the old signature.
   it('seeds the die it was given, never a house default', () => {
     const patch = applyLevelUp(
       { ...character, hitDice: null },
       { hpGain: 5, newFeatures: [], classHitDie: 'd6' }
     );
-    expect(patch.hitDice).toEqual({ dieType: 'd6', total: 6, spent: 0 });
+    expect(patch.hitDice).toEqual([{ dieType: 'd6', total: 6, spent: 0 }]);
   });
 
-  // A stored pool outranks the argument: a DM may have granted a nonstandard
-  // die, and levelling should add to that pool rather than restyle it.
-  it('bumps an existing pool without adopting the supplied die', () => {
+  // A die with no pool of its own is a new class's die, so the one level gained
+  // becomes a one-die pool after the stored ones.
+  it('appends a one-die pool when no stored pool has the given die', () => {
     const patch = applyLevelUp(character, { hpGain: 8, newFeatures: [], classHitDie: 'd4' });
-    expect(patch.hitDice).toEqual({ dieType: 'd10', total: 6, spent: 2 });
+    expect(patch.hitDice).toEqual([
+      { dieType: 'd10', total: 5, spent: 2 },
+      { dieType: 'd4', total: 1, spent: 0 },
+    ]);
   });
 
   it('omits features from the patch when nothing new was chosen', () => {

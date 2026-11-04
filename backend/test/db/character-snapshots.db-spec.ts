@@ -18,6 +18,12 @@ import { CharacterSnapshotsService } from '../../src/characters/snapshots/charac
 
 const HIT_POINTS_AT_FOUR = { max: 36, current: 20, temporary: 0 };
 
+// A free-typed Fighter, because the database holds no class rows here.
+const fighterAt = (level: number) => ({
+  classes: [{ classId: null, name: 'Fighter', level, subclass: null, subclassId: null }],
+  level,
+});
+
 describe('character snapshots on a real DB (VEG-643)', () => {
   let ctx: SeedContext;
   let characters: CharactersService;
@@ -27,8 +33,7 @@ describe('character snapshots on a real DB (VEG-643)', () => {
   const createLevelFour = () =>
     characters.create(ownerId, {
       name: 'Probe',
-      class: 'Fighter',
-      level: 4,
+      ...fighterAt(4),
       hitPoints: HIT_POINTS_AT_FOUR,
     });
 
@@ -63,7 +68,7 @@ describe('character snapshots on a real DB (VEG-643)', () => {
     const created = await createLevelFour();
 
     await characters.update(created.id, ownerId, {
-      level: 5,
+      ...fighterAt(5),
       hitPoints: { max: 44, current: 44, temporary: 0 },
       expectedVersion: created.version,
     });
@@ -81,7 +86,10 @@ describe('character snapshots on a real DB (VEG-643)', () => {
 
   it('reads the stored sheet back as a computed level-4 character (VEG-643)', async () => {
     const created = await createLevelFour();
-    await characters.update(created.id, ownerId, { level: 5, expectedVersion: created.version });
+    await characters.update(created.id, ownerId, {
+      ...fighterAt(5),
+      expectedVersion: created.version,
+    });
     const [summary] = await snapshots.list(created.id, ownerId);
 
     const snapshot = await snapshots.get(created.id, summary.id, ownerId);
@@ -95,7 +103,10 @@ describe('character snapshots on a real DB (VEG-643)', () => {
     const created = await createLevelFour();
 
     await expect(
-      characters.update(created.id, ownerId, { level: 5, expectedVersion: created.version + 1 })
+      characters.update(created.id, ownerId, {
+        ...fighterAt(5),
+        expectedVersion: created.version + 1,
+      })
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(await snapshotsOf(created.id)).toHaveLength(0);
@@ -103,9 +114,69 @@ describe('character snapshots on a real DB (VEG-643)', () => {
     expect(stored.level).toBe(4);
   });
 
+  // A snapshot taken before characters held a list of classes still stores the
+  // scalar class columns and a single hit-dice object.
+  describe('a snapshot stored before the classes list', () => {
+    const legacySnapshot = async () => {
+      const created = await createLevelFour();
+      const { data } = await ctx.prisma.characterSnapshot.create({
+        data: {
+          characterId: created.id,
+          level: 4,
+          label: 'Level 4',
+          data: {
+            name: 'Probe',
+            class: 'Fighter',
+            classId: null,
+            subclass: 'Champion',
+            level: 4,
+            hitPoints: HIT_POINTS_AT_FOUR,
+            hitDice: { dieType: 'd10', total: 4, spent: 3 },
+            proficiencies: [],
+            languages: [],
+            savingThrows: [],
+            skills: [],
+            armorTraining: [],
+            conditions: [],
+          },
+        },
+        select: { data: true },
+      });
+      const [summary] = await snapshots.list(created.id, ownerId);
+      return { created, summary, data };
+    };
+
+    it('reads back with one class entry and one pool', async () => {
+      const { created, summary } = await legacySnapshot();
+
+      const snapshot = await snapshots.get(created.id, summary.id, ownerId);
+
+      expect(snapshot.data.classes).toEqual([
+        { classId: null, name: 'Fighter', level: 4, subclass: 'Champion', subclassId: null },
+      ]);
+      expect(snapshot.data.hitDice).toEqual([{ dieType: 'd10', total: 4, spent: 3 }]);
+      expect(snapshot.data).toMatchObject({ class: 'Fighter', subclass: 'Champion' });
+    });
+
+    it('copies into a new character in the current shape with every die restored', async () => {
+      const { created, summary } = await legacySnapshot();
+
+      const copy = await snapshots.copy(created.id, summary.id, ownerId);
+
+      const stored = await ctx.prisma.character.findUniqueOrThrow({ where: { id: copy.id } });
+      expect(stored.classes).toEqual([
+        { classId: null, name: 'Fighter', level: 4, subclass: 'Champion', subclassId: null },
+      ]);
+      expect(stored.hitDice).toEqual([{ dieType: 'd10', total: 4, spent: 0 }]);
+    });
+  });
+
   it('deletes the snapshots along with the character (VEG-643)', async () => {
     const created = await createLevelFour();
-    await characters.update(created.id, ownerId, { level: 5, expectedVersion: created.version });
+    await characters.update(created.id, ownerId, {
+      ...fighterAt(5),
+      expectedVersion: created.version,
+    });
     expect(await snapshotsOf(created.id)).toHaveLength(1);
 
     await characters.remove(created.id, ownerId);

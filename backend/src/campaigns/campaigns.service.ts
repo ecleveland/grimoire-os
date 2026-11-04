@@ -11,6 +11,8 @@ import {
   abilityModifier,
   computeExhaustionEffect,
   deriveArmorClass,
+  classesFrom,
+  firstClassName,
   inventoryFromJson,
   resolveInitiative,
 } from '@grimoire-os/shared';
@@ -63,7 +65,8 @@ const partyCharacterSelect = {
   userId: true,
   name: true,
   race: true,
-  class: true,
+  // Projected to the first class's name; the DTO whitelist drops the list.
+  classes: true,
   level: true,
   armorClass: true,
   initiative: true,
@@ -78,7 +81,8 @@ const partyCharacterSelect = {
 } satisfies Prisma.CharacterSelect;
 
 /**
- * Resolve every derived stat the roster exposes, in one pass (VEG-410, VEG-452).
+ * Resolve every derived stat the roster exposes, in one pass (VEG-410, VEG-452),
+ * and the class shown, which is the first class's name.
  *
  * AC and initiative both need the Dexterity modifier, so they are derived
  * together: two helpers meant parsing `abilityScores`, applying the `?? 10`
@@ -100,13 +104,14 @@ const partyCharacterSelect = {
  */
 function withEffectiveDerivedStats<
   T extends {
+    classes: unknown;
     armorClass: number | null;
     initiative: number | null;
     abilityScores: unknown;
     inventory: unknown;
     exhaustion: number | null;
   },
->(character: T): T & { initiative: number } {
+>(character: T): T & { initiative: number; class: string | null } {
   const dexterity = (character.abilityScores as AbilityScores | null)?.dexterity ?? 10;
   const dexModifier = abilityModifier(dexterity);
 
@@ -121,7 +126,13 @@ function withEffectiveDerivedStats<
     computeExhaustionEffect(SEEDED_RULES.exhaustion, character.exhaustion)
   );
 
-  return { ...character, armorClass, initiative };
+  // The roster shows the first class as the class.
+  return {
+    ...character,
+    armorClass,
+    initiative,
+    class: firstClassName(classesFrom(character.classes)),
+  };
 }
 
 function serialize(campaign: any): CampaignDto {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Character, DieType, HitDieType, SrdClass } from '@/lib/types';
 import { asHitDie, DEFAULT_HIT_DIE, HIT_DIE_TYPES } from '@/lib/types';
+import { firstPool } from '@grimoire-os/shared';
 import FeatureText from '@/components/FeatureText';
 import Modal from '@/components/Modal';
 import { useApiQuery } from '@/lib/query';
@@ -107,7 +108,7 @@ export default function LevelUpDialog({
   // picker, and fed `averageHpForDie('d100')` = 51 into a permanent HP maximum
   // once per level. A d4-d12 pool still wins outright, including a nonstandard
   // one a DM granted; only a die that is not a hit die falls through and asks.
-  const storedDie = asHitDie(character.hitDice?.dieType);
+  const storedDie = asHitDie(firstPool(character.hitDice)?.dieType);
   // Narrowed to real hit dice (VEG-530). A homebrew class may declare d20 or
   // d100 — legal for the content DTO, not a hit die — and accepting one skipped
   // the picker and fed +51 a level straight into a permanent maximum, the same
@@ -134,7 +135,11 @@ export default function LevelUpDialog({
   // Ability Score Improvement at 4 and 8 silently granted it once (VEG-454).
   // A stored feature with no level can't claim one, so it no longer suppresses.
   const ownedFeatureKeys = new Set((character.features ?? []).map(characterFeatureIdentity));
-  const suggestedFeatures = (srdClass ? classFeaturesAtLevel(srdClass, newLevel) : []).filter(
+  // The level goes to the first class (`applyLevelUp`), and feature levels are
+  // class levels (VEG-671), so its next level picks the grants. The two agree
+  // for a single class; they part once a second class holds levels.
+  const newClassLevel = (character.classes[0]?.level ?? character.level) + 1;
+  const suggestedFeatures = (srdClass ? classFeaturesAtLevel(srdClass, newClassLevel) : []).filter(
     f => !ownedFeatureKeys.has(characterFeatureIdentity(f))
   );
   const chosenFeatures = suggestedFeatures.filter(f => !unchecked.has(characterFeatureIdentity(f)));

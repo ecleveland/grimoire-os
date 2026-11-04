@@ -25,7 +25,7 @@ async function createCharacter(page: Page, name: string, csrf: string): Promise<
     data: {
       name,
       race: 'Human',
-      class: 'Fighter',
+      classes: [{ name: 'Fighter', level: 1 }],
       level: 1,
       abilityScores: {
         strength: 10,

@@ -71,13 +71,13 @@ function expectRenderedMarkdown(scope: HTMLElement) {
 }
 
 const onPatch = vi.fn();
-// The API sends `class: null` for a classless row, while the shared type only
-// allows undefined.
-const classless = { class: null } as unknown as Partial<Character>;
+// The API sends `class: null` and `classes: []` for a classless row, while the
+// shared type only allows undefined for the projection.
+const classless = { class: null, classes: [] } as unknown as Partial<Character>;
 const editable = { editable: true as const, onPatch, isSaving: false };
 
 // makeCharacter defaults: level-5 Fighter, 6,500 XP (band floor), HP 44/32/+5,
-// hit dice d10 8 total 3 spent, no spellcastingAbility.
+// one d10 hit dice pool of 8 with 3 spent, no spellcastingAbility.
 function renderSection(over: Partial<Character> = {}, props: PlayControlProps = editable) {
   return render(<LevelUpSection character={makeCharacter(over)} {...props} />);
 }
@@ -214,9 +214,36 @@ describe('LevelUpSection', () => {
       await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
       expect(onPatch).toHaveBeenCalledWith({
         level: 6,
+        classes: [
+          { classId: null, name: 'Fighter', level: 6, subclass: 'Champion', subclassId: null },
+        ],
         hitPoints: { max: 52, current: 40, temporary: 5 },
-        hitDice: { dieType: 'd10', total: 9, spent: 3 },
+        hitDice: [{ dieType: 'd10', total: 9, spent: 3 }],
       });
+    });
+
+    it('adds the level to the first pool and leaves a later pool alone', async () => {
+      const user = userEvent.setup();
+      renderSection({
+        hitDice: [
+          { dieType: 'd10', total: 5, spent: 1 },
+          { dieType: 'd6', total: 3, spent: 2 },
+        ],
+      });
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 6,
+          classes: [
+            { classId: null, name: 'Fighter', level: 6, subclass: 'Champion', subclassId: null },
+          ],
+          hitDice: [
+            { dieType: 'd10', total: 6, spent: 1 },
+            { dieType: 'd6', total: 3, spent: 2 },
+          ],
+        })
+      );
     });
 
     it('stays open after confirming until the leveled character flows back down', async () => {
@@ -253,8 +280,11 @@ describe('LevelUpSection', () => {
       await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
       expect(onPatch).toHaveBeenCalledWith({
         level: 6,
+        classes: [
+          { classId: null, name: 'Fighter', level: 6, subclass: 'Champion', subclassId: null },
+        ],
         hitPoints: { max: 49, current: 37, temporary: 5 },
-        hitDice: { dieType: 'd10', total: 9, spent: 3 },
+        hitDice: [{ dieType: 'd10', total: 9, spent: 3 }],
       });
     });
 
@@ -293,7 +323,10 @@ describe('LevelUpSection', () => {
       await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
       expect(onPatch).toHaveBeenCalledWith({
         level: 6,
-        hitDice: { dieType: 'd10', total: 9, spent: 3 },
+        classes: [
+          { classId: null, name: 'Fighter', level: 6, subclass: 'Champion', subclassId: null },
+        ],
+        hitDice: [{ dieType: 'd10', total: 9, spent: 3 }],
       });
     });
 
@@ -306,7 +339,7 @@ describe('LevelUpSection', () => {
       expect(onPatch).toHaveBeenCalledWith(
         expect.objectContaining({
           level: 6,
-          hitDice: { dieType: 'd10', total: 6, spent: 0 },
+          hitDice: [{ dieType: 'd10', total: 6, spent: 0 }],
         })
       );
     });
@@ -327,6 +360,44 @@ describe('LevelUpSection', () => {
             { name: 'Second Wind', source: 'Fighter' },
             { name: 'Extra Attack', source: 'Fighter', level: 6, description: 'Attack twice.' },
             { name: 'Another Level-6 Boon', source: 'Fighter', level: 6 },
+          ],
+        })
+      );
+    });
+
+    // Feature levels are class levels (VEG-671). The level goes to the first
+    // class, so its next level decides the grants, not the character level.
+    it('offers the features of the level the first class reaches, not the character level', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterWithRecurringAsi] });
+      const user = userEvent.setup();
+      renderSection({
+        level: 5,
+        classes: [
+          { classId: null, name: 'Fighter', level: 3, subclass: null, subclassId: null },
+          { classId: null, name: 'Wizard', level: 2, subclass: null, subclassId: null },
+        ],
+        hitDice: [
+          { dieType: 'd10', total: 3, spent: 0 },
+          { dieType: 'd6', total: 2, spent: 0 },
+        ],
+        features: [],
+      });
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 6,
+          classes: [
+            { classId: null, name: 'Fighter', level: 4, subclass: null, subclassId: null },
+            { classId: null, name: 'Wizard', level: 2, subclass: null, subclassId: null },
+          ],
+          features: [
+            {
+              name: 'Ability Score Improvement',
+              source: 'Fighter',
+              level: 4,
+              description: 'Raise an ability score.',
+            },
           ],
         })
       );
@@ -396,7 +467,10 @@ describe('LevelUpSection', () => {
       it('asks for a die when the stored pool carries one that is not a hit die', async () => {
         mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
         const user = userEvent.setup();
-        renderSection({ hitDice: { dieType: 'd100', total: 5, spent: 0 }, class: 'Pumpkin Sage' });
+        renderSection({
+          hitDice: [{ dieType: 'd100', total: 5, spent: 0 }],
+          class: 'Pumpkin Sage',
+        });
         const dialog = await openDialog(user);
 
         expect(within(dialog).getByRole('combobox', { name: /hit die/i })).toBeInTheDocument();
@@ -409,7 +483,7 @@ describe('LevelUpSection', () => {
       it('still trusts a stored d12 without asking', async () => {
         mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
         const user = userEvent.setup();
-        renderSection({ hitDice: { dieType: 'd12', total: 5, spent: 0 }, class: 'Pumpkin Sage' });
+        renderSection({ hitDice: [{ dieType: 'd12', total: 5, spent: 0 }], class: 'Pumpkin Sage' });
         const dialog = await openDialog(user);
 
         expect(within(dialog).queryByRole('combobox', { name: /hit die/i })).toBeNull();
@@ -473,7 +547,7 @@ describe('LevelUpSection', () => {
             level: 6,
             // 44 + 9, and the pool seeded with the same die.
             hitPoints: { max: 53, current: 41, temporary: 5 },
-            hitDice: { dieType: 'd12', total: 6, spent: 0 },
+            hitDice: [{ dieType: 'd12', total: 6, spent: 0 }],
           })
         );
       });
@@ -884,7 +958,7 @@ describe('LevelUpSection', () => {
         await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
 
         expect(onPatch).toHaveBeenCalledWith(
-          expect.objectContaining({ hitDice: { dieType: 'd12', total: 6, spent: 0 } })
+          expect.objectContaining({ hitDice: [{ dieType: 'd12', total: 6, spent: 0 }] })
         );
       });
 
@@ -896,7 +970,7 @@ describe('LevelUpSection', () => {
         await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
 
         expect(onPatch).toHaveBeenCalledWith(
-          expect.objectContaining({ hitDice: { dieType: 'd10', total: 6, spent: 0 } })
+          expect.objectContaining({ hitDice: [{ dieType: 'd10', total: 6, spent: 0 }] })
         );
       });
     });

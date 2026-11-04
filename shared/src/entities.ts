@@ -3,6 +3,7 @@ import type { ComputedStats } from './computed';
 import type {
   AbilityScores,
   AttunedItem,
+  CharacterClass,
   CharacterFeat,
   CharacterResource,
   Combatant,
@@ -53,17 +54,17 @@ export interface Character {
   campaignId?: string;
   name: string;
   race?: string;
+  /** Classes held, first taken first; see {@link CharacterClass} (VEG-671). */
+  classes: CharacterClass[];
+  /** @deprecated Read-only projection of classes[0]; write classes. */
   class?: string;
-  /**
-   * Resolution key for the selected class (VEG-524). Same soft-ref contract as
-   * `backgroundId` below: VEG-506 let homebrew classes reuse an SRD class name,
-   * so the name alone no longer identifies a row. `class` (the display string)
-   * stays authoritative for free-typed names. Nullable at the API boundary (the
-   * column is `String?`); `undefined` when the client never sends it.
-   */
+  /** @deprecated Read-only projection of classes[0]; write classes. Soft ref, see CharacterClass.classId. */
   classId?: string | null;
   level: number;
+  /** @deprecated Read-only projection of classes[0]; write classes. */
   subclass?: string;
+  /** @deprecated Read-only projection of classes[0]; write classes. */
+  subclassId?: string | null;
   background?: string;
   /**
    * Resolution key for the selected background (VEG-476). Lets a loaded character
@@ -118,7 +119,8 @@ export interface Character {
   avatarUrl?: string;
   size?: string;
   heroicInspiration?: boolean;
-  hitDice?: HitDice | null;
+  /** One pool per die type; a single-class character has one entry. Null means none recorded. */
+  hitDice?: HitDice[] | null;
   armorTraining?: string[];
   weapons?: Weapon[] | null;
   // PC status tracking (VEG-408), sharing the combatant vocabulary from

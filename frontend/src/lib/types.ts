@@ -62,6 +62,7 @@ export type {
   AbilityScores,
   HitPoints,
   HitDice,
+  CharacterClass,
   DeathSaves,
   SpellEntry,
   SpellSlot,
