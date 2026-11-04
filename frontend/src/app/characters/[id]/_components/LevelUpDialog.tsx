@@ -135,7 +135,11 @@ export default function LevelUpDialog({
   // Ability Score Improvement at 4 and 8 silently granted it once (VEG-454).
   // A stored feature with no level can't claim one, so it no longer suppresses.
   const ownedFeatureKeys = new Set((character.features ?? []).map(characterFeatureIdentity));
-  const suggestedFeatures = (srdClass ? classFeaturesAtLevel(srdClass, newLevel) : []).filter(
+  // The level goes to the first class (`applyLevelUp`), and feature levels are
+  // class levels (VEG-671), so its next level picks the grants. The two agree
+  // for a single class; they part once a second class holds levels.
+  const newClassLevel = (character.classes[0]?.level ?? character.level) + 1;
+  const suggestedFeatures = (srdClass ? classFeaturesAtLevel(srdClass, newClassLevel) : []).filter(
     f => !ownedFeatureKeys.has(characterFeatureIdentity(f))
   );
   const chosenFeatures = suggestedFeatures.filter(f => !unchecked.has(characterFeatureIdentity(f)));

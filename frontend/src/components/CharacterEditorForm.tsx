@@ -789,6 +789,12 @@ export default function CharacterEditorForm({
   const storedDie = editedPool?.dieType;
   const hitDieOptions: readonly DieType[] =
     storedDie && !asHitDie(storedDie) ? [...HIT_DIE_TYPES, storedDie] : HIT_DIE_TYPES;
+  // Every save carries `classes`, and the server then rebuilds the pools from
+  // the class levels (VEG-671), keeping only the spent count. So for a class the
+  // catalog knows, the die and the total are not the player's to set here; a
+  // value typed in would be silently reverted on the next read. A free-typed
+  // class resolves to no row and no pool, so its controls stay live.
+  const poolsDerivedFromClass = !!asHitDie(selectedClass?.hitDie);
 
   const applyGrants = (
     source: string,
@@ -1064,6 +1070,8 @@ export default function CharacterEditorForm({
             as="select"
             label="Hit Die"
             value={editedPool?.dieType ?? ''}
+            disabled={poolsDerivedFromClass}
+            helperText={poolsDerivedFromClass ? `Set from the class levels on save.` : undefined}
             onChange={e =>
               set(
                 'hitDice',
@@ -1101,7 +1109,7 @@ export default function CharacterEditorForm({
             // Blank and inert until a die is recorded: a total without a die is
             // not a pool, and showing 0 would read as "no dice left".
             value={editedPool?.total ?? ''}
-            disabled={!editedPool}
+            disabled={!editedPool || poolsDerivedFromClass}
             onChange={e =>
               editedPool &&
               set(

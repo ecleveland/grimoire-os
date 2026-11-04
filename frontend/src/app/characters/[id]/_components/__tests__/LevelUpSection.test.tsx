@@ -365,6 +365,44 @@ describe('LevelUpSection', () => {
       );
     });
 
+    // Feature levels are class levels (VEG-671). The level goes to the first
+    // class, so its next level decides the grants, not the character level.
+    it('offers the features of the level the first class reaches, not the character level', async () => {
+      mockUseApiQuery.mockReturnValue({ data: [fighterWithRecurringAsi] });
+      const user = userEvent.setup();
+      renderSection({
+        level: 5,
+        classes: [
+          { classId: null, name: 'Fighter', level: 3, subclass: null, subclassId: null },
+          { classId: null, name: 'Wizard', level: 2, subclass: null, subclassId: null },
+        ],
+        hitDice: [
+          { dieType: 'd10', total: 3, spent: 0 },
+          { dieType: 'd6', total: 2, spent: 0 },
+        ],
+        features: [],
+      });
+      const dialog = await openDialog(user);
+      await user.click(within(dialog).getByRole('button', { name: /confirm level up/i }));
+      expect(onPatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 6,
+          classes: [
+            { classId: null, name: 'Fighter', level: 4, subclass: null, subclassId: null },
+            { classId: null, name: 'Wizard', level: 2, subclass: null, subclassId: null },
+          ],
+          features: [
+            {
+              name: 'Ability Score Improvement',
+              source: 'Fighter',
+              level: 4,
+              description: 'Raise an ability score.',
+            },
+          ],
+        })
+      );
+    });
+
     it('leaves an unchecked feature out of the patch', async () => {
       mockUseApiQuery.mockReturnValue({ data: [fighterClass] });
       const user = userEvent.setup();

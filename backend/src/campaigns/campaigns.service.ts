@@ -6,11 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
-import type { AbilityScores, CharacterClass, Combatant } from '@grimoire-os/shared';
+import type { AbilityScores, Combatant } from '@grimoire-os/shared';
 import {
   abilityModifier,
   computeExhaustionEffect,
   deriveArmorClass,
+  classesFrom,
   firstClassName,
   inventoryFromJson,
   resolveInitiative,
@@ -126,9 +127,12 @@ function withEffectiveDerivedStats<
   );
 
   // The roster shows the first class as the class.
-  const classes = Array.isArray(character.classes) ? (character.classes as CharacterClass[]) : [];
-
-  return { ...character, armorClass, initiative, class: firstClassName(classes) };
+  return {
+    ...character,
+    armorClass,
+    initiative,
+    class: firstClassName(classesFrom(character.classes)),
+  };
 }
 
 function serialize(campaign: any): CampaignDto {

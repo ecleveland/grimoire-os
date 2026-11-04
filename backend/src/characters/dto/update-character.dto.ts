@@ -51,38 +51,18 @@ export class UpdateCharacterDto extends PartialType(
   ] as const)
 ) {
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('class')
   class?: never;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('classId')
   classId?: never;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('subclass')
   subclass?: never;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('subclassId')
   subclassId?: never;
 

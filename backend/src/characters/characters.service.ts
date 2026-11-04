@@ -15,10 +15,13 @@ import type {
   Weapon,
 } from '@grimoire-os/shared';
 import {
+  classesFrom,
+  duplicateClassEntry,
   firstClassName,
   hitDicePoolsFor,
   inventoryFromJson,
   projectClassScalars,
+  sumClassLevels,
 } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
@@ -69,14 +72,6 @@ type ClassGrantRow = {
 /** A class entry with the visible catalog row its name and id resolved to, if any. */
 type ResolvedEntry = { entry: CharacterClass; row: { id: string; hitDie: string } | null };
 
-/**
- * The stored classes column as entries. The column is NOT NULL with a `[]`
- * default, so anything but an array is a row written outside the API and reads
- * as no class.
- */
-const classesFrom = (value: Prisma.JsonValue): CharacterClass[] =>
-  Array.isArray(value) ? (value as unknown as CharacterClass[]) : [];
-
 /** The stored pools, or null for none and for anything that is not an array. */
 const poolsFrom = (value: Prisma.JsonValue | null | undefined): HitDice[] | null =>
   Array.isArray(value) ? (value as unknown as HitDice[]) : null;
@@ -87,15 +82,25 @@ function assertClassesSumToLevel(classes: readonly CharacterClass[], level: numb
   if (mismatch) throw new BadRequestException(mismatch);
 }
 
-/** The entries as stored: each `classId` pinned to its resolved row, absent fields null. */
-const pinnedClasses = (resolved: readonly ResolvedEntry[]): CharacterClass[] =>
-  resolved.map(({ entry, row }) => ({
+/**
+ * The entries as stored: each `classId` pinned to its resolved row, absent
+ * fields null. `subclassId` is always null until the subclass step writes it;
+ * the DTO refuses any other value. 400 when two entries pin the same row: the
+ * DTO's duplicate check only sees the ids the client sent, so a free-typed name
+ * and an id that resolve to one row pass it.
+ */
+function pinnedClasses(resolved: readonly ResolvedEntry[]): CharacterClass[] {
+  const pinned = resolved.map(({ entry, row }) => ({
     classId: row?.id ?? null,
     name: entry.name,
     level: entry.level,
     subclass: entry.subclass ?? null,
-    subclassId: entry.subclassId ?? null,
+    subclassId: null,
   }));
+  const duplicate = duplicateClassEntry(pinned);
+  if (duplicate) throw new BadRequestException(`classes has a duplicate class "${duplicate}"`);
+  return pinned;
+}
 
 /** The pools the resolved classes produce, with spent dice carried from `carried`. */
 const poolsForClasses = (resolved: readonly ResolvedEntry[], carried: HitDice[] | null) =>
@@ -371,7 +376,7 @@ export class CharactersService {
     // refused, because every later save would send that level and fail the
     // DTO's @Max, leaving the character impossible to edit.
     const classes = dto.classes ?? [];
-    const level = dto.level ?? (classes.reduce((sum, entry) => sum + entry.level, 0) || 1);
+    const level = dto.level ?? (sumClassLevels(classes) || 1);
     if (dto.level === undefined && level > MAX_CHARACTER_LEVEL) {
       throw new BadRequestException(
         `classes levels sum to ${level} but the maximum level is ${MAX_CHARACTER_LEVEL}`
@@ -417,6 +422,7 @@ export class CharactersService {
     // supplied id is discarded and the name derives instead, so junk never
     // persists as a key. A name matching zero or several visible rows pins null.
     const resolved = await this.resolveClassEntries(classes, userId);
+    const pinned = pinnedClasses(resolved);
 
     // A level-N class owns N hit dice of its die, all unspent unless the DTO
     // sent a pool of that die to carry the spent count from. The die comes from
@@ -437,7 +443,7 @@ export class CharactersService {
         ...(inventory && { inventory: inventory as unknown as Prisma.InputJsonValue }),
         // Omitted when empty, which leaves the column at its SQL NULL default.
         ...(pools.length > 0 && { hitDice: pools as unknown as Prisma.InputJsonValue }),
-        classes: pinnedClasses(resolved) as unknown as Prisma.InputJsonValue,
+        classes: pinned as unknown as Prisma.InputJsonValue,
         level,
         userId,
       },

@@ -508,6 +508,11 @@ export interface CharacterClass {
   subclassId: string | null;
 }
 
+/** The sum of the class levels, zero for no class. */
+export function sumClassLevels(classes: readonly Pick<CharacterClass, 'level'>[]): number {
+  return classes.reduce((sum, entry) => sum + entry.level, 0);
+}
+
 /**
  * Whether the class levels add up to the character level. An empty list passes,
  * because a character with no class recorded has nothing to check.
@@ -516,8 +521,16 @@ export function classesSumToLevel(
   classes: readonly Pick<CharacterClass, 'level'>[],
   level: number
 ): boolean {
-  if (classes.length === 0) return true;
-  return classes.reduce((sum, entry) => sum + entry.level, 0) === level;
+  return classes.length === 0 || sumClassLevels(classes) === level;
+}
+
+/**
+ * A stored `classes` column as entries. The column is NOT NULL with a `[]`
+ * default, so anything but an array is a row written outside the API and reads
+ * as no class.
+ */
+export function classesFrom(value: unknown): CharacterClass[] {
+  return Array.isArray(value) ? (value as CharacterClass[]) : [];
 }
 
 /**

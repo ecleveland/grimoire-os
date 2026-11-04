@@ -15,6 +15,7 @@ import {
   IsUUID,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ABILITY_NAMES,
@@ -366,19 +367,34 @@ class CharacterClassDto implements CharacterClass {
   @IsString()
   subclass!: string | null;
 
-  @ApiPropertyOptional({ description: 'Resolution key for the subclass row', nullable: true })
+  // Always null until the level-up subclass step writes it. Unlike `classId` a
+  // supplied id would be stored with no visibility check, so a non-null value
+  // is refused rather than dropped.
+  @ApiPropertyOptional({
+    description: 'Resolution key for the subclass row. Not written yet; send null.',
+    nullable: true,
+  })
   @IsOptional()
-  @IsString()
+  @Equals(null, { message: 'subclassId is not written yet; send null' })
   subclassId!: string | null;
 }
 
 // The four deprecated scalar class fields answer a write with a 400 that names
 // the field to use instead. Equals(undefined) passes an absent key and fails any
 // present value, null included, because the property carries no @IsOptional.
+// The Swagger block rides along so the create and update DTOs declare each
+// field once.
 export const readOnlyProjection = (field: string) =>
-  Equals(undefined, {
-    message: `${field} is a read-only projection of classes[0]; write classes instead`,
-  });
+  applyDecorators(
+    ApiPropertyOptional({
+      type: String,
+      deprecated: true,
+      description: 'Read-only. Write classes instead.',
+    }),
+    Equals(undefined, {
+      message: `${field} is a read-only projection of classes[0]; write classes instead`,
+    })
+  );
 
 class ResourceDto implements CharacterResource {
   @ApiProperty({ example: 'Ki Points' })
@@ -596,38 +612,18 @@ export class CreateCharacterDto {
   level?: number;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('class')
   class?: never;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('classId')
   classId?: never;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('subclass')
   subclass?: never;
 
   /** @deprecated Read-only projection of classes[0]. Write `classes`. */
-  @ApiPropertyOptional({
-    type: String,
-    deprecated: true,
-    description: 'Read-only. Write classes instead.',
-  })
   @readOnlyProjection('subclassId')
   subclassId?: never;
 

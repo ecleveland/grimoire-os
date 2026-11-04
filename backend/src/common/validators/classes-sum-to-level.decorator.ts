@@ -1,5 +1,5 @@
 import { registerDecorator, ValidationArguments, ValidationOptions } from 'class-validator';
-import { duplicateClassEntry } from '@grimoire-os/shared';
+import { duplicateClassEntry, sumClassLevels } from '@grimoire-os/shared';
 
 type LevelledEntry = { level?: unknown };
 
@@ -14,9 +14,9 @@ export function classLevelMismatch(
   level: number
 ): string | null {
   if (classes.length === 0) return null;
-  const sum = classes.reduce(
-    (total, entry) => total + (typeof entry.level === 'number' ? entry.level : 0),
-    0
+  // A non-numeric level counts as zero here; the entry's own validator reports it.
+  const sum = sumClassLevels(
+    classes.map(entry => ({ level: typeof entry.level === 'number' ? entry.level : 0 }))
   );
   return sum === level ? null : `classes levels sum to ${sum} but level is ${level}`;
 }

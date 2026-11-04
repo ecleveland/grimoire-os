@@ -703,6 +703,31 @@ describe('CharacterEditorForm autofill', () => {
       expect(screen.getByLabelText(/hit dice spent/i)).toBeDisabled();
     });
 
+    // A free-typed class resolves to no catalog row, so the player's pool is
+    // the only record of its die and the controls stay live.
+    it('keeps the die and total editable for a class the catalog does not know', async () => {
+      renderForm({ initialValues: noDice(), submitLabel: 'Save Changes' });
+
+      expect(await screen.findByLabelText(/^hit die$/i)).toBeEnabled();
+      expect(screen.queryByText(/set from the class levels/i)).not.toBeInTheDocument();
+    });
+
+    // The server rebuilds the pools from the class levels on every save that
+    // carries classes, which the editor always does. Leaving these live would
+    // let a DM set a total the next read silently reverts.
+    it('locks the die and total to the catalog class, leaving spent editable', async () => {
+      renderForm({
+        initialValues: characterToFormValues(makeCharacter()),
+        submitLabel: 'Save Changes',
+      });
+
+      const select = await screen.findByLabelText(/^hit die$/i);
+      await waitFor(() => expect(select).toBeDisabled());
+      expect(screen.getByLabelText(/hit dice total/i)).toBeDisabled();
+      expect(screen.getByLabelText(/hit dice spent/i)).toBeEnabled();
+      expect(screen.getByText(/set from the class levels/i)).toBeInTheDocument();
+    });
+
     // The whole point of the ticket: this is the save that used to write a d8.
     it('saves an unrelated edit without inventing a pool', async () => {
       const { onSubmit } = renderForm({

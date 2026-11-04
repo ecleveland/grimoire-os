@@ -336,6 +336,19 @@ describe('CreateCharacterDto — 2024 sheet fields', () => {
       ).toHaveLength(0);
     });
 
+    // No ticket writes the subclass key yet, and unlike classId it gets no
+    // visibility check, so a stranger's homebrew id must not be stored.
+    it('rejects an entry carrying a subclassId', async () => {
+      const errors = await classErrors({ classes: [entry({ subclassId: 'sub-1' })] });
+      expect(JSON.stringify(errors)).toMatch(/subclassId is not written yet/);
+    });
+
+    it('accepts an entry with a null or absent subclassId', async () => {
+      expect(await classErrors({ classes: [entry({ subclassId: null })] })).toHaveLength(0);
+      const { subclassId: _omitted, ...without } = entry();
+      expect(await classErrors({ classes: [without] })).toHaveLength(0);
+    });
+
     it('rejects more than twenty entries', async () => {
       const classes = Array.from({ length: 21 }, (_, i) => entry({ name: `Class ${i}`, level: 1 }));
       const errors = await classErrors({ classes });

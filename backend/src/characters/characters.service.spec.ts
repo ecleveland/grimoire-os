@@ -297,6 +297,29 @@ describe('CharactersService', () => {
         expect(dataOf().level).toBe(20);
       });
 
+      // IsUniqueClassList only sees the ids the client sent, so a free-typed
+      // name and an id that resolve to the same row pass it.
+      it('rejects two entries that pin the same class after resolution', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([FIGHTER_ROW]);
+
+        const attempt = createWith(
+          [entry({ level: 3 }), entry({ name: 'Warrior', classId: SRD_FIGHTER_ID, level: 2 })],
+          { level: 5 }
+        );
+
+        await expect(attempt).rejects.toThrow(BadRequestException);
+        await expect(attempt).rejects.toThrow('classes has a duplicate class "Warrior"');
+        expect(prisma.character.create).not.toHaveBeenCalled();
+      });
+
+      it('stores a null subclassId whatever the entry carried', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([FIGHTER_ROW]);
+
+        await createWith([entry({ subclassId: 'sub-stranger' })]);
+
+        expect(classesOf()[0].subclassId).toBeNull();
+      });
+
       it('creates a classless character at level 1 with no lookup and no pool', async () => {
         await service.create(USER_ID, { name: 'Nobody' });
 
@@ -1994,6 +2017,23 @@ describe('CharactersService', () => {
           await patch({ classes: [entry({ classId: 'cls-stranger-hb' })] });
 
           expect(pinnedOf()).toEqual([SRD_FIGHTER_ID]);
+        });
+
+        it('rejects two entries that pin the same class after resolution', async () => {
+          storedWith([entry()]);
+          prisma.srdClass.findMany.mockResolvedValue([FIGHTER_ROW]);
+
+          const attempt = patch({
+            level: 5,
+            classes: [
+              entry({ level: 3 }),
+              entry({ name: 'Warrior', classId: SRD_FIGHTER_ID, level: 2 }),
+            ],
+          });
+
+          await expect(attempt).rejects.toThrow(BadRequestException);
+          await expect(attempt).rejects.toThrow('classes has a duplicate class "Warrior"');
+          expect(prisma.character.update).not.toHaveBeenCalled();
         });
 
         it('keeps a visible id that disambiguates a duplicate name', async () => {

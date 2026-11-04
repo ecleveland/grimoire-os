@@ -29,6 +29,10 @@ describe('foldLegacyCharacterRow', () => {
     }
   });
 
+  it('treats a whitespace-only class as no class', () => {
+    expect(foldLegacyCharacterRow(legacy({ class: '  ' })).classes).toEqual([]);
+  });
+
   it('wraps a single hit-dice object in a one-pool array', () => {
     expect(foldLegacyCharacterRow(legacy()).hitDice).toEqual([
       { dieType: 'd10', total: 5, spent: 3 },

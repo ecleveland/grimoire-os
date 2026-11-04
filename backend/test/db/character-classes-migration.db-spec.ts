@@ -86,6 +86,7 @@ describe('character_classes_array migration on a real DB', () => {
     );
     await legacy('Classed without id', 3, 'Wizard', null, null, null);
     await legacy('Empty class', 4, '', 'cls-orphan', null, null);
+    await legacy('Whitespace class', 4, '  ', 'cls-orphan-2', null, null);
     await legacy('No class', 2, null, null, null, '{"dieType":"d8","total":2,"spent":0}');
     await legacy('Jsonb null pool', 2, 'Cleric', null, null, 'null');
     await legacy('Level zero', 0, 'Rogue', null, null, null);
@@ -136,6 +137,12 @@ describe('character_classes_array migration on a real DB', () => {
 
   it('treats an empty class as no class, dropping its orphaned id', () => {
     expect(byName.get('Empty class')?.classes).toEqual([]);
+  });
+
+  // A whitespace-only name would fail the entry DTO's non-blank rule, so a
+  // snapshot of the folded row could never be copied or restored.
+  it('treats a whitespace-only class as no class', () => {
+    expect(byName.get('Whitespace class')?.classes).toEqual([]);
   });
 
   it('gives a row with no class an empty list and still wraps its pool', () => {

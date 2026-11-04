@@ -1,7 +1,5 @@
 import type { CharacterClass } from '@grimoire-os/shared';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+import { isRecord } from '../../common/helpers/json';
 
 const stringOrNull = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
@@ -12,7 +10,7 @@ const stringOrNull = (value: unknown): string | null => (typeof value === 'strin
  * of one passes through here first.
  *
  * `class`, `classId` and `subclass` become a one-entry `classes`, or an empty
- * list when the class is null or empty, and the three keys are dropped. The
+ * list when the class is null or blank, and the three keys are dropped. The
  * entry level is the row level floored at one. A single hit-dice object becomes
  * a one-pool array; null stays null. A row that already carries `classes` is
  * returned as it is. Returns a new object otherwise and leaves `data` untouched.
@@ -22,7 +20,7 @@ export function foldLegacyCharacterRow(data: Record<string, unknown>): Record<st
 
   const { class: name, classId, subclass, ...rest } = data;
   const classes: CharacterClass[] =
-    typeof name === 'string' && name !== ''
+    typeof name === 'string' && name.trim() !== ''
       ? [
           {
             classId: stringOrNull(classId),
