@@ -449,10 +449,17 @@ export function hitDiceSpent(hitDice: readonly HitDice[] | null | undefined): nu
 /**
  * Rebuilds the hit-dice pools from a character's classes (VEG-671). Each die gets
  * one pool holding the summed levels of the classes that use it, floored at one
- * like {@link hitDicePoolFor}. Spent dice carry over from the stored pool of the
- * same die, clamped to the new total. A stored pool whose die no class produces
- * was picked by the player or granted by the DM, so it is kept unchanged after
- * the derived ones. A class whose die fails {@link isHitDie} contributes nothing.
+ * like {@link hitDicePoolFor}. A class whose die fails {@link isHitDie}
+ * contributes nothing.
+ *
+ * When any class produces a pool, the result is exactly the derived pools. Each
+ * takes its spent dice from the carried pool of the same die. A carried pool of
+ * a die no class produces is foreign and is never kept: its spent dice go to the
+ * first derived pool that has no same-die carried pool, and are dropped when
+ * every derived pool has one. Spent dice are clamped to the pool's total.
+ *
+ * When no class produces a pool, the carried pools are returned as sent, because
+ * for a free-typed class they are the only record of its die.
  *
  * Returns an empty array when no pool results. Callers store null for that.
  */
@@ -466,13 +473,21 @@ export function hitDicePoolsFor(
     levelsByDie.set(entry.hitDie, (levelsByDie.get(entry.hitDie) ?? 0) + entry.level);
   }
   const stored = carried ?? [];
-  const derived: HitDice[] = [...levelsByDie].map(([dieType, levels]) => {
+  if (levelsByDie.size === 0) return [...stored];
+
+  let foreignSpent = stored
+    .filter(pool => !levelsByDie.has(pool.dieType as HitDieType))
+    .reduce((sum, pool) => sum + Math.max(0, pool.spent), 0);
+  return [...levelsByDie].map(([dieType, levels]) => {
     const total = Math.max(1, levels);
-    const spent = stored.find(pool => pool.dieType === dieType)?.spent ?? 0;
+    const match = stored.find(pool => pool.dieType === dieType);
+    let spent = match?.spent ?? 0;
+    if (!match) {
+      spent = foreignSpent;
+      foreignSpent = 0;
+    }
     return { dieType, total, spent: Math.min(total, Math.max(0, spent)) };
   });
-  const leftovers = stored.filter(pool => !levelsByDie.has(pool.dieType as HitDieType));
-  return [...derived, ...leftovers];
 }
 
 /**

@@ -93,10 +93,75 @@ describe('hitDicePoolsFor', () => {
     expect(pools).toEqual([{ dieType: 'd10', total: 5, spent: 5 }]);
   });
 
-  it('appends a carried pool whose die no class produces, unchanged', () => {
-    const granted: HitDice = { dieType: 'd12', total: 2, spent: 1 };
-    const pools = hitDicePoolsFor([{ hitDie: 'd10', level: 5 }], [granted]);
-    expect(pools).toEqual([{ dieType: 'd10', total: 5, spent: 0 }, granted]);
+  // A Fighter saved with a guessed d8 must not end up holding twelve dice at
+  // level 6, with the spent ones stranded on a pool no class produces.
+  it('moves the spent dice of a pool no class produces onto the derived pool', () => {
+    const pools = hitDicePoolsFor(
+      [{ hitDie: 'd10', level: 6 }],
+      [{ dieType: 'd8', total: 5, spent: 2 }]
+    );
+    expect(pools).toEqual([{ dieType: 'd10', total: 6, spent: 2 }]);
+  });
+
+  it('drops a foreign pool and its spent dice when every derived die has a match', () => {
+    const pools = hitDicePoolsFor(
+      [{ hitDie: 'd10', level: 6 }],
+      [
+        { dieType: 'd10', total: 5, spent: 1 },
+        { dieType: 'd8', total: 5, spent: 2 },
+      ]
+    );
+    expect(pools).toEqual([{ dieType: 'd10', total: 6, spent: 1 }]);
+  });
+
+  it('clamps foreign spent dice to the total of the pool that takes them', () => {
+    const pools = hitDicePoolsFor(
+      [{ hitDie: 'd10', level: 3 }],
+      [{ dieType: 'd8', total: 8, spent: 7 }]
+    );
+    expect(pools).toEqual([{ dieType: 'd10', total: 3, spent: 3 }]);
+  });
+
+  it('gives foreign spent dice to the first derived pool, leaving the next one full', () => {
+    const pools = hitDicePoolsFor(
+      [
+        { hitDie: 'd10', level: 3 },
+        { hitDie: 'd6', level: 2 },
+      ],
+      [{ dieType: 'd8', total: 5, spent: 3 }]
+    );
+    expect(pools).toEqual([
+      { dieType: 'd10', total: 3, spent: 3 },
+      { dieType: 'd6', total: 2, spent: 0 },
+    ]);
+  });
+
+  it('gives foreign spent dice to the first derived pool without a same-die match', () => {
+    const pools = hitDicePoolsFor(
+      [
+        { hitDie: 'd10', level: 3 },
+        { hitDie: 'd6', level: 2 },
+      ],
+      [
+        { dieType: 'd10', total: 3, spent: 1 },
+        { dieType: 'd8', total: 5, spent: 2 },
+      ]
+    );
+    expect(pools).toEqual([
+      { dieType: 'd10', total: 3, spent: 1 },
+      { dieType: 'd6', total: 2, spent: 2 },
+    ]);
+  });
+
+  // A free-typed class has no catalog die, so the pool the player picked is
+  // the only record of it.
+  it('keeps the carried pools as sent when no class produces a pool', () => {
+    const carried: HitDice[] = [
+      { dieType: 'd8', total: 3, spent: 1 },
+      { dieType: 'd12', total: 2, spent: 2 },
+    ];
+    expect(hitDicePoolsFor([], carried)).toEqual(carried);
+    expect(hitDicePoolsFor([{ hitDie: 'd100', level: 5 }], carried)).toEqual(carried);
   });
 
   it('ignores a class whose die is not a hit die', () => {

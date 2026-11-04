@@ -43,6 +43,7 @@ import {
 } from '../srd/resolve-catalog-ref';
 import { captureCharacterSnapshot } from './snapshots/capture-snapshot';
 import { classLevelMismatch } from '../common/validators/classes-sum-to-level.decorator';
+import { MAX_CHARACTER_LEVEL } from '../common/validators/level-keyed-map.decorator';
 
 // Slim projection for the characters list view (VEG-125). Characters carry
 // 40+ columns; the list only renders name/race/class/level.
@@ -366,9 +367,16 @@ export class CharactersService {
 
   async create(userId: string, dto: CreateCharacterDto) {
     // A character with no level sent takes the sum of its class levels, or 1
-    // when it has no class, which is the column default.
+    // when it has no class, which is the column default. A sum past the cap is
+    // refused, because every later save would send that level and fail the
+    // DTO's @Max, leaving the character impossible to edit.
     const classes = dto.classes ?? [];
     const level = dto.level ?? (classes.reduce((sum, entry) => sum + entry.level, 0) || 1);
+    if (dto.level === undefined && level > MAX_CHARACTER_LEVEL) {
+      throw new BadRequestException(
+        `classes levels sum to ${level} but the maximum level is ${MAX_CHARACTER_LEVEL}`
+      );
+    }
     assertClassesSumToLevel(classes, level);
 
     // campaignId is attacker-controlled input: without this check any
@@ -414,8 +422,10 @@ export class CharactersService {
     // sent a pool of that die to carry the spent count from. The die comes from
     // the row resolved above, so the pools cost no query of their own. A class
     // with no visible row, or with a die that is not a real hit die, adds no
-    // pool, and the level-up picker asks the player instead. A supplied pool
-    // for a die no class produces is kept as sent.
+    // pool, and the level-up picker asks the player instead. When no class adds
+    // a pool, the supplied pools are kept as sent. Otherwise a supplied pool of
+    // a die no class produces is replaced, and its spent dice move to a derived
+    // pool.
     const pools = poolsForClasses(resolved, suppliedPools ?? null);
 
     const character = await this.prisma.character.create({
@@ -489,10 +499,11 @@ export class CharactersService {
       assertClassesSumToLevel(classes, level);
 
       // Every entry is re-pinned whenever `classes` is sent, so a key can never
-      // outlive the name it was resolved for. A visible id sent back with its
-      // entry is kept, so a re-save does not lose a key that disambiguates a
-      // colliding name; a renamed entry, a junk id or a stranger's homebrew id
-      // derives from the name instead.
+      // outlive the name it was resolved for. A visible id that resolves is
+      // kept whatever the name says, so a re-save does not lose a key that
+      // disambiguates a colliding name. An unknown id, a stranger's homebrew id
+      // or an absent id derives from the name. The editor clears the id when
+      // the player retypes the name, so a rename arrives with no id.
       const resolved = await this.resolveClassEntries(classes, userId);
       if (changes.classes !== undefined) {
         changes.classes = pinnedClasses(resolved);

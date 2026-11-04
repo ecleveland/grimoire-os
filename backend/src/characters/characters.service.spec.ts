@@ -271,6 +271,32 @@ describe('CharactersService', () => {
         expect(dataOf().level).toBe(5);
       });
 
+      // Every later save would send the stored level and fail the DTO's
+      // @Max(20), so a character created past the cap could never be edited.
+      it('rejects classes summing past the level cap when the DTO omits the level', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([FIGHTER_ROW, WIZARD_ROW]);
+
+        const attempt = createWith([entry({ level: 20 }), entry({ name: 'Wizard', level: 1 })], {
+          level: undefined,
+        });
+
+        await expect(attempt).rejects.toThrow(BadRequestException);
+        await expect(attempt).rejects.toThrow(
+          'classes levels sum to 21 but the maximum level is 20'
+        );
+        expect(prisma.character.create).not.toHaveBeenCalled();
+      });
+
+      it('accepts classes summing to exactly the level cap when the DTO omits the level', async () => {
+        prisma.srdClass.findMany.mockResolvedValue([FIGHTER_ROW, WIZARD_ROW]);
+
+        await createWith([entry({ level: 19 }), entry({ name: 'Wizard', level: 1 })], {
+          level: undefined,
+        });
+
+        expect(dataOf().level).toBe(20);
+      });
+
       it('creates a classless character at level 1 with no lookup and no pool', async () => {
         await service.create(USER_ID, { name: 'Nobody' });
 
@@ -1769,7 +1795,22 @@ describe('CharactersService', () => {
         expect(dataOf().hitDice).toEqual([{ dieType: 'd10', total: 6, spent: 4 }]);
       });
 
-      it('keeps a stored pool for a die no class produces', async () => {
+      // What the level-up dialog sends for a Fighter saved with a guessed d8.
+      // Keeping the d8 pool beside the derived d10 one would hold twelve dice
+      // at level 6.
+      it('replaces a pool of a die no class produces, carrying its spent dice', async () => {
+        storedWith([entry()], { hitDice: [{ dieType: 'd8', total: 5, spent: 2 }] });
+
+        await patch({
+          level: 6,
+          classes: [entry({ level: 6 })],
+          hitDice: [{ dieType: 'd8', total: 5, spent: 2 }],
+        });
+
+        expect(dataOf().hitDice).toEqual([{ dieType: 'd10', total: 6, spent: 2 }]);
+      });
+
+      it('keeps a stored pool for a die no class produces on a classless character', async () => {
         storedWith([], { level: 3, hitDice: [{ dieType: 'd8', total: 3, spent: 1 }] });
 
         await patch({ level: 4 });
