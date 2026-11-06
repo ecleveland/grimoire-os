@@ -385,10 +385,15 @@ export class CampaignsService {
 
   async removeCharacter(campaignId: string, characterId: string, userId: string) {
     await this.campaignAuth.assertCampaignOwner(campaignId, userId);
-    await this.prisma.character.update({
-      where: { id: characterId },
+    // The character's own campaign must be the one in the URL, so an owner
+    // cannot detach a character from someone else's campaign by id.
+    const { count } = await this.prisma.character.updateMany({
+      where: { id: characterId, campaignId },
       data: { campaignId: null },
     });
+    if (count === 0) {
+      throw new NotFoundException(`Character "${characterId}" is not in this campaign`);
+    }
     return this.findOne(campaignId);
   }
 

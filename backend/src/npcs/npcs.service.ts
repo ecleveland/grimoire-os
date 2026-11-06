@@ -154,6 +154,15 @@ export class NpcsService {
     });
     if (!npc) throw new NotFoundException(`Npc "${npcId}" not found`);
     await this.campaignAuth.assertCampaignOwner(npc.campaignId, userId);
+    const target = await this.prisma.npc.findUnique({
+      where: { id: dto.toNpcId },
+      select: { id: true, campaignId: true },
+    });
+    // 404 rather than 403, so the response does not confirm that an NPC with
+    // this id exists in another campaign.
+    if (!target || target.campaignId !== npc.campaignId) {
+      throw new NotFoundException(`Npc "${dto.toNpcId}" not found`);
+    }
     try {
       const [forward] = await this.prisma.$transaction(async tx => {
         const forwardData: Prisma.NpcRelationUncheckedCreateInput = {

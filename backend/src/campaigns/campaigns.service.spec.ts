@@ -922,16 +922,33 @@ describe('CampaignsService', () => {
     it('removes character from campaign when called by owner', async () => {
       campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
-      prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: null });
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
 
       const result = await service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID);
 
       expect(campaignAuth.assertCampaignOwner).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
-      expect(prisma.character.update).toHaveBeenCalledWith({
-        where: { id: CHARACTER_ID },
+      expect(prisma.character.updateMany).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
         data: { campaignId: null },
       });
       expect(result).toEqual(serializedMockCampaign);
+    });
+
+    it('answers 404 when the character is not in this campaign, leaving it attached [VEG-689]', async () => {
+      // The owner of this campaign names a character that belongs to another
+      // campaign. The write is scoped to this campaign, so it matches no row.
+      campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaign);
+      prisma.character.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.removeCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID)).rejects.toThrow(
+        new NotFoundException(`Character "${CHARACTER_ID}" is not in this campaign`)
+      );
+      expect(prisma.character.updateMany).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
+        data: { campaignId: null },
+      });
+      expect(prisma.character.update).not.toHaveBeenCalled();
+      expect(prisma.campaign.findUnique).not.toHaveBeenCalled();
     });
 
     it('throws ForbiddenException for non-owner', async () => {
