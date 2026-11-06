@@ -415,13 +415,21 @@ describe('CampaignsService', () => {
   describe('addCharacter', () => {
     it('adds character to campaign for a member who owns the character', async () => {
       campaignAuth.assertCampaignMember.mockResolvedValue(mockCampaign);
-      prisma.character.findUnique.mockResolvedValue({ id: CHARACTER_ID, userId: USER_ID });
+      prisma.character.findUnique.mockResolvedValue({
+        id: CHARACTER_ID,
+        userId: USER_ID,
+        campaignId: null,
+      });
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: CAMPAIGN_ID });
 
       const result = await service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID);
 
       expect(campaignAuth.assertCampaignMember).toHaveBeenCalledWith(CAMPAIGN_ID, USER_ID);
+      expect(prisma.character.findUnique).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        select: { id: true, userId: true, campaignId: true },
+      });
       expect(prisma.character.update).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
         data: { campaignId: CAMPAIGN_ID },
@@ -470,7 +478,11 @@ describe('CampaignsService', () => {
         ],
       };
       campaignAuth.assertCampaignMember.mockResolvedValue(campaignWithMember);
-      prisma.character.findUnique.mockResolvedValue({ id: CHARACTER_ID, userId: USER_ID_2 });
+      prisma.character.findUnique.mockResolvedValue({
+        id: CHARACTER_ID,
+        userId: USER_ID_2,
+        campaignId: null,
+      });
       prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
       prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: CAMPAIGN_ID });
 
@@ -493,6 +505,54 @@ describe('CampaignsService', () => {
         ForbiddenException
       );
       expect(prisma.character.update).not.toHaveBeenCalled();
+    });
+
+    it("rejects the owner moving a member's character out of another campaign [VEG-689]", async () => {
+      // USER_ID_2 is a member here, but their character sits in another
+      // campaign. Only USER_ID_2 may move it.
+      const campaignWithMember = {
+        ...mockCampaign,
+        players: [
+          ...mockCampaign.players,
+          { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+        ],
+      };
+      campaignAuth.assertCampaignMember.mockResolvedValue(campaignWithMember);
+      prisma.character.findUnique.mockResolvedValue({
+        id: CHARACTER_ID,
+        userId: USER_ID_2,
+        campaignId: 'other-campaign',
+      });
+
+      await expect(service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID)).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(prisma.character.update).not.toHaveBeenCalled();
+    });
+
+    it('lets a member move their own character from another campaign [VEG-689]', async () => {
+      const campaignWithMember = {
+        ...mockCampaign,
+        players: [
+          ...mockCampaign.players,
+          { id: 'cp2', campaignId: CAMPAIGN_ID, userId: USER_ID_2, joinedAt: new Date() },
+        ],
+      };
+      campaignAuth.assertCampaignMember.mockResolvedValue(campaignWithMember);
+      prisma.character.findUnique.mockResolvedValue({
+        id: CHARACTER_ID,
+        userId: USER_ID_2,
+        campaignId: 'other-campaign',
+      });
+      prisma.campaign.findUnique.mockResolvedValue(mockCampaign); // final findOne
+      prisma.character.update.mockResolvedValue({ id: CHARACTER_ID, campaignId: CAMPAIGN_ID });
+
+      await service.addCharacter(CAMPAIGN_ID, CHARACTER_ID, USER_ID_2);
+
+      expect(prisma.character.update).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        data: { campaignId: CAMPAIGN_ID },
+      });
     });
   });
 

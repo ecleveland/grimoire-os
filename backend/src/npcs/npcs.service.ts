@@ -158,8 +158,8 @@ export class NpcsService {
       where: { id: dto.toNpcId },
       select: { id: true, campaignId: true },
     });
-    // 404 rather than 403, so the response does not confirm that an NPC with
-    // this id exists in another campaign.
+    // 404 rather than 403, matching removeRelation, which treats a relation
+    // that is not this NPC's as not found.
     if (!target || target.campaignId !== npc.campaignId) {
       throw new NotFoundException(`Npc "${dto.toNpcId}" not found`);
     }
