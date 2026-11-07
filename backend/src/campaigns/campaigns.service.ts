@@ -356,16 +356,17 @@ export class CampaignsService {
     const campaign = await this.campaignAuth.assertCampaignMember(campaignId, userId);
     const character = await this.prisma.character.findUnique({
       where: { id: characterId },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, campaignId: true },
     });
     if (!character) {
       throw new NotFoundException(`Character "${characterId}" not found`);
     }
     // A plain member may only attach their own character. The campaign owner
-    // (DM) may attach any member's character — but not an outsider's: the
+    // (DM) may attach any member's character, but not an outsider's: the
     // character's owner must belong to the campaign, otherwise a DM could
-    // conscript a stranger's character by ID and yank it out of its real
-    // campaign (VEG-317).
+    // conscript a stranger's character by ID. A character already in another
+    // campaign moves only at its owner's request, so one DM cannot pull a
+    // shared member's character out of another DM's campaign.
     const isOwner = campaign.ownerId === userId;
     if (!isOwner && character.userId !== userId) {
       throw new ForbiddenException('You can only add your own characters to a campaign');
@@ -376,6 +377,15 @@ export class CampaignsService {
     if (!characterOwnerIsMember) {
       throw new ForbiddenException("You can only add a campaign member's character");
     }
+    if (
+      character.campaignId &&
+      character.campaignId !== campaignId &&
+      character.userId !== userId
+    ) {
+      throw new ForbiddenException(
+        "Only the character's owner can move it out of another campaign"
+      );
+    }
     await this.prisma.character.update({
       where: { id: characterId },
       data: { campaignId },
@@ -385,10 +395,15 @@ export class CampaignsService {
 
   async removeCharacter(campaignId: string, characterId: string, userId: string) {
     await this.campaignAuth.assertCampaignOwner(campaignId, userId);
-    await this.prisma.character.update({
-      where: { id: characterId },
+    // The character's own campaign must be the one in the URL, so an owner
+    // cannot detach a character from someone else's campaign by id.
+    const { count } = await this.prisma.character.updateMany({
+      where: { id: characterId, campaignId },
       data: { campaignId: null },
     });
+    if (count === 0) {
+      throw new NotFoundException(`Character "${characterId}" is not in this campaign`);
+    }
     return this.findOne(campaignId);
   }
 
