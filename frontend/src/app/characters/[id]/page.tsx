@@ -2,18 +2,16 @@
 
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useAuth } from '@/lib/auth-context';
 import { useApiQuery } from '@/lib/query';
-import type { Character } from '@/lib/types';
+import type { CharacterDetail } from '@/lib/types';
 import CharacterSheet from './_components/CharacterSheet';
 import { takeCopiedFrom } from './_components/copied-from';
 
 export default function CharacterSheetPage() {
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
   // Read once on mount: taking the note removes it, so a reload shows no note.
   const [copiedFrom] = useState(() => takeCopiedFrom(id));
-  const characterQuery = useApiQuery<Character>(`/characters/${id}`, {
+  const characterQuery = useApiQuery<CharacterDetail>(`/characters/${id}`, {
     errorToast: 'Failed to load character',
   });
   const character = characterQuery.data;
@@ -23,7 +21,8 @@ export default function CharacterSheetPage() {
   if (!character)
     return <div className="text-gray-500 dark:text-gray-400">Character not found.</div>;
 
-  const isOwner = !!(user && character.userId === user.userId);
+  // The server decides: false when a campaign DM reads a player's sheet.
+  const isOwner = character.isOwner;
 
   return (
     <>
@@ -35,6 +34,15 @@ export default function CharacterSheetPage() {
         >
           Copied from {copiedFrom.name} at level {copiedFrom.level}.
         </p>
+      )}
+      {!isOwner && (
+        <div
+          role="status"
+          data-testid="owner-banner"
+          className="max-w-5xl mx-auto mb-6 rounded-lg border border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-900/20 px-4 py-3 text-sm text-gray-900 dark:text-gray-100"
+        >
+          {character.ownerName}&rsquo;s character. Read only.
+        </div>
       )}
       <CharacterSheet character={character} isOwner={isOwner} />
     </>

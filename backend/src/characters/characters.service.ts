@@ -29,7 +29,11 @@ import { buildPaginatedResponse } from '../common/helpers/paginate';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
-import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
+import {
+  CharacterDetailDto,
+  CharacterDto,
+  CharacterListItemDto,
+} from './dto/character-response.dto';
 import { toDto, toDtoArray } from '../common/serialization/to-dto';
 import {
   computeCharacterStats,
@@ -147,6 +151,39 @@ export class CharactersService {
       throw new ForbiddenException('You do not own this character');
     }
     return character;
+  }
+
+  // Read access to one character. Its owner reads it, and so does the owner of
+  // the campaign it is attached to right now. A character in no campaign has no
+  // DM, so detaching it ends the DM's access on the next request. Writes do not
+  // use this guard; they stay owner only through assertOwnership.
+  async assertOwnerOrCampaignDm(id: string, userId: string): Promise<'owner' | 'campaign_dm'> {
+    const character = await this.prisma.character.findUnique({
+      where: { id },
+      select: { userId: true, campaignId: true },
+    });
+    if (!character) {
+      throw new NotFoundException(`Character "${id}" not found`);
+    }
+    return this.readerRole(character, userId);
+  }
+
+  // Everyone refused gets the same 403, so the message does not reveal whether
+  // the character sits in a campaign.
+  private async readerRole(
+    character: { userId: string; campaignId: string | null },
+    userId: string
+  ): Promise<'owner' | 'campaign_dm'> {
+    if (character.userId === userId) {
+      return 'owner';
+    }
+    if (character.campaignId) {
+      const campaign = await this.campaignAuth.findCampaignForAuth(character.campaignId);
+      if (campaign.ownerId === userId) {
+        return 'campaign_dm';
+      }
+    }
+    throw new ForbiddenException('You do not own this character');
   }
 
   // Spell-slot maxima need a class's progression table and weapon proficiency
@@ -475,20 +512,22 @@ export class CharactersService {
     return buildPaginatedResponse(toDtoArray(CharacterListItemDto, rows), total, page, limit);
   }
 
-  async findOne(id: string) {
-    const character = await this.prisma.character.findUnique({ where: { id } });
+  async findOneForUser(id: string, userId: string): Promise<CharacterDetailDto> {
+    const character = await this.prisma.character.findUnique({
+      where: { id },
+      include: { user: { select: { displayName: true } } },
+    });
     if (!character) {
       throw new NotFoundException(`Character "${id}" not found`);
     }
-    return this.toCharacterDto(character);
-  }
-
-  async findOneForUser(id: string, userId: string) {
-    const character = await this.findOne(id);
-    if (character.userId !== userId) {
-      throw new ForbiddenException('You do not own this character');
-    }
-    return character;
+    const role = await this.readerRole(character, userId);
+    const { user, ...row } = character;
+    const dto = await this.toCharacterDto(row);
+    return toDto(CharacterDetailDto, {
+      ...dto,
+      isOwner: role === 'owner',
+      ownerName: user.displayName,
+    });
   }
 
   async update(id: string, userId: string, dto: UpdateCharacterDto) {

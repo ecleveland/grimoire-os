@@ -12,13 +12,14 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOkResponse, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedRequest } from '../auth/interfaces/jwt-payload.interface';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { CharactersService } from './characters.service';
 import { CreateCharacterDto } from './dto/create-character.dto';
 import { UpdateCharacterDto } from './dto/update-character.dto';
+import { CharacterDetailDto } from './dto/character-response.dto';
 
 @ApiTags('Characters')
 @ApiBearerAuth()
@@ -42,6 +43,8 @@ export class CharactersController {
 
   @Get(':id')
   @ApiOperation({ summary: 'Get character by ID' })
+  @ApiOkResponse({ type: CharacterDetailDto })
+  @ApiResponse({ status: 403, description: "Not the owner or the DM of the character's campaign" })
   findOne(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
     return this.charactersService.findOneForUser(id, req.user.userId);
   }

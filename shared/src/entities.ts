@@ -158,6 +158,14 @@ export interface Character {
   updatedAt: string;
 }
 
+/** The detail read of one character: the sheet plus who is looking at it. */
+export interface CharacterDetail extends Character {
+  /** False when a campaign DM reads a player's sheet. */
+  isOwner: boolean;
+  /** The owner's display name, for the read-only banner. */
+  ownerName: string;
+}
+
 // ── List projections ─────────────────────────────────
 // Slim shapes returned by list endpoints (GET collections). Detail endpoints
 // return the full entity above. See VEG-125.
