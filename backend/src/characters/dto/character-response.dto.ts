@@ -99,6 +99,16 @@ export class CharacterDto {
 }
 
 /**
+ * The detail read's payload, returned only by `GET /characters/:id`. `isOwner`
+ * is false when a campaign DM reads a player's sheet. `ownerName` is the
+ * owner's display name for the read-only banner.
+ */
+export class CharacterDetailDto extends CharacterDto {
+  @Expose() isOwner!: boolean;
+  @Expose() ownerName!: string;
+}
+
+/**
  * Slim character shape for list views (VEG-125 projection, VEG-128 DTO). `class`
  * is the first class's name.
  */

@@ -3,19 +3,15 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import CharacterSheetPage from '../page';
-import type { Character } from '@/lib/types';
+import type { Character, CharacterDetail } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
-const mockUseAuth = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
 }));
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'char-1' }),
-}));
-vi.mock('@/lib/auth-context', () => ({
-  useAuth: () => mockUseAuth(),
 }));
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -42,12 +38,16 @@ function renderPage(client: QueryClient = makeTestClient()) {
   return render(<CharacterSheetPage />, { wrapper });
 }
 
-const character = { id: 'char-1', userId: 'user-1', name: 'Thorin' } as Character;
+const character = {
+  id: 'char-1',
+  userId: 'user-1',
+  name: 'Thorin',
+  isOwner: true,
+  ownerName: 'Eric',
+} as CharacterDetail;
 
 beforeEach(() => {
   mockApiFetch.mockReset();
-  mockUseAuth.mockReset();
-  mockUseAuth.mockReturnValue({ user: { userId: 'user-1' } });
   sessionStorage.clear();
 });
 
@@ -66,20 +66,23 @@ describe('CharacterSheetPage', () => {
     expect(screen.getByText('Thorin')).toBeInTheDocument();
   });
 
-  it('marks the viewer as owner when the character belongs to them', async () => {
+  it('passes the server owner flag to the sheet and shows no banner for the owner', async () => {
     mockApiFetch.mockResolvedValue(character);
     renderPage();
     await waitFor(() =>
       expect(screen.getByTestId('character-sheet')).toHaveAttribute('data-owner', 'true')
     );
+    expect(screen.queryByTestId('owner-banner')).toBeNull();
   });
 
-  it('marks the viewer as non-owner for someone else’s character', async () => {
-    mockUseAuth.mockReturnValue({ user: { userId: 'someone-else' } });
-    mockApiFetch.mockResolvedValue(character);
+  it('shows a read-only banner naming the owner when the viewer is not the owner', async () => {
+    mockApiFetch.mockResolvedValue({ ...character, isOwner: false, ownerName: 'Thorn Player' });
     renderPage();
     await waitFor(() =>
       expect(screen.getByTestId('character-sheet')).toHaveAttribute('data-owner', 'false')
+    );
+    expect(screen.getByTestId('owner-banner')).toHaveTextContent(
+      /Thorn Player.s character\. Read only\./
     );
   });
 

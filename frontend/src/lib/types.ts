@@ -99,6 +99,7 @@ export type {
   User,
   Campaign,
   Character,
+  CharacterDetail,
   CharacterSnapshot,
   CharacterSnapshotSummary,
   Note,

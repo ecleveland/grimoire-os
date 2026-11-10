@@ -22,10 +22,15 @@ import {
   USER_ID,
   USER_ID_2,
   CHARACTER_ID,
+  CAMPAIGN_ID,
   mockCharacter,
   createCharacterDto,
 } from '../test/fixtures';
-import { CharacterDto, CharacterListItemDto } from './dto/character-response.dto';
+import {
+  CharacterDetailDto,
+  CharacterDto,
+  CharacterListItemDto,
+} from './dto/character-response.dto';
 
 // VEG-505: loadClassData resolves the class against the character owner's
 // visible content (srd + shared + their own homebrew), not by bare name.
@@ -113,12 +118,12 @@ const classIdOrNameWhere = (classId: string, name: string) => ({
 describe('CharactersService', () => {
   let service: CharactersService;
   let prisma: MockPrismaService;
-  let campaignAuth: { assertCampaignMember: jest.Mock };
+  let campaignAuth: { assertCampaignMember: jest.Mock; findCampaignForAuth: jest.Mock };
   let inventoryResolver: { resolveInventory: jest.Mock };
 
   beforeEach(async () => {
     prisma = createMockPrismaService();
-    campaignAuth = { assertCampaignMember: jest.fn() };
+    campaignAuth = { assertCampaignMember: jest.fn(), findCampaignForAuth: jest.fn() };
     // Default: pass inventory through untouched, so tests that don't care
     // about resolution assert the same payloads they always have.
     inventoryResolver = { resolveInventory: jest.fn(inv => Promise.resolve(inv)) };
@@ -852,22 +857,30 @@ describe('CharactersService', () => {
     });
   });
 
-  describe('findOne', () => {
-    it('should return character when found', async () => {
-      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+  describe('findOneForUser as the owner', () => {
+    // The detail read's row carries the owner's name from its include.
+    const mockStoredRow = (row: object) =>
+      prisma.character.findUnique.mockResolvedValue({
+        ...row,
+        user: { displayName: 'Test User' },
+      });
 
-      const result = await service.findOne(CHARACTER_ID);
+    it('should return character when found', async () => {
+      mockStoredRow(mockCharacter);
+
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(prisma.character.findUnique).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID },
+        include: { user: { select: { displayName: true } } },
       });
       expect(result).toMatchObject(mockCharacter);
     });
 
     it('attaches the computed-stats block derived from the stored inputs', async () => {
-      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+      mockStoredRow(mockCharacter);
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       // mockCharacter is a level-5 Fighter (non-caster): STR 16, DEX 12, CON 14,
       // WIS 13; proficient in Strength/Constitution saves and Athletics.
@@ -901,7 +914,7 @@ describe('CharactersService', () => {
     });
 
     it('derives spell DC/attack and slot maxima from the class spellcasting data', async () => {
-      prisma.character.findUnique.mockResolvedValue({
+      mockStoredRow({
         ...mockCharacter,
         ...withClass('Wizard'),
         spellcastingAbility: 'Intelligence',
@@ -921,7 +934,7 @@ describe('CharactersService', () => {
         },
       ]);
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: classWhere('Wizard'),
@@ -945,7 +958,7 @@ describe('CharactersService', () => {
         (service as unknown as { logger: { warn: jest.Mock } }).logger,
         'warn'
       );
-      prisma.character.findUnique.mockResolvedValue({
+      mockStoredRow({
         ...mockCharacter,
         ...withClass('Homebrew Warlock'),
         spellcastingAbility: 'Charisma',
@@ -954,7 +967,7 @@ describe('CharactersService', () => {
       // Class not present in the catalog.
       prisma.srdClass.findMany.mockResolvedValue([]);
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       // CHA 16 → mod 3, prof 3: DC = 14, attack = 6 — derived from the column.
       expect(result.computed.spellcasting).toEqual({
@@ -988,7 +1001,7 @@ describe('CharactersService', () => {
     };
 
     it('resolves weapon proficiency from the class weapon-proficiency grants (VEG-463)', async () => {
-      prisma.character.findUnique.mockResolvedValue({
+      mockStoredRow({
         ...mockCharacter,
         // Nothing on the character row itself — the class grant must cover it.
         proficiencies: [],
@@ -1003,7 +1016,7 @@ describe('CharactersService', () => {
         },
       ]);
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       // STR 16 → +3, prof +3 granted by the class list.
       expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
@@ -1018,12 +1031,12 @@ describe('CharactersService', () => {
     // by bare name would let another user's homebrew drive this character's
     // spell slots and weapon proficiencies.
     it("resolves the class against the character owner's visible content only (VEG-505)", async () => {
-      prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, ...withClass('Fighter') });
+      mockStoredRow({ ...mockCharacter, ...withClass('Fighter') });
       prisma.srdClass.findMany.mockResolvedValue([
         { id: SRD_FIGHTER_ID, name: 'Fighter', spellcasting: null, weaponProficiencies: [] },
       ]);
 
-      await service.findOne(CHARACTER_ID);
+      await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
         where: {
@@ -1064,7 +1077,7 @@ describe('CharactersService', () => {
       // Longswords are martial: a proficient row reads +6 (STR +3, prof +3),
       // a non-proficient one +3. So the attack bonus names which row won.
       async function attackBonusFrom(candidates: unknown[]) {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('Fighter'),
           proficiencies: [],
@@ -1072,7 +1085,7 @@ describe('CharactersService', () => {
         });
         // No stored id in this block, so only the name query runs.
         prisma.srdClass.findMany.mockResolvedValue(candidates);
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
         return result.computed.weapons[0].attackBonus;
       }
 
@@ -1131,13 +1144,13 @@ describe('CharactersService', () => {
         };
         const collidingCaster = { ...caster, id: 'cls-hb' };
         async function spellSlotsFrom(candidates: unknown[]) {
-          prisma.character.findUnique.mockResolvedValue({
+          mockStoredRow({
             ...mockCharacter,
             ...withClass('Wizard', null),
             spellcastingAbility: 'Intelligence',
           });
           prisma.srdClass.findMany.mockResolvedValue(candidates);
-          return (await service.findOne(CHARACTER_ID)).computed.spellSlots;
+          return (await service.findOneForUser(CHARACTER_ID, USER_ID)).computed.spellSlots;
         }
 
         // Asserted against its own contrast: one row grants a full caster's
@@ -1168,7 +1181,7 @@ describe('CharactersService', () => {
     // weapon grants from here — the same sheet, disagreeing with itself.
     describe('matching the class name case-insensitively (VEG-528)', () => {
       it('resolves a free-typed lowercase name against the catalog row', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('fighter', null),
           proficiencies: [],
@@ -1183,18 +1196,18 @@ describe('CharactersService', () => {
           },
         ]);
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(result.computed.weapons[0].attackBonus).toBe('+6');
       });
 
       it('asks Postgres for the insensitive comparison rather than folding in code', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('fighter', null),
         });
 
-        await service.findOne(CHARACTER_ID);
+        await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.where).toEqual(classWhere('fighter'));
@@ -1210,24 +1223,24 @@ describe('CharactersService', () => {
       // exists to delete, reintroduced by its own fix. Worse on the write path,
       // where deriveClassId would persist the matched id permanently.
       it('escapes LIKE metacharacters so a name is matched literally', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('Fighte_', null),
         });
 
-        await service.findOne(CHARACTER_ID);
+        await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.where).toEqual(classWhere('Fighte_'));
       });
 
       it('escapes the percent wildcard too', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('%', null),
         });
 
-        await service.findOne(CHARACTER_ID);
+        await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.where).toEqual(classWhere('%'));
@@ -1237,12 +1250,12 @@ describe('CharactersService', () => {
       // LIKE escape, which Postgres 16 silently fails to match, so the class
       // would never resolve.
       it('escapes a trailing backslash so the name can still match', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('Fighter\\', null),
         });
 
-        await service.findOne(CHARACTER_ID);
+        await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         const [args] = prisma.srdClass.findMany.mock.calls[0];
         expect(args.where).toEqual(classWhere('Fighter\\'));
@@ -1252,7 +1265,7 @@ describe('CharactersService', () => {
       // case-folded equality, so a pattern that matched extra rows still resolves
       // to nothing rather than to whichever row it happened to catch.
       it('refuses a wildcard name even when the query returns rows', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('Fighte_', null),
           proficiencies: [],
@@ -1267,7 +1280,7 @@ describe('CharactersService', () => {
           },
         ]);
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(result.computed.weapons[0].attackBonus).toBe('+3');
       });
@@ -1277,7 +1290,7 @@ describe('CharactersService', () => {
       // can both be legitimate rows. Matching both and then picking one would
       // re-create the arbitrary choice this ticket exists to delete.
       it('treats case-variant duplicates as ambiguous, not as a wider net', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('Fighter', null),
           proficiencies: [],
@@ -1293,7 +1306,7 @@ describe('CharactersService', () => {
           { id: 'cls-hb', name: 'fighter', spellcasting: null, weaponProficiencies: [] },
         ]);
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(result.computed.weapons[0].attackBonus).toBe('+3');
       });
@@ -1320,7 +1333,7 @@ describe('CharactersService', () => {
       // proficient row reads +6 (STR +3, prof +3) and a non-proficient one +3.
       // The attack bonus names which row won.
       async function attackBonusFor(classId: string | null, candidates: unknown[]) {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           ...withClass('Fighter', classId),
           proficiencies: [],
@@ -1332,7 +1345,7 @@ describe('CharactersService', () => {
         const byId = classId ? (candidates as { id: string }[]).find(c => c.id === classId) : null;
         prisma.srdClass.findFirst.mockResolvedValue(byId ?? null);
         prisma.srdClass.findMany.mockResolvedValue(candidates);
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
         return result.computed.weapons[0].attackBonus;
       }
 
@@ -1450,7 +1463,7 @@ describe('CharactersService', () => {
     });
 
     it('derives a non-proficient row when neither class nor character covers the weapon (VEG-463)', async () => {
-      prisma.character.findUnique.mockResolvedValue({
+      mockStoredRow({
         ...mockCharacter,
         ...withClass('Homebrew Warlock'),
         proficiencies: [],
@@ -1459,7 +1472,7 @@ describe('CharactersService', () => {
       // Class not present in the catalog → no class grants.
       prisma.srdClass.findMany.mockResolvedValue([]);
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(result.computed.weapons[0]).toMatchObject({
         attackBonus: '+3',
@@ -1468,7 +1481,7 @@ describe('CharactersService', () => {
     });
 
     it("resolves weapon proficiency from the character's own proficiencies column (VEG-463)", async () => {
-      prisma.character.findUnique.mockResolvedValue({
+      mockStoredRow({
         ...mockCharacter,
         ...withClass('Homebrew Warlock'),
         proficiencies: ['Longswords'],
@@ -1476,7 +1489,7 @@ describe('CharactersService', () => {
       });
       prisma.srdClass.findMany.mockResolvedValue([]);
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(result.computed.weapons[0]).toMatchObject({ attackBonus: '+6' });
     });
@@ -1486,12 +1499,12 @@ describe('CharactersService', () => {
         (service as unknown as { logger: { warn: jest.Mock } }).logger,
         'warn'
       );
-      prisma.character.findUnique.mockResolvedValue({
+      mockStoredRow({
         ...mockCharacter,
         spellcastingAbility: 'Inteligence', // typo
       });
 
-      const result = await service.findOne(CHARACTER_ID);
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('unrecognized spellcastingAbility "Inteligence"')
@@ -1515,7 +1528,7 @@ describe('CharactersService', () => {
       };
 
       it('projects the first entry onto the deprecated scalar fields', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           classes: [
             entry({ classId: 'cls-1', level: 3, subclass: 'Champion', subclassId: 'sub-1' }),
@@ -1523,7 +1536,7 @@ describe('CharactersService', () => {
           ],
         });
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(result).toMatchObject({
           class: 'Fighter',
@@ -1535,9 +1548,9 @@ describe('CharactersService', () => {
       });
 
       it('projects nulls for a character with no classes', async () => {
-        prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, classes: [] });
+        mockStoredRow({ ...mockCharacter, classes: [] });
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(result).toMatchObject({
           classes: [],
@@ -1551,7 +1564,7 @@ describe('CharactersService', () => {
       });
 
       it('resolves every entry and unions their weapon proficiencies', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           classes: [entry({ level: 3 }), entry({ name: 'Wizard', level: 2 })],
           proficiencies: [],
@@ -1576,7 +1589,7 @@ describe('CharactersService', () => {
           WIZARD_CASTER,
         ]);
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(prisma.srdClass.findMany).toHaveBeenCalledWith({
           where: classWhere('Fighter'),
@@ -1591,14 +1604,14 @@ describe('CharactersService', () => {
       });
 
       it('reads spell slots at the caster class level, not the character level', async () => {
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           classes: [entry({ level: 3 }), entry({ name: 'Wizard', level: 2 })],
           spellcastingAbility: 'Intelligence',
         });
         prisma.srdClass.findMany.mockResolvedValue([FIGHTER_ROW, WIZARD_CASTER]);
 
-        const result = await service.findOne(CHARACTER_ID);
+        const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(result.computed.spellSlots).toEqual({ caster: 'full', maxByLevel: { 1: 3 } });
         expect(result.computed.spellcasting?.ability).toBe('Intelligence');
@@ -1609,7 +1622,7 @@ describe('CharactersService', () => {
           (service as unknown as { logger: { warn: jest.Mock } }).logger,
           'warn'
         );
-        prisma.character.findUnique.mockResolvedValue({
+        mockStoredRow({
           ...mockCharacter,
           classes: [
             entry({ name: 'Bloodbinder', level: 3 }),
@@ -1618,7 +1631,7 @@ describe('CharactersService', () => {
         });
         prisma.srdClass.findMany.mockResolvedValue([]);
 
-        await service.findOne(CHARACTER_ID);
+        await service.findOneForUser(CHARACTER_ID, USER_ID);
 
         expect(warn).toHaveBeenCalledTimes(2);
         expect(warn).toHaveBeenCalledWith(expect.stringContaining('class "Bloodbinder" not found'));
@@ -1631,24 +1644,151 @@ describe('CharactersService', () => {
     it('should throw NotFoundException when character not found', async () => {
       prisma.character.findUnique.mockResolvedValue(null);
 
-      await expect(service.findOne(CHARACTER_ID)).rejects.toThrow(NotFoundException);
+      await expect(service.findOneForUser(CHARACTER_ID, USER_ID)).rejects.toThrow(
+        NotFoundException
+      );
     });
   });
 
   describe('findOneForUser', () => {
-    it('should return character when user is owner', async () => {
-      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+    const OTHER_CAMPAIGN_ID = 'e5f6a7b8-c9d0-1234-efab-345678901234';
+    // The stored row with the owner's name, as the detail read's include returns it.
+    const storedRow = (over: Record<string, unknown> = {}) =>
+      prisma.character.findUnique.mockResolvedValue({
+        ...mockCharacter,
+        user: { displayName: 'Thorn Player' },
+        ...over,
+      });
+    const campaignOwnedBy = (ownerId: string, players: { userId: string }[] = []) =>
+      campaignAuth.findCampaignForAuth.mockResolvedValue({ id: CAMPAIGN_ID, ownerId, players });
+
+    it('returns the sheet to its owner from one read without consulting the campaign', async () => {
+      storedRow();
 
       const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
 
       expect(result).toMatchObject(mockCharacter);
+      expect(result.isOwner).toBe(true);
+      expect(result.ownerName).toBe('Thorn Player');
+      expect(prisma.character.findUnique).toHaveBeenCalledTimes(1);
+      expect(campaignAuth.findCampaignForAuth).not.toHaveBeenCalled();
     });
 
-    it('should throw ForbiddenException when user does not own character', async () => {
-      prisma.character.findUnique.mockResolvedValue(mockCharacter);
+    it("returns a player's sheet read only to the owner of its campaign from one read", async () => {
+      storedRow({ campaignId: CAMPAIGN_ID });
+      campaignOwnedBy(USER_ID_2);
+
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID_2);
+
+      expect(result.isOwner).toBe(false);
+      expect(result.ownerName).toBe('Thorn Player');
+      expect(prisma.character.findUnique).toHaveBeenCalledTimes(1);
+      expect(campaignAuth.findCampaignForAuth).toHaveBeenCalledWith(CAMPAIGN_ID);
+    });
+
+    it('refuses a campaign member who does not own the campaign', async () => {
+      storedRow({ campaignId: CAMPAIGN_ID });
+      campaignOwnedBy('c3d4e5f6-a7b8-9012-cdef-123456789012', [{ userId: USER_ID_2 }]);
+
+      await expect(service.findOneForUser(CHARACTER_ID, USER_ID_2)).rejects.toThrow(
+        new ForbiddenException('You do not own this character')
+      );
+    });
+
+    it('refuses the owner of another campaign', async () => {
+      storedRow({ campaignId: CAMPAIGN_ID });
+      // USER_ID_2 owns OTHER_CAMPAIGN_ID, not the campaign the character is in.
+      campaignAuth.findCampaignForAuth.mockImplementation((campaignId: string) =>
+        Promise.resolve({
+          id: campaignId,
+          ownerId: campaignId === OTHER_CAMPAIGN_ID ? USER_ID_2 : USER_ID,
+          players: [],
+        })
+      );
 
       await expect(service.findOneForUser(CHARACTER_ID, USER_ID_2)).rejects.toThrow(
         ForbiddenException
+      );
+      expect(campaignAuth.findCampaignForAuth).toHaveBeenCalledWith(CAMPAIGN_ID);
+      expect(campaignAuth.findCampaignForAuth).not.toHaveBeenCalledWith(OTHER_CAMPAIGN_ID);
+    });
+
+    it('refuses a stranger to an attached character with the same message as an unattached one', async () => {
+      storedRow({ campaignId: CAMPAIGN_ID });
+      campaignOwnedBy(USER_ID);
+
+      await expect(service.findOneForUser(CHARACTER_ID, USER_ID_2)).rejects.toThrow(
+        new ForbiddenException('You do not own this character')
+      );
+    });
+
+    it('refuses the former DM once the character is detached', async () => {
+      storedRow({ campaignId: null });
+
+      await expect(service.findOneForUser(CHARACTER_ID, USER_ID_2)).rejects.toThrow(
+        new ForbiddenException('You do not own this character')
+      );
+      expect(campaignAuth.findCampaignForAuth).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException for an unknown character', async () => {
+      prisma.character.findUnique.mockResolvedValue(null);
+
+      await expect(service.findOneForUser(CHARACTER_ID, USER_ID)).rejects.toThrow(
+        NotFoundException
+      );
+    });
+
+    it('returns a CharacterDetailDto that still carries the computed block', async () => {
+      storedRow();
+
+      const result = await service.findOneForUser(CHARACTER_ID, USER_ID);
+
+      expect(result).toBeInstanceOf(CharacterDetailDto);
+      expect(result.computed).toBeDefined();
+      expect(result.computed.proficiencyBonus).toEqual(expect.any(Number));
+      // The owner relation feeds ownerName and is not exposed itself.
+      expect(result).not.toHaveProperty('user');
+    });
+  });
+
+  describe('assertOwnerOrCampaignDm', () => {
+    it('reads only the owner and campaign columns', async () => {
+      prisma.character.findUnique.mockResolvedValue({ userId: USER_ID, campaignId: null });
+
+      await expect(service.assertOwnerOrCampaignDm(CHARACTER_ID, USER_ID)).resolves.toBe('owner');
+      expect(prisma.character.findUnique).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID },
+        select: { userId: true, campaignId: true },
+      });
+    });
+
+    it("names the campaign owner as the character's DM", async () => {
+      prisma.character.findUnique.mockResolvedValue({ userId: USER_ID, campaignId: CAMPAIGN_ID });
+      campaignAuth.findCampaignForAuth.mockResolvedValue({
+        id: CAMPAIGN_ID,
+        ownerId: USER_ID_2,
+        players: [],
+      });
+
+      await expect(service.assertOwnerOrCampaignDm(CHARACTER_ID, USER_ID_2)).resolves.toBe(
+        'campaign_dm'
+      );
+    });
+
+    it('refuses anyone else', async () => {
+      prisma.character.findUnique.mockResolvedValue({ userId: USER_ID, campaignId: null });
+
+      await expect(service.assertOwnerOrCampaignDm(CHARACTER_ID, USER_ID_2)).rejects.toThrow(
+        new ForbiddenException('You do not own this character')
+      );
+    });
+
+    it('throws NotFoundException for an unknown character', async () => {
+      prisma.character.findUnique.mockResolvedValue(null);
+
+      await expect(service.assertOwnerOrCampaignDm(CHARACTER_ID, USER_ID)).rejects.toThrow(
+        NotFoundException
       );
     });
   });
@@ -2103,6 +2243,21 @@ describe('CharactersService', () => {
       );
     });
 
+    it("refuses the campaign DM's write to a player's character", async () => {
+      prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, campaignId: CAMPAIGN_ID });
+      campaignAuth.findCampaignForAuth.mockResolvedValue({
+        id: CAMPAIGN_ID,
+        ownerId: USER_ID_2,
+        players: [],
+      });
+
+      await expect(service.update(CHARACTER_ID, USER_ID_2, { name: 'Renamed' })).rejects.toThrow(
+        ForbiddenException
+      );
+      expect(campaignAuth.findCampaignForAuth).not.toHaveBeenCalled();
+      expect(prisma.character.update).not.toHaveBeenCalled();
+    });
+
     it('should throw NotFoundException when character does not exist', async () => {
       prisma.character.findUnique.mockResolvedValue(null);
 
@@ -2385,6 +2540,19 @@ describe('CharactersService', () => {
       prisma.character.findUnique.mockResolvedValue(mockCharacter);
 
       await expect(service.remove(CHARACTER_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
+    });
+
+    it("refuses the campaign DM's delete of a player's character", async () => {
+      prisma.character.findUnique.mockResolvedValue({ ...mockCharacter, campaignId: CAMPAIGN_ID });
+      campaignAuth.findCampaignForAuth.mockResolvedValue({
+        id: CAMPAIGN_ID,
+        ownerId: USER_ID_2,
+        players: [],
+      });
+
+      await expect(service.remove(CHARACTER_ID, USER_ID_2)).rejects.toThrow(ForbiddenException);
+      expect(campaignAuth.findCampaignForAuth).not.toHaveBeenCalled();
+      expect(prisma.character.delete).not.toHaveBeenCalled();
     });
 
     it('should throw NotFoundException when character does not exist', async () => {
