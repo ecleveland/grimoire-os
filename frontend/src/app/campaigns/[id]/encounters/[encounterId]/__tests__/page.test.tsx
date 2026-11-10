@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithQueryClient } from '@/test-utils/query';
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
@@ -598,6 +598,54 @@ describe('InitiativeTrackerPage', () => {
         expect(gets).toHaveLength(2);
       });
       expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('live indicator (VEG-683)', () => {
+    const asMember = () =>
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'member-9', username: 'p', role: 'player' },
+        isDm: false,
+      });
+
+    it('shows the live indicator with the last refresh time for a member during active combat', async () => {
+      asMember();
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      renderWithQueryClient(<InitiativeTrackerPage />);
+
+      const indicator = await screen.findByTestId('live-indicator');
+      expect(indicator).toHaveTextContent(/live/i);
+      expect(indicator).toHaveTextContent(/updated \d/);
+    });
+
+    it('hides the live indicator for the DM and when combat is inactive', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      const dmView = renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
+      dmView.unmount();
+
+      asMember();
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: false }));
+      renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByRole('heading', { name: /goblin ambush/i });
+      expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
+    });
+
+    it('dims the indicator and keeps the last state when a refresh fails', async () => {
+      asMember();
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValueOnce(new Error('boom'));
+      const { client } = renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByTestId('live-indicator');
+
+      await act(() => client.invalidateQueries());
+
+      await waitFor(() => expect(screen.getByTestId('live-indicator')).toHaveClass('opacity-60'));
+      expect(screen.getByTestId('live-indicator')).toHaveTextContent(/last update/i);
+      expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument();
+      expect(mockToastError).not.toHaveBeenCalled();
     });
   });
 });
