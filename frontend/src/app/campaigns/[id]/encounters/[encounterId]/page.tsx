@@ -15,18 +15,29 @@ import Modal from '@/components/Modal';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import { sortByInitiative } from './_hooks/encounter-rows';
-import { useEncounter } from './_hooks/useEncounter';
+import { isController as canControl, useEncounter } from './_hooks/useEncounter';
 import { useEncounterActions } from './_hooks/useEncounterActions';
 import { useMonsterViewer } from './_hooks/useMonsterViewer';
 import AddCombatantControls from './_components/AddCombatantControls';
 import CombatantCard from './_components/CombatantCard';
 import EncounterLootPanel from './_components/EncounterLootPanel';
+import LiveIndicator from './_components/LiveIndicator';
 import MonsterSidePanel from './_components/MonsterSidePanel';
 
 export default function InitiativeTrackerPage() {
   const { id: campaignId, encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
-  const { encounter, isLoading, writePending, patch, rollLoot } = useEncounter(encounterId);
+  const encounterViewer = { userId: user?.userId ?? null, isDm };
+  const {
+    encounter,
+    isLoading,
+    writePending,
+    patch,
+    rollLoot,
+    isLive,
+    lastUpdatedAt,
+    refreshFailed,
+  } = useEncounter(encounterId, encounterViewer);
   // Auto-roll loot when a monster combatant drops to 0 HP (VEG-301).
   // Session-local DM preference, intentionally not persisted on the encounter.
   const [autoRollLoot, setAutoRollLoot] = useState(false);
@@ -108,7 +119,7 @@ export default function InitiativeTrackerPage() {
   // combatant's, i.e. a quick reference (resistances/immunities) that leaves
   // whose-turn-it-is untouched. The banner makes that explicit and reversible.
   const isPeeking = isWide && pinnedMonsterId !== null && pinnedMonsterId !== activeMonsterId;
-  const isController = isDm || (user && encounter.createdBy === user.userId);
+  const isController = canControl(encounter, encounterViewer);
   // Card identity follows resolveCombatantRow's rule: a unique name keys by
   // name, so the card and its open draft follow the combatant across a
   // re-sort; a duplicated name keys by row. The u: and d: prefixes keep the
@@ -131,6 +142,9 @@ export default function InitiativeTrackerPage() {
               <Badge variant={encounter.isActive ? 'success' : 'neutral'} size="md">
                 {encounter.isActive ? 'Active' : 'Inactive'}
               </Badge>
+              {isLive && (
+                <LiveIndicator lastUpdatedAt={lastUpdatedAt} refreshFailed={refreshFailed} />
+              )}
               {/* The round normally rides on the active card's inline header; with
                   no combatants there is no such card, so surface it here so the
                   round is never hidden (and never duplicated — these are mutually
@@ -177,7 +191,7 @@ export default function InitiativeTrackerPage() {
                 combatant={c}
                 rowIndex={i}
                 isCurrent={isCurrent}
-                isController={!!isController}
+                isController={isController}
                 writePending={writePending}
                 round={encounter.round}
                 turnBackDisabled={encounter.round === 1 && encounter.currentTurn === 0}
@@ -289,7 +303,7 @@ export default function InitiativeTrackerPage() {
           )}
         </Modal>
 
-        <MonsterLookupPanel canAdd={!!isController} onAdd={actions.addMonsterToEncounter} />
+        <MonsterLookupPanel canAdd={isController} onAdd={actions.addMonsterToEncounter} />
 
         <Modal
           open={viewer.isOpen}

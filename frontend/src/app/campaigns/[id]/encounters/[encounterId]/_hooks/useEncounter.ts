@@ -21,10 +21,47 @@ const normalize = (updates: Partial<Encounter>): Partial<Encounter> =>
     ? { ...updates, combatants: updates.combatants.map(clearDeathSavesIfRevived) }
     : updates;
 
+/** How often a campaign member's tracker refetches while combat is active. */
+export const LIVE_POLL_MS = 3000;
+/** How often it refetches while combat is not running. */
+export const IDLE_POLL_MS = 10_000;
+
+/** Who is looking at the tracker, which decides whether it polls. */
+export interface EncounterViewer {
+  userId: string | null;
+  isDm: boolean;
+}
+
+/**
+ * The tracker's control rule. `isDm` is the account role, not campaign
+ * ownership, which is the rule the tracker's controls have always used.
+ */
+export function isController(encounter: Encounter, viewer: EncounterViewer): boolean {
+  return viewer.isDm || (viewer.userId !== null && encounter.createdBy === viewer.userId);
+}
+
+// A controller's own writes land in the cache, so only the read-only view
+// polls. It polls while combat is idle too, because a member who opens the
+// tracker before the DM starts combat has no other way to learn it started.
+// The idle cadence is slow rather than off.
+const watchesLive = (encounter: Encounter | undefined | null, viewer: EncounterViewer) =>
+  !!encounter && !isController(encounter, viewer);
+
+const pollInterval = (encounter: Encounter | undefined, viewer: EncounterViewer) => {
+  if (!encounter || !watchesLive(encounter, viewer)) return false;
+  return encounter.isActive ? LIVE_POLL_MS : IDLE_POLL_MS;
+};
+
 export interface UseEncounterResult {
   encounter: Encounter | null;
   isLoading: boolean;
   isError: boolean;
+  /** True while the tracker polls for other people's changes. */
+  isLive: boolean;
+  /** When the shown state arrived, 0 before the first load. */
+  lastUpdatedAt: number;
+  /** A refetch failed after data was shown, so the state on screen may be old. */
+  refreshFailed: boolean;
   writePending: boolean;
   patch: (
     updates: Partial<Encounter>,
@@ -40,16 +77,27 @@ export interface UseEncounterResult {
 /**
  * The tracker's encounter read plus its two version-guarded writes. Writes put
  * the response straight into the query cache, so a write never costs a second
- * GET; a 409 refetches through the shared optimistic-patch hook.
+ * GET; a 409 refetches through the shared optimistic-patch hook. A viewer who
+ * cannot control the tracker polls it every LIVE_POLL_MS while combat is
+ * active and every IDLE_POLL_MS otherwise, so they follow the DM's turns
+ * without reloading.
  */
-export function useEncounter(encounterId: string): UseEncounterResult {
+export function useEncounter(encounterId: string, viewer: EncounterViewer): UseEncounterResult {
   const queryClient = useQueryClient();
   const path = `/encounters/${encounterId}`;
+  // In the live view a failed poll dims the indicator instead of toasting, so
+  // a dropped connection does not toast every few seconds. The cache keeps the
+  // last data through a failed refetch, so the first load still toasts. The
+  // controller has no indicator, so its failures toast as before.
+  const cached = queryClient.getQueryData<Encounter>(apiQueryKey(path));
+  const suppressToast = watchesLive(cached, viewer);
   // The tracker is a live combat document that other pages also write, so
   // every mount refetches, as the page did before it read through the cache.
   const query = useApiQuery<Encounter>(path, {
-    errorToast: 'Failed to load encounter',
+    errorToast: suppressToast ? undefined : 'Failed to load encounter',
     staleTime: 0,
+    refetchInterval: q => pollInterval(q.state.data, viewer),
+    refetchIntervalInBackground: false,
   });
   const encounter = query.data ?? null;
 
@@ -167,6 +215,10 @@ export function useEncounter(encounterId: string): UseEncounterResult {
     encounter,
     isLoading: query.isPending,
     isError: query.isError,
+    isLive: watchesLive(encounter, viewer),
+    lastUpdatedAt: query.dataUpdatedAt,
+    // failureCount covers a failure that is still retrying, before isError flips.
+    refreshFailed: encounter !== null && (query.isError || query.failureCount > 0),
     writePending: pendingWrites > 0,
     patch,
     rollLoot,
