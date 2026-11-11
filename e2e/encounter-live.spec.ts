@@ -8,6 +8,10 @@ test.describe('Encounter tracker refreshes for campaign members (VEG-683)', () =
     page,
     browser,
   }) => {
+    // The player waits out up to one idle poll before combat starts and one
+    // live poll per later step, so the default 30 s budget is too tight.
+    test.slow();
+
     // The DM creates the fixture encounter and mints an invite code.
     await registerAndLogin(page, 'livedm', 'E2E Live DM');
     const { campaignId, encounterId } = await createEncounter(page, 'Live Camp');
