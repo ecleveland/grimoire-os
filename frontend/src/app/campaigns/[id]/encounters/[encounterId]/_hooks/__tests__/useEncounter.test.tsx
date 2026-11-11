@@ -8,7 +8,7 @@ import type { Encounter } from '@/lib/types';
 import { createTestQueryClient } from '@/test-utils/query';
 import { makeQueryClient } from '@/components/QueryProvider';
 import { makeCombatant, makeEncounter } from '@/test-utils/encounter';
-import { LIVE_POLL_MS, useEncounter, type EncounterViewer } from '../useEncounter';
+import { IDLE_POLL_MS, LIVE_POLL_MS, useEncounter, type EncounterViewer } from '../useEncounter';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -258,9 +258,9 @@ describe('useEncounter', () => {
       vi.useRealTimers();
     });
 
-    const poll = () =>
+    const poll = (ms = LIVE_POLL_MS) =>
       act(async () => {
-        await vi.advanceTimersByTimeAsync(LIVE_POLL_MS);
+        await vi.advanceTimersByTimeAsync(ms);
       });
 
     async function renderLoaded(viewer: EncounterViewer) {
@@ -283,7 +283,7 @@ describe('useEncounter', () => {
       expect(callsTo(undefined)).toHaveLength(3);
     });
 
-    it('polling stops when combat ends', async () => {
+    it('polling slows to every 10 seconds when combat ends', async () => {
       mockApiFetch
         .mockResolvedValueOnce(makeEncounter({ isActive: true }))
         .mockResolvedValue(makeEncounter({ isActive: false }));
@@ -291,12 +291,13 @@ describe('useEncounter', () => {
 
       await poll();
       await waitFor(() => expect(result.current.encounter?.isActive).toBe(false));
-      expect(result.current.isLive).toBe(false);
-
-      await poll();
-      await poll();
-      await poll();
+      expect(result.current.isLive).toBe(true);
       expect(callsTo(undefined)).toHaveLength(2);
+
+      await poll(LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(2);
+      await poll(IDLE_POLL_MS - LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(3);
     });
 
     it('the DM view does not poll', async () => {
@@ -321,15 +322,21 @@ describe('useEncounter', () => {
       expect(result.current.isLive).toBe(false);
     });
 
-    it('an inactive encounter does not poll for a member', async () => {
-      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: false }));
+    it('a member polls an inactive encounter every 10 seconds and speeds up when combat starts', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: false }))
+        .mockResolvedValue(makeEncounter({ isActive: true }));
       const { result } = await renderLoaded(MEMBER);
+      expect(result.current.isLive).toBe(true);
 
-      await poll();
-      await poll();
-      await poll();
+      await poll(LIVE_POLL_MS);
       expect(callsTo(undefined)).toHaveLength(1);
-      expect(result.current.isLive).toBe(false);
+      await poll(IDLE_POLL_MS - LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(2);
+      await waitFor(() => expect(result.current.encounter?.isActive).toBe(true));
+
+      await poll(LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(3);
     });
 
     it('a failed refetch keeps the last state, dims the indicator and does not toast', async () => {

@@ -618,7 +618,7 @@ describe('InitiativeTrackerPage', () => {
       expect(indicator).toHaveTextContent(/updated \d/);
     });
 
-    it('hides the live indicator for the DM and when combat is inactive', async () => {
+    it('hides the live indicator for the DM and shows it for a member before combat starts', async () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
       const dmView = renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
@@ -629,7 +629,8 @@ describe('InitiativeTrackerPage', () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ isActive: false }));
       renderWithQueryClient(<InitiativeTrackerPage />);
       await screen.findByRole('heading', { name: /goblin ambush/i });
-      expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
+      expect(screen.getByText('Inactive')).toBeInTheDocument();
+      expect(screen.getByTestId('live-indicator')).toHaveTextContent(/live/i);
     });
 
     it('dims the indicator and keeps the last state when a refresh fails', async () => {

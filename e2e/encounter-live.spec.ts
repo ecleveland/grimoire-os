@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
 import { BACKEND, createEncounter, csrfHeaders, registerAndLogin } from './helpers';
 
-// A campaign member watching the tracker follows the DM's turns without
-// reloading, and the live indicator goes away when combat ends.
+// A campaign member watching the tracker follows the DM starting combat,
+// advancing turns and ending combat, all without reloading.
 test.describe('Encounter tracker refreshes for campaign members (VEG-683)', () => {
-  test('a member sees the DM advance the round while combat is active', async ({
+  test('a member who opens the tracker before combat follows the DM without reloading', async ({
     page,
     browser,
   }) => {
@@ -29,30 +29,35 @@ test.describe('Encounter tracker refreshes for campaign members (VEG-683)', () =
 
       const trackerUrl = `/campaigns/${campaignId}/encounters/${encounterId}`;
 
-      // The DM starts combat.
-      await page.goto(trackerUrl);
-      await page.getByRole('button', { name: /start combat/i }).click();
-      await expect(page.getByText('Active', { exact: true })).toBeVisible();
-
-      // The player opens the tracker read-only and sees it is live.
+      // The player opens the tracker before combat starts. It is read-only and
+      // already live, so it can notice the DM starting combat.
       await playerPage.goto(trackerUrl);
       await expect(playerPage.getByRole('heading', { name: /goblin ambush/i })).toBeVisible();
+      await expect(playerPage.getByText('Inactive', { exact: true })).toBeVisible();
       await expect(playerPage.getByTestId('live-indicator')).toBeVisible();
       await expect(playerPage.getByTestId('live-indicator')).toHaveText(/live/i);
       await expect(playerPage.getByRole('button', { name: /next turn/i })).toHaveCount(0);
+
+      // The DM starts combat, and the player's tracker follows with no reload.
+      await page.goto(trackerUrl);
+      await page.getByRole('button', { name: /start combat/i }).click();
+      await expect(page.getByText('Active', { exact: true })).toBeVisible();
+      await expect(playerPage.getByText('Active', { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
       await expect(playerPage.getByText(/round 1/i)).toBeVisible();
 
       // One combatant, so the next turn wraps to round 2.
       await page.getByRole('button', { name: /next turn/i }).click();
       await expect(page.getByText(/round 2/i)).toBeVisible();
-
-      // The player's tracker picks the change up with no reload.
       await expect(playerPage.getByText(/round 2/i)).toBeVisible({ timeout: 10_000 });
 
-      // Ending combat stops the live view, and the tracker stays on screen.
+      // Ending combat reaches the player too, and the tracker stays live.
       await page.getByRole('button', { name: /end combat/i }).click();
-      await expect(playerPage.getByTestId('live-indicator')).toHaveCount(0, { timeout: 10_000 });
-      await expect(playerPage.getByRole('heading', { name: /goblin ambush/i })).toBeVisible();
+      await expect(playerPage.getByText('Inactive', { exact: true })).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(playerPage.getByTestId('live-indicator')).toBeVisible();
     } finally {
       await playerCtx.close();
     }

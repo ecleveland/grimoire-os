@@ -23,6 +23,8 @@ const normalize = (updates: Partial<Encounter>): Partial<Encounter> =>
 
 /** How often a campaign member's tracker refetches while combat is active. */
 export const LIVE_POLL_MS = 3000;
+/** How often it refetches while combat is not running. */
+export const IDLE_POLL_MS = 10_000;
 
 /** Who is looking at the tracker, which decides whether it polls. */
 export interface EncounterViewer {
@@ -39,9 +41,16 @@ export function isController(encounter: Encounter, viewer: EncounterViewer): boo
 }
 
 // A controller's own writes land in the cache, so only the read-only view
-// needs to poll, and only while combat runs.
+// polls. It polls while combat is idle too, because a member who opens the
+// tracker before the DM starts combat has no other way to learn it started.
+// The idle cadence is slow rather than off.
 const watchesLive = (encounter: Encounter | undefined | null, viewer: EncounterViewer) =>
-  !!encounter && encounter.isActive && !isController(encounter, viewer);
+  !!encounter && !isController(encounter, viewer);
+
+const pollInterval = (encounter: Encounter | undefined, viewer: EncounterViewer) => {
+  if (!encounter || !watchesLive(encounter, viewer)) return false;
+  return encounter.isActive ? LIVE_POLL_MS : IDLE_POLL_MS;
+};
 
 export interface UseEncounterResult {
   encounter: Encounter | null;
@@ -70,7 +79,8 @@ export interface UseEncounterResult {
  * the response straight into the query cache, so a write never costs a second
  * GET; a 409 refetches through the shared optimistic-patch hook. A viewer who
  * cannot control the tracker polls it every LIVE_POLL_MS while combat is
- * active, so they follow the DM's turns without reloading.
+ * active and every IDLE_POLL_MS otherwise, so they follow the DM's turns
+ * without reloading.
  */
 export function useEncounter(encounterId: string, viewer: EncounterViewer): UseEncounterResult {
   const queryClient = useQueryClient();
@@ -86,7 +96,7 @@ export function useEncounter(encounterId: string, viewer: EncounterViewer): UseE
   const query = useApiQuery<Encounter>(path, {
     errorToast: suppressToast ? undefined : 'Failed to load encounter',
     staleTime: 0,
-    refetchInterval: q => (watchesLive(q.state.data, viewer) ? LIVE_POLL_MS : false),
+    refetchInterval: q => pollInterval(q.state.data, viewer),
     refetchIntervalInBackground: false,
   });
   const encounter = query.data ?? null;
