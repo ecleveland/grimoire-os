@@ -480,6 +480,7 @@ describe('EncountersService', () => {
           id: true,
           campaignId: true,
           combatants: true,
+          version: true,
           campaign: { select: { id: true, ownerId: true, players: { select: { userId: true } } } },
         },
       });
@@ -757,7 +758,7 @@ describe('EncountersService', () => {
 
     it('guards the write on expectedVersion, increments version, and returns the fresh row', async () => {
       prisma.encounter.findUnique
-        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, version: 3, campaign: campaignAuthShape }) // auth read
         .mockResolvedValueOnce({ ...mockEncounter, currentTurn: 1, version: 4 }); // re-fetch
       prisma.encounter.updateMany.mockResolvedValue({ count: 1 });
 
@@ -783,7 +784,7 @@ describe('EncountersService', () => {
 
     it('throws 409 ConflictException carrying currentVersion on a stale write', async () => {
       prisma.encounter.findUnique
-        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, version: 3, campaign: campaignAuthShape }) // auth read
         .mockResolvedValueOnce({ ...mockEncounter, version: 7 }); // current-version probe
       prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
 
@@ -797,13 +798,59 @@ describe('EncountersService', () => {
 
     it('throws NotFoundException when the row vanished mid-update', async () => {
       prisma.encounter.findUnique
-        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, version: 3, campaign: campaignAuthShape }) // auth read
         .mockResolvedValueOnce(null); // probe: gone
       prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
 
       await expect(
         service.update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 }, DM_USERNAME)
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns 409 before checking references when the stored version is already newer (VEG-693)', async () => {
+      // A player left the campaign: cleanup removed their combatant and bumped
+      // the version. The DM's stale tracker resends that characterId, which is
+      // neither stored on the encounter nor in the campaign any more.
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaignId: CAMPAIGN_ID,
+        version: 4,
+        combatants: [],
+        campaign: campaignAuthShape,
+      });
+      prisma.character.findMany.mockResolvedValue([]);
+
+      const err = await service
+        .update(
+          ENCOUNTER_ID,
+          USER_ID,
+          {
+            combatants: [
+              {
+                name: 'Departed',
+                initiative: 10,
+                hp: 20,
+                maxHp: 20,
+                ac: 14,
+                isNpc: false,
+                characterId: CHARACTER_ID,
+              },
+            ],
+            expectedVersion: 3,
+          },
+          DM_USERNAME
+        )
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        message: 'Encounter was modified by another request; re-fetch and retry.',
+        currentVersion: 4,
+      });
+      expect(campaignAuth.assertOwnerOnCampaign).toHaveBeenCalledWith(campaignAuthShape, USER_ID);
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
     });
   });
 
@@ -829,6 +876,7 @@ describe('EncountersService', () => {
       id: ENCOUNTER_ID,
       campaignId: CAMPAIGN_ID,
       combatants,
+      version: 3,
       campaign: campaignAuthShape,
     });
     const save = (combatants: unknown[], extra: Record<string, unknown> = {}) =>
@@ -840,6 +888,7 @@ describe('EncountersService', () => {
       prisma.character.findFirst.mockResolvedValue({
         hitPoints: { max: 44, current: 44, temporary: 0 },
         deathSaves: null,
+        version: 1,
       });
       prisma.character.updateMany.mockResolvedValue({ count: 1 });
     });
@@ -852,10 +901,10 @@ describe('EncountersService', () => {
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.character.findFirst).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
-        select: { hitPoints: true, deathSaves: true },
+        select: { hitPoints: true, deathSaves: true, version: true },
       });
       expect(prisma.character.updateMany).toHaveBeenCalledWith({
-        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID, version: 1 },
         data: {
           hitPoints: { max: 44, current: 30, temporary: 0 },
           version: { increment: 1 },
@@ -1036,15 +1085,16 @@ describe('EncountersService', () => {
 
     it('saves an encounter whose grandfathered characterId has left the campaign, without an audit row', async () => {
       prisma.encounter.findUnique.mockResolvedValue(stored([pc()]));
-      prisma.character.updateMany.mockResolvedValue({ count: 0 });
+      prisma.character.findFirst.mockResolvedValue(null);
 
       await expect(save([pc({ hp: 10 })])).resolves.toBeDefined();
 
       expect(prisma.character.findMany).not.toHaveBeenCalled();
       expect(prisma.encounter.update).toHaveBeenCalled();
-      expect(prisma.character.updateMany).toHaveBeenCalledWith(
+      expect(prisma.character.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID } })
       );
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
       expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 

@@ -2581,6 +2581,7 @@ describe('CharactersService', () => {
     const linked = (over: Record<string, unknown> = {}) => ({
       hitPoints: { max: 44, current: 44, temporary: 0 },
       deathSaves: null,
+      version: 1,
       ...over,
     });
     const apply = (s: CombatState) =>
@@ -2604,10 +2605,10 @@ describe('CharactersService', () => {
       expect(written).toBe(true);
       expect(prisma.character.findFirst).toHaveBeenCalledWith({
         where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
-        select: { hitPoints: true, deathSaves: true },
+        select: { hitPoints: true, deathSaves: true, version: true },
       });
       expect(prisma.character.updateMany).toHaveBeenCalledWith({
-        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID, version: 1 },
         data: {
           hitPoints: { max: 44, current: 30, temporary: 0 },
           version: { increment: 1 },
@@ -2687,6 +2688,59 @@ describe('CharactersService', () => {
       });
     });
 
+    it('clears the sheet death saves when a heal lifts the character above 0 (VEG-693)', async () => {
+      prisma.character.findFirst.mockResolvedValue(
+        linked({
+          hitPoints: { max: 44, current: 0, temporary: 0 },
+          deathSaves: { successes: 0, failures: 2 },
+        })
+      );
+
+      await apply(state({ hp: 5, changed: { ...unchanged, hp: true } }));
+
+      expect(prisma.character.updateMany.mock.calls[0][0].data).toEqual({
+        hitPoints: { max: 44, current: 5, temporary: 0 },
+        deathSaves: { successes: 0, failures: 0 },
+        version: { increment: 1 },
+      });
+      expect(prisma.auditLog.create.mock.calls[0][0].data.metadata).toMatchObject({
+        before: { current: 0, deathSaves: { successes: 0, failures: 2 } },
+        after: { current: 5, deathSaves: { successes: 0, failures: 0 } },
+      });
+    });
+
+    it('writes no death saves when a heal finds the track already empty (VEG-693)', async () => {
+      prisma.character.findFirst.mockResolvedValue(
+        linked({ hitPoints: { max: 44, current: 0, temporary: 0 }, deathSaves: null })
+      );
+
+      await apply(state({ hp: 5, changed: { ...unchanged, hp: true } }));
+
+      expect(prisma.character.updateMany.mock.calls[0][0].data).toEqual({
+        hitPoints: { max: 44, current: 5, temporary: 0 },
+        version: { increment: 1 },
+      });
+      expect(prisma.auditLog.create.mock.calls[0][0].data.metadata.after).not.toHaveProperty(
+        'deathSaves'
+      );
+    });
+
+    it('keeps the death saves when damage leaves the character at 0 (VEG-693)', async () => {
+      prisma.character.findFirst.mockResolvedValue(
+        linked({
+          hitPoints: { max: 44, current: 0, temporary: 5 },
+          deathSaves: { successes: 1, failures: 1 },
+        })
+      );
+
+      await apply(state({ hp: 0, tempHp: 0, changed: { ...unchanged, tempHp: true } }));
+
+      expect(prisma.character.updateMany.mock.calls[0][0].data).toEqual({
+        hitPoints: { max: 44, current: 0, temporary: 0 },
+        version: { increment: 1 },
+      });
+    });
+
     it('builds hitPoints from the combatant when the character has none', async () => {
       prisma.character.findFirst.mockResolvedValue(linked({ hitPoints: null }));
 
@@ -2739,14 +2793,66 @@ describe('CharactersService', () => {
       expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
 
-    it('skips the audit row when the campaign-scoped write matches no row', async () => {
+    it('re-reads and re-merges when a sheet save lands between the read and the write (VEG-693)', async () => {
+      prisma.character.findFirst
+        .mockResolvedValueOnce(linked())
+        .mockResolvedValueOnce(
+          linked({ hitPoints: { max: 44, current: 44, temporary: 10 }, version: 2 })
+        );
+      prisma.character.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 1 });
+
+      const written = await apply(state({ hp: 30, changed: { ...unchanged, hp: true } }));
+
+      expect(written).toBe(true);
+      expect(prisma.character.findFirst).toHaveBeenCalledTimes(2);
+      expect(prisma.character.updateMany).toHaveBeenCalledTimes(2);
+      expect(prisma.character.updateMany.mock.calls[0][0].where).toEqual({
+        id: CHARACTER_ID,
+        campaignId: CAMPAIGN_ID,
+        version: 1,
+      });
+      expect(prisma.character.updateMany.mock.calls[1][0]).toEqual({
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID, version: 2 },
+        data: {
+          hitPoints: { max: 44, current: 30, temporary: 10 },
+          version: { increment: 1 },
+        },
+      });
+      expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+      expect(prisma.auditLog.create.mock.calls[0][0].data.metadata).toMatchObject({
+        before: { current: 44 },
+        after: { current: 30 },
+      });
+    });
+
+    it('returns false without an audit row when the character leaves the campaign before the retry (VEG-693)', async () => {
+      prisma.character.findFirst.mockResolvedValueOnce(linked()).mockResolvedValueOnce(null);
+      prisma.character.updateMany.mockResolvedValueOnce({ count: 0 });
+
+      const written = await apply(state({ hp: 30, changed: { ...unchanged, hp: true } }));
+
+      expect(written).toBe(false);
+      expect(prisma.character.updateMany).toHaveBeenCalledTimes(1);
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('gives up after three lost races, warning and writing no audit row (VEG-693)', async () => {
+      const warn = jest
+        .spyOn((service as unknown as { logger: { warn: jest.Mock } }).logger, 'warn')
+        .mockImplementation(() => undefined);
       prisma.character.findFirst.mockResolvedValue(linked());
       prisma.character.updateMany.mockResolvedValue({ count: 0 });
 
       const written = await apply(state({ hp: 30, changed: { ...unchanged, hp: true } }));
 
       expect(written).toBe(false);
+      expect(prisma.character.findFirst).toHaveBeenCalledTimes(3);
+      expect(prisma.character.updateMany).toHaveBeenCalledTimes(3);
       expect(prisma.auditLog.create).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(CHARACTER_ID));
     });
   });
 });

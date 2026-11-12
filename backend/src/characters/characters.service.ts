@@ -17,12 +17,14 @@ import type {
   Weapon,
 } from '@grimoire-os/shared';
 import {
+  CLEARED_DEATH_SAVES,
   classesFrom,
   duplicateClassEntry,
   firstClassName,
   hitDicePoolsFor,
   inventoryFromJson,
   projectClassScalars,
+  reviveDeathSaves,
   sumClassLevels,
 } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -139,8 +141,6 @@ export interface CombatStateContext {
   encounterId: string;
 }
 
-const NO_DEATH_SAVES: DeathSaves = { successes: 0, failures: 0 };
-
 /** The stored hit points, or null for none and for anything not shaped like them. */
 const hitPointsFrom = (value: Prisma.JsonValue | null): HitPoints | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -151,7 +151,72 @@ const hitPointsFrom = (value: Prisma.JsonValue | null): HitPoints | null =>
 const deathSavesFrom = (value: Prisma.JsonValue | null): DeathSaves =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as unknown as DeathSaves)
-    : NO_DEATH_SAVES;
+    : CLEARED_DEATH_SAVES;
+
+/** How many read, merge and write tries a combat HP write gets in all. */
+const COMBAT_WRITE_ATTEMPTS = 3;
+
+/** A combat HP write: the update data and the changed values for the audit row. */
+interface CombatStateChange {
+  data: Prisma.CharacterUpdateManyMutationInput;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+}
+
+/**
+ * Merge a combatant's changed HP state over the stored character. Returns null
+ * when the sheet already holds every value. The sheet keeps its own max; a
+ * character with no hit points yet takes all three from the combatant. A heal
+ * above 0 clears the death saves, the same rule the sheet applies, unless the
+ * combatant's own death saves are being written.
+ */
+function mergeCombatState(
+  character: { hitPoints: Prisma.JsonValue | null; deathSaves: Prisma.JsonValue | null },
+  state: CombatState
+): CombatStateChange | null {
+  const data: Prisma.CharacterUpdateManyMutationInput = {};
+  const before: Record<string, unknown> = {};
+  const after: Record<string, unknown> = {};
+
+  const storedHp = hitPointsFrom(character.hitPoints);
+  let writtenHp: HitPoints | null = null;
+  if (state.changed.hp || state.changed.tempHp) {
+    const hitPoints: HitPoints = storedHp
+      ? {
+          ...storedHp,
+          ...(state.changed.hp && { current: state.hp }),
+          ...(state.changed.tempHp && { temporary: state.tempHp }),
+        }
+      : { max: state.maxHp, current: state.hp, temporary: state.tempHp };
+    if (hitPoints.current !== storedHp?.current) {
+      before.current = storedHp?.current ?? null;
+      after.current = hitPoints.current;
+    }
+    if (hitPoints.temporary !== storedHp?.temporary) {
+      before.temporary = storedHp?.temporary ?? null;
+      after.temporary = hitPoints.temporary;
+    }
+    if ('current' in after || 'temporary' in after) {
+      data.hitPoints = hitPoints as unknown as Prisma.InputJsonValue;
+      writtenHp = hitPoints;
+    }
+  }
+
+  const storedSaves = deathSavesFrom(character.deathSaves);
+  const saves =
+    state.changed.deathSaves &&
+    (state.deathSaves.successes !== storedSaves.successes ||
+      state.deathSaves.failures !== storedSaves.failures)
+      ? state.deathSaves
+      : writtenHp && reviveDeathSaves(writtenHp.current, storedSaves);
+  if (saves) {
+    data.deathSaves = saves as unknown as Prisma.InputJsonValue;
+    before.deathSaves = storedSaves;
+    after.deathSaves = saves;
+  }
+
+  return Object.keys(data).length === 0 ? null : { data, before, after };
+}
 
 @Injectable()
 export class CharactersService {
@@ -666,8 +731,13 @@ export class CharactersService {
    * owner check. A character that left the campaign or no longer exists is
    * skipped, and so is a write that would change nothing.
    *
-   * The write bumps `version`, so a player whose sheet is open gets a 409 on
-   * their next save instead of overwriting the DM's HP. The audit row goes
+   * The write matches the version it read and bumps it, so a player whose sheet
+   * is open gets a 409 on their next save instead of overwriting the DM's HP.
+   * A sheet save that commits between the read and the write makes the write
+   * match nothing. The character is then read and merged again, with
+   * `COMBAT_WRITE_ATTEMPTS` tries in all, so the DM never overwrites the
+   * player's change. When every try loses the race the character is skipped
+   * with a warning and the encounter save still succeeds. The audit row goes
    * through the same transaction, so a rolled-back write leaves none behind.
    * Returns whether the character was written.
    */
@@ -678,75 +748,43 @@ export class CharactersService {
     state: CombatState,
     context: CombatStateContext
   ): Promise<boolean> {
-    const character = await tx.character.findFirst({
-      where: { id: characterId, campaignId },
-      select: { hitPoints: true, deathSaves: true },
-    });
-    if (!character) return false;
+    for (let attempt = 0; attempt < COMBAT_WRITE_ATTEMPTS; attempt++) {
+      const character = await tx.character.findFirst({
+        where: { id: characterId, campaignId },
+        select: { hitPoints: true, deathSaves: true, version: true },
+      });
+      if (!character) return false;
 
-    const data: Prisma.CharacterUpdateManyMutationInput = {};
-    const before: Record<string, unknown> = {};
-    const after: Record<string, unknown> = {};
+      const change = mergeCombatState(character, state);
+      if (!change) return false;
 
-    const storedHp = hitPointsFrom(character.hitPoints);
-    if (state.changed.hp || state.changed.tempHp) {
-      // The sheet keeps its own max. A character with no hit points yet takes
-      // all three from the combatant.
-      const hitPoints: HitPoints = storedHp
-        ? {
-            ...storedHp,
-            ...(state.changed.hp && { current: state.hp }),
-            ...(state.changed.tempHp && { temporary: state.tempHp }),
-          }
-        : { max: state.maxHp, current: state.hp, temporary: state.tempHp };
-      if (hitPoints.current !== storedHp?.current) {
-        before.current = storedHp?.current ?? null;
-        after.current = hitPoints.current;
-      }
-      if (hitPoints.temporary !== storedHp?.temporary) {
-        before.temporary = storedHp?.temporary ?? null;
-        after.temporary = hitPoints.temporary;
-      }
-      if ('current' in after || 'temporary' in after) {
-        data.hitPoints = hitPoints as unknown as Prisma.InputJsonValue;
-      }
+      const { count } = await tx.character.updateMany({
+        where: { id: characterId, campaignId, version: character.version },
+        data: { ...change.data, version: { increment: 1 } },
+      });
+      if (count === 0) continue;
+
+      await tx.auditLog.create({
+        data: {
+          userId: context.userId,
+          username: context.username,
+          action: AuditAction.update,
+          entity: 'Character',
+          entityId: characterId,
+          metadata: {
+            source: ENCOUNTER_COMBAT_AUDIT_SOURCE,
+            encounterId: context.encounterId,
+            before: change.before,
+            after: change.after,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      return true;
     }
-
-    const storedSaves = deathSavesFrom(character.deathSaves);
-    if (
-      state.changed.deathSaves &&
-      (state.deathSaves.successes !== storedSaves.successes ||
-        state.deathSaves.failures !== storedSaves.failures)
-    ) {
-      data.deathSaves = state.deathSaves as unknown as Prisma.InputJsonValue;
-      before.deathSaves = storedSaves;
-      after.deathSaves = state.deathSaves;
-    }
-
-    if (Object.keys(data).length === 0) return false;
-
-    const { count } = await tx.character.updateMany({
-      where: { id: characterId, campaignId },
-      data: { ...data, version: { increment: 1 } },
-    });
-    if (count === 0) return false;
-
-    await tx.auditLog.create({
-      data: {
-        userId: context.userId,
-        username: context.username,
-        action: AuditAction.update,
-        entity: 'Character',
-        entityId: characterId,
-        metadata: {
-          source: ENCOUNTER_COMBAT_AUDIT_SOURCE,
-          encounterId: context.encounterId,
-          before,
-          after,
-        } as Prisma.InputJsonValue,
-      },
-    });
-    return true;
+    this.logger.warn(
+      `Skipped the combat HP write to character "${characterId}" after ${COMBAT_WRITE_ATTEMPTS} concurrent sheet saves`
+    );
+    return false;
   }
 
   async remove(id: string, userId: string): Promise<void> {

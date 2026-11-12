@@ -7,8 +7,8 @@ import {
 import { Prisma } from '../generated/prisma/client';
 import {
   aggregateCombatantLoot,
+  CLEARED_DEATH_SAVES,
   Combatant,
-  DeathSaves,
   EncounterLootTotal,
 } from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
@@ -46,7 +46,16 @@ interface CombatWriteBack {
   state: CombatState;
 }
 
-const NO_DEATH_SAVES: DeathSaves = { successes: 0, failures: 0 };
+/**
+ * The 409 for a stale `expectedVersion`. Both the pre-check in `update` and the
+ * guarded write build it here, so the client sees one shape from either.
+ */
+function staleEncounterConflict(currentVersion: number): ConflictException {
+  return new ConflictException({
+    message: 'Encounter was modified by another request; re-fetch and retry.',
+    currentVersion,
+  });
+}
 
 /** The combatants keyed by `characterId`, leaving out any id held by more than one. */
 function byUniqueCharacterId<T extends { characterId?: string }>(combatants: T[]): Map<string, T> {
@@ -81,8 +90,8 @@ function planCombatWriteBack(incoming: CombatantInput[], stored: Combatant[]): C
     // its hit points stay as they are.
     const hasHp = typeof next.hp === 'number' && typeof prev.hp === 'number';
     const tempHp = next.tempHp ?? 0;
-    const deathSaves = next.deathSaves ?? NO_DEATH_SAVES;
-    const prevSaves = prev.deathSaves ?? NO_DEATH_SAVES;
+    const deathSaves = next.deathSaves ?? CLEARED_DEATH_SAVES;
+    const prevSaves = prev.deathSaves ?? CLEARED_DEATH_SAVES;
     const changed = {
       hp: hasHp && next.hp !== prev.hp,
       tempHp: hasHp && tempHp !== (prev.tempHp ?? 0),
@@ -303,6 +312,12 @@ export class EncountersService {
    * linked to a character are copied onto that character in the same
    * transaction, after the encounter write, so a 409 on the encounter leaves
    * every character untouched. `username` names the DM on the audit row.
+   *
+   * A stale `expectedVersion` gets its 409 before the reference checks. The
+   * tracker refetches only on a 409, and a stale payload can carry a
+   * characterId that has since left the campaign, which would otherwise draw a
+   * 400 the tracker never recovers from. The guarded write still catches a
+   * change that lands after this read.
    */
   async update(id: string, userId: string, dto: UpdateEncounterDto, username: string) {
     const encounter = await this.prisma.encounter.findUnique({
@@ -311,6 +326,7 @@ export class EncountersService {
         id: true,
         campaignId: true,
         combatants: true,
+        version: true,
         campaign: { select: campaignAuthSelect },
       },
     });
@@ -318,6 +334,9 @@ export class EncountersService {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
     this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== encounter.version) {
+      throw staleEncounterConflict(encounter.version);
+    }
     const storedCombatants = (encounter.combatants as unknown as Combatant[] | null) ?? [];
     const knownIds = new Set(
       storedCombatants.map(c => c.monsterId).filter((mid): mid is string => mid !== undefined)
@@ -401,10 +420,7 @@ export class EncountersService {
       if (!current) {
         throw new NotFoundException(`Encounter "${id}" not found`);
       }
-      throw new ConflictException({
-        message: 'Encounter was modified by another request; re-fetch and retry.',
-        currentVersion: current.version,
-      });
+      throw staleEncounterConflict(current.version);
     }
     const updated = await client.encounter.findUnique({ where: { id } });
     if (!updated) {
