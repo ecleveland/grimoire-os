@@ -382,6 +382,28 @@ describe('InitiativeTrackerPage', () => {
       expect(dialog.getByText(/already in encounter/i)).toBeInTheDocument();
     });
 
+    it('greys out a PC whose character already backs a combatant (VEG-693)', async () => {
+      // The linked combatant has a different name, so only the characterId
+      // can tell the picker that Thia is already in the encounter.
+      routeAddFlow({
+        encounter: makeEncounter({
+          combatants: [
+            makeCombatant({ name: 'Hero', isNpc: false, characterId: 'char-1' }),
+            makeCombatant({ name: 'Goblin A' }),
+          ],
+        }),
+        characters: [thia, mort],
+      });
+      const user = userEvent.setup();
+      renderWithQueryClient(<InitiativeTrackerPage />);
+      const dialog = await openAddParty(user);
+      await dialog.findByText('Thia');
+      expect(dialog.getByRole('checkbox', { name: /add thia/i })).toBeDisabled();
+      expect(dialog.getByRole('checkbox', { name: /add thia/i })).not.toBeChecked();
+      expect(dialog.getByRole('checkbox', { name: /add mort/i })).toBeEnabled();
+      expect(dialog.getByRole('checkbox', { name: /add mort/i })).toBeChecked();
+    });
+
     it('retries after a 409 with the refreshed expectedVersion', async () => {
       let currentEncounter = makeEncounter({ version: 5 });
       let patchCount = 0;

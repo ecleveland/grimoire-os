@@ -213,6 +213,9 @@ export default function InitiativeTrackerPage() {
             <AddCombatantControls
               campaignId={campaignId}
               existingNames={encounter.combatants.map(c => c.name)}
+              existingCharacterIds={encounter.combatants.flatMap(c =>
+                c.characterId ? [c.characterId] : []
+              )}
               writePending={writePending}
               onAddManual={actions.addManualCombatant}
               onAddParty={actions.addPartyToEncounter}

@@ -13,6 +13,10 @@ export default function CharacterSheetPage() {
   const [copiedFrom] = useState(() => takeCopiedFrom(id));
   const characterQuery = useApiQuery<CharacterDetail>(`/characters/${id}`, {
     errorToast: 'Failed to load character',
+    // A DM's combat write changes HP while the player's tab sits in the
+    // background, so refetch on every focus. 'always' ignores the app-wide
+    // 60 s stale window, which `true` would respect.
+    refetchOnWindowFocus: 'always',
   });
   const character = characterQuery.data;
 

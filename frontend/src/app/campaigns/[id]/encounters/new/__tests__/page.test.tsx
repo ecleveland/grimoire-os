@@ -258,6 +258,25 @@ describe('NewEncounterPage', () => {
       expect(screen.getByRole('button', { name: /remove legolas/i })).toBeInTheDocument();
     });
 
+    it('greys out a party member already picked when the picker reopens (VEG-693)', async () => {
+      mockHappyPath();
+      const user = userEvent.setup();
+      render(<NewEncounterPage />);
+
+      await user.click(screen.getByRole('button', { name: /add party/i }));
+      await waitFor(() => expect(screen.getByLabelText('Add Aragorn')).toBeInTheDocument());
+      await user.click(screen.getByLabelText('Add Legolas')); // pick Aragorn only
+      await user.click(screen.getByRole('button', { name: /add selected/i }));
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /remove aragorn/i })).toBeInTheDocument()
+      );
+
+      await user.click(screen.getByRole('button', { name: /add party/i }));
+      await waitFor(() => expect(screen.getByLabelText('Add Aragorn')).toBeInTheDocument());
+      expect(screen.getByLabelText('Add Aragorn')).toBeDisabled();
+      expect(screen.getByLabelText('Add Legolas')).toBeEnabled();
+    });
+
     it('shows the no-party empty state when the campaign has no characters', async () => {
       mockHappyPath([]);
       const user = userEvent.setup();

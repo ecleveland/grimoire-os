@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import CharacterSheetPage from '../page';
+import { makeQueryClient } from '@/components/QueryProvider';
 import type { Character, CharacterDetail } from '@/lib/types';
 
 const mockApiFetch = vi.fn();
@@ -49,6 +50,10 @@ const character = {
 beforeEach(() => {
   mockApiFetch.mockReset();
   sessionStorage.clear();
+});
+
+afterEach(() => {
+  focusManager.setFocused(undefined);
 });
 
 describe('CharacterSheetPage', () => {
@@ -105,6 +110,23 @@ describe('CharacterSheetPage', () => {
     await screen.findByTestId('character-sheet');
     expect(screen.queryByTestId('copied-from-note')).toBeNull();
     expect(sessionStorage.getItem('copied-from:char-2')).not.toBeNull();
+  });
+
+  it('refetches on window focus inside the app stale window so a DM combat write shows up (VEG-693)', async () => {
+    // The app client keeps reads fresh for 60 s and turns focus refetch off;
+    // the sheet has to refetch on focus anyway.
+    mockApiFetch.mockResolvedValue(character);
+    renderPage(makeQueryClient());
+    await screen.findByText('Thorin');
+    expect(mockApiFetch).toHaveBeenCalledTimes(1);
+
+    mockApiFetch.mockResolvedValue({ ...character, name: 'Thorin Wounded' });
+    act(() => focusManager.setFocused(false));
+    act(() => focusManager.setFocused(true));
+
+    await screen.findByText('Thorin Wounded');
+    expect(mockApiFetch).toHaveBeenCalledTimes(2);
+    expect(mockApiFetch).toHaveBeenLastCalledWith('/characters/char-1');
   });
 
   it('shows a not-found message when the character fails to load', async () => {

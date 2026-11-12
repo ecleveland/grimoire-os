@@ -6,12 +6,14 @@ import {
   ForbiddenException,
   ConflictException,
 } from '@nestjs/common';
-import { Prisma } from '../generated/prisma/client';
+import { AuditAction, Prisma } from '../generated/prisma/client';
 import type {
   AbilityScores,
   CharacterClass,
   ClassSpellcasting,
+  DeathSaves,
   HitDice,
+  HitPoints,
   Weapon,
 } from '@grimoire-os/shared';
 import {
@@ -112,6 +114,44 @@ const poolsForClasses = (resolved: readonly ResolvedEntry[], carried: HitDice[] 
     resolved.flatMap(({ entry, row }) => (row ? [{ hitDie: row.hitDie, level: entry.level }] : [])),
     carried
   );
+
+/** The audit `metadata.source` of a character write made by the encounter tracker. */
+export const ENCOUNTER_COMBAT_AUDIT_SOURCE = 'encounter-combat';
+
+/**
+ * A linked combatant's HP state as the encounter tracker saved it. Absent temp
+ * HP arrives as 0 and absent death saves as 0/0. `changed` names the fields
+ * that differ from the combatant the encounter held before the save, and only
+ * those reach the sheet.
+ */
+export interface CombatState {
+  hp: number;
+  maxHp: number;
+  tempHp: number;
+  deathSaves: DeathSaves;
+  changed: { hp: boolean; tempHp: boolean; deathSaves: boolean };
+}
+
+/** Who saved the encounter, and which one, for the audit row. */
+export interface CombatStateContext {
+  userId: string;
+  username: string;
+  encounterId: string;
+}
+
+const NO_DEATH_SAVES: DeathSaves = { successes: 0, failures: 0 };
+
+/** The stored hit points, or null for none and for anything not shaped like them. */
+const hitPointsFrom = (value: Prisma.JsonValue | null): HitPoints | null =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as unknown as HitPoints)
+    : null;
+
+/** The stored death saves, with none read as 0/0. */
+const deathSavesFrom = (value: Prisma.JsonValue | null): DeathSaves =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as unknown as DeathSaves)
+    : NO_DEATH_SAVES;
 
 @Injectable()
 export class CharactersService {
@@ -617,6 +657,96 @@ export class CharactersService {
       throw new NotFoundException(`Character "${id}" not found`);
     }
     return character;
+  }
+
+  /**
+   * Copy a combatant's changed HP state onto its linked character, inside the
+   * caller's transaction. The only check is that the character still belongs
+   * to `campaignId`: the campaign DM writes here by design, so there is no
+   * owner check. A character that left the campaign or no longer exists is
+   * skipped, and so is a write that would change nothing.
+   *
+   * The write bumps `version`, so a player whose sheet is open gets a 409 on
+   * their next save instead of overwriting the DM's HP. The audit row goes
+   * through the same transaction, so a rolled-back write leaves none behind.
+   * Returns whether the character was written.
+   */
+  async applyCombatState(
+    tx: Prisma.TransactionClient,
+    characterId: string,
+    campaignId: string,
+    state: CombatState,
+    context: CombatStateContext
+  ): Promise<boolean> {
+    const character = await tx.character.findFirst({
+      where: { id: characterId, campaignId },
+      select: { hitPoints: true, deathSaves: true },
+    });
+    if (!character) return false;
+
+    const data: Prisma.CharacterUpdateManyMutationInput = {};
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+
+    const storedHp = hitPointsFrom(character.hitPoints);
+    if (state.changed.hp || state.changed.tempHp) {
+      // The sheet keeps its own max. A character with no hit points yet takes
+      // all three from the combatant.
+      const hitPoints: HitPoints = storedHp
+        ? {
+            ...storedHp,
+            ...(state.changed.hp && { current: state.hp }),
+            ...(state.changed.tempHp && { temporary: state.tempHp }),
+          }
+        : { max: state.maxHp, current: state.hp, temporary: state.tempHp };
+      if (hitPoints.current !== storedHp?.current) {
+        before.current = storedHp?.current ?? null;
+        after.current = hitPoints.current;
+      }
+      if (hitPoints.temporary !== storedHp?.temporary) {
+        before.temporary = storedHp?.temporary ?? null;
+        after.temporary = hitPoints.temporary;
+      }
+      if ('current' in after || 'temporary' in after) {
+        data.hitPoints = hitPoints as unknown as Prisma.InputJsonValue;
+      }
+    }
+
+    const storedSaves = deathSavesFrom(character.deathSaves);
+    if (
+      state.changed.deathSaves &&
+      (state.deathSaves.successes !== storedSaves.successes ||
+        state.deathSaves.failures !== storedSaves.failures)
+    ) {
+      data.deathSaves = state.deathSaves as unknown as Prisma.InputJsonValue;
+      before.deathSaves = storedSaves;
+      after.deathSaves = state.deathSaves;
+    }
+
+    if (Object.keys(data).length === 0) return false;
+
+    const { count } = await tx.character.updateMany({
+      where: { id: characterId, campaignId },
+      data: { ...data, version: { increment: 1 } },
+    });
+    if (count === 0) return false;
+
+    await tx.auditLog.create({
+      data: {
+        userId: context.userId,
+        username: context.username,
+        action: AuditAction.update,
+        entity: 'Character',
+        entityId: characterId,
+        metadata: {
+          source: ENCOUNTER_COMBAT_AUDIT_SOURCE,
+          encounterId: context.encounterId,
+          before,
+          after,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return true;
   }
 
   async remove(id: string, userId: string): Promise<void> {
