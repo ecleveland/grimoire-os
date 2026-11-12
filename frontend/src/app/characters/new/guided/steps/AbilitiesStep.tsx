@@ -205,6 +205,8 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
               </span>
               <input
                 type="number"
+                min={1}
+                max={30}
                 aria-label={ABILITY_LABELS[k]}
                 value={manualDrafts[k] ?? value.abilityScores[k]}
                 onChange={e => editManual(k, e.target.value)}

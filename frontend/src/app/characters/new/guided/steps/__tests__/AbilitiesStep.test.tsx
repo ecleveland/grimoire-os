@@ -266,6 +266,15 @@ describe('AbilitiesStep — ability score generation', () => {
     expect(scores()).toBe('10,10,10,10,10,15');
   });
 
+  it('manual: score fields carry the 1..30 bounds so the stepper stops at them', () => {
+    renderStep();
+    for (const name of ['STR', 'DEX', 'CON', 'INT', 'WIS', 'CHA']) {
+      const field = screen.getByRole('spinbutton', { name });
+      expect(field).toHaveAttribute('min', '1');
+      expect(field).toHaveAttribute('max', '30');
+    }
+  });
+
   it('manual: clearing the field keeps the old score, and retyping commits the new one', async () => {
     const user = userEvent.setup();
     renderStep(withCha8());
