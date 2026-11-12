@@ -201,14 +201,90 @@ describe('AbilitiesStep — ability score generation', () => {
 
     fireEvent.change(str, { target: { value: '13.7' } });
     expect(scores()).toBe('13,10,10,10,10,10'); // truncated
+    fireEvent.blur(str);
+    expect(str).toHaveValue(13);
+    // Out-of-range text waits for blur, then clamps.
     fireEvent.change(str, { target: { value: '99' } });
-    expect(scores()).toBe('30,10,10,10,10,10'); // clamped up to 30
+    expect(scores()).toBe('13,10,10,10,10,10');
+    fireEvent.blur(str);
+    expect(scores()).toBe('30,10,10,10,10,10'); // clamped down to 30
     fireEvent.change(str, { target: { value: '0' } });
+    fireEvent.blur(str);
     expect(scores()).toBe('1,10,10,10,10,10'); // clamped up to 1
     fireEvent.change(str, { target: { value: '' } });
+    fireEvent.blur(str);
     expect(scores()).toBe('1,10,10,10,10,10'); // empty is a no-op, not 0/1 churn
+    expect(str).toHaveValue(1);
     fireEvent.change(str, { target: { value: 'abc' } });
+    fireEvent.blur(str);
     expect(scores()).toBe('1,10,10,10,10,10'); // non-numeric ignored
+  });
+
+  // VEG-706: the field used to clamp on every keystroke, so appending a digit to
+  // the 8 already in the box (81) snapped straight to 30.
+  const withCha8 = () => ({
+    abilityScores: {
+      strength: 10,
+      dexterity: 10,
+      constitution: 10,
+      intelligence: 10,
+      wisdom: 10,
+      charisma: 8,
+    },
+  });
+
+  it('manual: appending a digit keeps the typed text and clamps only on blur', async () => {
+    const user = userEvent.setup();
+    renderStep(withCha8());
+    const cha = screen.getByRole('spinbutton', { name: 'CHA' });
+
+    await user.click(cha);
+    await user.keyboard('1');
+    expect(cha).toHaveValue(81);
+    expect(scores()).toBe('10,10,10,10,10,8'); // out of range: not committed yet
+
+    await user.tab();
+    expect(cha).toHaveValue(30);
+    expect(scores()).toBe('10,10,10,10,10,30');
+  });
+
+  it('manual: deleting the 8 and typing 1 then 5 gives 15 after blur', async () => {
+    const user = userEvent.setup();
+    renderStep(withCha8());
+    const cha = screen.getByRole('spinbutton', { name: 'CHA' });
+
+    await user.click(cha);
+    await user.keyboard('{Backspace}');
+    expect(cha).toHaveValue(null);
+    await user.keyboard('1');
+    expect(cha).toHaveValue(1);
+    await user.keyboard('5');
+    expect(cha).toHaveValue(15);
+
+    await user.tab();
+    expect(cha).toHaveValue(15);
+    expect(scores()).toBe('10,10,10,10,10,15');
+  });
+
+  it('manual: clearing the field keeps the old score, and retyping commits the new one', async () => {
+    const user = userEvent.setup();
+    renderStep(withCha8());
+    const cha = screen.getByRole('spinbutton', { name: 'CHA' });
+
+    await user.clear(cha);
+    expect(cha).toHaveValue(null); // the box shows what the user did
+    expect(scores()).toBe('10,10,10,10,10,8');
+
+    // Blurring an empty field restores the committed score.
+    await user.tab();
+    expect(cha).toHaveValue(8);
+    expect(scores()).toBe('10,10,10,10,10,8');
+
+    await user.clear(cha);
+    await user.type(cha, '12');
+    await user.tab();
+    expect(cha).toHaveValue(12);
+    expect(scores()).toBe('10,10,10,10,10,12');
   });
 
   it('carries the point-buy result into manual mode for fine-tuning', async () => {

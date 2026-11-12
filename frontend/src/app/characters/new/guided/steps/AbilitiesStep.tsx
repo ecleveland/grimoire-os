@@ -69,6 +69,9 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
   const [mode, setMode] = useState<Mode>('manual');
   const [assignments, setAssignments] =
     useState<Record<AbilityKey, number | null>>(emptyAssignments);
+  // Manual-mode text the user is typing, per field. A key is present only while
+  // that field is being edited; otherwise the input shows the committed score.
+  const [manualDrafts, setManualDrafts] = useState<Partial<Record<AbilityKey, string>>>({});
 
   // Resolve the draft's class to its catalog record to surface its recommended
   // primary abilities. id-first (VEG-524), like the background resolver: a
@@ -130,13 +133,34 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
   };
 
   // ── Manual helpers ──
-  const setManual = (k: AbilityKey, raw: string) => {
-    // Ignore an empty/blank field (Number('') is 0) so clearing to retype doesn't
-    // silently clamp the score to 1.
-    if (raw.trim() === '') return;
+  // Parse typed text to a whole score, or null for blank/non-numeric text
+  // (Number('') is 0, which would otherwise clamp a cleared field to 1).
+  const parseManual = (raw: string): number | null => {
+    if (raw.trim() === '') return null;
     const n = Number(raw);
-    if (!Number.isFinite(n)) return;
-    setScores({ ...value.abilityScores, [k]: Math.max(1, Math.min(30, Math.trunc(n))) });
+    return Number.isFinite(n) ? Math.trunc(n) : null;
+  };
+  // Keep the raw text while typing (VEG-706). Clamping on every keystroke turned
+  // 8 followed by 1 into 81 and then 30. An in-range value commits right away so
+  // the preview stays live and Next never sees a stale score; anything else
+  // waits for blur.
+  const editManual = (k: AbilityKey, raw: string) => {
+    setManualDrafts(d => ({ ...d, [k]: raw }));
+    const n = parseManual(raw);
+    if (n != null && n >= 1 && n <= 30) setScores({ ...value.abilityScores, [k]: n });
+  };
+  // On blur, clamp the typed value to 1..30 and drop the draft. Blank or
+  // non-numeric text leaves the committed score alone.
+  const commitManual = (k: AbilityKey) => {
+    const raw = manualDrafts[k];
+    if (raw === undefined) return;
+    setManualDrafts(({ [k]: _dropped, ...rest }) => rest);
+    const n = parseManual(raw);
+    if (n == null) return;
+    const clamped = Math.max(1, Math.min(30, n));
+    if (clamped !== value.abilityScores[k]) {
+      setScores({ ...value.abilityScores, [k]: clamped });
+    }
   };
 
   const pb = proficiencyBonus(value.level);
@@ -182,8 +206,9 @@ export default function AbilitiesStep({ value, onChange }: WizardStepProps) {
               <input
                 type="number"
                 aria-label={ABILITY_LABELS[k]}
-                value={value.abilityScores[k]}
-                onChange={e => setManual(k, e.target.value)}
+                value={manualDrafts[k] ?? value.abilityScores[k]}
+                onChange={e => editManual(k, e.target.value)}
+                onBlur={() => commitManual(k)}
                 className="mt-1 rounded border border-gray-300 px-2 py-1 dark:border-gray-600 dark:bg-gray-700"
               />
             </label>
