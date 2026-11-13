@@ -53,7 +53,7 @@ export class EncountersController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: UpdateEncounterDto
   ) {
-    return this.encountersService.update(id, req.user.userId, dto);
+    return this.encountersService.update(id, req.user.userId, dto, req.user.username);
   }
 
   @Post(':id/loot')

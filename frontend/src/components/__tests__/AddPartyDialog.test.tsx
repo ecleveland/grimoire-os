@@ -32,6 +32,7 @@ function renderDialog(props: Partial<React.ComponentProps<typeof AddPartyDialog>
     <AddPartyDialog
       characters={[makeCharacter()]}
       existingNames={[]}
+      existingCharacterIds={[]}
       onConfirm={onConfirm}
       onCancel={onCancel}
       {...props}
@@ -71,6 +72,50 @@ describe('AddPartyDialog', () => {
     });
     expect(screen.getByRole('checkbox', { name: /add thia/i })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: /add mort/i })).not.toBeChecked();
+  });
+
+  it('greys out a character already linked to a combatant and never adds it (VEG-693)', async () => {
+    const user = userEvent.setup();
+    const thia = makeCharacter();
+    const mort = makeCharacter({ id: 'char-2', name: 'Mort' });
+    renderDialog({ characters: [thia, mort], existingCharacterIds: ['char-2'], rng: () => 0.999 });
+
+    const mortBox = screen.getByRole('checkbox', { name: /add mort/i });
+    expect(mortBox).toBeDisabled();
+    expect(mortBox).not.toBeChecked();
+    expect(screen.getByRole('spinbutton', { name: /initiative for mort/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /roll initiative for mort/i })).toBeDisabled();
+    expect(screen.getByTestId('party-row-char-2')).toHaveClass('opacity-50');
+    expect(screen.getByTestId('party-row-char-2')).toHaveTextContent(/already in encounter/i);
+    expect(screen.getByTestId('party-row-char-1')).not.toHaveClass('opacity-50');
+
+    // Roll all rolls Thia (d20 face 20 + 2) and leaves the linked row alone.
+    await user.click(screen.getByRole('button', { name: /roll all/i }));
+    expect(
+      (screen.getByRole('spinbutton', { name: /initiative for thia/i }) as HTMLInputElement).value
+    ).toBe('22');
+    expect(
+      (screen.getByRole('spinbutton', { name: /initiative for mort/i }) as HTMLInputElement).value
+    ).toBe('10');
+
+    await user.click(screen.getByRole('button', { name: /add selected/i }));
+    expect(onConfirm).toHaveBeenCalledWith([{ character: thia, initiative: 22 }]);
+  });
+
+  it('disables confirm when every character is already linked (VEG-693)', () => {
+    renderDialog({ existingCharacterIds: ['char-1'] });
+    expect(screen.getByRole('button', { name: /add selected/i })).toBeDisabled();
+  });
+
+  it('keeps a name-only match selectable so a same-name PC can still be added (VEG-693)', async () => {
+    const user = userEvent.setup();
+    renderDialog({ existingNames: ['Thia'] });
+    const box = screen.getByRole('checkbox', { name: /add thia/i });
+    expect(box).toBeEnabled();
+    expect(box).not.toBeChecked();
+    expect(screen.getByText(/already in encounter/i)).toBeInTheDocument();
+    await user.click(box);
+    expect(box).toBeChecked();
   });
 
   it('disables confirm when nothing is selected', async () => {
