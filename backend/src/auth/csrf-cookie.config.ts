@@ -1,4 +1,5 @@
 import { randomBytes } from 'crypto';
+import { resolveCookieSecure } from '../config/cookie.config';
 import type { CookieOptions } from 'express';
 
 export const CSRF_COOKIE_NAME = 'csrf_token';
@@ -22,7 +23,7 @@ export function generateCsrfToken(): string {
 export function csrfCookieOptions(): CookieOptions {
   return {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: CSRF_COOKIE_MAX_AGE_MS,
@@ -32,7 +33,7 @@ export function csrfCookieOptions(): CookieOptions {
 export function clearCsrfCookieOptions(): CookieOptions {
   return {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: '/',
   };

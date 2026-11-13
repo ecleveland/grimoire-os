@@ -80,6 +80,7 @@ In `frontend/`, `npm run typecheck` type-checks the spec files too. Vitest strip
 | JWT_SECRET | Yes | — |
 | DATABASE_URL | No | postgresql://grimoire:grimoire@localhost:5432/grimoire_os |
 | JWT_EXPIRES_IN | No | 24h |
+| COOKIE_SECURE | No | unset: Secure flag on when NODE_ENV=production; `false` for plain HTTP |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
 | INTERNAL_API_URL | No | falls back to NEXT_PUBLIC_API_URL |

@@ -33,6 +33,12 @@ JWT_SECRET=your-secret docker compose up --build
 - Backend API: http://localhost:3001/api
 - Swagger docs: http://localhost:3001/api/docs
 
+The backend image runs with `NODE_ENV=production`, so its auth cookies carry the `Secure` flag and browsers send them only over HTTPS. To serve over plain HTTP on a trusted network, set `COOKIE_SECURE=false` in `.env` or the environment. The backend logs the cookie mode at startup. An existing install that serves over plain HTTP needs `COOKIE_SECURE=false` after upgrading, or login stops working. Safari has not always accepted Secure cookies on `http://localhost`, so set it there too if login fails.
+
+| Variable | Values | Default |
+|----------|--------|---------|
+| COOKIE_SECURE | `true`, `false` or unset | unset: Secure when `NODE_ENV=production` |
+
 ## Tech Stack
 
 - **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS v4

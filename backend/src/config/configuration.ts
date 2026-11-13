@@ -1,3 +1,4 @@
+import { resolveCookieSecure } from './cookie.config';
 import databaseConfig from './database.config';
 
 export default () => {
@@ -13,6 +14,8 @@ export default () => {
       jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',
       refreshTokenTtlMs: 7 * 24 * 60 * 60 * 1000,
       refreshRotationGraceMs: 3_000,
+      // Resolved here so a bad COOKIE_SECURE value stops the boot.
+      cookieSecure: resolveCookieSecure(),
     },
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
     cors: {

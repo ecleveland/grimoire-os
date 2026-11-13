@@ -40,8 +40,11 @@ describe('AuthController', () => {
     purgeExpired: jest.Mock;
   };
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalCookieSecure = process.env.COOKIE_SECURE;
 
   beforeEach(async () => {
+    // The Secure assertions below assume no COOKIE_SECURE override in the shell.
+    delete process.env.COOKIE_SECURE;
     authService = { login: jest.fn(), signAccessTokenForUserId: jest.fn() };
     usersService = { create: jest.fn() };
     refreshTokenService = {
@@ -67,6 +70,8 @@ describe('AuthController', () => {
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
+    if (originalCookieSecure === undefined) delete process.env.COOKIE_SECURE;
+    else process.env.COOKIE_SECURE = originalCookieSecure;
   });
 
   describe('login', () => {
@@ -172,6 +177,22 @@ describe('AuthController', () => {
       const calls = (res.cookie as jest.Mock).mock.calls;
       expect(calls.find(c => c[0] === AUTH_COOKIE_NAME)[2].secure).toBe(true);
       expect(calls.find(c => c[0] === REFRESH_COOKIE_NAME)[2].secure).toBe(true);
+    });
+
+    it('leaves every login cookie insecure when COOKIE_SECURE=false in production', async () => {
+      process.env.NODE_ENV = 'production';
+      process.env.COOKIE_SECURE = 'false';
+      authService.login.mockResolvedValue({ access_token: 't', user: mockUserPublic });
+      refreshTokenService.issue.mockResolvedValue({ token: 'r', id: 'r1' });
+      const res = createMockResponse();
+
+      await controller.login({ username: 'u', password: 'p' }, res);
+
+      const calls = (res.cookie as jest.Mock).mock.calls;
+      expect(calls).toHaveLength(4);
+      for (const call of calls) {
+        expect(call[2].secure).toBe(false);
+      }
     });
 
     it('does NOT issue a refresh token when login fails', async () => {

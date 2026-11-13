@@ -28,6 +28,10 @@ services:
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - FRONTEND_URL=http://localhost:3000
+      # Unset, the auth cookies carry the Secure flag because the image runs with
+      # NODE_ENV=production. Set COOKIE_SECURE=false in .env to serve over plain
+      # HTTP on a trusted network.
+      - COOKIE_SECURE=${COOKIE_SECURE:-}
     depends_on:
       postgres:
         condition: service_healthy

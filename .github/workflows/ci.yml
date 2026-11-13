@@ -222,6 +222,8 @@ jobs:
       # it touches a file that can break the image without breaking the unit
       # suites (VEG-570: a missing tsconfig.build.json shipped a backend image
       # that exited with MODULE_NOT_FOUND while CI stayed green).
+      # The cookie files are listed because the Set-Cookie steps below are the
+      # only end-to-end check of the Secure flag.
       - name: Decide whether to run
         id: changed
         env:
@@ -232,7 +234,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|backend/prisma\.config\.ts|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -259,6 +261,39 @@ jobs:
           echo "$body" | grep -q '"status":"ok"'
           # / redirects to /login through the middleware; probe /login directly.
           curl -fsS -o /dev/null http://localhost:3000/login
+      # The image sets NODE_ENV=production and this job leaves COOKIE_SECURE
+      # unset, so every login cookie must carry Secure. cookie-flags.sh prints the
+      # Set-Cookie lines a fresh login returns and how many of them are Secure.
+      - name: Login cookies carry Secure by default
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/cookie-flags.sh" <<'SH'
+          login() {
+            curl -fsS -D - -o /dev/null -X POST -H 'Content-Type: application/json' \
+              -d '{"username":"ci-cookie","password":"CiCookie-Pass1!"}' \
+              http://localhost:3001/api/auth/login | tr -d '\r'
+          }
+          cookies=$(login | grep -i '^set-cookie:')
+          echo "$cookies"
+          total=$(echo "$cookies" | grep -c .)
+          secure=$(echo "$cookies" | grep -Eic '; *secure(;|$)' || true)
+          echo "set-cookie=$total secure=$secure"
+          SH
+          curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
+            -d '{"username":"ci-cookie","password":"CiCookie-Pass1!"}' \
+            http://localhost:3001/api/auth/register
+          docker compose logs backend | grep 'Auth cookies carry the Secure flag (COOKIE_SECURE unset, NODE_ENV=production)'
+          result=$(bash "$RUNNER_TEMP/cookie-flags.sh" | tee /dev/stderr | tail -1)
+          [ "$result" = "set-cookie=4 secure=4" ]
+      # Recreate only the backend with the override. The image is reused, and
+      # the user registered above survives in the database.
+      - name: COOKIE_SECURE=false drops Secure from login cookies
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          COOKIE_SECURE=false docker compose up -d --no-deps --wait --wait-timeout 180 backend
+          docker compose logs backend | grep 'Auth cookies are sent without the Secure flag (COOKIE_SECURE=false)'
+          result=$(bash "$RUNNER_TEMP/cookie-flags.sh" | tee /dev/stderr | tail -1)
+          [ "$result" = "set-cookie=4 secure=0" ]
       - name: Show service logs
         if: failure() && steps.changed.outputs.run == 'true'
         run: |
