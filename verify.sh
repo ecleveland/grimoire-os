@@ -47,3 +47,4 @@ cd "$ROOT_DIR/frontend" && npm run build
 
 echo
 echo "All verification steps passed."
+cd "$ROOT_DIR" && { git write-tree > "$(git rev-parse --git-dir)/verify-ok"; } 2>/dev/null || true
