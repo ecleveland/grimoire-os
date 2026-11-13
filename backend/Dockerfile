@@ -1,10 +1,10 @@
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS shared-build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS shared-build
 WORKDIR /app/shared
 COPY shared/package.json shared/package-lock.json shared/tsconfig.json ./
 COPY shared/src ./src
 RUN npm ci && npm run build
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS deps
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
 WORKDIR /app
 COPY --from=shared-build /app/shared ./shared
 COPY backend/package.json backend/package-lock.json ./backend/
@@ -13,7 +13,7 @@ WORKDIR /app/backend
 # dist is already built in the shared-build stage.
 RUN npm ci --ignore-scripts
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 WORKDIR /app
 COPY --from=deps /app/shared ./shared
 COPY --from=deps /app/backend/node_modules ./backend/node_modules
@@ -22,7 +22,7 @@ WORKDIR /app/backend
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS production
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS production
 WORKDIR /app
 RUN addgroup -g 1001 -S nestjs && adduser -S nestjs -u 1001
 # Preserve the shared/ <-> backend/ layout so the @grimoire-os/shared symlink
