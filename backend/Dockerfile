@@ -24,6 +24,9 @@ RUN npm run build
 
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS production
 WORKDIR /app
+# Production mode for Express. The auth cookies' Secure flag follows this unless
+# COOKIE_SECURE overrides it (see .env.example).
+ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nestjs && adduser -S nestjs -u 1001
 # Preserve the shared/ <-> backend/ layout so the @grimoire-os/shared symlink
 # (node_modules/@grimoire-os/shared -> ../../shared) resolves at runtime.
