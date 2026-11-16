@@ -56,9 +56,10 @@ export default function InitiativeTrackerPage() {
 
   // Live-combat side panel (VEG-384). On wide screens the active creature's
   // stat block floats in a sticky right-hand column so the DM never scrolls to
-  // read it. `pinnedMonsterId` is a click-override: clicking a combatant's name
-  // pins its stat block until the turn advances, otherwise the panel follows
-  // whoever is up.
+  // read it. `pinnedMonsterId` is a click-override. Clicking a combatant's name
+  // pins its stat block. The controller's own turn change releases the pin,
+  // and Back to current turn releases it for anyone. Without a pin the panel
+  // follows whoever is up.
   const isWide = useMediaQuery('(min-width: 1024px)');
   const [pinnedMonsterId, setPinnedMonsterId] = useState<string | null>(null);
   // The two-column row and the active card, used to (a) anchor the stat panel
@@ -115,9 +116,7 @@ export default function InitiativeTrackerPage() {
   if (!encounter)
     return (
       <div className="text-gray-500 dark:text-gray-400">
-        {errorStatus === 403
-          ? 'You no longer have access to this encounter.'
-          : 'Encounter not found.'}
+        {errorStatus === 403 ? 'You do not have access to this encounter.' : 'Encounter not found.'}
       </div>
     );
 

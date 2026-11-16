@@ -109,8 +109,9 @@ export function useEncounter(encounterId: string, viewer: EncounterViewer): UseE
     refetchIntervalInBackground: false,
     // A live viewer who returns to the tab refetches at once instead of
     // waiting out the interval. The controller does not, matching the app
-    // default.
-    refetchOnWindowFocus: q => watchesLive(q.state.data, viewer),
+    // default, and neither does a viewer whose encounter is gone, because the
+    // cache keeps the old data after the final 403 or 404.
+    refetchOnWindowFocus: q => !isGone(q.state.error) && watchesLive(q.state.data, viewer),
   });
   const goneError = query.isError && isGone(query.error) ? query.error : null;
   const encounter = goneError ? null : (query.data ?? null);

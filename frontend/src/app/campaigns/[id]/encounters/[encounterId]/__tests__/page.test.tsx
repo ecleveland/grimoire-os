@@ -676,7 +676,7 @@ describe('InitiativeTrackerPage', () => {
       await act(() => client.invalidateQueries());
 
       await waitFor(() =>
-        expect(screen.getByText(/no longer have access to this encounter/i)).toBeInTheDocument()
+        expect(screen.getByText(/do not have access to this encounter/i)).toBeInTheDocument()
       );
       expect(screen.queryByRole('heading', { name: /goblin ambush/i })).not.toBeInTheDocument();
       expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();

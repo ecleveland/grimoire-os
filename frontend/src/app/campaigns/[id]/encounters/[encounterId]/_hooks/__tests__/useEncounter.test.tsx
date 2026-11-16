@@ -447,6 +447,25 @@ describe('useEncounter', () => {
       await waitFor(() => expect(callsTo(undefined)).toHaveLength(2));
     });
 
+    it('a gone encounter does not refetch on focus', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(404, 'not found'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.errorStatus).toBe(404));
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await poll(LIVE_POLL_MS);
+
+      expect(callsTo(undefined)).toHaveLength(2);
+    });
+
     it('the controller does not refetch on focus', async () => {
       mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
       // The test client refetches on focus by default, so this proves the
