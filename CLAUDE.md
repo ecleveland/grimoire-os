@@ -65,7 +65,7 @@ Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0
 
 ## CI & pre-merge verification
 
-GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + typecheck + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` before tearing down. It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, `backend/prisma.config.ts` (the image ships it and `migrate deploy` loads it at boot), or the workflow itself (VEG-570).
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + typecheck + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login`. It then registers a user and checks that every login `Set-Cookie` carries `Secure`, recreates only the backend with `COOKIE_SECURE=false` and checks that none do, then tears down (VEG-687). It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, `backend/prisma.config.ts` (the image ships it and `migrate deploy` loads it at boot), the cookie config files, `auth.controller.ts`, the auth DTOs, `backend/src/main.ts`, or the workflow itself (VEG-570).
 
 Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E and the real-DB seed tests (both need a live Postgres). The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
 
@@ -80,7 +80,7 @@ In `frontend/`, `npm run typecheck` type-checks the spec files too. Vitest strip
 | JWT_SECRET | Yes | — |
 | DATABASE_URL | No | postgresql://grimoire:grimoire@localhost:5432/grimoire_os |
 | JWT_EXPIRES_IN | No | 24h |
-| COOKIE_SECURE | No | unset: Secure flag on when NODE_ENV=production; `false` for plain HTTP |
+| COOKIE_SECURE | No | Unset means Secure when NODE_ENV=production. Set `false` for plain HTTP |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
 | INTERNAL_API_URL | No | falls back to NEXT_PUBLIC_API_URL |

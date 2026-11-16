@@ -35,5 +35,5 @@ export function cookieModeDescription(env: CookieEnv = process.env): string {
     return `Auth cookies are sent without the Secure flag (${source}). Browsers send them over plain HTTP.`;
   }
   const hint = override === undefined ? ' Set COOKIE_SECURE=false to serve over plain HTTP.' : '';
-  return `Auth cookies carry the Secure flag (${source}). Browsers send them only over HTTPS, so login over plain HTTP fails.${hint}`;
+  return `Auth cookies carry the Secure flag (${source}). Browsers send them only over HTTPS or to localhost, so login over plain HTTP from another address fails.${hint}`;
 }

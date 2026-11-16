@@ -59,13 +59,13 @@ describe('cookie.config', () => {
 
     it('names the override when COOKIE_SECURE turns the flag on', () => {
       expect(cookieModeDescription({ COOKIE_SECURE: 'true', NODE_ENV: 'development' })).toBe(
-        'Auth cookies carry the Secure flag (COOKIE_SECURE=true). Browsers send them only over HTTPS, so login over plain HTTP fails.'
+        'Auth cookies carry the Secure flag (COOKIE_SECURE=true). Browsers send them only over HTTPS or to localhost, so login over plain HTTP from another address fails.'
       );
     });
 
     it('names NODE_ENV when COOKIE_SECURE is unset in production', () => {
       expect(cookieModeDescription({ NODE_ENV: 'production' })).toBe(
-        'Auth cookies carry the Secure flag (COOKIE_SECURE unset, NODE_ENV=production). Browsers send them only over HTTPS, so login over plain HTTP fails. Set COOKIE_SECURE=false to serve over plain HTTP.'
+        'Auth cookies carry the Secure flag (COOKIE_SECURE unset, NODE_ENV=production). Browsers send them only over HTTPS or to localhost, so login over plain HTTP from another address fails. Set COOKIE_SECURE=false to serve over plain HTTP.'
       );
     });
 

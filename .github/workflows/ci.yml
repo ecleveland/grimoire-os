@@ -222,8 +222,9 @@ jobs:
       # it touches a file that can break the image without breaking the unit
       # suites (VEG-570: a missing tsconfig.build.json shipped a backend image
       # that exited with MODULE_NOT_FOUND while CI stayed green).
-      # The cookie files are listed because the Set-Cookie steps below are the
-      # only end-to-end check of the Secure flag.
+      # The cookie files, the auth controller and its DTOs are listed because
+      # the Set-Cookie steps below register, log in and count the cookies, and
+      # they are the only end-to-end check of the Secure flag.
       - name: Decide whether to run
         id: changed
         env:
@@ -234,7 +235,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
