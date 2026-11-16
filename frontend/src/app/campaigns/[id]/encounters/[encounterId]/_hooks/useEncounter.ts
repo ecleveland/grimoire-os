@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api';
+import { ApiError, apiFetch } from '@/lib/api';
 import { apiQueryKey, useApiQuery } from '@/lib/query';
 import { useOptimisticPatch } from '@/lib/use-optimistic-patch';
 import { clearDeathSavesIfRevived } from '@/lib/death-saves';
@@ -52,6 +52,12 @@ const pollInterval = (encounter: Encounter | undefined, viewer: EncounterViewer)
   return encounter.isActive ? LIVE_POLL_MS : IDLE_POLL_MS;
 };
 
+// A 403 or 404 on a refetch is final. The encounter is gone or the viewer lost
+// access, so polling stops and the page shows that instead of a stale tracker.
+// Network and 5xx failures keep the dimmed indicator and keep polling.
+const isGone = (error: unknown): error is ApiError =>
+  error instanceof ApiError && (error.status === 403 || error.status === 404);
+
 export interface UseEncounterResult {
   encounter: Encounter | null;
   isLoading: boolean;
@@ -62,6 +68,8 @@ export interface UseEncounterResult {
   lastUpdatedAt: number;
   /** A refetch failed after data was shown, so the state on screen may be old. */
   refreshFailed: boolean;
+  /** HTTP status of a permanent failure (403 or 404), null otherwise. */
+  errorStatus: number | null;
   writePending: boolean;
   patch: (
     updates: Partial<Encounter>,
@@ -80,7 +88,8 @@ export interface UseEncounterResult {
  * GET; a 409 refetches through the shared optimistic-patch hook. A viewer who
  * cannot control the tracker polls it every LIVE_POLL_MS while combat is
  * active and every IDLE_POLL_MS otherwise, so they follow the DM's turns
- * without reloading.
+ * without reloading. A 403 or 404 ends the read for good. Polling stops, the
+ * encounter reads as null and `errorStatus` holds the status.
  */
 export function useEncounter(encounterId: string, viewer: EncounterViewer): UseEncounterResult {
   const queryClient = useQueryClient();
@@ -96,10 +105,15 @@ export function useEncounter(encounterId: string, viewer: EncounterViewer): UseE
   const query = useApiQuery<Encounter>(path, {
     errorToast: suppressToast ? undefined : 'Failed to load encounter',
     staleTime: 0,
-    refetchInterval: q => pollInterval(q.state.data, viewer),
+    refetchInterval: q => (isGone(q.state.error) ? false : pollInterval(q.state.data, viewer)),
     refetchIntervalInBackground: false,
+    // A live viewer who returns to the tab refetches at once instead of
+    // waiting out the interval. The controller does not, matching the app
+    // default.
+    refetchOnWindowFocus: q => watchesLive(q.state.data, viewer),
   });
-  const encounter = query.data ?? null;
+  const goneError = query.isError && isGone(query.error) ? query.error : null;
+  const encounter = goneError ? null : (query.data ?? null);
 
   // Count of version-guarded writes (PATCHes and loot POSTs) in flight. A
   // counter, not a boolean: a quick write resolving mid-roll must not drop
@@ -219,6 +233,7 @@ export function useEncounter(encounterId: string, viewer: EncounterViewer): UseE
     lastUpdatedAt: query.dataUpdatedAt,
     // failureCount covers a failure that is still retrying, before isError flips.
     refreshFailed: encounter !== null && (query.isError || query.failureCount > 0),
+    errorStatus: goneError?.status ?? null,
     writePending: pendingWrites > 0,
     patch,
     rollLoot,

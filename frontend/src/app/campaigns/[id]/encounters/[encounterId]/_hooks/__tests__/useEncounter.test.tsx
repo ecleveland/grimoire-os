@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClientProvider, onlineManager, type QueryClient } from '@tanstack/react-query';
+import {
+  QueryClientProvider,
+  focusManager,
+  onlineManager,
+  type QueryClient,
+} from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { ApiError } from '@/lib/api';
 import { apiQueryKey } from '@/lib/query';
@@ -256,6 +261,7 @@ describe('useEncounter', () => {
     });
     afterEach(() => {
       vi.useRealTimers();
+      focusManager.setFocused(undefined);
     });
 
     const poll = (ms = LIVE_POLL_MS) =>
@@ -369,6 +375,92 @@ describe('useEncounter', () => {
       await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load encounter'));
       expect(mockToastError).toHaveBeenCalledTimes(1);
       expect(result.current.encounter).not.toBeNull();
+    });
+
+    it('a 404 on a refetch stops polling and clears the encounter', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(404, 'not found'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.encounter).toBeNull());
+      expect(result.current.errorStatus).toBe(404);
+      expect(result.current.isLive).toBe(false);
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await poll();
+      await poll();
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(2);
+    });
+
+    it('a 403 on a refetch stops polling the same way', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(403, 'forbidden'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.encounter).toBeNull());
+      expect(result.current.errorStatus).toBe(403);
+      expect(result.current.isLive).toBe(false);
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await poll();
+      await poll();
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(2);
+    });
+
+    it('a network error on a refetch keeps polling', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new Error('boom'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.refreshFailed).toBe(true));
+      expect(result.current.encounter).not.toBeNull();
+      expect(result.current.errorStatus).toBeNull();
+
+      await poll();
+      await poll();
+      expect(callsTo(undefined).length).toBeGreaterThanOrEqual(4);
+    });
+
+    it('a live viewer refetches when the window regains focus', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      // The app's own client, whose focus refetch is off, so only the hook's
+      // own option can turn it on.
+      const rendered = renderEncounter(makeQueryClient(), MEMBER);
+      await waitFor(() => expect(rendered.result.current.encounter).not.toBeNull());
+      expect(callsTo(undefined)).toHaveLength(1);
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+
+      await waitFor(() => expect(callsTo(undefined)).toHaveLength(2));
+    });
+
+    it('the controller does not refetch on focus', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      // The test client refetches on focus by default, so this proves the
+      // hook itself turns it off for the controller.
+      await renderLoaded(CONTROLLER);
+      expect(callsTo(undefined)).toHaveLength(1);
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await poll(LIVE_POLL_MS);
+
+      expect(callsTo(undefined)).toHaveLength(1);
     });
 
     it('the initial load failure still toasts', async () => {
