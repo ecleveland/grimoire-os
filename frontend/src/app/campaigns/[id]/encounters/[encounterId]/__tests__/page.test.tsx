@@ -648,5 +648,39 @@ describe('InitiativeTrackerPage', () => {
       expect(screen.getByRole('heading', { name: /goblin ambush/i })).toBeInTheDocument();
       expect(mockToastError).not.toHaveBeenCalled();
     });
+
+    it('shows the not-found state and stops polling when a refetch 404s', async () => {
+      asMember();
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(404, 'not found'));
+      const { client } = renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByTestId('live-indicator');
+
+      await act(() => client.invalidateQueries());
+
+      await waitFor(() => expect(screen.getByText(/encounter not found/i)).toBeInTheDocument());
+      expect(screen.queryByRole('heading', { name: /goblin ambush/i })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
+      expect(mockToastError).not.toHaveBeenCalled();
+    });
+
+    it('tells a member who lost access when a refetch 403s', async () => {
+      asMember();
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(403, 'forbidden'));
+      const { client } = renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByTestId('live-indicator');
+
+      await act(() => client.invalidateQueries());
+
+      await waitFor(() =>
+        expect(screen.getByText(/do not have access to this encounter/i)).toBeInTheDocument()
+      );
+      expect(screen.queryByRole('heading', { name: /goblin ambush/i })).not.toBeInTheDocument();
+      expect(screen.queryByTestId('live-indicator')).not.toBeInTheDocument();
+      expect(mockToastError).not.toHaveBeenCalled();
+    });
   });
 });

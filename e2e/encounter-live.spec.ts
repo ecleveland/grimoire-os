@@ -51,10 +51,55 @@ test.describe('Encounter tracker refreshes for campaign members (VEG-683)', () =
       });
       await expect(playerPage.getByText(/round 1/i)).toBeVisible();
 
-      // One combatant, so the next turn wraps to round 2.
+      // The DM adds a monster from the lookup panel. The first 'goblin' match
+      // is whatever the seeded compendium ranks first, so read its name.
+      await page.getByPlaceholder(/search monsters/i).fill('goblin');
+      const result = page.getByTestId('lookup-result').first();
+      await expect(result).toBeVisible({ timeout: 10_000 });
+      await result.click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toBeVisible();
+      await expect(page.getByTestId('monster-stat-block')).toBeVisible();
+      const monsterName = ((await dialog.locator('h3').first().textContent()) ?? '').trim();
+      expect(monsterName.length).toBeGreaterThan(0);
+      await dialog.getByRole('button', { name: /add to encounter/i }).click();
+      await expect(dialog.getByLabel('Quantity')).toBeVisible();
+      await dialog.getByRole('button', { name: /add to encounter/i }).click();
+      await expect(page.getByRole('dialog')).toBeHidden();
+      await expect(
+        page.getByRole('button', { name: monsterName, exact: true }).first()
+      ).toBeVisible();
+
+      // The player pins the monster's stat block while it is still Hero's turn.
+      const pinned = playerPage.getByRole('button', { name: monsterName, exact: true }).first();
+      await expect(pinned).toBeVisible({ timeout: 10_000 });
+      await pinned.click();
+      const playerPanel = playerPage.getByTestId('active-stat-panel');
+      const pinnedHeading = playerPanel.getByRole('heading', { name: monsterName, exact: true });
+      await expect(pinnedHeading).toBeVisible();
+
+      // The monster rolls initiative 10 by default, below Hero's 18, so the
+      // first next turn moves to the monster.
+      const escapedName = monsterName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const monsterTurn = new RegExp(`${escapedName}'s turn`, 'i');
+      await page.getByRole('button', { name: /next turn/i }).click();
+      await expect(page.getByText(monsterTurn)).toBeVisible();
+      await expect(playerPage.getByText(monsterTurn).first()).toBeVisible({ timeout: 10_000 });
+      await expect(pinnedHeading).toBeVisible();
+
+      // The second next turn wraps to round 2 with Hero up again. The player's
+      // pin survives both polled turn changes, so the panel still shows the
+      // monster and the quick-reference banner says whose turn it is.
       await page.getByRole('button', { name: /next turn/i }).click();
       await expect(page.getByText(/round 2/i)).toBeVisible();
       await expect(playerPage.getByText(/round 2/i)).toBeVisible({ timeout: 10_000 });
+      await expect(pinnedHeading).toBeVisible();
+      await expect(playerPanel.getByText(/quick reference/i)).toBeVisible();
+      await expect(playerPanel.getByText(/still hero's turn/i)).toBeVisible();
+
+      // Back to current turn drops the pin and the panel follows Hero again.
+      await playerPanel.getByRole('button', { name: /back to current turn/i }).click();
+      await expect(pinnedHeading).toBeHidden();
 
       // Ending combat reaches the player too, and the tracker stays live.
       await page.getByRole('button', { name: /end combat/i }).click();
