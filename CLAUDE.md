@@ -9,7 +9,7 @@ A free, open-source D&D 5e campaign management tool. Self-hostable alternative t
 ./dev.sh
 
 # Production (Docker)
-JWT_SECRET=your-secret docker compose up --build
+JWT_SECRET=your-secret POSTGRES_PASSWORD=your-db-password docker compose up --build
 ```
 
 ## Architecture
@@ -65,7 +65,7 @@ Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0
 
 ## CI & pre-merge verification
 
-GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + typecheck + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login`. It then registers a user and checks that every login `Set-Cookie` carries `Secure`, recreates only the backend with `COOKIE_SECURE=false` and checks that none do, then tears down (VEG-687). It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, `backend/prisma.config.ts` (the image ships it and `migrate deploy` loads it at boot), the cookie config files, `auth.controller.ts`, the auth DTOs, `backend/src/main.ts`, or the workflow itself (VEG-570).
+GitHub Actions (`.github/workflows/ci.yml`, VEG-120) runs on every PR: backend lint + `test:cov` + `nest build`, frontend lint + typecheck + `test:cov` + `next build`, the SRD extraction-lib tests, the `backend-db` real-DB seed tests (VEG-484), and the Playwright E2E suite against a compose-provisioned Postgres. The Docker job builds both images, boots the compose stack with `docker compose up --wait`, and probes `/api/health` and `/login` on port 3000, so the API probes go through the frontend container's `/api` proxy. Before the build it runs `scripts/compose-config.test.sh`, which renders the compose config from a temp env file and checks that it names no `localhost`, publishes only port 3000, takes CORS from `PUBLIC_URL` and refuses to render without `POSTGRES_PASSWORD`. `verify.sh` runs the same test. It then registers a user and checks that every login `Set-Cookie` carries `Secure`, recreates only the backend with `COOKIE_SECURE=false` and checks that none do, then tears down (VEG-687). It runs on every push to `main` and on PRs that touch the Dockerfiles, `docker-compose.yml`, `docker-compose.dev.yml`, the compose config test, either package's `tsconfig*.json` or `package.json`, `frontend/next.config.ts`, `frontend/src/middleware.ts`, `frontend/src/lib/api-base.ts`, `backend/prisma.config.ts` (the image ships it and `migrate deploy` loads it at boot), the cookie and trust proxy config files, `auth.controller.ts`, the auth DTOs, `backend/src/bootstrap-config.ts`, `backend/src/main.ts`, or the workflow itself (VEG-570).
 
 Run `./verify.sh` from the repo root before pushing — it mirrors the CI jobs locally (lint, unit tests with coverage thresholds, and the same production builds that `docker compose build` runs inside each image), minus E2E and the real-DB seed tests (both need a live Postgres). The production builds catch type errors the dev servers (Next.js dev, `nest start --watch`) silently let through.
 
@@ -78,16 +78,24 @@ In `frontend/`, `npm run typecheck` type-checks the spec files too. Vitest strip
 | Variable | Required | Default |
 |----------|----------|---------|
 | JWT_SECRET | Yes | — |
+| POSTGRES_PASSWORD | Yes, for compose and `dev.sh` | None. `.env.example` sets the dev value `grimoire` |
+| POSTGRES_USER | No | grimoire |
+| POSTGRES_DB | No | grimoire_os |
+| PUBLIC_URL | No | http://localhost:3000. Compose uses it as the backend's `FRONTEND_URL` |
+| FRONTEND_BIND | No | 127.0.0.1. The host address compose publishes port 3000 on. `0.0.0.0` opens it to the network |
+| TRUST_PROXY | No | Unset means 0. Compose sets 1 |
 | DATABASE_URL | No | postgresql://grimoire:grimoire@localhost:5432/grimoire_os |
 | JWT_EXPIRES_IN | No | 24h |
 | COOKIE_SECURE | No | Unset means Secure when NODE_ENV=production. Set `false` for plain HTTP |
 | FRONTEND_URL | No | http://localhost:3000 |
-| NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
-| INTERNAL_API_URL | No | falls back to NEXT_PUBLIC_API_URL |
+| NEXT_PUBLIC_API_URL | No | The relative `/api`. `.env.example` sets http://localhost:3001/api for dev |
+| INTERNAL_API_URL | No | An absolute NEXT_PUBLIC_API_URL, else http://localhost:3001/api |
 | CACHE_TTL_MS | No | 86400000 (24h) |
 | CACHE_LRU_SIZE | No | 1000 |
 
-`INTERNAL_API_URL` is the server-side base URL for SSR data fetches (the SRD reference pages render as server components — VEG-320). In Docker it's `http://backend:3001/api` (the frontend container can't reach the backend via the host-published `localhost` URL); locally it's unset and falls back to `NEXT_PUBLIC_API_URL`.
+The browser calls the API at `NEXT_PUBLIC_API_URL`, which defaults to the relative `/api`. `frontend/src/middleware.ts` proxies `/api/*` to `INTERNAL_API_URL`, which it reads on every request, so the Docker stack needs one public port and one origin. The proxy lives in middleware because `next build` resolves `rewrites()` in `next.config.ts` once and writes it into the image. `INTERNAL_API_URL` is also the base for SSR data fetches (the SRD reference pages render as server components). In Docker it is `http://backend:3001/api`. Locally it is unset, and `frontend/src/lib/api-base.ts` falls back to an absolute `NEXT_PUBLIC_API_URL`, then to `http://localhost:3001/api`. `dev.sh` keeps `NEXT_PUBLIC_API_URL=http://localhost:3001/api` from `.env`, so in dev the browser calls the backend directly.
+
+Compose never reads `DATABASE_URL`, `FRONTEND_URL` or `NEXT_PUBLIC_API_URL`, because the root `.env` sets them to localhost values for `dev.sh` and compose reads that file too. It builds the backend's database URL from the `POSTGRES_*` values and its CORS origin from `PUBLIC_URL`. The backend honors `TRUST_PROXY` (`backend/src/config/trust-proxy.config.ts`), a hop count for Express's `trust proxy`, so `req.ip` and the rate limiter see the client address behind the frontend proxy. Next sets `X-Forwarded-For` to the connecting address only when the request has none, and its rewrite proxy passes an existing header on unchanged, so a client that reaches port 3000 directly can forge it. A bad value stops the boot.
 
 `CACHE_TTL_MS` / `CACHE_LRU_SIZE` tune the global in-memory response cache (`backend/src/config/cache.config.ts`, VEG-340). The cache is LRU-bounded so high-cardinality anonymous traffic (e.g. `/srd/search?q=<unique>`) can't accrete unbounded 24h entries and OOM a small self-host; raise `CACHE_LRU_SIZE` on instances with more heap, or lower `CACHE_TTL_MS` for a shorter staleness window.
 
@@ -117,6 +125,8 @@ Before invoking `./dev.sh`:
 ## Docker
 
 Base images are pinned to immutable SHA256 digests in `backend/Dockerfile`, `frontend/Dockerfile`, and `docker-compose.yml`. The combined `tag@sha256:<digest>` form is used so the human-readable tag is preserved alongside the digest.
+
+Production compose publishes only the frontend's port 3000, on `${FRONTEND_BIND:-127.0.0.1}`. The loopback default leaves a reverse proxy on the same host as the only way in, because with `TRUST_PROXY=1` a client that reaches port 3000 directly can forge `X-Forwarded-For` and get a fresh rate-limit key on every request. The docker CI job probes `http://127.0.0.1:3000`, because an IPv6-first resolver could send `localhost` to `::1` and miss the IPv4 binding. `docker-compose.dev.yml` publishes Postgres on 5432 for runs that keep the backend on the host. `dev.sh`, `dev-e2e.sh` and the CI e2e job add it to their `up -d postgres` call. Compose fails fast without `POSTGRES_PASSWORD`, on every subcommand, `exec` and `down` included.
 
 Every compose service has a healthcheck, and each one starts only after its dependency reports healthy (postgres, then backend, then frontend). The backend probe calls `GET /api/health`, which runs `SELECT 1` and answers 503 when the database is unreachable. The probes use `node -e "fetch(...)"` because the alpine images ship no curl. `docker compose ps` shows the health state.
 
@@ -153,7 +163,7 @@ After updating, verify:
 ```bash
 docker compose config        # parses cleanly
 docker compose build         # all services build
-docker compose up -d postgres  # comes up healthy
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres  # comes up healthy
 ```
 
 Record the resolution date in the table above for each image you bump.

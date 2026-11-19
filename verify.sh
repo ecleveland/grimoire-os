@@ -18,6 +18,9 @@ cd "$ROOT_DIR" && node --test scripts/*.test.mjs scripts/lib/*.test.mjs
 echo "==> Testing e2e stack naming rules (e2e/stack-env.test.sh)"
 cd "$ROOT_DIR" && bash e2e/stack-env.test.sh
 
+echo "==> Testing compose interpolation (scripts/compose-config.test.sh)"
+cd "$ROOT_DIR" && bash scripts/compose-config.test.sh
+
 echo "==> Building @grimoire-os/shared"
 cd "$ROOT_DIR/shared" && npm run build
 

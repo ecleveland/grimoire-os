@@ -137,6 +137,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       JWT_SECRET: ci-e2e-secret
+      # Compose needs it on every call, exec included, and the e2e specs read
+      # it from .env.
+      POSTGRES_PASSWORD: grimoire
       E2E_DATABASE_URL: postgresql://grimoire:grimoire@localhost:5432/grimoire_os_e2e
     steps:
       - uses: actions/checkout@v7
@@ -155,7 +158,9 @@ jobs:
         run: sudo apt-get update -q && sudo apt-get install -y -q netcat-openbsd
       # dev-e2e.sh sources the repo-root .env (set -e: it must exist).
       - name: Create .env
-        run: echo "JWT_SECRET=${JWT_SECRET}" > .env
+        run: |
+          echo "JWT_SECRET=${JWT_SECRET}" > .env
+          echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> .env
       - name: Install shared deps (prepare builds dist)
         working-directory: shared
         run: npm ci
@@ -174,9 +179,10 @@ jobs:
       # dev-e2e.sh, so the cold-start work (image pull, migrate, seed) happens
       # in visible, individually-timed steps; dev-e2e.sh then re-runs the same
       # steps as fast idempotent no-ops.
+      # docker-compose.dev.yml publishes 5432 for the backend on the runner.
       - name: Start postgres
         run: |
-          docker compose up -d postgres
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d postgres
           # Probe over TCP, not the default unix socket: on a cold volume,
           # initdb's temporary bootstrap server answers socket probes, so a
           # socket pg_isready can pass and the next psql then lands in the
@@ -215,6 +221,8 @@ jobs:
     timeout-minutes: 15
     env:
       JWT_SECRET: ci-docker-build
+      POSTGRES_PASSWORD: ci-docker-pw
+      PUBLIC_URL: http://localhost:3000
       COMPOSE_PROJECT_NAME: ci-smoke
     steps:
       - uses: actions/checkout@v7
@@ -224,7 +232,9 @@ jobs:
       # that exited with MODULE_NOT_FOUND while CI stayed green).
       # The cookie files, the auth controller and its DTOs are listed because
       # the Set-Cookie steps below register, log in and count the cookies, and
-      # they are the only end-to-end check of the Secure flag.
+      # they are the only end-to-end check of the Secure flag. The middleware,
+      # the API base and the trust proxy setup are listed because every probe
+      # below reaches the backend through the frontend container's /api proxy.
       - name: Decide whether to run
         id: changed
         env:
@@ -235,7 +245,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -243,7 +253,9 @@ jobs:
           fi
       - name: Validate compose config
         if: steps.changed.outputs.run == 'true'
-        run: docker compose config -q
+        run: |
+          docker compose config -q
+          bash scripts/compose-config.test.sh
       - name: Build images
         if: steps.changed.outputs.run == 'true'
         run: docker compose build
@@ -257,14 +269,20 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         run: |
           docker compose ps
-          body=$(curl -fsS http://localhost:3001/api/health)
+          # Only the frontend publishes a port, so this request goes through the
+          # frontend container's /api proxy to the backend. The port binds
+          # 127.0.0.1 only. Every probe names that address, because an
+          # IPv6-first resolver could send localhost to ::1 and miss it.
+          body=$(curl -fsS http://127.0.0.1:3000/api/health)
           echo "GET /api/health -> $body"
           echo "$body" | grep -q '"status":"ok"'
           # / redirects to /login through the middleware; probe /login directly.
-          curl -fsS -o /dev/null http://localhost:3000/login
+          curl -fsS -o /dev/null http://127.0.0.1:3000/login
       # The image sets NODE_ENV=production and this job leaves COOKIE_SECURE
       # unset, so every login cookie must carry Secure. cookie-flags.sh prints the
       # Set-Cookie lines a fresh login returns and how many of them are Secure.
+      # Register and login go through the frontend container's /api proxy, so
+      # the counts also prove Set-Cookie survives the proxy.
       - name: Login cookies carry Secure by default
         if: steps.changed.outputs.run == 'true'
         run: |
@@ -272,7 +290,7 @@ jobs:
           login() {
             curl -fsS -D - -o /dev/null -X POST -H 'Content-Type: application/json' \
               -d '{"username":"ci-cookie","password":"CiCookie-Pass1!"}' \
-              http://localhost:3001/api/auth/login | tr -d '\r'
+              http://127.0.0.1:3000/api/auth/login | tr -d '\r'
           }
           cookies=$(login | grep -i '^set-cookie:')
           echo "$cookies"
@@ -282,10 +300,41 @@ jobs:
           SH
           curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
             -d '{"username":"ci-cookie","password":"CiCookie-Pass1!"}' \
-            http://localhost:3001/api/auth/register
+            http://127.0.0.1:3000/api/auth/register
           docker compose logs backend | grep 'Auth cookies carry the Secure flag (COOKIE_SECURE unset, NODE_ENV=production)'
           result=$(bash "$RUNNER_TEMP/cookie-flags.sh" | tee /dev/stderr | tail -1)
           [ "$result" = "set-cookie=4 secure=4" ]
+      # Login allows 5 requests a minute per client key (LOGIN_LIMIT in
+      # auth.controller.ts, and compose passes no THROTTLE_AUTH_LIMIT). The
+      # key is the client address from X-Forwarded-For, so one forwarded
+      # address hits 429 on its sixth login while a second address still gets
+      # in. The step fails if TRUST_PROXY is off, if main.ts stops applying it,
+      # or if Next stops forwarding the header, because every login would then
+      # share one key and the last one would also get 429. The cookie step's
+      # login sends no X-Forwarded-For, so Next fills in the address its
+      # connection came from, and that login leaves both buckets here
+      # untouched. The next step recreates the backend, which empties the
+      # in-memory throttler storage.
+      - name: Rate limiter keys on the client address through the proxy
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          login() {
+            curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              -H "X-Forwarded-For: $1" \
+              -d '{"username":"ci-cookie","password":"CiCookie-Pass1!"}' \
+              http://127.0.0.1:3000/api/auth/login
+          }
+          codes=()
+          for i in 1 2 3 4 5 6; do
+            code=$(login 203.0.113.10)
+            codes+=("$code")
+            echo "203.0.113.10 login $i -> $code"
+          done
+          other=$(login 203.0.113.11)
+          echo "203.0.113.11 login 1 -> $other"
+          [ "${codes[0]}" = "200" ]
+          [ "${codes[5]}" = "429" ]
+          [ "$other" = "200" ]
       # Recreate only the backend with the override. The image is reused, and
       # the user registered above survives in the database.
       - name: COOKIE_SECURE=false drops Secure from login cookies

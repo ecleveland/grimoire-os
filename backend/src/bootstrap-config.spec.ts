@@ -1,11 +1,14 @@
 import { Test } from '@nestjs/testing';
-import { Body, Controller, INestApplication, Post } from '@nestjs/common';
+import { Body, Controller, Get, INestApplication, Post, Req } from '@nestjs/common';
+import type { Request } from 'express';
 import request from 'supertest';
 import {
   AUTH_BODY_LIMIT_BYTES,
   AUTH_LIMITED_PATHS,
   DEFAULT_BODY_LIMIT_BYTES,
   configureBodyParsers,
+  configureSecurityHeaders,
+  configureTrustProxy,
 } from './bootstrap-config';
 
 @Controller()
@@ -90,5 +93,90 @@ describe('configureBodyParsers', () => {
     const res = await request(app.getHttpServer()).post('/api/echo').send(oversized);
 
     expect(res.status).toBe(413);
+  });
+});
+
+@Controller()
+class IpController {
+  @Get('api/ip')
+  ip(@Req() req: Request) {
+    return { ip: req.ip };
+  }
+}
+
+describe('configureTrustProxy', () => {
+  let app: INestApplication;
+
+  async function start(hops: number) {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [IpController],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    configureTrustProxy(app, hops);
+    await app.init();
+  }
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('ignores X-Forwarded-For at 0 hops, so a client cannot pick its own rate-limit key', async () => {
+    await start(0);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/ip')
+      .set('X-Forwarded-For', '203.0.113.7');
+
+    expect(res.body.ip).not.toBe('203.0.113.7');
+    expect(res.body.ip).toMatch(/127\.0\.0\.1|::1/);
+  });
+
+  it('reads the client address from X-Forwarded-For at 1 hop', async () => {
+    await start(1);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/ip')
+      .set('X-Forwarded-For', '203.0.113.7');
+
+    expect(res.body.ip).toBe('203.0.113.7');
+  });
+
+  it('trusts only the given number of hops from the right of X-Forwarded-For', async () => {
+    await start(1);
+
+    const res = await request(app.getHttpServer())
+      .get('/api/ip')
+      .set('X-Forwarded-For', '198.51.100.9, 203.0.113.7');
+
+    expect(res.body.ip).toBe('203.0.113.7');
+  });
+});
+
+describe('configureSecurityHeaders', () => {
+  let app: INestApplication;
+
+  beforeEach(async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [IpController],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    configureSecurityHeaders(app);
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('sends HSTS for the app host alone, without includeSubDomains', async () => {
+    const res = await request(app.getHttpServer()).get('/api/ip');
+
+    expect(res.headers['strict-transport-security']).toBe('max-age=15552000');
+  });
+
+  it('sends no Content-Security-Policy header', async () => {
+    const res = await request(app.getHttpServer()).get('/api/ip');
+
+    expect(res.headers['content-security-policy']).toBeUndefined();
   });
 });

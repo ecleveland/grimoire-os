@@ -9,7 +9,9 @@ import {
   withRefreshLock,
 } from '../api';
 
-const API_URL = 'http://localhost:3001/api';
+// The browser calls its own origin, and the Next server proxies /api to the
+// backend. Vitest sets no NEXT_PUBLIC_API_URL, so the default applies.
+const API_URL = '/api';
 
 // A real Response, so the body reads once through text() or json() as it does
 // in a browser. The Response constructor rejects a body on a 204.

@@ -2,11 +2,16 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
-import { configureBodyParsers, GLOBAL_VALIDATION_PIPE_OPTIONS } from './bootstrap-config';
+import {
+  configureBodyParsers,
+  configureSecurityHeaders,
+  configureTrustProxy,
+  GLOBAL_VALIDATION_PIPE_OPTIONS,
+} from './bootstrap-config';
 import { cookieModeDescription } from './config/cookie.config';
+import { trustProxyDescription } from './config/trust-proxy.config';
 
 async function bootstrap() {
   // Nest's default body parser is disabled so configureBodyParsers can install
@@ -14,8 +19,11 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   const configService = app.get(ConfigService);
-  // Logged before listen so the line is in the log by the time a healthcheck passes.
-  new Logger('Bootstrap').log(cookieModeDescription());
+  // Logged before listen so the lines are in the log by the time a healthcheck passes.
+  const logger = new Logger('Bootstrap');
+  logger.log(cookieModeDescription());
+  configureTrustProxy(app, configService.get<number>('trustProxy') ?? 0);
+  logger.log(trustProxyDescription());
 
   app.setGlobalPrefix('api');
   app.use(cookieParser());
@@ -23,15 +31,7 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS));
 
-  app.use(
-    helmet({
-      contentSecurityPolicy: false,
-      strictTransportSecurity: {
-        maxAge: 15552000,
-        includeSubDomains: true,
-      },
-    })
-  );
+  configureSecurityHeaders(app);
 
   app.enableCors({
     origin: configService.get<string>('cors.origin'),
