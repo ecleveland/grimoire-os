@@ -136,7 +136,31 @@ else
   fail "backend DATABASE_URL carries the password and host postgres" "got: $database_url"
 fi
 
-# 5. A missing password stops compose before anything starts. The repo's .env
+# 5. The backend trusts the frontend proxy by default, so the rate limiter keys
+# on the client address. Under compose every request reaches the backend from
+# the frontend container, so 0 puts every client in one bucket.
+trust_proxy=$(service_env backend TRUST_PROXY <<<"$rendered")
+if [ "$trust_proxy" = "1" ]; then
+  pass "backend TRUST_PROXY defaults to 1"
+else
+  fail "backend TRUST_PROXY defaults to 1" "got: ${trust_proxy:-empty}"
+fi
+
+NO_TRUST="$TMP/no-trust.env"
+cat "$MINIMAL" > "$NO_TRUST"
+echo 'TRUST_PROXY=0' >> "$NO_TRUST"
+if no_trust_rendered=$(render "$NO_TRUST" 2>&1); then
+  no_trust=$(service_env backend TRUST_PROXY <<<"$no_trust_rendered")
+  if [ "$no_trust" = "0" ]; then
+    pass "TRUST_PROXY=0 in the env file reaches the backend"
+  else
+    fail "TRUST_PROXY=0 in the env file reaches the backend" "got: ${no_trust:-empty}"
+  fi
+else
+  fail "TRUST_PROXY=0 in the env file reaches the backend" "$no_trust_rendered"
+fi
+
+# 6. A missing password stops compose before anything starts. The repo's .env
 # sets POSTGRES_PASSWORD, so this check also proves that file is not read.
 NO_PASSWORD="$TMP/no-password.env"
 grep -v '^POSTGRES_PASSWORD=' "$MINIMAL" > "$NO_PASSWORD"
@@ -147,7 +171,7 @@ else
   fail "missing POSTGRES_PASSWORD fails with the required-variable message" "exit $rc: $(head -n 5 <<<"$out")"
 fi
 
-# 6. The dev override publishes Postgres for dev.sh and the e2e stack.
+# 7. The dev override publishes Postgres for dev.sh and the e2e stack.
 if dev_rendered=$(render "$MINIMAL" -f "$ROOT_DIR/docker-compose.dev.yml" 2>&1); then
   dev_ports=$(published_ports <<<"$dev_rendered")
   if grep -qx 'postgres:5432:5432' <<<"$dev_ports"; then

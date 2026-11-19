@@ -43,7 +43,7 @@ JWT_SECRET=your-secret
 POSTGRES_PASSWORD=your-db-password
 ```
 
-`PUBLIC_URL` sets the backend's CORS origin. `POSTGRES_PASSWORD` has no default, and compose refuses to start without it. Keep it URL-safe, because compose places it inside the backend's database URL. `POSTGRES_USER` and `POSTGRES_DB` default to `grimoire` and `grimoire_os`.
+`PUBLIC_URL` sets the backend's CORS origin. `POSTGRES_PASSWORD` has no default, and compose refuses to start without it. Keep it URL-safe, because compose places it inside the backend's database URL. Generate one with `openssl rand -hex 32`. Base64 output can contain `/`, which breaks the database URL and stops the backend from booting. `POSTGRES_USER` and `POSTGRES_DB` default to `grimoire` and `grimoire_os`.
 
 Port 3000 listens on 127.0.0.1 by default, and a reverse proxy on the same host is the way in. Point it at `http://127.0.0.1:3000` and have it add the client address to the end of `X-Forwarded-For` or replace the header with it. The backend trusts one proxy hop (`TRUST_PROXY=1`) and keys its rate limits on the last entry of that header, which the frontend passes on unchanged. When a request arrives without the header, the frontend fills it in with the address its connection came from. That is the client's own address only when Docker passes the source address through to the container.
 
@@ -66,7 +66,7 @@ The backend image runs with `NODE_ENV=production`, so its auth cookies carry the
 | PUBLIC_URL | The URL users open | http://localhost:3000 |
 | FRONTEND_BIND | Host address port 3000 listens on | `127.0.0.1`. `0.0.0.0` opens it to the network |
 | POSTGRES_PASSWORD | A URL-safe password | None, required |
-| TRUST_PROXY | Proxy hop count, `0` turns it off | `1` in compose, `0` elsewhere |
+| TRUST_PROXY | Proxy hop count. Under compose, `0` puts every client in one rate-limit bucket | `1` in compose, `0` elsewhere |
 | COOKIE_SECURE | `true`, `false` or unset | Unset means Secure when `NODE_ENV=production` |
 
 ## Tech Stack

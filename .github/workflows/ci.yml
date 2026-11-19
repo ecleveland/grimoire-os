@@ -304,6 +304,37 @@ jobs:
           docker compose logs backend | grep 'Auth cookies carry the Secure flag (COOKIE_SECURE unset, NODE_ENV=production)'
           result=$(bash "$RUNNER_TEMP/cookie-flags.sh" | tee /dev/stderr | tail -1)
           [ "$result" = "set-cookie=4 secure=4" ]
+      # Login allows 5 requests a minute per client key (LOGIN_LIMIT in
+      # auth.controller.ts, and compose passes no THROTTLE_AUTH_LIMIT). The
+      # key is the client address from X-Forwarded-For, so one forwarded
+      # address hits 429 on its sixth login while a second address still gets
+      # in. The step fails if TRUST_PROXY is off, if main.ts stops applying it,
+      # or if Next stops forwarding the header, because every login would then
+      # share one key and the last one would also get 429. The cookie step's
+      # login sends no X-Forwarded-For, so Next fills in the address its
+      # connection came from, and that login leaves both buckets here
+      # untouched. The next step recreates the backend, which empties the
+      # in-memory throttler storage.
+      - name: Rate limiter keys on the client address through the proxy
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          login() {
+            curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+              -H "X-Forwarded-For: $1" \
+              -d '{"username":"ci-cookie","password":"CiCookie-Pass1!"}' \
+              http://127.0.0.1:3000/api/auth/login
+          }
+          codes=()
+          for i in 1 2 3 4 5 6; do
+            code=$(login 203.0.113.10)
+            codes+=("$code")
+            echo "203.0.113.10 login $i -> $code"
+          done
+          other=$(login 203.0.113.11)
+          echo "203.0.113.11 login 1 -> $other"
+          [ "${codes[0]}" = "200" ]
+          [ "${codes[5]}" = "429" ]
+          [ "$other" = "200" ]
       # Recreate only the backend with the override. The image is reused, and
       # the user registered above survives in the database.
       - name: COOKIE_SECURE=false drops Secure from login cookies

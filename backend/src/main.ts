@@ -2,11 +2,11 @@ import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import {
   configureBodyParsers,
+  configureSecurityHeaders,
   configureTrustProxy,
   GLOBAL_VALIDATION_PIPE_OPTIONS,
 } from './bootstrap-config';
@@ -31,15 +31,7 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe(GLOBAL_VALIDATION_PIPE_OPTIONS));
 
-  app.use(
-    helmet({
-      contentSecurityPolicy: false,
-      strictTransportSecurity: {
-        maxAge: 15552000,
-        includeSubDomains: true,
-      },
-    })
-  );
+  configureSecurityHeaders(app);
 
   app.enableCors({
     origin: configService.get<string>('cors.origin'),

@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipeOptions } from '@nestjs/common';
 import { ValidatorOptions } from 'class-validator';
 import { Express, json, urlencoded } from 'express';
+import helmet, { HelmetOptions } from 'helmet';
 import { resolveTrustProxy } from './config/trust-proxy.config';
 
 // Strictness shared by the global ValidationPipe and manual validateSync call
@@ -43,4 +44,20 @@ export function configureBodyParsers(app: INestApplication): void {
 export function configureTrustProxy(app: INestApplication, hops = resolveTrustProxy()): void {
   if (hops <= 0) return;
   (app.getHttpAdapter().getInstance() as Express).set('trust proxy', hops);
+}
+
+// HSTS covers the app's own host for 180 days. includeSubDomains stays off
+// because the app is one host on an operator's domain and must not claim the
+// rest of it. Browsers would otherwise refuse plain HTTP on every subdomain of
+// an apex install.
+export const HELMET_OPTIONS: HelmetOptions = {
+  contentSecurityPolicy: false,
+  strictTransportSecurity: {
+    maxAge: 15552000,
+    includeSubDomains: false,
+  },
+};
+
+export function configureSecurityHeaders(app: INestApplication): void {
+  app.use(helmet(HELMET_OPTIONS));
 }

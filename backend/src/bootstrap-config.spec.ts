@@ -7,6 +7,7 @@ import {
   AUTH_LIMITED_PATHS,
   DEFAULT_BODY_LIMIT_BYTES,
   configureBodyParsers,
+  configureSecurityHeaders,
   configureTrustProxy,
 } from './bootstrap-config';
 
@@ -148,5 +149,34 @@ describe('configureTrustProxy', () => {
       .set('X-Forwarded-For', '198.51.100.9, 203.0.113.7');
 
     expect(res.body.ip).toBe('203.0.113.7');
+  });
+});
+
+describe('configureSecurityHeaders', () => {
+  let app: INestApplication;
+
+  beforeEach(async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [IpController],
+    }).compile();
+    app = moduleRef.createNestApplication();
+    configureSecurityHeaders(app);
+    await app.init();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it('sends HSTS for the app host alone, without includeSubDomains', async () => {
+    const res = await request(app.getHttpServer()).get('/api/ip');
+
+    expect(res.headers['strict-transport-security']).toBe('max-age=15552000');
+  });
+
+  it('sends no Content-Security-Policy header', async () => {
+    const res = await request(app.getHttpServer()).get('/api/ip');
+
+    expect(res.headers['content-security-policy']).toBeUndefined();
   });
 });

@@ -33,7 +33,9 @@ services:
       # The CORS origin, the address users open in the browser.
       - FRONTEND_URL=${PUBLIC_URL:-http://localhost:3000}
       # The frontend proxy is one hop, so req.ip and the rate limiter see the
-      # client address from X-Forwarded-For. Set 0 to turn it off.
+      # client address from X-Forwarded-For. Every request reaches the backend
+      # from the frontend container, so 0 puts every client in one rate-limit
+      # bucket.
       - TRUST_PROXY=${TRUST_PROXY:-1}
       # Unset, the auth cookies carry the Secure flag because the image runs with
       # NODE_ENV=production. Set COOKIE_SECURE=false in .env to serve over plain
