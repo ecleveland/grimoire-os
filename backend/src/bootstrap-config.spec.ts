@@ -1,5 +1,17 @@
+import { stripVTControlCharacters } from 'node:util';
 import { Test } from '@nestjs/testing';
-import { Body, Controller, Get, INestApplication, Post, Req } from '@nestjs/common';
+import {
+  Body,
+  CanActivate,
+  Controller,
+  ExecutionContext,
+  Get,
+  INestApplication,
+  Post,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import request from 'supertest';
 import {
@@ -7,9 +19,12 @@ import {
   AUTH_LIMITED_PATHS,
   DEFAULT_BODY_LIMIT_BYTES,
   configureBodyParsers,
+  configureRequestLogging,
   configureSecurityHeaders,
   configureTrustProxy,
 } from './bootstrap-config';
+import { createAppLogger } from './config/logging.config';
+import type { LogFormat } from './config/logging.config';
 
 @Controller()
 class TestController {
@@ -178,5 +193,223 @@ describe('configureSecurityHeaders', () => {
     const res = await request(app.getHttpServer()).get('/api/ip');
 
     expect(res.headers['content-security-policy']).toBeUndefined();
+  });
+});
+
+// Sets req.user the way the JWT guard does, after every middleware has run, so
+// a passing test proves the request line reads the user at response time.
+class SignedInGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    context.switchToHttp().getRequest().user = {
+      userId: 'user-42',
+      username: 'alice',
+      role: 'player',
+    };
+    return true;
+  }
+}
+
+class RejectingGuard implements CanActivate {
+  canActivate(): boolean {
+    throw new UnauthorizedException();
+  }
+}
+
+@Controller('api')
+class LoggedController {
+  @Get('campaigns')
+  campaigns() {
+    return [];
+  }
+
+  @Post('campaigns')
+  create(@Body() body: Record<string, unknown>) {
+    return { received: Object.keys(body).length };
+  }
+
+  @Get('me')
+  @UseGuards(SignedInGuard)
+  me() {
+    return { ok: true };
+  }
+
+  @Get('locked')
+  @UseGuards(RejectingGuard)
+  locked() {
+    return { ok: true };
+  }
+
+  @Get('health')
+  health() {
+    return { status: 'ok' };
+  }
+}
+
+describe('configureRequestLogging', () => {
+  let app: INestApplication;
+  let written: string[];
+  let writeSpy: jest.SpyInstance;
+
+  // Boots the way main.ts does, with the app logger built from the given env,
+  // and captures every line the logger prints.
+  async function start(env: Partial<Record<'LOG_FORMAT' | 'LOG_LEVEL', string>> = {}) {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [LoggedController],
+    }).compile();
+    app = moduleRef.createNestApplication({ logger: createAppLogger(env) });
+    configureRequestLogging(app, (env.LOG_FORMAT ?? 'text') as LogFormat);
+    await app.init();
+  }
+
+  function requestLines(): string[] {
+    return written
+      .map(line => stripVTControlCharacters(line))
+      .filter(line => line.includes('[HTTP] ') || line.includes('"context":"HTTP"'));
+  }
+
+  function textMessages(): string[] {
+    return requestLines().map(line =>
+      line.slice(line.indexOf('[HTTP] ') + '[HTTP] '.length).trim()
+    );
+  }
+
+  function jsonRecords(): Record<string, unknown>[] {
+    return requestLines().map(line => JSON.parse(line) as Record<string, unknown>);
+  }
+
+  // The line is written on the response's finish event, which can land a tick
+  // after the client has read the response.
+  async function waitForRequestLines(count: number): Promise<void> {
+    for (let i = 0; i < 50 && requestLines().length < count; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+
+  beforeEach(() => {
+    written = [];
+    writeSpy = jest.spyOn(process.stdout, 'write').mockImplementation(chunk => {
+      written.push(String(chunk));
+      return true;
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+    writeSpy.mockRestore();
+  });
+
+  it('logs method, path, status and whole-millisecond duration for a request (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/campaigns').expect(200);
+    await waitForRequestLines(1);
+
+    expect(textMessages()).toHaveLength(1);
+    expect(textMessages()[0]).toMatch(/^GET \/api\/campaigns 200 \d+ms$/);
+  });
+
+  it('drops the query string from the logged path (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/campaigns?q=secret-search&code=invite-123');
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^GET \/api\/campaigns 200 \d+ms$/);
+    expect(written.join('')).not.toContain('secret-search');
+    expect(written.join('')).not.toContain('invite-123');
+  });
+
+  it('adds the user id when a guard signed the request in (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/me').expect(200);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^GET \/api\/me 200 \d+ms user=user-42$/);
+  });
+
+  it('logs a request a guard rejects with 401, without a user (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/locked').expect(401);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^GET \/api\/locked 401 \d+ms$/);
+  });
+
+  it('logs a request for an unknown route with 404 (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/nowhere').expect(404);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^GET \/api\/nowhere 404 \d+ms$/);
+  });
+
+  it('never logs the request body or headers (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer())
+      .post('/api/campaigns')
+      .set('Cookie', 'access_token=cookie-value')
+      .set('X-Custom', 'header-value')
+      .send({ password: 'body-value' })
+      .expect(201);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^POST \/api\/campaigns 201 \d+ms$/);
+    const output = written.join('');
+    expect(output).not.toContain('cookie-value');
+    expect(output).not.toContain('header-value');
+    expect(output).not.toContain('body-value');
+  });
+
+  it('skips /api/health, which the container healthcheck polls (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/health').expect(200);
+    await request(app.getHttpServer()).get('/api/health?probe=1').expect(200);
+    await request(app.getHttpServer()).get('/api/campaigns').expect(200);
+    await waitForRequestLines(1);
+    // Give a stray health line the same chance to land as the campaigns line.
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    expect(textMessages()).toEqual([expect.stringMatching(/^GET \/api\/campaigns 200/)]);
+  });
+
+  it('prints request lines with fields as top-level JSON keys when LOG_FORMAT=json (VEG-694)', async () => {
+    await start({ LOG_FORMAT: 'json' });
+
+    await request(app.getHttpServer()).get('/api/me?q=secret').expect(200);
+    await request(app.getHttpServer()).get('/api/campaigns').expect(200);
+    await waitForRequestLines(2);
+
+    const [signedIn, anonymous] = jsonRecords();
+    expect(signedIn).toEqual(
+      expect.objectContaining({
+        level: 'log',
+        context: 'HTTP',
+        method: 'GET',
+        path: '/api/me',
+        status: 200,
+        userId: 'user-42',
+      })
+    );
+    expect(signedIn.message).toMatch(/^GET \/api\/me 200 \d+ms user=user-42$/);
+    expect(Number.isInteger(signedIn.durationMs)).toBe(true);
+    expect(signedIn.durationMs).toBeGreaterThanOrEqual(0);
+    expect(anonymous).toEqual(
+      expect.objectContaining({ method: 'GET', path: '/api/campaigns', status: 200 })
+    );
+    expect(anonymous).not.toHaveProperty('userId');
+  });
+
+  it('prints no request lines when LOG_LEVEL=warn (VEG-694)', async () => {
+    await start({ LOG_LEVEL: 'warn' });
+
+    await request(app.getHttpServer()).get('/api/campaigns').expect(200);
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    expect(requestLines()).toEqual([]);
   });
 });

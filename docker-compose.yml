@@ -16,10 +16,33 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Applies pending migrations once and exits. The backend starts only after it
+  # exits 0, so a failed migration stops the stack with the error in
+  # `docker compose logs migrate`, and nothing restarts in a loop.
+  migrate:
+    # The migrate target of the backend Dockerfile, which keeps the Prisma CLI.
+    # The backend's own image leaves the CLI out and cannot migrate.
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: migrate
+    # Named per project, like the backend image, so the CI job can find both.
+    image: ${COMPOSE_PROJECT_NAME}-migrate
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    environment:
+      # The same address the backend uses, built the same way.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-grimoire}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-grimoire_os}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    # The Dockerfile's last stage, the server without the Prisma CLI.
+    image: ${COMPOSE_PROJECT_NAME}-backend
     # No host port. The frontend container is the backend's only client, and
     # it proxies the browser's /api requests here.
     environment:
@@ -41,11 +64,16 @@ services:
       # NODE_ENV=production. Set COOKIE_SECURE=false in .env to serve over plain
       # HTTP on a trusted network.
       - COOKIE_SECURE=${COOKIE_SECURE:-}
+      # Unset means log level and text lines. See .env.example.
+      - LOG_LEVEL=${LOG_LEVEL:-}
+      - LOG_FORMAT=${LOG_FORMAT:-}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     # The alpine image has node but no curl, so the probe uses node's fetch.
-    # start_period covers `prisma migrate deploy`, which runs before the server.
+    # start_period covers the server's boot. Migrations finish before it starts.
     healthcheck:
       test:
         [

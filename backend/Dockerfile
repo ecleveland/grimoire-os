@@ -22,6 +22,38 @@ WORKDIR /app/backend
 RUN npx prisma generate
 RUN npm run build
 
+# The server's dependencies. prisma is an optional dependency, so --omit=optional
+# leaves the Prisma CLI and everything only it needs out of the runtime image.
+# npm ci reads shared/package.json to link @grimoire-os/shared, and shared has
+# no runtime dependencies of its own.
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS prod-deps
+WORKDIR /app
+COPY shared/package.json ./shared/
+COPY backend/package.json backend/package-lock.json ./backend/
+WORKDIR /app/backend
+RUN npm ci --omit=dev --omit=optional --ignore-scripts
+
+# The image the compose migrate service runs. It keeps the Prisma CLI, which
+# the runtime image leaves out, and applies pending migrations when it starts.
+# Build it with --target migrate.
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS migrate
+RUN addgroup -g 1001 -S nestjs && adduser -S nestjs -u 1001 \
+  && mkdir -p /app/shared /app/backend && chown -R nestjs:nestjs /app
+# The CLI writes under node_modules/@prisma/engines when it runs, so nestjs
+# installs the tree and owns it.
+USER nestjs
+WORKDIR /app
+COPY --chown=nestjs:nestjs shared/package.json ./shared/
+COPY --chown=nestjs:nestjs backend/package.json backend/package-lock.json ./backend/
+WORKDIR /app/backend
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+COPY --chown=nestjs:nestjs backend/prisma ./prisma
+COPY --chown=nestjs:nestjs backend/prisma.config.ts ./
+# Keeps npm's upgrade notice out of the migration log.
+ENV NPM_CONFIG_UPDATE_NOTIFIER=false
+CMD ["npx", "prisma", "migrate", "deploy"]
+
+# The server. It stays the last stage, so a plain docker build produces it.
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS production
 WORKDIR /app
 # Production mode for Express. The auth cookies' Secure flag follows this unless
@@ -30,13 +62,14 @@ ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nestjs && adduser -S nestjs -u 1001
 # Preserve the shared/ <-> backend/ layout so the @grimoire-os/shared symlink
 # (node_modules/@grimoire-os/shared -> ../../shared) resolves at runtime.
-COPY --from=build --chown=nestjs:nestjs /app/shared ./shared
+COPY --from=shared-build --chown=nestjs:nestjs /app/shared/package.json ./shared/
+COPY --from=shared-build --chown=nestjs:nestjs /app/shared/dist ./shared/dist
 WORKDIR /app/backend
+COPY --from=prod-deps --chown=nestjs:nestjs /app/backend/node_modules ./node_modules
 COPY --from=build --chown=nestjs:nestjs /app/backend/dist ./dist
-COPY --from=build --chown=nestjs:nestjs /app/backend/node_modules ./node_modules
 COPY --from=build --chown=nestjs:nestjs /app/backend/package.json ./
-COPY --from=build --chown=nestjs:nestjs /app/backend/prisma ./prisma
-COPY --from=build --chown=nestjs:nestjs /app/backend/prisma.config.ts ./prisma.config.ts
 USER nestjs
 EXPOSE 3001
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+# This image cannot migrate the database. The migrate target does that, and
+# it must run first.
+CMD ["node", "dist/main"]
