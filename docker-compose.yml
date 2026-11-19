@@ -28,7 +28,8 @@ services:
       target: migrate
     # Named per project, like the backend image, so the CI job can find both.
     image: ${COMPOSE_PROJECT_NAME}-migrate
-    command: ['npx', 'prisma', 'migrate', 'deploy']
+    # The local CLI, never npx, which could fetch another version from npm.
+    command: ['./node_modules/.bin/prisma', 'migrate', 'deploy']
     environment:
       # The same address the backend uses, built the same way.
       - DATABASE_URL=postgresql://${POSTGRES_USER:-grimoire}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-grimoire_os}

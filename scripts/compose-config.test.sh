@@ -197,10 +197,10 @@ fi
 # after that service exits 0. The migrate service publishes no port, which
 # check 2 covers.
 migrate_command=$(config_field services.migrate.command <<<"$rendered")
-if [ "$migrate_command" = "npx prisma migrate deploy" ]; then
-  pass "migrate service runs npx prisma migrate deploy"
+if [ "$migrate_command" = "./node_modules/.bin/prisma migrate deploy" ]; then
+  pass "migrate service runs the local prisma migrate deploy"
 else
-  fail "migrate service runs npx prisma migrate deploy" "got: ${migrate_command:-none}"
+  fail "migrate service runs the local prisma migrate deploy" "got: ${migrate_command:-none}"
 fi
 
 migrate_restart=$(config_field services.migrate.restart <<<"$rendered")

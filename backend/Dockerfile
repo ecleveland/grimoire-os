@@ -46,12 +46,23 @@ WORKDIR /app
 COPY --chown=nestjs:nestjs shared/package.json ./shared/
 COPY --chown=nestjs:nestjs backend/package.json backend/package-lock.json ./backend/
 WORKDIR /app/backend
-RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+# --ignore-scripts keeps the backend's postinstall (prisma generate) and
+# shared's prepare from running. npm rebuild then runs only the engines
+# package's postinstall, which downloads the schema engine for this platform
+# into node_modules, so migrate deploy needs no network at run time. The
+# download also leaves a copy in ~/.cache/prisma, which the image does not need.
+RUN npm ci --omit=dev --ignore-scripts \
+  && npm rebuild @prisma/engines \
+  && npm cache clean --force \
+  && rm -rf /home/nestjs/.cache/prisma
+# prisma is an optional dependency, and npm only warns when an optional
+# install fails. Without the local CLI, npx would fetch whatever version the
+# registry tags latest and run it against the database, so the build stops
+# here instead.
+RUN test -x node_modules/.bin/prisma
 COPY --chown=nestjs:nestjs backend/prisma ./prisma
 COPY --chown=nestjs:nestjs backend/prisma.config.ts ./
-# Keeps npm's upgrade notice out of the migration log.
-ENV NPM_CONFIG_UPDATE_NOTIFIER=false
-CMD ["npx", "prisma", "migrate", "deploy"]
+CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
 
 # The server. It stays the last stage, so a plain docker build produces it.
 FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS production

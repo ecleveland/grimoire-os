@@ -68,12 +68,26 @@ export function configureSecurityHeaders(app: INestApplication): void {
 // bury the requests an operator is looking for.
 export const UNLOGGED_PATHS: readonly string[] = ['/api/health'];
 
+// Path prefixes followed by a secret. A campaign invite code in the join path
+// admits anyone who reads it, so the request line shows [redacted] for
+// everything after the prefix, including a mistyped extra segment.
+export const SECRET_TAIL_PATHS: readonly RegExp[] = [/^(\/api\/campaigns\/join\/).+$/];
+
+/** The path as the request line shows it, with any secret last segment redacted. */
+export function redactSecretPath(path: string): string {
+  for (const pattern of SECRET_TAIL_PATHS) {
+    if (pattern.test(path)) return path.replace(pattern, '$1[redacted]');
+  }
+  return path;
+}
+
 /**
  * Logs one line per finished request at level log, with context HTTP. The line
  * has the method, the path without its query string, the status, the duration
  * in whole milliseconds and the user id when a guard signed the request in. It
- * leaves out the query string, because search text and invite codes travel
- * there, and never reads the body, headers, cookies or client address.
+ * leaves out the query string, because search text travels there, redacts the
+ * invite code in a join path (see SECRET_TAIL_PATHS), and never reads the
+ * body, headers, cookies or client address.
  *
  * Register it before every other middleware, so the duration covers them and
  * a response they end early, such as a 413 or a 401, still gets a line. The
@@ -95,15 +109,21 @@ export function configureRequestLogging(
       next();
       return;
     }
+    const loggedPath = redactSecretPath(path);
     const startedAt = performance.now();
     res.on('finish', () => {
       const durationMs = Math.round(performance.now() - startedAt);
       const userId = req.user?.userId;
       const message =
-        `${req.method} ${path} ${res.statusCode} ${durationMs}ms` +
+        `${req.method} ${loggedPath} ${res.statusCode} ${durationMs}ms` +
         (userId ? ` user=${userId}` : '');
       if (format === 'json') {
-        const fields = { method: req.method, path, status: res.statusCode, durationMs };
+        const fields = {
+          method: req.method,
+          path: loggedPath,
+          status: res.statusCode,
+          durationMs,
+        };
         logger.log(message, userId ? { ...fields, userId } : fields);
       } else {
         logger.log(message);

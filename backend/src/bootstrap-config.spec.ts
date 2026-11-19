@@ -239,6 +239,11 @@ class LoggedController {
     return { ok: true };
   }
 
+  @Post('campaigns/join/:code')
+  join() {
+    return { joined: true };
+  }
+
   @Get('health')
   health() {
     return { status: 'ok' };
@@ -411,5 +416,37 @@ describe('configureRequestLogging', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
 
     expect(requestLines()).toEqual([]);
+  });
+
+  it('redacts the invite code in a join path in text mode (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).post('/api/campaigns/join/SECRET123').expect(201);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^POST \/api\/campaigns\/join\/\[redacted\] 201 \d+ms$/);
+    expect(written.join('')).not.toContain('SECRET123');
+  });
+
+  it('redacts everything after the join prefix, so a 404 on a mistyped join path hides the code (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).get('/api/campaigns/join/SECRET123/extra').expect(404);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^GET \/api\/campaigns\/join\/\[redacted\] 404 \d+ms$/);
+    expect(written.join('')).not.toContain('SECRET123');
+  });
+
+  it('redacts the invite code in the JSON path and message fields (VEG-694)', async () => {
+    await start({ LOG_FORMAT: 'json' });
+
+    await request(app.getHttpServer()).post('/api/campaigns/join/SECRET123/').expect(201);
+    await waitForRequestLines(1);
+
+    const [record] = jsonRecords();
+    expect(record.path).toBe('/api/campaigns/join/[redacted]');
+    expect(record.message).toMatch(/^POST \/api\/campaigns\/join\/\[redacted\] 201 \d+ms$/);
+    expect(written.join('')).not.toContain('SECRET123');
   });
 });

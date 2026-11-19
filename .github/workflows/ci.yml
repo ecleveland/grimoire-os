@@ -224,11 +224,12 @@ jobs:
       POSTGRES_PASSWORD: ci-docker-pw
       PUBLIC_URL: http://localhost:3000
       COMPOSE_PROJECT_NAME: ci-smoke
-      # The backend runtime image size in MB (10^6 bytes) as docker image
-      # inspect reports it. The size step fails above this plus 10 percent.
-      # When a change moves the size on purpose, set this to the size the step
-      # prints.
-      BACKEND_IMAGE_BASELINE_MB: 455
+      # The backend runtime image size in MB (10^6 bytes) that the size step
+      # prints on the GitHub runner. The step fails above this plus 10 percent.
+      # Local Docker Desktop reports a larger number for the same image, so do
+      # not set this from a local measurement. To update it, copy the printed
+      # value from a passing run of this job.
+      BACKEND_IMAGE_BASELINE_MB: 101
     steps:
       - uses: actions/checkout@v7
       # Every push to main runs the whole job. A pull request runs it only when

@@ -63,7 +63,7 @@ POSTGRES_PASSWORD=grimoire docker compose exec postgres psql -U grimoire -d grim
 
 Then set `POSTGRES_PASSWORD=your-db-password` in `.env` and run `docker compose up -d`. The `POSTGRES_PASSWORD=grimoire` prefix is there because compose refuses to run any command, `exec` included, until the variable has a value.
 
-The backend image no longer applies migrations when it starts, and it no longer contains the Prisma CLI. Compose runs migrations in the `migrate` service. If you run the backend image outside compose, build the migrate image with `docker build -f backend/Dockerfile --target migrate .` and run it first with the same `DATABASE_URL` the backend gets. Its default command is `npx prisma migrate deploy`.
+The backend image no longer applies migrations when it starts, and it no longer contains the Prisma CLI. Compose runs migrations in the `migrate` service. If you run the backend image outside compose, build the migrate image with `docker build -f backend/Dockerfile --target migrate .` and run it first with the same `DATABASE_URL` the backend gets. Its default command is `./node_modules/.bin/prisma migrate deploy`, the CLI version the lockfile pins.
 
 The backend image runs with `NODE_ENV=production`, so its auth cookies carry the `Secure` flag and browsers send them only over HTTPS or to `localhost`. To serve over plain HTTP from another address on a trusted network, set `COOKIE_SECURE=false` in `.env` or the environment. The backend logs the cookie mode at startup. An existing install that serves over plain HTTP needs `COOKIE_SECURE=false` after upgrading, or login stops working. Safari has not always accepted Secure cookies on `http://localhost`, so set it there too if login fails.
 
