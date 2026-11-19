@@ -147,6 +147,13 @@ set -a
 source "$ROOT_DIR/.env"
 set +a
 
+# Compose refuses to run without it, and the ps check below hides that error,
+# so a missing value would read as "postgres not running".
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+  echo "ERROR: POSTGRES_PASSWORD is not set. Add POSTGRES_PASSWORD=grimoire to .env (see .env.example)." >&2
+  exit 1
+fi
+
 export DATABASE_URL="postgresql://grimoire:grimoire@localhost:5432/${E2E_DB_NAME}"
 export FRONTEND_URL="http://localhost:${E2E_FRONTEND_PORT}"
 export NEXT_PUBLIC_API_URL="http://localhost:${E2E_BACKEND_PORT}/api"
@@ -160,9 +167,10 @@ export THROTTLE_AUTHED_LIMIT="${THROTTLE_AUTHED_LIMIT:-10000}"
 export THROTTLE_AUTH_LIMIT="${THROTTLE_AUTH_LIMIT:-10000}"
 
 # Other stacks share the postgres container, so leave a running one alone.
+# The dev file publishes 5432, which the backend on the host connects to.
 if [ -z "$("${COMPOSE[@]}" ps --status running -q postgres 2>/dev/null)" ]; then
   echo "Starting PostgreSQL..."
-  "${COMPOSE[@]}" up -d postgres
+  "${COMPOSE[@]}" -f "$ROOT_DIR/docker-compose.dev.yml" up -d postgres
 fi
 
 echo "Waiting for PostgreSQL to be healthy..."

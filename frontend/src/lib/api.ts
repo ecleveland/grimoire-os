@@ -1,7 +1,6 @@
+import { BROWSER_API_URL as API_URL } from './api-base';
 import { isPublicPath, loginPathFor } from './public-paths';
 import { SESSION_PRESENT_COOKIE_NAME } from './session-cookie';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 /**
  * Error thrown for non-OK API responses, carrying the HTTP `status` and parsed

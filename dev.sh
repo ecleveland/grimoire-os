@@ -28,8 +28,13 @@ set -a
 source "$ROOT_DIR/.env"
 set +a
 
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+  echo "ERROR: POSTGRES_PASSWORD is not set. Add POSTGRES_PASSWORD=grimoire to .env (see .env.example)." >&2
+  exit 1
+fi
+
 echo "Starting PostgreSQL..."
-docker compose -f "$ROOT_DIR/docker-compose.yml" up -d postgres
+docker compose -f "$ROOT_DIR/docker-compose.yml" -f "$ROOT_DIR/docker-compose.dev.yml" up -d postgres
 
 echo "Waiting for PostgreSQL to be healthy..."
 until docker compose -f "$ROOT_DIR/docker-compose.yml" exec postgres pg_isready -U grimoire -d grimoire_os > /dev/null 2>&1; do

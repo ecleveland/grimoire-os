@@ -1,5 +1,6 @@
 import { resolveCookieSecure } from './cookie.config';
 import databaseConfig from './database.config';
+import { resolveTrustProxy } from './trust-proxy.config';
 
 export default () => {
   if (!process.env.JWT_SECRET) {
@@ -17,6 +18,8 @@ export default () => {
       // Resolved here so a bad COOKIE_SECURE value stops the boot.
       cookieSecure: resolveCookieSecure(),
     },
+    // Resolved here so a bad TRUST_PROXY value stops the boot.
+    trustProxy: resolveTrustProxy(),
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
     cors: {
       origin: process.env.FRONTEND_URL || 'http://localhost:3000',

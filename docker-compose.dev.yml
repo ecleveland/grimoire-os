@@ -1,0 +1,7 @@
+# Publishes Postgres on the host for runs that keep the backend outside
+# compose. dev.sh, dev-e2e.sh and the CI e2e job load this file on top of
+# docker-compose.yml when they start postgres.
+services:
+  postgres:
+    ports:
+      - '5432:5432'

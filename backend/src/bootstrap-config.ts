@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipeOptions } from '@nestjs/common';
 import { ValidatorOptions } from 'class-validator';
-import { json, urlencoded } from 'express';
+import { Express, json, urlencoded } from 'express';
+import { resolveTrustProxy } from './config/trust-proxy.config';
 
 // Strictness shared by the global ValidationPipe and manual validateSync call
 // sites (e.g. AdminNpcDataService, whose body class depends on a route param).
@@ -30,4 +31,16 @@ export function configureBodyParsers(app: INestApplication): void {
   }
   app.use(json({ limit: DEFAULT_BODY_LIMIT_BYTES }));
   app.use(urlencoded({ extended: true, limit: DEFAULT_BODY_LIMIT_BYTES }));
+}
+
+/**
+ * Sets Express's trust proxy option to a hop count, so req.ip is the client
+ * address from X-Forwarded-For when the backend sits behind that many proxies.
+ * RateLimitGuard keys on req.ip. At 0 the option stays off and req.ip is the
+ * direct peer, which keeps a client from choosing its own key with a forged
+ * header.
+ */
+export function configureTrustProxy(app: INestApplication, hops = resolveTrustProxy()): void {
+  if (hops <= 0) return;
+  (app.getHttpAdapter().getInstance() as Express).set('trust proxy', hops);
 }

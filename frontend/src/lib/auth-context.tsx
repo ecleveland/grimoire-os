@@ -21,6 +21,7 @@ import {
   refreshSession,
   withRefreshLock,
 } from './api';
+import { BROWSER_API_URL as API_URL } from './api-base';
 import { resolveNextPath } from './public-paths';
 import { SESSION_PRESENT_COOKIE_NAME } from './session-cookie';
 import { Role } from './types';
@@ -77,8 +78,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
 // `likelyAuthenticated` is read through useSyncExternalStore so the server
 // snapshot is a stable `false` — matching the anonymous-first HTML that the

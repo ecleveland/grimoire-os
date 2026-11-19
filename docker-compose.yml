@@ -1,16 +1,16 @@
 services:
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
-    ports:
-      - '5432:5432'
+    # No host port. docker-compose.dev.yml publishes 5432 for dev.sh and the
+    # e2e stack, which run the backend on the host.
     environment:
-      - POSTGRES_USER=grimoire
-      - POSTGRES_PASSWORD=grimoire
-      - POSTGRES_DB=grimoire_os
+      - POSTGRES_USER=${POSTGRES_USER:-grimoire}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      - POSTGRES_DB=${POSTGRES_DB:-grimoire_os}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD', 'pg_isready', '-U', 'grimoire', '-d', 'grimoire_os']
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -20,14 +20,21 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    ports:
-      - '3001:3001'
+    # No host port. The frontend container is the backend's only client, and
+    # it proxies the browser's /api requests here.
     environment:
       - PORT=3001
-      - DATABASE_URL=postgresql://grimoire:grimoire@postgres:5432/grimoire_os
+      # Built from the POSTGRES_* variables, never read as DATABASE_URL, because
+      # the root .env sets DATABASE_URL, FRONTEND_URL and NEXT_PUBLIC_API_URL to
+      # localhost values for dev.sh and compose reads that file too.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-grimoire}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-grimoire_os}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
-      - FRONTEND_URL=http://localhost:3000
+      # The CORS origin, the address users open in the browser.
+      - FRONTEND_URL=${PUBLIC_URL:-http://localhost:3000}
+      # The frontend proxy is one hop, so req.ip and the rate limiter see the
+      # client address from X-Forwarded-For. Set 0 to turn it off.
+      - TRUST_PROXY=${TRUST_PROXY:-1}
       # Unset, the auth cookies carry the Secure flag because the image runs with
       # NODE_ENV=production. Set COOKIE_SECURE=false in .env to serve over plain
       # HTTP on a trusted network.
@@ -43,7 +50,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://localhost:3001/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+          "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
         ]
       interval: 10s
       timeout: 5s
@@ -55,16 +62,18 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-      args:
-        - NEXT_PUBLIC_API_URL=http://localhost:3001/api
+    # The only published port, bound to 127.0.0.1 by default so only a reverse
+    # proxy on the same host reaches it. The backend trusts one proxy hop, so a
+    # client that reaches port 3000 directly can forge X-Forwarded-For and get a
+    # fresh rate-limit key on every request. FRONTEND_BIND=0.0.0.0 opens the
+    # port to the network.
     ports:
-      - '3000:3000'
+      - '${FRONTEND_BIND:-127.0.0.1}:3000:3000'
     environment:
-      # Browser-facing API URL (baked into the client bundle at build).
-      - NEXT_PUBLIC_API_URL=http://localhost:3001/api
-      # Server-side API URL for SSR data fetches (VEG-320). The frontend
-      # container can't reach the backend via the host-published localhost URL —
-      # it uses the compose service name on the internal network instead.
+      # The browser calls the relative /api on this container. The middleware
+      # proxies those requests to INTERNAL_API_URL, which it reads on every
+      # request, and server components fetch from the same address. It uses
+      # the backend's service name on the compose network.
       - INTERNAL_API_URL=http://backend:3001/api
     depends_on:
       backend:
@@ -75,7 +84,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+          "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
         ]
       interval: 10s
       timeout: 5s
