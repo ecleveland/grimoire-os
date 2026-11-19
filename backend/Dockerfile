@@ -60,6 +60,16 @@ RUN npm ci --omit=dev --ignore-scripts \
 # registry tags latest and run it against the database, so the build stops
 # here instead.
 RUN test -x node_modules/.bin/prisma
+# The engines postinstall exits 0 even when the download fails, so npm rebuild
+# can succeed with no engine, and migrate deploy would then try the network.
+# The build stops unless at least one schema engine binary is executable. The
+# loop handles zero matches, where the glob stays literal and fails the test,
+# and several matches.
+RUN found=0; \
+  for engine in node_modules/@prisma/engines/schema-engine-*; do \
+    if [ -x "$engine" ]; then found=1; fi; \
+  done; \
+  test "$found" = 1
 COPY --chown=nestjs:nestjs backend/prisma ./prisma
 COPY --chown=nestjs:nestjs backend/prisma.config.ts ./
 CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]

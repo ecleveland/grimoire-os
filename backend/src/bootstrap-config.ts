@@ -68,15 +68,46 @@ export function configureSecurityHeaders(app: INestApplication): void {
 // bury the requests an operator is looking for.
 export const UNLOGGED_PATHS: readonly string[] = ['/api/health'];
 
-// Path prefixes followed by a secret. A campaign invite code in the join path
-// admits anyone who reads it, so the request line shows [redacted] for
-// everything after the prefix, including a mistyped extra segment.
-export const SECRET_TAIL_PATHS: readonly RegExp[] = [/^(\/api\/campaigns\/join\/).+$/];
+// Segment sequences that put a secret in everything after them. A campaign
+// invite code in the join path admits anyone who reads it. Add a route by
+// adding its sequence in lower case.
+export const SECRET_PATH_SEGMENTS: readonly (readonly string[])[] = [['campaigns', 'join']];
 
-/** The path as the request line shows it, with any secret last segment redacted. */
+/**
+ * The path as the request line shows it, with everything after a secret
+ * segment sequence replaced by [redacted]. The prefix stays as the client sent
+ * it.
+ *
+ * Express routes paths case-insensitively, and a client can send repeated
+ * slashes, ./ segments or an absolute-form target, so the scan compares
+ * segments in lower case and skips empty and . segments. Anything after the
+ * slash that ends the sequence counts as the secret, a lone dot included,
+ * because redacting too much is the safe side.
+ *
+ * The middleware runs this on every request, so it is one pass over the path
+ * with no regular expression, which keeps a long run of slashes from costing
+ * more than its length.
+ */
 export function redactSecretPath(path: string): string {
-  for (const pattern of SECRET_TAIL_PATHS) {
-    if (pattern.test(path)) return path.replace(pattern, '$1[redacted]');
+  // Each meaningful segment in lower case, with the offset just past its end.
+  const segments: { name: string; end: number }[] = [];
+  let start = 0;
+  for (let i = 0; i <= path.length; i++) {
+    if (i < path.length && path[i] !== '/') continue;
+    if (i > start) {
+      const name = path.slice(start, i).toLowerCase();
+      if (name !== '.') segments.push({ name, end: i });
+    }
+    start = i + 1;
+  }
+
+  for (let i = 0; i < segments.length; i++) {
+    for (const sequence of SECRET_PATH_SEGMENTS) {
+      if (!sequence.every((name, offset) => segments[i + offset]?.name === name)) continue;
+      // The offset of the slash after the sequence's last segment.
+      const slash = segments[i + sequence.length - 1].end;
+      if (slash + 1 < path.length) return `${path.slice(0, slash + 1)}[redacted]`;
+    }
   }
   return path;
 }
@@ -86,7 +117,7 @@ export function redactSecretPath(path: string): string {
  * has the method, the path without its query string, the status, the duration
  * in whole milliseconds and the user id when a guard signed the request in. It
  * leaves out the query string, because search text travels there, redacts the
- * invite code in a join path (see SECRET_TAIL_PATHS), and never reads the
+ * invite code in a join path (see SECRET_PATH_SEGMENTS), and never reads the
  * body, headers, cookies or client address.
  *
  * Register it before every other middleware, so the duration covers them and

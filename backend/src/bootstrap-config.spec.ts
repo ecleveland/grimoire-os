@@ -22,6 +22,7 @@ import {
   configureRequestLogging,
   configureSecurityHeaders,
   configureTrustProxy,
+  redactSecretPath,
 } from './bootstrap-config';
 import { createAppLogger } from './config/logging.config';
 import type { LogFormat } from './config/logging.config';
@@ -438,6 +439,26 @@ describe('configureRequestLogging', () => {
     expect(written.join('')).not.toContain('SECRET123');
   });
 
+  it('redacts the invite code in a mixed-case join path that the route still accepts (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).post('/api/campaigns/JOIN/SECRET3').expect(201);
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^POST \/api\/campaigns\/JOIN\/\[redacted\] 201 \d+ms$/);
+    expect(written.join('')).not.toContain('SECRET3');
+  });
+
+  it('redacts the invite code in a double-slash join path (VEG-694)', async () => {
+    await start();
+
+    await request(app.getHttpServer()).post('/api//campaigns/join/SECRET5');
+    await waitForRequestLines(1);
+
+    expect(textMessages()[0]).toMatch(/^POST \/api\/\/campaigns\/join\/\[redacted\] \d{3} \d+ms$/);
+    expect(written.join('')).not.toContain('SECRET5');
+  });
+
   it('redacts the invite code in the JSON path and message fields (VEG-694)', async () => {
     await start({ LOG_FORMAT: 'json' });
 
@@ -448,5 +469,50 @@ describe('configureRequestLogging', () => {
     expect(record.path).toBe('/api/campaigns/join/[redacted]');
     expect(record.message).toMatch(/^POST \/api\/campaigns\/join\/\[redacted\] 201 \d+ms$/);
     expect(written.join('')).not.toContain('SECRET123');
+  });
+});
+
+describe('redactSecretPath', () => {
+  it.each`
+    path                                        | expected
+    ${'/api/campaigns/join/SECRET1'}            | ${'/api/campaigns/join/[redacted]'}
+    ${'/api/campaigns/join/SECRET1/'}           | ${'/api/campaigns/join/[redacted]'}
+    ${'/api/campaigns/JOIN/SECRET3'}            | ${'/api/campaigns/JOIN/[redacted]'}
+    ${'/API/Campaigns/Join/SECRET3'}            | ${'/API/Campaigns/Join/[redacted]'}
+    ${'http://x/api/campaigns/join/SECRET4'}    | ${'http://x/api/campaigns/join/[redacted]'}
+    ${'//api/campaigns/join/SECRET6'}           | ${'//api/campaigns/join/[redacted]'}
+    ${'/api//campaigns/join/SECRET6'}           | ${'/api//campaigns/join/[redacted]'}
+    ${'/api/campaigns//join/SECRET6'}           | ${'/api/campaigns//join/[redacted]'}
+    ${'/api/campaigns/join//SECRET6'}           | ${'/api/campaigns/join/[redacted]'}
+    ${'/api/./campaigns/join/SECRET7'}          | ${'/api/./campaigns/join/[redacted]'}
+    ${'/api/campaigns/./join/SECRET7'}          | ${'/api/campaigns/./join/[redacted]'}
+    ${'/api/campaigns/join/SEC%2FRET8'}         | ${'/api/campaigns/join/[redacted]'}
+    ${'/api/campaigns/join/SECRET9/extra'}      | ${'/api/campaigns/join/[redacted]'}
+    ${'/api/campaigns/123/invite-code'}         | ${'/api/campaigns/123/invite-code'}
+    ${'/api/campaigns/joined'}                  | ${'/api/campaigns/joined'}
+    ${'/api/campaigns/joined/abc'}              | ${'/api/campaigns/joined/abc'}
+    ${'/api/campaigns/join'}                    | ${'/api/campaigns/join'}
+    ${'/api/campaigns/join/'}                   | ${'/api/campaigns/join/'}
+    ${'/api/mycampaigns/join/abc'}              | ${'/api/mycampaigns/join/abc'}
+    ${'/api/campaigns'}                         | ${'/api/campaigns'}
+    ${'/api/campaigns/join/A/campaigns/join/B'} | ${'/api/campaigns/join/[redacted]'}
+    ${'/api/campaigns/join/.'}                  | ${'/api/campaigns/join/[redacted]'}
+  `('logs $path as $expected (VEG-694)', ({ path, expected }) => {
+    expect(redactSecretPath(path)).toBe(expected);
+  });
+
+  // The middleware redacts the path of every request, including ones the rate
+  // limiter rejects, so the work must stay linear in the path length. A
+  // backtracking pattern takes tens of seconds on these inputs, and a linear
+  // scan takes a few milliseconds. The 1000 ms bound sits far from both, so a
+  // loaded machine does not make it flake.
+  it.each`
+    shape                                            | path
+    ${'200,000 slashes'}                             | ${'/'.repeat(200_000)}
+    ${'100,000 slashes, campaigns, 100,000 slashes'} | ${'/'.repeat(100_000) + 'campaigns' + '/'.repeat(100_000)}
+  `('returns within 1000 ms for $shape (VEG-694)', ({ path }) => {
+    const startedAt = performance.now();
+    redactSecretPath(path);
+    expect(performance.now() - startedAt).toBeLessThan(1000);
   });
 });
