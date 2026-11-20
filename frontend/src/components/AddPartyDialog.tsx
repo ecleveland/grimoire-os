@@ -10,8 +10,18 @@ import { formatSigned } from '@grimoire-os/shared';
 interface Props {
   /** Campaign party roster, fetched by the parent. */
   characters: PartyCharacter[];
-  /** Combatant names already in the encounter — those PCs start deselected. */
+  /**
+   * Combatant names already in the encounter. A PC with one of these names
+   * starts deselected but stays selectable, because a hand-typed combatant can
+   * share a name with a different character.
+   */
   existingNames: string[];
+  /**
+   * Character ids already linked to a combatant in the encounter. Those rows
+   * are greyed out and can never be added, so one character never backs two
+   * combatants.
+   */
+  existingCharacterIds: string[];
   onConfirm: (entries: PartyCombatantEntry[]) => void;
   onCancel: () => void;
   /** Disables confirm while the parent is persisting. */
@@ -23,26 +33,32 @@ interface Props {
 const DEFAULT_INIT = '10';
 
 /**
- * Picks campaign PCs to add as combatants (VEG-283). Every PC starts selected
- * unless a combatant with the same name is already in the encounter; each row
- * carries its own initiative with a d20 + sheet-modifier auto-roll — the
- * modifier is `PartyCharacter.initiative`, which the roster resolves to the
- * effective value the owner's sheet shows (VEG-452). Emits the
- * resolved entries upward; snapshotting, auto-numbering, and persistence
- * happen in the parent.
+ * Picks campaign PCs to add as combatants. A PC already linked to a combatant
+ * in the encounter renders greyed out and disabled, and confirm and "Roll all"
+ * skip it. Every other PC starts selected unless a combatant with the same
+ * name is already in the encounter. Each row carries its own initiative with
+ * a d20 plus sheet-modifier auto-roll. The modifier is
+ * `PartyCharacter.initiative`, which the roster resolves to the effective
+ * value the owner's sheet shows. Emits the resolved entries upward, and the
+ * parent handles snapshotting, auto-numbering and persistence.
  */
 export default function AddPartyDialog({
   characters,
   existingNames,
+  existingCharacterIds,
   onConfirm,
   onCancel,
   submitting = false,
   rng = Math.random,
 }: Props) {
   const existing = new Set(existingNames);
+  // Read on every render, not only for the initial selection: the tracker
+  // polls, so a character can become linked while the dialog is open.
+  const linked = new Set(existingCharacterIds);
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(characters.filter(c => !existing.has(c.name.trim())).map(c => c.id))
   );
+  const addable = characters.filter(c => selected.has(c.id) && !linked.has(c.id));
   const [inits, setInits] = useState<Record<string, string>>({});
 
   const initValue = (id: string) => inits[id] ?? DEFAULT_INIT;
@@ -67,6 +83,7 @@ export default function AddPartyDialog({
     setInits(prev => {
       const next = { ...prev };
       for (const c of characters) {
+        if (linked.has(c.id)) continue;
         next[c.id] = String(rollInitiativeMod(c.initiative, rng));
       }
       return next;
@@ -74,17 +91,13 @@ export default function AddPartyDialog({
   }
 
   function handleConfirm() {
-    onConfirm(
-      characters
-        .filter(c => selected.has(c.id))
-        .map(c => ({ character: c, initiative: parseIntField(initValue(c.id)) }))
-    );
+    onConfirm(addable.map(c => ({ character: c, initiative: parseIntField(initValue(c.id)) })));
   }
 
   const fieldClass =
     'w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-transparent';
   const rollButtonClass =
-    'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors';
+    'shrink-0 px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:cursor-not-allowed transition-colors';
 
   if (characters.length === 0) {
     return (
@@ -120,17 +133,20 @@ export default function AddPartyDialog({
       <ul className="space-y-2">
         {characters.map(c => {
           const summary = [c.race, c.class, c.level].filter(v => v != null).join(' ');
+          const isLinked = linked.has(c.id);
           return (
             <li
               key={c.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50"
+              data-testid={`party-row-${c.id}`}
+              className={`flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50${isLinked ? ' opacity-50' : ''}`}
             >
               <input
                 type="checkbox"
                 aria-label={`Add ${c.name}`}
-                checked={selected.has(c.id)}
+                checked={!isLinked && selected.has(c.id)}
+                disabled={isLinked}
                 onChange={() => toggle(c.id)}
-                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:cursor-not-allowed"
               />
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-gray-900 dark:text-white truncate">{c.name}</div>
@@ -149,7 +165,7 @@ export default function AddPartyDialog({
                       Init {formatSigned(c.initiative)}
                     </span>
                   </span>
-                  {existing.has(c.name.trim()) && (
+                  {(isLinked || existing.has(c.name.trim())) && (
                     <span className="ml-1 text-amber-600 dark:text-amber-400">
                       · already in encounter
                     </span>
@@ -160,6 +176,7 @@ export default function AddPartyDialog({
                 type="number"
                 aria-label={`Initiative for ${c.name}`}
                 value={initValue(c.id)}
+                disabled={isLinked}
                 onChange={e => setInits(prev => ({ ...prev, [c.id]: e.target.value }))}
                 className={fieldClass}
               />
@@ -167,6 +184,7 @@ export default function AddPartyDialog({
                 type="button"
                 aria-label={`Roll initiative for ${c.name}`}
                 onClick={() => rollRow(c)}
+                disabled={isLinked}
                 className={rollButtonClass}
                 title={`d20 ${formatSigned(c.initiative)}`}
               >
@@ -188,7 +206,7 @@ export default function AddPartyDialog({
         <button
           type="button"
           onClick={handleConfirm}
-          disabled={submitting || selected.size === 0}
+          disabled={submitting || addable.length === 0}
           className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Add selected

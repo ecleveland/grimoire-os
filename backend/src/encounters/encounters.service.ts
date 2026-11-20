@@ -5,8 +5,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Prisma } from '../generated/prisma/client';
-import { aggregateCombatantLoot, Combatant, EncounterLootTotal } from '@grimoire-os/shared';
+import {
+  aggregateCombatantLoot,
+  CLEARED_DEATH_SAVES,
+  Combatant,
+  EncounterLootTotal,
+} from '@grimoire-os/shared';
 import { PrismaService } from '../prisma/prisma.service';
+import { CharactersService, CombatState } from '../characters/characters.service';
 import { CampaignAuthService, campaignAuthSelect } from '../auth/campaign-auth.service';
 import { ContentAccessService } from '../srd/content-access.service';
 import { buildPaginatedResponse } from '../common/helpers/paginate';
@@ -32,13 +38,90 @@ const encounterListSelect = {
   updatedAt: true,
 } satisfies Prisma.EncounterSelect;
 
+type CombatantInput = NonNullable<CreateEncounterDto['combatants']>[number];
+
+/** A linked character and the HP state to copy onto it. */
+interface CombatWriteBack {
+  characterId: string;
+  state: CombatState;
+}
+
+/**
+ * The 409 for a stale `expectedVersion`. Both the pre-check in `update` and the
+ * guarded write build it here, so the client sees one shape from either.
+ */
+function staleEncounterConflict(currentVersion: number): ConflictException {
+  return new ConflictException({
+    message: 'Encounter was modified by another request; re-fetch and retry.',
+    currentVersion,
+  });
+}
+
+/** The combatants keyed by `characterId`, leaving out any id held by more than one. */
+function byUniqueCharacterId<T extends { characterId?: string }>(combatants: T[]): Map<string, T> {
+  const seen = new Map<string, T>();
+  const repeated = new Set<string>();
+  for (const combatant of combatants) {
+    const id = combatant.characterId;
+    if (id === undefined) continue;
+    if (seen.has(id)) repeated.add(id);
+    seen.set(id, combatant);
+  }
+  for (const id of repeated) seen.delete(id);
+  return seen;
+}
+
+/**
+ * The HP writes a save makes to linked characters. Each incoming combatant is
+ * compared with the stored combatant for the same character, never with the
+ * sheet. The tracker resends every combatant on each save, so comparing with
+ * the sheet would overwrite the player's own edits on every turn advance. A
+ * combatant with no stored counterpart was just added and writes nothing. A
+ * character linked from more than one combatant on either side is ambiguous
+ * and skipped.
+ */
+function planCombatWriteBack(incoming: CombatantInput[], stored: Combatant[]): CombatWriteBack[] {
+  const storedById = byUniqueCharacterId(stored);
+  const plan: CombatWriteBack[] = [];
+  for (const [characterId, next] of byUniqueCharacterId(incoming)) {
+    const prev = storedById.get(characterId);
+    if (!prev) continue;
+    // A combatant without a numeric hp on both sides has no hp to compare, so
+    // its hit points stay as they are.
+    const hasHp = typeof next.hp === 'number' && typeof prev.hp === 'number';
+    const tempHp = next.tempHp ?? 0;
+    const deathSaves = next.deathSaves ?? CLEARED_DEATH_SAVES;
+    const prevSaves = prev.deathSaves ?? CLEARED_DEATH_SAVES;
+    const changed = {
+      hp: hasHp && next.hp !== prev.hp,
+      tempHp: hasHp && tempHp !== (prev.tempHp ?? 0),
+      deathSaves:
+        deathSaves.successes !== prevSaves.successes || deathSaves.failures !== prevSaves.failures,
+    };
+    if (!changed.hp && !changed.tempHp && !changed.deathSaves) continue;
+    const hp = next.hp ?? 0;
+    plan.push({
+      characterId,
+      state: {
+        hp,
+        maxHp: next.maxHp ?? hp,
+        tempHp,
+        deathSaves: { successes: deathSaves.successes, failures: deathSaves.failures },
+        changed,
+      },
+    });
+  }
+  return plan;
+}
+
 @Injectable()
 export class EncountersService {
   constructor(
     private prisma: PrismaService,
     private campaignAuth: CampaignAuthService,
     private monsterLoot: MonsterLootService,
-    private contentAccess: ContentAccessService
+    private contentAccess: ContentAccessService,
+    private characters: CharactersService
   ) {}
 
   /**
@@ -139,10 +222,47 @@ export class EncountersService {
     }
   }
 
+  /**
+   * A combatant's `characterId` must name a character in the encounter's
+   * campaign, because a save writes HP back to that character. An unknown id
+   * and another campaign's id get the same 400, naming the combatants.
+   *
+   * Ids in `knownIds` (already stored on the encounter being patched) are
+   * grandfathered. Detaching a character from the campaign leaves its
+   * combatants in place, so validating what the row already holds would make
+   * every later save of that encounter fail. The write-back checks the
+   * campaign again for those.
+   */
+  private async assertCharacterReferences(
+    combatants: CreateEncounterDto['combatants'],
+    campaignId: string,
+    knownIds: ReadonlySet<string> = new Set()
+  ): Promise<void> {
+    if (!combatants) return;
+    const ids = [
+      ...new Set(combatants.map(c => c.characterId).filter((id): id is string => id !== undefined)),
+    ].filter(id => !knownIds.has(id));
+    if (ids.length === 0) return;
+    const found = await this.prisma.character.findMany({
+      where: { id: { in: ids }, campaignId },
+      select: { id: true },
+    });
+    const resolved = new Set(found.map(c => c.id));
+    const unresolved = new Set(ids.filter(id => !resolved.has(id)));
+    if (unresolved.size > 0) {
+      throw new BadRequestException(
+        combatants
+          .filter(c => c.characterId !== undefined && unresolved.has(c.characterId))
+          .map(c => `Combatant "${c.name}" links a character that is not in this campaign`)
+      );
+    }
+  }
+
   async create(userId: string, dto: CreateEncounterDto) {
     await this.campaignAuth.assertCampaignOwner(dto.campaignId, userId);
     await this.assertMonsterReferences(dto.combatants, userId);
     await this.assertLootItemReferences(dto.combatants);
+    await this.assertCharacterReferences(dto.combatants, dto.campaignId);
     const { combatants, ...rest } = dto;
     const encounter = await this.prisma.encounter.create({
       data: {
@@ -187,12 +307,26 @@ export class EncountersService {
     return toDto(EncounterDto, encounter);
   }
 
-  async update(id: string, userId: string, dto: UpdateEncounterDto) {
+  /**
+   * Applies a DM's PATCH. When it carries combatants, HP changes on combatants
+   * linked to a character are copied onto that character in the same
+   * transaction, after the encounter write, so a 409 on the encounter leaves
+   * every character untouched. `username` names the DM on the audit row.
+   *
+   * A stale `expectedVersion` gets its 409 before the reference checks. The
+   * tracker refetches only on a 409, and a stale payload can carry a
+   * characterId that has since left the campaign, which would otherwise draw a
+   * 400 the tracker never recovers from. The guarded write still catches a
+   * change that lands after this read.
+   */
+  async update(id: string, userId: string, dto: UpdateEncounterDto, username: string) {
     const encounter = await this.prisma.encounter.findUnique({
       where: { id },
       select: {
         id: true,
+        campaignId: true,
         combatants: true,
+        version: true,
         campaign: { select: campaignAuthSelect },
       },
     });
@@ -200,6 +334,9 @@ export class EncountersService {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
     this.campaignAuth.assertOwnerOnCampaign(encounter.campaign, userId);
+    if (dto.expectedVersion !== undefined && dto.expectedVersion !== encounter.version) {
+      throw staleEncounterConflict(encounter.version);
+    }
     const storedCombatants = (encounter.combatants as unknown as Combatant[] | null) ?? [];
     const knownIds = new Set(
       storedCombatants.map(c => c.monsterId).filter((mid): mid is string => mid !== undefined)
@@ -212,6 +349,10 @@ export class EncountersService {
         .filter((iid): iid is string => typeof iid === 'string')
     );
     await this.assertLootItemReferences(dto.combatants, knownItemIds);
+    const knownCharacterIds = new Set(
+      storedCombatants.map(c => c.characterId).filter((cid): cid is string => cid !== undefined)
+    );
+    await this.assertCharacterReferences(dto.combatants, encounter.campaignId, knownCharacterIds);
     const { combatants, expectedVersion, ...rest } = dto;
     const data = {
       ...rest,
@@ -220,7 +361,26 @@ export class EncountersService {
       }),
     };
 
-    const updated = await this.writeWithVersionGuard(id, data, expectedVersion);
+    const writeBack = combatants ? planCombatWriteBack(combatants, storedCombatants) : [];
+    if (writeBack.length === 0) {
+      const updated = await this.writeWithVersionGuard(this.prisma, id, data, expectedVersion);
+      return toDto(EncounterDto, updated);
+    }
+
+    const context = { userId, username, encounterId: id };
+    const updated = await this.prisma.$transaction(async tx => {
+      const row = await this.writeWithVersionGuard(tx, id, data, expectedVersion);
+      for (const { characterId, state } of writeBack) {
+        await this.characters.applyCombatState(
+          tx,
+          characterId,
+          encounter.campaignId,
+          state,
+          context
+        );
+      }
+      return row;
+    });
     return toDto(EncounterDto, updated);
   }
 
@@ -232,37 +392,37 @@ export class EncountersService {
    * same way. Note the contract's blind spot: unguarded writes do NOT bump
    * `version`, so they are invisible to later guarded writes — the 409 only
    * fires when the intervening write itself carried an `expectedVersion`.
+   * Pass a transaction client to make the write part of the caller's
+   * transaction; the 409 and 404 then throw inside it.
    */
   private async writeWithVersionGuard(
+    client: PrismaService | Prisma.TransactionClient,
     id: string,
     data: Prisma.EncounterUpdateInput,
     expectedVersion: number | undefined
   ) {
     if (expectedVersion === undefined) {
-      return this.prisma.encounter.update({ where: { id }, data });
+      return client.encounter.update({ where: { id }, data });
     }
 
     // Guarded write: only succeeds if the row is still at expectedVersion.
     // `version` is non-unique, so updateMany with a compound where + atomic
     // increment is the correct primitive (plain update can't match on version).
-    const { count } = await this.prisma.encounter.updateMany({
+    const { count } = await client.encounter.updateMany({
       where: { id, version: expectedVersion },
       data: { ...data, version: { increment: 1 } },
     });
     if (count === 0) {
-      const current = await this.prisma.encounter.findUnique({
+      const current = await client.encounter.findUnique({
         where: { id },
         select: { version: true },
       });
       if (!current) {
         throw new NotFoundException(`Encounter "${id}" not found`);
       }
-      throw new ConflictException({
-        message: 'Encounter was modified by another request; re-fetch and retry.',
-        currentVersion: current.version,
-      });
+      throw staleEncounterConflict(current.version);
     }
-    const updated = await this.prisma.encounter.findUnique({ where: { id } });
+    const updated = await client.encounter.findUnique({ where: { id } });
     if (!updated) {
       throw new NotFoundException(`Encounter "${id}" not found`);
     }
@@ -321,6 +481,7 @@ export class EncountersService {
     });
 
     const updated = await this.writeWithVersionGuard(
+      this.prisma,
       id,
       { combatants: updatedCombatants as unknown as Prisma.InputJsonValue },
       dto.expectedVersion

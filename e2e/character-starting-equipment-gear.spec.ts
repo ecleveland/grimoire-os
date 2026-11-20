@@ -24,7 +24,7 @@ test.describe('starting equipment gear snapshots (VEG-462)', () => {
       data: {
         name: 'Fresh Fighter',
         race: 'Human',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 1 }],
         level: 1,
         abilityScores: {
           strength: 16,
@@ -96,7 +96,7 @@ test.describe('starting equipment gear snapshots (VEG-462)', () => {
     const create = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Snapshot Keeper',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 1 }],
         level: 1,
         inventory: [
           { name: 'Chain mail', quantity: 1, equipped: false, gear: custom },
@@ -131,7 +131,7 @@ test.describe('starting equipment gear snapshots (VEG-462)', () => {
       data: {
         name: 'Auto Fighter',
         race: 'Human',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 1 }],
         level: 1,
         abilityScores: {
           strength: 16,

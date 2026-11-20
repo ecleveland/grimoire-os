@@ -8,15 +8,15 @@
 // NOT use the browser-oriented `apiFetch` (which reads document.cookie and
 // redirects via window.location) — server fetches carry no caller identity.
 
-// In browser-rendered paths the app reaches the backend at NEXT_PUBLIC_API_URL
-// (the host-published address, e.g. http://localhost:3001/api). A server
-// component running inside the frontend container cannot use that — `localhost`
-// there is the frontend container itself, not the backend. INTERNAL_API_URL
-// supplies the container-reachable address (e.g. http://backend:3001/api) in
-// Docker; it falls back to the public URL for local dev, where the Next server
-// and the backend share the host's localhost.
-const SERVER_API_URL =
-  process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+import { serverApiUrl } from './api-base';
+
+// A server component cannot use the browser's relative /api, because a fetch
+// on the Next server has no page origin to resolve it against. serverApiUrl()
+// gives the address the Next server itself reaches the backend on.
+// INTERNAL_API_URL sets it in Docker (http://backend:3001/api, the compose
+// service name), and local dev falls back to the backend on the host.
+// It is read on every call, so the container's runtime env applies, not the
+// env of the image build.
 
 // SRD reference content is user-invariant and rarely edited (only admins curate
 // shared rows), and the backend already caches it for 24h. An hour of Next
@@ -29,7 +29,7 @@ export const SRD_REVALIDATE_SECONDS = 3600;
  * Throws on a non-OK response so the calling page can render its error state.
  */
 export async function fetchSrdList<T>(path: string): Promise<T> {
-  const res = await fetch(`${SERVER_API_URL}${path}`, {
+  const res = await fetch(`${serverApiUrl()}${path}`, {
     next: { revalidate: SRD_REVALIDATE_SECONDS },
   });
   if (!res.ok) {

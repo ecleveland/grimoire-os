@@ -15,18 +15,33 @@ import Modal from '@/components/Modal';
 import MonsterLookupPanel from '@/components/MonsterLookupPanel';
 import MonsterStatBlock from '@/components/MonsterStatBlock';
 import { sortByInitiative } from './_hooks/encounter-rows';
-import { useEncounter } from './_hooks/useEncounter';
+import { isController as canControl, useEncounter } from './_hooks/useEncounter';
 import { useEncounterActions } from './_hooks/useEncounterActions';
 import { useMonsterViewer } from './_hooks/useMonsterViewer';
 import AddCombatantControls from './_components/AddCombatantControls';
 import CombatantCard from './_components/CombatantCard';
 import EncounterLootPanel from './_components/EncounterLootPanel';
+import LiveIndicator from './_components/LiveIndicator';
 import MonsterSidePanel from './_components/MonsterSidePanel';
 
 export default function InitiativeTrackerPage() {
   const { id: campaignId, encounterId } = useParams<{ id: string; encounterId: string }>();
   const { user, isDm } = useAuth();
-  const { encounter, isLoading, writePending, patch, rollLoot } = useEncounter(encounterId);
+  const encounterViewer = { userId: user?.userId ?? null, isDm };
+  const {
+    encounter,
+    isLoading,
+    writePending,
+    patch,
+    rollLoot,
+    isLive,
+    lastUpdatedAt,
+    refreshFailed,
+    errorStatus,
+  } = useEncounter(encounterId, encounterViewer);
+  // Computed before the early returns because the turn-change hooks below
+  // read it on every render.
+  const controls = encounter !== null && canControl(encounter, encounterViewer);
   // Auto-roll loot when a monster combatant drops to 0 HP (VEG-301).
   // Session-local DM preference, intentionally not persisted on the encounter.
   const [autoRollLoot, setAutoRollLoot] = useState(false);
@@ -41,9 +56,10 @@ export default function InitiativeTrackerPage() {
 
   // Live-combat side panel (VEG-384). On wide screens the active creature's
   // stat block floats in a sticky right-hand column so the DM never scrolls to
-  // read it. `pinnedMonsterId` is a click-override: clicking a combatant's name
-  // pins its stat block until the turn advances, otherwise the panel follows
-  // whoever is up.
+  // read it. `pinnedMonsterId` is a click-override. Clicking a combatant's name
+  // pins its stat block. The controller's own turn change releases the pin,
+  // and Back to current turn releases it for anyone. Without a pin the panel
+  // follows whoever is up.
   const isWide = useMediaQuery('(min-width: 1024px)');
   const [pinnedMonsterId, setPinnedMonsterId] = useState<string | null>(null);
   // The two-column row and the active card, used to (a) anchor the stat panel
@@ -64,25 +80,29 @@ export default function InitiativeTrackerPage() {
   // on wide screens (the panel is hidden below `lg`, so don't fetch for it).
   const panelMonsterId = isWide ? (pinnedMonsterId ?? activeMonsterId) : null;
 
-  // Advancing/stepping the turn drops any manual pin so the panel resumes
-  // following whoever is now up.
+  // The controller's own turn change drops any manual pin, so the panel
+  // resumes following whoever is now up. A change that arrives through the
+  // poll leaves the viewer's pin alone.
   const currentTurn = encounter?.currentTurn;
-  useValueChange(currentTurn, () => setPinnedMonsterId(null));
+  useValueChange(currentTurn, () => {
+    if (controls) setPinnedMonsterId(null);
+  });
 
-  // Scroll the active card into view when the turn advances (not on first
-  // load). Brings the card — and its now-inline turn/damage/status controls —
-  // to the DM instead of making them scroll to it. Guarded for jsdom, which
-  // has no scrollIntoView.
+  // The controller's own turn change scrolls the active card into view, not
+  // the first load, so its inline turn, damage and status controls come to
+  // the DM. A change that arrives through the poll leaves the viewer's scroll
+  // position alone. Guarded for jsdom, which has no scrollIntoView.
   useEffect(() => {
     if (currentTurn === undefined) return;
     const prev = prevTurnRef.current;
     prevTurnRef.current = currentTurn;
     if (prev === null || prev === currentTurn) return;
+    if (!controls) return;
     const card = activeCardRef.current;
     if (card && typeof card.scrollIntoView === 'function') {
       card.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [currentTurn]);
+  }, [currentTurn, controls]);
 
   const viewer = useMonsterViewer();
   const actions = useEncounterActions(encounter, { patch, rollLoot, writePending }, autoRollLoot);
@@ -94,7 +114,11 @@ export default function InitiativeTrackerPage() {
 
   if (isLoading) return <LoadingState />;
   if (!encounter)
-    return <div className="text-gray-500 dark:text-gray-400">Encounter not found.</div>;
+    return (
+      <div className="text-gray-500 dark:text-gray-400">
+        {errorStatus === 403 ? 'You do not have access to this encounter.' : 'Encounter not found.'}
+      </div>
+    );
 
   const sorted = sortByInitiative(encounter.combatants);
   // The active row, clamped so a stale/out-of-range currentTurn still resolves
@@ -108,7 +132,7 @@ export default function InitiativeTrackerPage() {
   // combatant's, i.e. a quick reference (resistances/immunities) that leaves
   // whose-turn-it-is untouched. The banner makes that explicit and reversible.
   const isPeeking = isWide && pinnedMonsterId !== null && pinnedMonsterId !== activeMonsterId;
-  const isController = isDm || (user && encounter.createdBy === user.userId);
+  const isController = controls;
   // Card identity follows resolveCombatantRow's rule: a unique name keys by
   // name, so the card and its open draft follow the combatant across a
   // re-sort; a duplicated name keys by row. The u: and d: prefixes keep the
@@ -131,6 +155,9 @@ export default function InitiativeTrackerPage() {
               <Badge variant={encounter.isActive ? 'success' : 'neutral'} size="md">
                 {encounter.isActive ? 'Active' : 'Inactive'}
               </Badge>
+              {isLive && (
+                <LiveIndicator lastUpdatedAt={lastUpdatedAt} refreshFailed={refreshFailed} />
+              )}
               {/* The round normally rides on the active card's inline header; with
                   no combatants there is no such card, so surface it here so the
                   round is never hidden (and never duplicated — these are mutually
@@ -177,7 +204,7 @@ export default function InitiativeTrackerPage() {
                 combatant={c}
                 rowIndex={i}
                 isCurrent={isCurrent}
-                isController={!!isController}
+                isController={isController}
                 writePending={writePending}
                 round={encounter.round}
                 turnBackDisabled={encounter.round === 1 && encounter.currentTurn === 0}
@@ -199,6 +226,9 @@ export default function InitiativeTrackerPage() {
             <AddCombatantControls
               campaignId={campaignId}
               existingNames={encounter.combatants.map(c => c.name)}
+              existingCharacterIds={encounter.combatants.flatMap(c =>
+                c.characterId ? [c.characterId] : []
+              )}
               writePending={writePending}
               onAddManual={actions.addManualCombatant}
               onAddParty={actions.addPartyToEncounter}
@@ -289,7 +319,7 @@ export default function InitiativeTrackerPage() {
           )}
         </Modal>
 
-        <MonsterLookupPanel canAdd={!!isController} onAdd={actions.addMonsterToEncounter} />
+        <MonsterLookupPanel canAdd={isController} onAdd={actions.addMonsterToEncounter} />
 
         <Modal
           open={viewer.isOpen}

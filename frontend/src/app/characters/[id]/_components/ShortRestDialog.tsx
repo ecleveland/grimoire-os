@@ -11,7 +11,9 @@ import {
   formatShortRestSummary,
   healHitPoints,
   shortRestHealPerDie,
+  shortRestPool,
 } from '@/lib/character-play';
+import { firstPool } from '@grimoire-os/shared';
 import type { CharacterPatch, PatchOptions } from './useCharacterMutation';
 import { formatModifier } from './utils';
 
@@ -49,7 +51,10 @@ export default function ShortRestDialog({
   // modifier stays a display-time concern and the rolls survive a failed write.
   const [rolls, setRolls] = useState<number[]>([]);
 
-  const { hitDice } = character;
+  // Dice come from the first pool with one left, the same pool `applyShortRest`
+  // spends from. Once every pool is exhausted the first one stays on screen so
+  // the "none remaining" state still names a die.
+  const hitDice = shortRestPool(character.hitDice) ?? firstPool(character.hitDice);
   const hasHitPoints = character.hitPoints !== null;
   const conMod = character.computed.abilityModifiers.constitution;
   const available = hitDice ? hitDice.total - hitDice.spent : 0;

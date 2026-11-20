@@ -25,10 +25,13 @@ Set at minimum:
 | Variable | Required | Default |
 |----------|----------|---------|
 | JWT_SECRET | Yes | — |
+| POSTGRES_PASSWORD | Yes | None. `.env.example` sets the dev value `grimoire` |
 | DATABASE_URL | No | postgresql://grimoire:grimoire@localhost:5432/grimoire_os |
 | JWT_EXPIRES_IN | No | 24h |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
+| LOG_LEVEL | No | `log`. One of `error`, `warn`, `log`, `debug`, `verbose` |
+| LOG_FORMAT | No | `text`. `json` prints one JSON object per line |
 
 3. Start everything with hot reload:
 
@@ -86,5 +89,7 @@ When adding or modifying DTOs, always include `@ApiProperty` or `@ApiPropertyOpt
 ## Docker (Production)
 
 ```bash
-JWT_SECRET=your-secret docker compose up --build
+JWT_SECRET=your-secret POSTGRES_PASSWORD=your-db-password docker compose up --build
 ```
+
+The stack publishes only the frontend on port 3000, with the backend API at http://localhost:3000/api through the frontend's `/api` proxy. The port listens on 127.0.0.1, so other machines reach it through a reverse proxy on the same host, or directly once `FRONTEND_BIND=0.0.0.0` opens it to the network. Set `PUBLIC_URL` to the address users open. `dev.sh` loads `docker-compose.dev.yml` as well, which publishes Postgres on 5432 for the backend it runs on the host. The dev backend stays on http://localhost:3001.

@@ -297,6 +297,7 @@ export default function NewEncounterPage() {
           <AddPartyDialog
             characters={partyRoster}
             existingNames={takenNames()}
+            existingCharacterIds={picked.flatMap(c => (c.characterId ? [c.characterId] : []))}
             onConfirm={addParty}
             onCancel={() => setAddPartyOpen(false)}
           />

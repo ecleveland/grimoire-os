@@ -16,7 +16,7 @@ test.describe('character sheet — inventory CRUD', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Bramble Hauler',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 3 }],
         level: 3,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
         hitPoints: { max: 28, current: 28, temporary: 0 },

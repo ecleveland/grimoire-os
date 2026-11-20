@@ -159,7 +159,7 @@ describe('ClassStep — SRD class selection', () => {
 
     await pickClass(user, 'Fighter');
 
-    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd10', total: 1, spent: 0 }));
+    await waitFor(() => expect(draftHitDice()).toEqual([{ dieType: 'd10', total: 1, spent: 0 }]));
   });
 
   // Typing over a resolved class drops its grants, and the die is one of them
@@ -172,7 +172,7 @@ describe('ClassStep — SRD class selection', () => {
     renderStep([makeClass()]);
 
     await pickClass(user, 'Fighter');
-    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd10', total: 1, spent: 0 }));
+    await waitFor(() => expect(draftHitDice()).toEqual([{ dieType: 'd10', total: 1, spent: 0 }]));
 
     const input = screen.getByRole('combobox', { name: /^class/i });
     await user.clear(input);
@@ -589,7 +589,7 @@ describe('ClassStep retyping and ambiguous names', () => {
     const summary = await screen.findByRole('group', { name: /class grants/i });
     expect(within(summary).getByText(/d12/)).toBeInTheDocument();
     expect(within(summary).getByText('Dexterity, Charisma')).toBeInTheDocument();
-    expect(draftHitDice()).toEqual({ dieType: 'd12', total: 1, spent: 0 });
+    expect(draftHitDice()).toEqual([{ dieType: 'd12', total: 1, spent: 0 }]);
     expect(onValid).toHaveBeenLastCalledWith(true);
   });
 
@@ -626,9 +626,9 @@ describe('ClassStep retyping and ambiguous names', () => {
     renderStep([homebrewFighter, srdFighter, WIZARD]);
 
     await pickHomebrew(user);
-    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd12', total: 1, spent: 0 }));
+    await waitFor(() => expect(draftHitDice()).toEqual([{ dieType: 'd12', total: 1, spent: 0 }]));
     await pickClass(user, 'Wizard');
-    await waitFor(() => expect(draftHitDice()).toEqual({ dieType: 'd6', total: 1, spent: 0 }));
+    await waitFor(() => expect(draftHitDice()).toEqual([{ dieType: 'd6', total: 1, spent: 0 }]));
 
     const input = screen.getByRole('combobox', { name: /^class/i });
     await user.clear(input);

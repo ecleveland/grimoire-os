@@ -14,12 +14,12 @@ test.describe('character sheet — Long Rest', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Wynn Emberfall',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 5 }],
         level: 5,
         abilityScores: { strength: 8, dexterity: 14, constitution: 14, intelligence: 16 },
         hitPoints: { max: 30, current: 8, temporary: 4 },
         // total 5 → regain max(1, floor(5/2)) = 2; spent 4 → 2 remaining.
-        hitDice: { dieType: 'd6', total: 5, spent: 4 },
+        hitDice: [{ dieType: 'd6', total: 5, spent: 4 }],
         spellcastingAbility: 'Intelligence',
         spellSaveDC: 13,
         spellAttackBonus: 5,
@@ -96,12 +96,12 @@ test.describe('character sheet — Long Rest', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Brom Stoutshield',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 4 }],
         level: 4,
         abilityScores: { strength: 16, dexterity: 12, constitution: 15 },
         hitPoints: { max: 36, current: 11, temporary: 0 },
         // total 4 → regain max(1, floor(4/2)) = 2; spent 3 → 1 remaining.
-        hitDice: { dieType: 'd10', total: 4, spent: 3 },
+        hitDice: [{ dieType: 'd10', total: 4, spent: 3 }],
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
         // No spellcastingAbility and no spellSlots → spellSlots persists as null.
       },
@@ -129,7 +129,7 @@ test.describe('character sheet — Long Rest', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Shan Two-Rivers',
-        class: 'Monk',
+        classes: [{ name: 'Monk', level: 5 }],
         level: 5,
         // Pinned null because VEG-530 seeds an omitted pool from the class, and
         // this is the only end-to-end exercise of the short-rest dialog on a
@@ -200,12 +200,12 @@ test.describe('character sheet — Long Rest', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Dara Stonewalker',
-        class: 'Barbarian',
+        classes: [{ name: 'Barbarian', level: 4 }],
         level: 4,
         // CON 14 → +2 modifier, so an average d12 (7) heals 9 per die.
         abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
         hitPoints: { max: 40, current: 12, temporary: 0 },
-        hitDice: { dieType: 'd12', total: 4, spent: 1 },
+        hitDice: [{ dieType: 'd12', total: 4, spent: 1 }],
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
       },
       headers,
@@ -247,11 +247,11 @@ test.describe('character sheet — Long Rest', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Kelen Ashgrove',
-        class: 'Ranger',
+        classes: [{ name: 'Ranger', level: 3 }],
         level: 3,
         abilityScores: { strength: 12, dexterity: 16, constitution: 13 },
         hitPoints: { max: 24, current: 24, temporary: 0 },
-        hitDice: { dieType: 'd10', total: 3, spent: 0 },
+        hitDice: [{ dieType: 'd10', total: 3, spent: 0 }],
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
         exhaustion: 3,
       },
@@ -297,13 +297,13 @@ test.describe('character sheet — Long Rest', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Ilna Fairweather',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 3 }],
         level: 3,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14 },
         // Nothing spent anywhere: full HP, no temp, no spent dice, no
         // exhaustion, no death saves, non-caster.
         hitPoints: { max: 28, current: 28, temporary: 0 },
-        hitDice: { dieType: 'd10', total: 3, spent: 0 },
+        hitDice: [{ dieType: 'd10', total: 3, spent: 0 }],
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
       },
       headers,

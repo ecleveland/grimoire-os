@@ -25,7 +25,7 @@ test.describe('character sheet — weapon proficiency (VEG-463)', () => {
     // differentiator between their derived longsword rows.
     const wizardId = await create({
       name: 'Fizban Frays',
-      class: 'Wizard',
+      classes: [{ name: 'Wizard', level: 3 }],
       level: 3,
       abilityScores: { strength: 16, dexterity: 14, constitution: 12 },
       hitPoints: { max: 17, current: 17, temporary: 0 },
@@ -36,7 +36,7 @@ test.describe('character sheet — weapon proficiency (VEG-463)', () => {
     });
     const fighterId = await create({
       name: 'Bruni Oakshield',
-      class: 'Fighter',
+      classes: [{ name: 'Fighter', level: 3 }],
       level: 3,
       abilityScores: { strength: 16, dexterity: 14, constitution: 14 },
       hitPoints: { max: 28, current: 28, temporary: 0 },

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { middleware } from '@/middleware';
 
@@ -63,6 +63,63 @@ describe('middleware', () => {
     it('lets a protected page through', () => {
       const res = run('/campaigns/1', AUTHED);
       expect(res.headers.get('location')).toBeNull();
+    });
+  });
+
+  describe('API proxy', () => {
+    const BACKEND = 'http://backend:3001/api';
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    function post(path: string) {
+      return middleware(new NextRequest(`${ORIGIN}${path}`, { method: 'POST' }));
+    }
+
+    it('rewrites a signed-out login to the backend instead of redirecting it', () => {
+      vi.stubEnv('INTERNAL_API_URL', BACKEND);
+      const res = post('/api/auth/login');
+      expect(res.headers.get('x-middleware-rewrite')).toBe(`${BACKEND}/auth/login`);
+      expect(res.headers.get('location')).toBeNull();
+    });
+
+    it('keeps the query string', () => {
+      vi.stubEnv('INTERNAL_API_URL', BACKEND);
+      const res = run('/api/srd/search?q=fire&limit=5');
+      expect(res.headers.get('x-middleware-rewrite')).toBe(`${BACKEND}/srd/search?q=fire&limit=5`);
+    });
+
+    it('maps /api alone to the backend base', () => {
+      vi.stubEnv('INTERNAL_API_URL', BACKEND);
+      const res = run('/api');
+      expect(res.headers.get('x-middleware-rewrite')).toBe(BACKEND);
+    });
+
+    it('reads INTERNAL_API_URL on each request', () => {
+      vi.stubEnv('INTERNAL_API_URL', 'http://first:3001/api');
+      expect(run('/api/health').headers.get('x-middleware-rewrite')).toBe(
+        'http://first:3001/api/health'
+      );
+
+      vi.stubEnv('INTERNAL_API_URL', 'http://second:3001/api');
+      expect(run('/api/health').headers.get('x-middleware-rewrite')).toBe(
+        'http://second:3001/api/health'
+      );
+    });
+
+    it('rewrites a signed-in API call too', () => {
+      vi.stubEnv('INTERNAL_API_URL', BACKEND);
+      const res = run('/api/users/me', AUTHED);
+      expect(res.headers.get('x-middleware-rewrite')).toBe(`${BACKEND}/users/me`);
+    });
+
+    it('treats a path that only shares the /api prefix as a protected page', () => {
+      vi.stubEnv('INTERNAL_API_URL', BACKEND);
+      const res = run('/apix');
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe(`${ORIGIN}/login?next=%2Fapix`);
+      expect(res.headers.get('x-middleware-rewrite')).toBeNull();
     });
   });
 

@@ -13,6 +13,8 @@ import type { Character } from '@/lib/types';
  * layer and are never patched from here. `level`/`experiencePoints`/`features`
  * are stored inputs too — the level-up assistant (VEG-411) writes them and the
  * computed layer re-derives proficiency, slot maxima, and XP progress.
+ * `classes` moves with `level`, because the server requires the class levels
+ * to add up to it.
  * `armorClass` is the manual AC override (VEG-410): the AC block sets it and
  * clears it back to null to fall through to the equipment-derived value.
  */
@@ -20,6 +22,7 @@ export type CharacterPatch = Partial<
   Pick<
     Character,
     | 'level'
+    | 'classes'
     | 'experiencePoints'
     | 'armorClass'
     | 'hitPoints'

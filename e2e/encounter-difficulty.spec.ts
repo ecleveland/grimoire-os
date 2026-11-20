@@ -20,7 +20,7 @@ test.describe('Encounter difficulty readout (VEG-362)', () => {
       data: {
         name: 'Thia',
         race: 'Elf',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 5 }],
         level: 5,
         armorClass: 12,
         initiative: 2,

@@ -13,7 +13,7 @@ test.describe('character sheet — status tracker', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Mara Stillwater',
-        class: 'Cleric',
+        classes: [{ name: 'Cleric', level: 3 }],
         level: 3,
         abilityScores: { strength: 10, dexterity: 12, wisdom: 16 },
         hitPoints: { max: 21, current: 21, temporary: 0 },
@@ -89,7 +89,7 @@ test.describe('character sheet — status tracker', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Bran Coldhearth',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 5 }],
         level: 5,
         // DEX 12 → +1 initiative; WIS 14 → passive perception 12 unproficient.
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, wisdom: 14 },

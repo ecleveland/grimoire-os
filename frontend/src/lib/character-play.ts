@@ -3,11 +3,18 @@ import type {
   CombatantConcentration,
   Condition,
   DeathSaves,
+  DieType,
   HitDice,
   HitPoints,
   SpellSlot,
 } from '@/lib/types';
-import { CLEARED_DEATH_SAVES, hasDeathSaves, reviveDeathSaves } from '@grimoire-os/shared';
+import {
+  CLEARED_DEATH_SAVES,
+  hasDeathSaves,
+  hitDiceSpent,
+  hitDiceTotal,
+  reviveDeathSaves,
+} from '@grimoire-os/shared';
 import { applyDamage, applyHeal } from './combatant-hp';
 import { recoverResources } from './character-resources';
 import { clampIntToRange } from './form-helpers';
@@ -86,9 +93,25 @@ export function togglePip(current: number, index: number, max: number): number {
   return Math.max(0, Math.min(max, next));
 }
 
-/** Adjust hit dice spent by `delta` (+1 spend, -1 restore); clamped to 0..total. */
-export function adjustHitDiceSpent(hitDice: HitDice, delta: number): HitDice {
-  return { ...hitDice, spent: Math.max(0, Math.min(hitDice.total, hitDice.spent + delta)) };
+/**
+ * Adjust the spent count of the `dieType` pool by `delta` (+1 spend, -1
+ * restore), clamped to 0..total within that pool. The other pools come back
+ * unchanged, so an over-supplied spend never spills into a different die.
+ */
+export function adjustHitDiceSpent(pools: HitDice[], dieType: DieType, delta: number): HitDice[] {
+  return pools.map(pool =>
+    pool.dieType === dieType
+      ? { ...pool, spent: Math.max(0, Math.min(pool.total, pool.spent + delta)) }
+      : pool
+  );
+}
+
+/**
+ * The pool a short rest spends from: the first one with a die left, or null
+ * when every pool is exhausted or none is recorded.
+ */
+export function shortRestPool(pools: readonly HitDice[] | null | undefined): HitDice | null {
+  return pools?.find(pool => pool.spent < pool.total) ?? null;
 }
 
 /**
@@ -143,7 +166,7 @@ export interface LongRestPatch {
   // field here, which made `applyLongRest` incapable of returning an empty patch
   // and so made every fully-rested click a wasted write.
   deathSaves?: DeathSaves;
-  hitDice?: HitDice;
+  hitDice?: HitDice[];
   spellSlots?: SpellSlot[];
   resources?: CharacterResource[];
   // Omitted when the character isn't exhausted (VEG-487): writing an unchanged
@@ -164,7 +187,7 @@ export function applyLongRest(character: {
   // `spellSlots`, and a hit-dice-less sheet omits `hitDice`. Each is omitted from
   // the patch when absent, so the rest never writes a fabricated block back.
   hitPoints: HitPoints | null;
-  hitDice?: HitDice | null;
+  hitDice?: HitDice[] | null;
   spellSlots?: SpellSlot[] | null;
   resources?: CharacterResource[] | null;
   exhaustion?: number | null;
@@ -186,9 +209,15 @@ export function applyLongRest(character: {
   if (hitPoints && (hitPoints.current < hitPoints.max || hitPoints.temporary > 0)) {
     patch.hitPoints = { ...hitPoints, current: hitPoints.max, temporary: 0 };
   }
-  if (hitDice && hitDice.spent > 0) {
-    const regained = hitDiceRegainedOnLongRest(hitDice.total);
-    patch.hitDice = { ...hitDice, spent: Math.max(0, hitDice.spent - regained) };
+  // The regained count comes from the dice held across every pool, then fills
+  // the spent dice pool by pool in stored order until it runs out.
+  if (hitDice && hitDiceSpent(hitDice) > 0) {
+    let regained = hitDiceRegainedOnLongRest(hitDiceTotal(hitDice));
+    patch.hitDice = hitDice.map(pool => {
+      const restored = Math.min(pool.spent, regained);
+      regained -= restored;
+      return { ...pool, spent: pool.spent - restored };
+    });
   }
   if (spellSlots?.some(slot => slot.used > 0)) {
     patch.spellSlots = spellSlots.map(slot => ({ ...slot, used: 0 }));
@@ -217,7 +246,7 @@ export interface ShortRestPatch {
   // `applyLongRest`, so it's stated here — `formatShortRestSummary` reads
   // `hitPoints` and `hitDice` separately and is correct only because of it.
   hitPoints?: HitPoints;
-  hitDice?: HitDice;
+  hitDice?: HitDice[];
   deathSaves?: DeathSaves;
 }
 
@@ -237,7 +266,7 @@ export function applyShortRest(
   character: {
     resources?: CharacterResource[] | null;
     hitPoints?: HitPoints | null;
-    hitDice?: HitDice | null;
+    hitDice?: HitDice[] | null;
     deathSaves?: DeathSaves | null;
   },
   spend: { healPerDie?: number[] } = {}
@@ -252,14 +281,16 @@ export function applyShortRest(
     patch.resources = recoverResources(resources, 'short');
   }
 
-  // Hit dice can only be spent by a character that has them; the clamp caps the
-  // spend at what actually remains even if the caller over-supplies rolls. When
-  // none remain the clamp is a no-op, so the field is dropped rather than
-  // written back identical (which would still read as a confirmable change).
-  if (spentDice.length > 0 && hitDice && hitDice.spent < hitDice.total) {
-    patch.hitDice = adjustHitDiceSpent(hitDice, spentDice.length);
+  // Hit dice can only be spent by a character that has them. They come from the
+  // first pool with a die left, and the clamp caps the spend at what that pool
+  // holds even if the caller over-supplies rolls. When no pool has a die left
+  // the field is dropped rather than written back identical (which would still
+  // read as a confirmable change).
+  const pool = shortRestPool(hitDice);
+  if (spentDice.length > 0 && hitDice && pool) {
+    patch.hitDice = adjustHitDiceSpent(hitDice, pool.dieType, spentDice.length);
     // Only the dice the clamp actually allowed may heal.
-    const allowed = patch.hitDice.spent - hitDice.spent;
+    const allowed = hitDiceSpent(patch.hitDice) - hitDiceSpent(hitDice);
     const healed = spentDice.slice(0, allowed).reduce((sum, hp) => sum + hp, 0);
     // Omitted for a null-HP record (VEG-425) — same invariant as applyLongRest.
     if (hitPoints && healed > 0) {
@@ -292,7 +323,7 @@ function joinSummary(parts: string[], nothingChanged: string): string {
  * move are dropped rather than reported as zeroes.
  */
 export function formatLongRestSummary(
-  before: { hitPoints?: HitPoints | null; hitDice?: HitDice | null },
+  before: { hitPoints?: HitPoints | null; hitDice?: HitDice[] | null },
   patch: LongRestPatch
 ): string {
   const parts: string[] = [];
@@ -305,7 +336,8 @@ export function formatLongRestSummary(
   const tempCleared = patch.hitPoints ? (before.hitPoints?.temporary ?? 0) : 0;
   if (tempCleared > 0) parts.push(`${tempCleared} temp HP cleared`);
 
-  const regained = (before.hitDice?.spent ?? 0) - (patch.hitDice?.spent ?? 0);
+  // An omitted `hitDice` means nothing moved, so the before count stands in.
+  const regained = hitDiceSpent(before.hitDice) - hitDiceSpent(patch.hitDice ?? before.hitDice);
   if (regained > 0) parts.push(`${hitDiceLabel(regained)} regained`);
 
   // Each of these is present only when it actually changed (see applyLongRest),
@@ -330,7 +362,7 @@ export function formatLongRestSummary(
 
 /** Describe what a short rest changed. See `formatLongRestSummary`. */
 export function formatShortRestSummary(
-  before: { hitPoints?: HitPoints | null; hitDice?: HitDice | null },
+  before: { hitPoints?: HitPoints | null; hitDice?: HitDice[] | null },
   patch: ShortRestPatch
 ): string {
   const parts: string[] = [];
@@ -338,7 +370,7 @@ export function formatShortRestSummary(
   const healed = (patch.hitPoints?.current ?? 0) - (before.hitPoints?.current ?? 0);
   if (healed > 0) parts.push(`+${healed} HP`);
 
-  const spent = (patch.hitDice?.spent ?? 0) - (before.hitDice?.spent ?? 0);
+  const spent = hitDiceSpent(patch.hitDice ?? before.hitDice) - hitDiceSpent(before.hitDice);
   if (spent > 0) parts.push(`${hitDiceLabel(spent)} spent`);
 
   if (patch.resources) parts.push('resources recharged');

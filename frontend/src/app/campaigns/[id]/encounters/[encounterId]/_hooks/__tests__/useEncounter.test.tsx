@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { QueryClientProvider, onlineManager, type QueryClient } from '@tanstack/react-query';
+import {
+  QueryClientProvider,
+  focusManager,
+  onlineManager,
+  type QueryClient,
+} from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { ApiError } from '@/lib/api';
 import { apiQueryKey } from '@/lib/query';
@@ -8,7 +13,7 @@ import type { Encounter } from '@/lib/types';
 import { createTestQueryClient } from '@/test-utils/query';
 import { makeQueryClient } from '@/components/QueryProvider';
 import { makeCombatant, makeEncounter } from '@/test-utils/encounter';
-import { useEncounter } from '../useEncounter';
+import { IDLE_POLL_MS, LIVE_POLL_MS, useEncounter, type EncounterViewer } from '../useEncounter';
 
 const mockApiFetch = vi.fn();
 const mockToastError = vi.fn();
@@ -32,11 +37,18 @@ type Init = { method?: string; body?: string } | undefined;
 const callsTo = (method: string | undefined, path = PATH) =>
   mockApiFetch.mock.calls.filter(([p, init]) => p === path && (init as Init)?.method === method);
 
-function renderEncounter(client: QueryClient = createTestQueryClient()) {
+// The fixture's creator, viewing as a DM, so the default render controls the tracker.
+const CONTROLLER: EncounterViewer = { userId: 'user-1', isDm: true };
+const MEMBER: EncounterViewer = { userId: 'member-9', isDm: false };
+
+function renderEncounter(
+  client: QueryClient = createTestQueryClient(),
+  viewer: EncounterViewer = CONTROLLER
+) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
-  const hook = renderHook(() => useEncounter('enc-1'), { wrapper });
+  const hook = renderHook(() => useEncounter('enc-1', viewer), { wrapper });
   return { client, ...hook };
 }
 
@@ -238,5 +250,245 @@ describe('useEncounter', () => {
     });
     expect(result.current.writePending).toBe(false);
     expect(mockToastSuccess).toHaveBeenCalledWith('Rolled loot for Goblin A');
+  });
+
+  describe('live polling (VEG-683)', () => {
+    // Fake timers go in before the render, because TanStack schedules the
+    // poll on whatever setInterval is global when the first GET lands.
+    // shouldAdvanceTime keeps waitFor's own timers moving.
+    beforeEach(() => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+      focusManager.setFocused(undefined);
+    });
+
+    const poll = (ms = LIVE_POLL_MS) =>
+      act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+
+    async function renderLoaded(viewer: EncounterViewer) {
+      const rendered = renderEncounter(createTestQueryClient(), viewer);
+      await waitFor(() => expect(rendered.result.current.encounter).not.toBeNull());
+      return rendered;
+    }
+
+    it('a campaign member polls every 3 seconds while combat is active', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      const { result } = await renderLoaded(MEMBER);
+
+      expect(result.current.isLive).toBe(true);
+      expect(result.current.lastUpdatedAt).toBeGreaterThan(0);
+      expect(callsTo(undefined)).toHaveLength(1);
+
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(2);
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(3);
+    });
+
+    it('polling slows to every 10 seconds when combat ends', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockResolvedValue(makeEncounter({ isActive: false }));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.encounter?.isActive).toBe(false));
+      expect(result.current.isLive).toBe(true);
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await poll(LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(2);
+      await poll(IDLE_POLL_MS - LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(3);
+    });
+
+    it('the DM view does not poll', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      const { result } = await renderLoaded({ userId: 'someone', isDm: true });
+
+      await poll();
+      await poll();
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(1);
+      expect(result.current.isLive).toBe(false);
+    });
+
+    it('the creator does not poll', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      const { result } = await renderLoaded({ userId: 'user-1', isDm: false });
+
+      await poll();
+      await poll();
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(1);
+      expect(result.current.isLive).toBe(false);
+    });
+
+    it('a member polls an inactive encounter every 10 seconds and speeds up when combat starts', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: false }))
+        .mockResolvedValue(makeEncounter({ isActive: true }));
+      const { result } = await renderLoaded(MEMBER);
+      expect(result.current.isLive).toBe(true);
+
+      await poll(LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(1);
+      await poll(IDLE_POLL_MS - LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(2);
+      await waitFor(() => expect(result.current.encounter?.isActive).toBe(true));
+
+      await poll(LIVE_POLL_MS);
+      expect(callsTo(undefined)).toHaveLength(3);
+    });
+
+    it('a failed refetch keeps the last state, dims the indicator and does not toast', async () => {
+      const first = makeEncounter({ isActive: true });
+      mockApiFetch
+        .mockResolvedValueOnce(first)
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValueOnce(makeEncounter({ isActive: true, round: 2 }));
+      const { result } = await renderLoaded(MEMBER);
+      expect(result.current.refreshFailed).toBe(false);
+
+      await poll();
+      await waitFor(() => expect(result.current.refreshFailed).toBe(true));
+      expect(result.current.encounter).toEqual(first);
+      expect(mockToastError).not.toHaveBeenCalled();
+
+      await poll();
+      await waitFor(() => expect(result.current.encounter?.round).toBe(2));
+      expect(result.current.refreshFailed).toBe(false);
+    });
+
+    it('a controller whose refetch fails still toasts', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValueOnce(new Error('boom'));
+      const { result, client } = await renderLoaded(CONTROLLER);
+
+      await act(() => client.invalidateQueries());
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load encounter'));
+      expect(mockToastError).toHaveBeenCalledTimes(1);
+      expect(result.current.encounter).not.toBeNull();
+    });
+
+    it('a 404 on a refetch stops polling and clears the encounter', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(404, 'not found'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.encounter).toBeNull());
+      expect(result.current.errorStatus).toBe(404);
+      expect(result.current.isLive).toBe(false);
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await poll();
+      await poll();
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(2);
+    });
+
+    it('a 403 on a refetch stops polling the same way', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(403, 'forbidden'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.encounter).toBeNull());
+      expect(result.current.errorStatus).toBe(403);
+      expect(result.current.isLive).toBe(false);
+      expect(mockToastError).not.toHaveBeenCalled();
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await poll();
+      await poll();
+      await poll();
+      expect(callsTo(undefined)).toHaveLength(2);
+    });
+
+    it('a network error on a refetch keeps polling', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new Error('boom'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.refreshFailed).toBe(true));
+      expect(result.current.encounter).not.toBeNull();
+      expect(result.current.errorStatus).toBeNull();
+
+      await poll();
+      await poll();
+      expect(callsTo(undefined).length).toBeGreaterThanOrEqual(4);
+    });
+
+    it('a live viewer refetches when the window regains focus', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      // The app's own client, whose focus refetch is off, so only the hook's
+      // own option can turn it on.
+      const rendered = renderEncounter(makeQueryClient(), MEMBER);
+      await waitFor(() => expect(rendered.result.current.encounter).not.toBeNull());
+      expect(callsTo(undefined)).toHaveLength(1);
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+
+      await waitFor(() => expect(callsTo(undefined)).toHaveLength(2));
+    });
+
+    it('a gone encounter does not refetch on focus', async () => {
+      mockApiFetch
+        .mockResolvedValueOnce(makeEncounter({ isActive: true }))
+        .mockRejectedValue(new ApiError(404, 'not found'));
+      const { result } = await renderLoaded(MEMBER);
+
+      await poll();
+      await waitFor(() => expect(result.current.errorStatus).toBe(404));
+      expect(callsTo(undefined)).toHaveLength(2);
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await poll(LIVE_POLL_MS);
+
+      expect(callsTo(undefined)).toHaveLength(2);
+    });
+
+    it('the controller does not refetch on focus', async () => {
+      mockApiFetch.mockResolvedValue(makeEncounter({ isActive: true }));
+      // The test client refetches on focus by default, so this proves the
+      // hook itself turns it off for the controller.
+      await renderLoaded(CONTROLLER);
+      expect(callsTo(undefined)).toHaveLength(1);
+
+      await act(async () => {
+        focusManager.setFocused(false);
+        focusManager.setFocused(true);
+      });
+      await poll(LIVE_POLL_MS);
+
+      expect(callsTo(undefined)).toHaveLength(1);
+    });
+
+    it('the initial load failure still toasts', async () => {
+      mockApiFetch.mockRejectedValue(new Error('404'));
+      const { result } = renderEncounter(createTestQueryClient(), MEMBER);
+
+      await waitFor(() => expect(mockToastError).toHaveBeenCalledWith('Failed to load encounter'));
+      expect(result.current.encounter).toBeNull();
+      expect(result.current.refreshFailed).toBe(false);
+    });
   });
 });

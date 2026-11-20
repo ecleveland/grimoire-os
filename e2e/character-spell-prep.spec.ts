@@ -13,7 +13,7 @@ test.describe('character sheet — spell preparation indicator', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Selene Glimmer',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 5 }],
         level: 5,
         abilityScores: { strength: 8, dexterity: 14, constitution: 12, intelligence: 18 },
         hitPoints: { max: 22, current: 22, temporary: 0 },

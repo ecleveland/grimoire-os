@@ -15,7 +15,7 @@ test.describe('character sheet — resource tracker', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Vess Duskwhisper',
-        class: 'Sorcerer',
+        classes: [{ name: 'Sorcerer', level: 3 }],
         level: 3,
         abilityScores: { strength: 8, dexterity: 14, constitution: 14, charisma: 16 },
         hitPoints: { max: 21, current: 21, temporary: 0 },
@@ -77,7 +77,7 @@ test.describe('character sheet — resource tracker', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Torv Ashenmark',
-        class: 'Sorcerer',
+        classes: [{ name: 'Sorcerer', level: 20 }],
         level: 20,
         hitPoints: { max: 110, current: 110, temporary: 0 },
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },

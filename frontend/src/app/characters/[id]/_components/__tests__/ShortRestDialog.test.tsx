@@ -27,7 +27,7 @@ function renderDialog(over: Parameters<typeof makeCharacter>[0] = {}, props = {}
   // CON 14 → +2. d10 hit dice, 8 total / 3 spent → 5 available.
   const character = makeCharacter({
     hitPoints: { max: 44, current: 12, temporary: 0 },
-    hitDice: { dieType: 'd10', total: 8, spent: 3 },
+    hitDice: [{ dieType: 'd10', total: 8, spent: 3 }],
     resources: [],
     ...over,
   });
@@ -93,7 +93,7 @@ describe('ShortRestDialog (VEG-487)', () => {
   it('caps spending at the dice actually remaining', async () => {
     const user = userEvent.setup();
     // 8 total, 7 spent → exactly one available.
-    renderDialog({ hitDice: { dieType: 'd10', total: 8, spent: 7 } });
+    renderDialog({ hitDice: [{ dieType: 'd10', total: 8, spent: 7 }] });
 
     const spend = screen.getByRole('button', { name: /spend a hit die/i });
     await user.click(spend);
@@ -151,7 +151,7 @@ describe('ShortRestDialog (VEG-487)', () => {
     const onClose = vi.fn();
     const base = {
       hitPoints: { max: 44, current: 12, temporary: 0 },
-      hitDice: { dieType: 'd10' as const, total: 8, spent: 3 },
+      hitDice: [{ dieType: 'd10' as const, total: 8, spent: 3 }],
       resources: [],
     };
     const { rerender } = render(
@@ -170,7 +170,7 @@ describe('ShortRestDialog (VEG-487)', () => {
 
     rerender(
       <ShortRestDialog
-        character={makeCharacter({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 7 } })}
+        character={makeCharacter({ ...base, hitDice: [{ dieType: 'd10', total: 8, spent: 7 }] })}
         onPatch={onPatch}
         onClose={onClose}
         isSaving={false}
@@ -202,7 +202,7 @@ describe('ShortRestDialog (VEG-487)', () => {
     const [fields] = onPatch.mock.calls[0];
     expect(fields).toMatchObject({
       hitPoints: { max: 44, current: 20, temporary: 0 },
-      hitDice: { dieType: 'd10', total: 8, spent: 4 },
+      hitDice: [{ dieType: 'd10', total: 8, spent: 4 }],
     });
   });
 
@@ -230,7 +230,7 @@ describe('ShortRestDialog (VEG-487)', () => {
     const onClose = vi.fn();
     const character = makeCharacter({
       hitPoints: { max: 44, current: 12, temporary: 0 },
-      hitDice: { dieType: 'd10', total: 8, spent: 3 },
+      hitDice: [{ dieType: 'd10', total: 8, spent: 3 }],
       resources: [],
     });
     const props = { character, onPatch, onClose };
@@ -269,7 +269,7 @@ describe('ShortRestDialog (VEG-487)', () => {
     const onClose = vi.fn();
     const base = {
       hitPoints: { max: 44, current: 12, temporary: 0 },
-      hitDice: { dieType: 'd10' as const, total: 8, spent: 3 },
+      hitDice: [{ dieType: 'd10' as const, total: 8, spent: 3 }],
       resources: [],
     };
     const { rerender } = render(
@@ -288,7 +288,7 @@ describe('ShortRestDialog (VEG-487)', () => {
     // Another session spends dice → two rolls are dropped...
     rerender(
       <ShortRestDialog
-        character={makeCharacter({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 7 } })}
+        character={makeCharacter({ ...base, hitDice: [{ dieType: 'd10', total: 8, spent: 7 }] })}
         onPatch={onPatch}
         onClose={onClose}
         isSaving={false}
@@ -301,7 +301,7 @@ describe('ShortRestDialog (VEG-487)', () => {
     // player already saw discarded.
     rerender(
       <ShortRestDialog
-        character={makeCharacter({ ...base, hitDice: { dieType: 'd10', total: 8, spent: 0 } })}
+        character={makeCharacter({ ...base, hitDice: [{ dieType: 'd10', total: 8, spent: 0 }] })}
         onPatch={onPatch}
         onClose={onClose}
         isSaving={false}
@@ -341,10 +341,49 @@ describe('ShortRestDialog (VEG-487)', () => {
   });
 
   it('explains when there are no hit dice left to spend', () => {
-    renderDialog({ hitDice: { dieType: 'd10', total: 8, spent: 8 } });
+    renderDialog({ hitDice: [{ dieType: 'd10', total: 8, spent: 8 }] });
 
     expect(screen.getByRole('button', { name: /spend a hit die/i })).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent(/no hit dice/i);
+  });
+
+  it('spends from the next pool once the first is exhausted', async () => {
+    const user = userEvent.setup();
+    const { onPatch } = renderDialog({
+      hitDice: [
+        { dieType: 'd10', total: 5, spent: 5 },
+        { dieType: 'd6', total: 2, spent: 0 },
+      ],
+    });
+
+    // The d6 pool is the one on offer: its count, die and average.
+    expect(screen.getByTestId('dice-available')).toHaveTextContent('2');
+    expect(screen.getByText(/of 2 d6 available/)).toBeInTheDocument();
+    expect(screen.getByText(/Average \(4\)/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /spend a hit die/i }));
+    expect(screen.getByTestId('die-row-0')).toHaveTextContent('d6');
+    await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+    const [fields] = onPatch.mock.calls[0];
+    expect(fields.hitDice).toEqual([
+      { dieType: 'd10', total: 5, spent: 5 },
+      { dieType: 'd6', total: 2, spent: 1 },
+    ]);
+    // Average d6 is 4, plus CON +2.
+    expect(fields.hitPoints).toEqual({ max: 44, current: 18, temporary: 0 });
+  });
+
+  it('explains that no dice remain when every pool is exhausted', () => {
+    renderDialog({
+      hitDice: [
+        { dieType: 'd10', total: 5, spent: 5 },
+        { dieType: 'd6', total: 2, spent: 2 },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: /spend a hit die/i })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(/no hit dice remaining/i);
   });
 
   // VEG-530 removed a `hitDice?.dieType ?? 'd8'` from this file, but unlike the
@@ -408,7 +447,7 @@ describe('ShortRestDialog (VEG-487)', () => {
 
     await user.click(screen.getByRole('button', { name: /confirm/i }));
     const [fields] = onPatch.mock.calls[0];
-    expect(fields.hitDice).toEqual({ dieType: 'd10', total: 8, spent: 4 });
+    expect(fields.hitDice).toEqual([{ dieType: 'd10', total: 8, spent: 4 }]);
     expect('hitPoints' in fields).toBe(false);
   });
 });

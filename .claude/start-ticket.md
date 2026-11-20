@@ -10,7 +10,7 @@ Project-specific configuration for the global `start-ticket` skill. The skill re
 ## Pre-flight
 
 - Confirm Docker is running and the `postgres` container is up: `docker compose ps`
-- Confirm `.env` exists at the repo root; copy from `.env.example` if missing. Nothing reads `backend/.env`; `dev.sh` exports the root file.
+- Confirm `.env` exists at the repo root; copy from `.env.example` if missing. `dev.sh` exports the root file. `backend/.env` is optional and is read only by standalone runs from `backend/` (the Prisma CLI, the NPC backfill).
 - No separate kill step for stale dev processes: `dev.sh` reaps leftover `dev.sh` process trees itself before starting.
 
 ## Fast test runners (TDD inner loop)
@@ -42,7 +42,7 @@ For UI tickets, also draft a Playwright spec under `e2e/<feature>.spec.ts` cover
 
 ## Verification gate
 
-Run both steps below with Bash `run_in_background: true` — `verify.sh` is ten serial stages (SRD lib tests → e2e stack-naming tests → shared build → backend lint → backend `test:cov` → backend build → frontend lint → frontend typecheck → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
+Run both steps below with Bash `run_in_background: true` — `verify.sh` is a serial chain (SRD lib tests → e2e stack-naming tests → shared build → Prisma generate → backend lint → backend `test:cov` → backend build → frontend lint → frontend typecheck → frontend `test:cov` → frontend build) and Playwright is slower still. You get re-invoked on exit; don't block the foreground.
 
 1. `./verify.sh` from the repo root — mirrors CI exactly (backend + frontend lint, unit tests with coverage thresholds, SRD extraction-lib tests, production builds). Do not substitute plain `npm test`/`npm run build`. (Backend's `prettier.spec.ts` runs `format:check` on the frontend — prettier-format new frontend files first.)
 2. **E2E (Playwright)** — `cd e2e && npm run e2e -- <specs>`, as the last step (there is no root `package.json`).
@@ -90,9 +90,9 @@ Classify the PR before running any automated review. Measure against main (`git 
 | **standard** | Everything else with no risk trigger, whatever its size: bug fixes, UI tweaks, full features                                                                         | `/code-review medium --comment` + self-review                                                                             |
 | **risk**     | Any risk trigger above                                                                                                                                               | `/code-review xhigh --comment` + both toolkit agents + self-review. Offer `ultra` as a user-run option; never attempt it. |
 
-There is no `max` tier and no deep tier. On VEG-509 (PR #280) the old policy
-ran `max` for three rounds: 120 review agents against 5 implementers, about
-85% of the ticket's subagent tokens, and the user stopped it by hand.
+Never run `max` unprompted. Three rounds of it on one ticket spawned 120
+review agents against 5 implementers, about 85% of the ticket's subagent
+tokens.
 
 Compute the tier, do not judge it. Production files only — test-only and
 generated files (lockfiles, `tsconfig.tsbuildinfo`, snapshots) do not count
@@ -109,12 +109,9 @@ see the decision and override it. Announce it; do not ask permission for it.
 
 ### Running the review
 
-`/code-review` is model-invocable. Claude runs it itself at the computed tier —
-no prompt, no handoff. (An earlier version of this file claimed the opposite,
-citing a `disable-model-invocation` error. That was verified false on
-2026-09-09: `/code-review max` launched, captured the diff, and fanned out its
-finder angles. If it ever does refuse, test it rather than trusting this
-paragraph either.)
+`/code-review` is model-invocable. Claude runs it itself at the computed tier,
+with no prompt and no handoff. If it refuses, test the refusal before working
+around it.
 
 The one genuine exception is **`ultra`**, which runs in the cloud and is billed.
 That is user-triggered only. Name it as an option at the risk-tier gate; do not
@@ -122,10 +119,10 @@ attempt it.
 
 **Two passes, at different points:**
 
-1. **Pre-commit**, once the fast tests are green: `/code-review medium` over the
-   working tree. Correctness bugs and obvious simplifications only. Fixing here
-   keeps the PR history clean instead of accreting review-round commits. Skip
-   for trivial diffs.
+1. **Pre-commit, risk tier only**, once the fast tests are green:
+   `/code-review medium` over the working tree. Correctness bugs and obvious
+   simplifications only. Fixing here keeps the PR history clean instead of
+   accreting review-round commits. Skip it for the standard and skip tiers.
 2. **Post-PR**, after `gh pr create`: the tier-appropriate command with
    `--comment`, so findings anchor to lines. This is the one that gates, and it
    runs once per PR.
@@ -162,7 +159,8 @@ comment fixes get no check. Then move to CI.
 
 **The toolkit agents stay additive, once.** At the risk tier, also run
 `pr-review-toolkit:pr-test-analyzer` and `pr-review-toolkit:type-design-analyzer`
-alongside the single `/code-review xhigh` pass. Test coverage and type design
+before the single `/code-review xhigh` pass. Wait for both to finish and confirm
+with `git status` that the tree is clean before starting it. Test coverage and type design
 are not `/code-review` angles. Do not rerun them after fixes. Do not run the
 full `/pr-review-toolkit:review-pr`; its `code-reviewer` and
 `silent-failure-hunter` passes duplicate what `/code-review` covers at `xhigh`,
@@ -175,8 +173,6 @@ agents mutate source in place to mutation-test. Commit first, let them run, then
 edit.
 
 **Self-review is not a substitute, but it isn't nothing.** On VEG-453 it caught a drift seam and two exports the refactor had orphaned. The toolkit agents then caught what it missed: a docstring claiming a compile-time guarantee the type didn't provide, and a test that was an unfalsifiable identity. Treat all three as complementary and none as sufficient.
-
-Test-only and generated files (lockfiles, `tsconfig.tsbuildinfo`, snapshots) don't count toward the line/file thresholds — size the review on production-code impact. When borderline, state the tier and the numbers and let the user bump it up or down before starting.
 
 ### Posting review findings to the PR
 
@@ -192,7 +188,7 @@ findings. Claude posts the rest:
   deleted two agent names from a posted comment, leaving "Ran and .".
 - **Findings anchored to a line** — `gh api repos/<owner>/<repo>/pulls/<pr>/comments -f commit_id=… -f path=… -F line=… -f side=RIGHT -f body=…`. The command **must start with `gh api`** to match the project's `Bash(gh api:*)` allow rule — a compound prefix like `SHA=$(git rev-parse HEAD) && gh api …` falls through to the permission classifier and gets denied. Resolve the commit SHA in a separate `git rev-parse HEAD` call first.
 
-Don't take agent findings at face value before posting or acting on them — verify each against the code first. On VEG-453 a review agent cited a species trait's prose description as a structured data listing, and proposed a one-line drift guard that would have failed on a field the seeded row carries and the shared constant doesn't. Both read as authoritative. Verifying is also what tells you whether a finding is latent or already broken, which changes its priority.
+Verify each agent finding against the code before posting it, as under "Acting on findings" above. Verifying also tells you whether a finding is latent or already broken, which changes its priority.
 
 ## Follow-up tickets
 
