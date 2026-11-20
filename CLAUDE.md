@@ -57,7 +57,7 @@ Both projects enforce minimum coverage thresholds via their respective test runn
 | Backend (Jest) | 90% | 80% | 88% | 90% | `backend/package.json` (`jest.coverageThreshold.global`) |
 | Frontend (Vitest) | 88% | 82% | 86% | 90% | `frontend/vitest.config.ts` (`test.coverage.thresholds`) |
 
-Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0/91.2/95.4% backend, ~93.3/87.0/91.3/95.1% frontend) — enough margin to avoid flaky failures while still catching regression. The frontend floors were originally ~47–52% against a much smaller suite (VEG-204 era); the suite has since grown to ~150 spec files and the floors were ratcheted up to match.
+Floors are set a few points below the live actuals (as of 2026-06-23, ~94.9/83.0/91.2/95.4% backend, ~93.3/87.0/91.3/95.1% frontend) — enough margin to avoid flaky failures while still catching regression.
 
 **Ratchet up** as coverage improves: bump the relevant numbers in the corresponding config file once a new floor has been reliably maintained for at least one CI run. Never lower a threshold without a deliberate, documented reason.
 
@@ -120,9 +120,9 @@ Swagger UI available at http://localhost:3001/api/docs when backend is running.
 
 Before invoking `./dev.sh`:
 
-- Kill stale processes on the dev ports: `lsof -ti:3000,3001 | xargs kill -9 2>/dev/null`
+- No kill step is needed. `dev.sh` reaps leftover `dev.sh` process trees before it starts, and `./stop.sh` stops a running stack.
 - Verify Docker is running and the `postgres` container is up (`docker compose ps`)
-- Verify `.env` exists in the repo root and `backend/.env` is present; copy from `.env.example` if missing
+- Verify `.env` exists in the repo root; copy from `.env.example` if missing. `dev.sh` exports that file. `backend/.env` is optional and is read only by standalone runs from `backend/` (the Prisma CLI, the NPC backfill).
 
 ## Docker
 
