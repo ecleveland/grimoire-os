@@ -1,10 +1,10 @@
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS shared-build
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS shared-build
 WORKDIR /app/shared
 COPY shared/package.json shared/package-lock.json shared/tsconfig.json ./
 COPY shared/src ./src
 RUN npm ci && npm run build
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS deps
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS deps
 WORKDIR /app
 COPY --from=shared-build /app/shared ./shared
 COPY backend/package.json backend/package-lock.json ./backend/
@@ -13,7 +13,7 @@ WORKDIR /app/backend
 # dist is already built in the shared-build stage.
 RUN npm ci --ignore-scripts
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS build
 WORKDIR /app
 COPY --from=deps /app/shared ./shared
 COPY --from=deps /app/backend/node_modules ./backend/node_modules
@@ -26,7 +26,7 @@ RUN npm run build
 # leaves the Prisma CLI and everything only it needs out of the runtime image.
 # npm ci reads shared/package.json to link @grimoire-os/shared, and shared has
 # no runtime dependencies of its own.
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS prod-deps
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS prod-deps
 WORKDIR /app
 COPY shared/package.json ./shared/
 COPY backend/package.json backend/package-lock.json ./backend/
@@ -36,7 +36,7 @@ RUN npm ci --omit=dev --omit=optional --ignore-scripts
 # The image the compose migrate service runs. It keeps the Prisma CLI, which
 # the runtime image leaves out, and applies pending migrations when it starts.
 # Build it with --target migrate.
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS migrate
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS migrate
 RUN addgroup -g 1001 -S nestjs && adduser -S nestjs -u 1001 \
   && mkdir -p /app/shared /app/backend && chown -R nestjs:nestjs /app
 # The CLI writes under node_modules/@prisma/engines when it runs, so nestjs
@@ -75,7 +75,7 @@ COPY --chown=nestjs:nestjs backend/prisma.config.ts ./
 CMD ["./node_modules/.bin/prisma", "migrate", "deploy"]
 
 # The server. It stays the last stage, so a plain docker build produces it.
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS production
+FROM node:24-alpine@sha256:116b800c3754b440ee0aa3ed2f20f5bf3d99a554bfd9adeea09ea8017f6e85f5 AS production
 WORKDIR /app
 # Production mode for Express. The auth cookies' Secure flag follows this unless
 # COOKIE_SECURE overrides it (see .env.example).
