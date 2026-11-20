@@ -17,6 +17,8 @@ import {
 import { ContentAccessService } from '../../src/srd/content-access.service';
 import { CampaignAuthService } from '../../src/auth/campaign-auth.service';
 import { EncountersService } from '../../src/encounters/encounters.service';
+import { CharactersService } from '../../src/characters/characters.service';
+import { InventoryResolverService } from '../../src/characters/inventory/inventory-resolver.service';
 import { MonsterLootService } from '../../src/loot/monster-loot.service';
 import { HOMEBREW_SOURCE_LABEL } from '../../src/srd/homebrew-write.helpers';
 
@@ -73,7 +75,13 @@ describe('catalog-only encounter loot on a real DB (VEG-565)', () => {
       prisma,
       new CampaignAuthService(prisma),
       new MonsterLootService(prisma),
-      new ContentAccessService()
+      new ContentAccessService(),
+      new CharactersService(
+        prisma,
+        new CampaignAuthService(prisma),
+        new InventoryResolverService(prisma),
+        new ContentAccessService()
+      )
     );
 
     const [dm, stranger] = await Promise.all([
@@ -180,9 +188,14 @@ describe('catalog-only encounter loot on a real DB (VEG-565)', () => {
       });
 
       await expect(
-        encounters.update(encounter.id, dmId, {
-          combatants: [goblin(entry(strangerHomebrewId, 'Smuggled Draught'))],
-        })
+        encounters.update(
+          encounter.id,
+          dmId,
+          {
+            combatants: [goblin(entry(strangerHomebrewId, 'Smuggled Draught'))],
+          },
+          'dm'
+        )
       ).rejects.toMatchObject({
         response: expect.objectContaining({
           message: expect.arrayContaining([
@@ -198,10 +211,15 @@ describe('catalog-only encounter loot on a real DB (VEG-565)', () => {
       const combatants = [goblin(entry(strangerHomebrewId, 'Smuggled Draught'))];
       const encounter = await insertEncounter(combatants);
 
-      const renamed = await encounters.update(encounter.id, dmId, {
-        name: 'Renamed',
-        combatants,
-      });
+      const renamed = await encounters.update(
+        encounter.id,
+        dmId,
+        {
+          name: 'Renamed',
+          combatants,
+        },
+        'dm'
+      );
 
       expect(renamed.name).toBe('Renamed');
       expect(await storedLootIds(encounter.id)).toEqual([strangerHomebrewId]);
@@ -213,14 +231,19 @@ describe('catalog-only encounter loot on a real DB (VEG-565)', () => {
       ]);
 
       await expect(
-        encounters.update(encounter.id, dmId, {
-          combatants: [
-            goblin(
-              entry(strangerHomebrewId, 'Smuggled Draught'),
-              entry(dmHomebrewId, 'Cursed Idol')
-            ),
-          ],
-        })
+        encounters.update(
+          encounter.id,
+          dmId,
+          {
+            combatants: [
+              goblin(
+                entry(strangerHomebrewId, 'Smuggled Draught'),
+                entry(dmHomebrewId, 'Cursed Idol')
+              ),
+            ],
+          },
+          'dm'
+        )
       ).rejects.toMatchObject({
         response: expect.objectContaining({
           message: [

@@ -1,4 +1,12 @@
-import type { ComputedXp, DieType, Feature, HitDice, HitPoints, SrdClass } from '@/lib/types';
+import type {
+  CharacterClass,
+  ComputedXp,
+  DieType,
+  Feature,
+  HitDice,
+  HitPoints,
+  SrdClass,
+} from '@/lib/types';
 
 /**
  * Pure helpers for the XP → level-up assistant (VEG-411). Mirrors the
@@ -75,19 +83,24 @@ export function xpProgressPercent(xp: ComputedXp): number | null {
  */
 export interface LevelUpPatch {
   level: number;
+  // The server requires the class levels to add up to `level`, so the class
+  // that gained the level travels with it. Omitted for a character with no
+  // class recorded, which the sum rule does not cover.
+  classes?: CharacterClass[];
   // Omitted when the character has no stored HP block (VEG-425): one level's
   // gain can't reconstruct a cumulative max, so fabricating one would persist
   // a confidently-wrong value.
   hitPoints?: HitPoints;
-  hitDice?: HitDice;
+  hitDice?: HitDice[];
   features?: Feature[];
 }
 
 export function applyLevelUp(
   character: {
     level: number;
+    classes: CharacterClass[];
     hitPoints: HitPoints | null;
-    hitDice?: HitDice | null;
+    hitDice?: HitDice[] | null;
     features?: Feature[] | null;
   },
   changes: {
@@ -95,11 +108,12 @@ export function applyLevelUp(
     hpGain: number | null;
     newFeatures: Feature[];
     /**
-     * The die to seed `hitDice` with when the character has none. Required, and
-     * not nullable, since VEG-530: this used to fall back to a hardcoded d8, so
-     * a caller that could not resolve a die got one silently written into a
-     * permanent pool. `LevelUpDialog` is the only caller and always has a
-     * concrete die — the character's own, its class's, or one the player picked.
+     * The die of the class gaining the level: its pool gains one die, or a new
+     * pool starts with it. Required, and not nullable, since VEG-530: this used
+     * to fall back to a hardcoded d8, so a caller that could not resolve a die
+     * got one silently written into a permanent pool. `LevelUpDialog` is the
+     * only caller and always has a concrete die: the first pool's, the class's,
+     * or one the player picked.
      */
     classHitDie: DieType;
   }
@@ -115,11 +129,25 @@ export function applyLevelUp(
     };
   }
 
-  // A level-N character owns N hit dice: bump an existing pool, or seed a
-  // missing one — unlike HP, the correct total is fully derivable.
-  patch.hitDice = character.hitDice
-    ? { ...character.hitDice, total: character.hitDice.total + 1 }
-    : { dieType: changes.classHitDie, total: newLevel, spent: 0 };
+  // Level-up adds to the class taken at level 1, the only class a character can
+  // hold until a later picker lets the player choose another.
+  const [first, ...rest] = character.classes;
+  if (first) patch.classes = [{ ...first, level: first.level + 1 }, ...rest];
+
+  // A level-N character owns N hit dice: the level's die joins the pool of the
+  // same die, or starts a pool of its own. With no pools at all the whole set
+  // is derivable, unlike HP, so it is seeded at the new level.
+  const pools = character.hitDice ?? [];
+  const die = changes.classHitDie;
+  if (pools.some(pool => pool.dieType === die)) {
+    patch.hitDice = pools.map(pool =>
+      pool.dieType === die ? { ...pool, total: pool.total + 1 } : pool
+    );
+  } else if (pools.length > 0) {
+    patch.hitDice = [...pools, { dieType: die, total: 1, spent: 0 }];
+  } else {
+    patch.hitDice = [{ dieType: die, total: newLevel, spent: 0 }];
+  }
 
   if (changes.newFeatures.length > 0) {
     patch.features = [...(character.features ?? []), ...changes.newFeatures];

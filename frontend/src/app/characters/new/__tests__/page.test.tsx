@@ -162,9 +162,12 @@ describe('NewCharacterPage — campaign picker', () => {
       name: 'Mialee',
       size: 'Small',
       initiative: 0,
-      hitDice: { dieType: 'd6', total: 1, spent: 0 },
+      hitDice: [{ dieType: 'd6', total: 1, spent: 0 }],
       hitPoints: { max: 10, current: 10, temporary: 0 },
+      // No class typed, so no entry, and never the read-only scalar.
+      classes: [],
     });
+    expect(lastPostBody()).not.toHaveProperty('class');
   });
 
   it('toasts an error and stays on the page when creation fails', async () => {

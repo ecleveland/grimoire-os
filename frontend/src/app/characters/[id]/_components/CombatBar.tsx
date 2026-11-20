@@ -2,7 +2,12 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { Character, ComputedArmorClass, ComputedArmorClassBreakdown } from '@/lib/types';
+import type {
+  Character,
+  ComputedArmorClass,
+  ComputedArmorClassBreakdown,
+  DieType,
+} from '@/lib/types';
 import { ZERO_HIT_POINTS } from '@/lib/character-defaults';
 import { resolvePlayControls, type PlayControlProps } from './useCharacterMutation';
 import ShortRestDialog from './ShortRestDialog';
@@ -20,7 +25,7 @@ import {
   CLEARED_DEATH_SAVES,
 } from '@/lib/character-play';
 import { clampIntToRange } from '@/lib/form-helpers';
-import { MAX_ARMOR_CLASS } from '@grimoire-os/shared';
+import { hitDiceSpent, hitDiceTotal, MAX_ARMOR_CLASS } from '@grimoire-os/shared';
 
 type CombatBarProps = { character: Character } & PlayControlProps;
 
@@ -99,9 +104,9 @@ export default function CombatBar(props: CombatBarProps) {
     patch({ deathSaves: { ...deathSaves, [track]: togglePip(deathSaves[track], index, 3) } });
   };
 
-  const spendHitDie = (delta: number) => {
+  const spendHitDie = (dieType: DieType, delta: number) => {
     if (!hitDice) return;
-    patch({ hitDice: adjustHitDiceSpent(hitDice, delta) });
+    patch({ hitDice: adjustHitDiceSpent(hitDice, dieType, delta) });
   };
 
   // One-click long rest: HP to max, temp cleared, slots reset, hit dice regained,
@@ -135,7 +140,7 @@ export default function CombatBar(props: CombatBarProps) {
   // silently does nothing (and an empty PATCH would burn an optimistic-lock
   // version) both mislead.
   const [showShortRest, setShowShortRest] = useState(false);
-  const diceAvailable = hasHitPoints && hitDice ? hitDice.total - hitDice.spent : 0;
+  const diceAvailable = hasHitPoints ? hitDiceTotal(hitDice) - hitDiceSpent(hitDice) : 0;
   const canShortRest = diceAvailable > 0 || applyShortRest(character).resources !== undefined;
 
   const renderPips = (track: 'successes' | 'failures', filledClass: string) => {
@@ -296,40 +301,48 @@ export default function CombatBar(props: CombatBarProps) {
         )}
       </div>
 
-      {/* Hit Dice */}
-      {hitDice && (
-        <div data-testid="hd-block" className={blockClass}>
-          <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-            Hit Dice
-          </div>
-          <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
-            {hitDice.spent}/{hitDice.total}
-          </div>
-          <div className="text-sm text-gray-500 dark:text-gray-400">{hitDice.dieType}</div>
-          {editable && (
-            <div className="flex justify-center gap-2 mt-2">
-              <button
-                type="button"
-                aria-label="Restore hit die"
-                onClick={() => spendHitDie(-1)}
-                disabled={isSaving || hitDice.spent <= 0}
-                className="w-7 h-7 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
-              >
-                −
-              </button>
-              <button
-                type="button"
-                aria-label="Spend hit die"
-                onClick={() => spendHitDie(1)}
-                disabled={isSaving || hitDice.spent >= hitDice.total}
-                className="w-7 h-7 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
-              >
-                +
-              </button>
+      {/* Hit Dice, one block per pool. The first keeps the plain test id and
+          button labels; later pools name their die so each control is distinct. */}
+      {(hitDice ?? []).map((pool, i) => {
+        const dieLabel = i === 0 ? '' : `${pool.dieType} `;
+        return (
+          <div
+            key={`${pool.dieType}-${i}`}
+            data-testid={i === 0 ? 'hd-block' : `hd-block-${pool.dieType}`}
+            className={blockClass}
+          >
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+              Hit Dice
             </div>
-          )}
-        </div>
-      )}
+            <div className="text-2xl font-bold text-gray-900 dark:text-white mt-1">
+              {pool.spent}/{pool.total}
+            </div>
+            <div className="text-sm text-gray-500 dark:text-gray-400">{pool.dieType}</div>
+            {editable && (
+              <div className="flex justify-center gap-2 mt-2">
+                <button
+                  type="button"
+                  aria-label={`Restore ${dieLabel}hit die`}
+                  onClick={() => spendHitDie(pool.dieType, -1)}
+                  disabled={isSaving || pool.spent <= 0}
+                  className="w-7 h-7 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Spend ${dieLabel}hit die`}
+                  onClick={() => spendHitDie(pool.dieType, 1)}
+                  disabled={isSaving || pool.spent >= pool.total}
+                  className="w-7 h-7 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       {/* Death Saves */}
       <div data-testid="death-saves-block" className={blockClass}>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import { renderWithQueryClient } from '@/test-utils/query';
 import userEvent from '@testing-library/user-event';
 import InitiativeTrackerPage from '../page';
@@ -317,5 +317,92 @@ describe('live-combat layout (VEG-384)', () => {
     await waitFor(() => expect(screen.queryByText('Nimble Escape.')).not.toBeInTheDocument());
     expect(screen.queryByText(/quick reference/i)).not.toBeInTheDocument();
     expect(screen.getByText(/no stat block for hero/i)).toBeInTheDocument();
+  });
+
+  describe('pin and scroll across turn changes', () => {
+    const wolf: SrdMonster = {
+      ...goblinMonster,
+      id: 'monster-2',
+      name: 'Wolf',
+      specialAbilities: [{ name: 'Pack Tactics', description: 'Advantage near an ally.' }],
+    };
+    const combatants = [
+      makeCombatant({ name: 'Hero', initiative: 18, isNpc: false }),
+      makeCombatant({ name: 'Goblin A', initiative: 12, monsterId: 'monster-1' }),
+      makeCombatant({ name: 'Goblin B', initiative: 6, monsterId: 'monster-2' }),
+    ];
+    const routeMonsters = (path: string) => {
+      if (path === '/srd/monsters/monster-1') return Promise.resolve(goblinMonster);
+      if (path === '/srd/monsters/monster-2') return Promise.resolve(wolf);
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    };
+
+    it("a polled turn change does not scroll a member's page and keeps their pinned monster", async () => {
+      stubWide(true);
+      const scrollSpy = vi.fn();
+      (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
+      mockUseAuth.mockReturnValue({
+        user: { userId: 'member-9', username: 'p', role: 'player' },
+        isDm: false,
+      });
+      let gets = 0;
+      mockApiFetch.mockImplementation((path: string) => {
+        if (path === '/encounters/enc-1') {
+          gets += 1;
+          return Promise.resolve(makeEncounter({ currentTurn: gets === 1 ? 0 : 1, combatants }));
+        }
+        return routeMonsters(path);
+      });
+      const user = userEvent.setup();
+      const { client } = renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByText(/hero's turn/i);
+
+      await user.click(screen.getByRole('button', { name: /^goblin b$/i }));
+      const panel = screen.getByTestId('active-stat-panel');
+      expect(await within(panel).findByText('Pack Tactics.')).toBeInTheDocument();
+      scrollSpy.mockClear();
+
+      // Stands in for a poll that brings the DM's turn change.
+      await act(() => client.invalidateQueries());
+
+      // The peek banner repeats the name, so more than one match is expected.
+      await waitFor(() =>
+        expect(screen.getAllByText(/goblin a's turn/i).length).toBeGreaterThan(0)
+      );
+      expect(scrollSpy).not.toHaveBeenCalled();
+      expect(within(panel).getByText('Pack Tactics.')).toBeInTheDocument();
+      expect(within(panel).queryByText('Nimble Escape.')).not.toBeInTheDocument();
+      expect(within(panel).getByText(/quick reference/i)).toBeInTheDocument();
+      expect(within(panel).getByText(/still goblin a's turn/i)).toBeInTheDocument();
+      expect(
+        within(panel).getByRole('button', { name: /back to current turn/i })
+      ).toBeInTheDocument();
+    });
+
+    it("the controller's own next turn drops the pin", async () => {
+      stubWide(true);
+      const encounter = makeEncounter({ currentTurn: 0, combatants });
+      mockApiFetch.mockImplementation((path: string, init?: { method?: string; body?: string }) => {
+        if (path === '/encounters/enc-1' && init?.method === 'PATCH') {
+          return Promise.resolve({ ...encounter, ...JSON.parse(init.body ?? '{}'), version: 2 });
+        }
+        if (path === '/encounters/enc-1') return Promise.resolve(encounter);
+        return routeMonsters(path);
+      });
+      const user = userEvent.setup();
+      renderWithQueryClient(<InitiativeTrackerPage />);
+      await screen.findByText(/hero's turn/i);
+
+      await user.click(screen.getByRole('button', { name: /^goblin b$/i }));
+      const panel = screen.getByTestId('active-stat-panel');
+      expect(await within(panel).findByText('Pack Tactics.')).toBeInTheDocument();
+      expect(within(panel).getByText(/quick reference/i)).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /next turn/i }));
+
+      expect(await within(panel).findByText('Nimble Escape.')).toBeInTheDocument();
+      expect(within(panel).queryByText('Pack Tactics.')).not.toBeInTheDocument();
+      expect(within(panel).queryByText(/quick reference/i)).not.toBeInTheDocument();
+    });
   });
 });

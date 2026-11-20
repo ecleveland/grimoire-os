@@ -30,13 +30,30 @@ const liveCharacter = {
   createdAt: new Date('2024-06-01T00:00:00Z'),
 };
 
-// What a snapshot stores: the fixture row without the omitted columns.
+// What a snapshot stores: the fixture row without the omitted columns. The
+// fixture also carries the read-only class projection, which no stored row has.
+const PROJECTION_KEYS = ['class', 'classId', 'subclass', 'subclassId'];
 const storedData = () => {
-  const omitted: readonly string[] = SNAPSHOT_OMITTED_COLUMNS;
+  const omitted: readonly string[] = [...SNAPSHOT_OMITTED_COLUMNS, ...PROJECTION_KEYS];
   return Object.fromEntries(
     Object.entries(mockCharacter).filter(([key]) => !omitted.includes(key))
   );
 };
+
+// A sheet stored before characters held a list of classes.
+const legacyData = () => {
+  const { classes: _classes, ...rest } = storedData();
+  return {
+    ...rest,
+    class: 'Fighter',
+    classId: 'cls-srd-fighter',
+    subclass: 'Champion',
+    hitDice: { dieType: 'd10', total: 5, spent: 3 },
+  };
+};
+const FOLDED_CLASSES = [
+  { classId: 'cls-srd-fighter', name: 'Fighter', level: 5, subclass: 'Champion', subclassId: null },
+];
 
 const snapshotRow = (over: Record<string, unknown> = {}) => ({
   id: SNAPSHOT_ID,
@@ -202,6 +219,40 @@ describe('CharacterSnapshotsService', () => {
       expect(data.version).toBe(0);
     });
 
+    it('folds a pre-migration sheet into classes and hit-dice pools', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue(snapshotRow({ data: legacyData() }));
+
+      const { data } = await service.get(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      expect(data.classes).toEqual(FOLDED_CLASSES);
+      expect(data.hitDice).toEqual([{ dieType: 'd10', total: 5, spent: 3 }]);
+      expect(data).toMatchObject({
+        class: 'Fighter',
+        classId: 'cls-srd-fighter',
+        subclass: 'Champion',
+        subclassId: null,
+      });
+    });
+
+    it('reads a sheet already in the new shape as stored', async () => {
+      const hitDice = [
+        { dieType: 'd10', total: 3, spent: 1 },
+        { dieType: 'd8', total: 2, spent: 0 },
+      ];
+      const classes = [
+        { classId: null, name: 'Fighter', level: 3, subclass: null, subclassId: null },
+        { classId: null, name: 'Rogue', level: 2, subclass: null, subclassId: null },
+      ];
+      prisma.characterSnapshot.findFirst.mockResolvedValue(
+        snapshotRow({ data: { ...storedData(), classes, hitDice } })
+      );
+
+      const { data } = await service.get(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      expect(data.classes).toEqual(classes);
+      expect(data.hitDice).toEqual(hitDice);
+    });
+
     it('answers 404 for an unknown snapshot or one under another character (VEG-643)', async () => {
       prisma.characterSnapshot.findFirst.mockResolvedValue(null);
 
@@ -331,7 +382,7 @@ describe('CharacterSnapshotsService', () => {
       expect(dto).toBeInstanceOf(CreateCharacterDto);
       expect(dto).toMatchObject({
         name: `${mockCharacter.name} (level 4)`,
-        class: mockCharacter.class,
+        classes: mockCharacter.classes,
         hitPoints: { max: 44, current: 44, temporary: 0 },
         conditions: [],
         concentration: null,
@@ -370,13 +421,61 @@ describe('CharacterSnapshotsService', () => {
     it('names a failing nested field in the 400 (VEG-646)', async () => {
       prisma.characterSnapshot.findFirst.mockResolvedValue({
         level: 4,
-        data: { ...midFightData(), hitDice: { dieType: 'd7', total: 5, spent: 2 } },
+        data: { ...midFightData(), hitDice: [{ dieType: 'd7', total: 5, spent: 2 }] },
       });
 
       await expect(service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID)).rejects.toMatchObject({
         response: { message: expect.arrayContaining([expect.stringContaining('dieType')]) },
       });
       expect(createCharacter).not.toHaveBeenCalled();
+    });
+
+    it('folds a pre-migration sheet before validating it', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue({ level: 5, data: legacyData() });
+
+      await service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      const [, dto] = createCharacter.mock.calls[0];
+      expect(dto.classes).toEqual(FOLDED_CLASSES);
+      expect(dto.hitDice).toEqual([{ dieType: 'd10', total: 5, spent: 0 }]);
+      for (const key of ['class', 'classId', 'subclass']) {
+        expect(dto[key]).toBeUndefined();
+      }
+    });
+
+    it('restores spent dice in every pool of a new-shape sheet', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue({
+        level: 5,
+        data: {
+          ...midFightData(),
+          classes: [
+            { classId: null, name: 'Fighter', level: 3, subclass: null, subclassId: null },
+            { classId: null, name: 'Rogue', level: 2, subclass: null, subclassId: null },
+          ],
+          hitDice: [
+            { dieType: 'd10', total: 3, spent: 2 },
+            { dieType: 'd8', total: 2, spent: 2 },
+          ],
+        },
+      });
+
+      await service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      expect(createCharacter.mock.calls[0][1].hitDice).toEqual([
+        { dieType: 'd10', total: 3, spent: 0 },
+        { dieType: 'd8', total: 2, spent: 0 },
+      ]);
+    });
+
+    it('keeps a null pool null on a pre-migration sheet', async () => {
+      prisma.characterSnapshot.findFirst.mockResolvedValue({
+        level: 5,
+        data: { ...legacyData(), hitDice: null },
+      });
+
+      await service.copy(CHARACTER_ID, SNAPSHOT_ID, USER_ID);
+
+      expect(createCharacter.mock.calls[0][1].hitDice).toBeNull();
     });
 
     it('returns what CharactersService.create returns (VEG-646)', async () => {

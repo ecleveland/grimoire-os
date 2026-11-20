@@ -126,6 +126,22 @@ test.describe('guided character builder — class selection', () => {
       'Recommended for Fighter: Strength, Dexterity'
     );
     await expect(page.getByTestId('recommended-tag')).toHaveCount(2);
+
+    // VEG-706: typing into a manual score field keeps the typed text until blur.
+    // Appending to the default 10 used to snap the box to 30 on the keystroke.
+    const cha = page.getByRole('spinbutton', { name: 'CHA' });
+    await cha.click();
+    await cha.press('End');
+    await cha.press('1');
+    await expect(cha).toHaveValue('101');
+    await cha.press('Tab');
+    await expect(cha).toHaveValue('30');
+
+    await cha.click();
+    await cha.press('ControlOrMeta+a');
+    await cha.pressSequentially('15');
+    await cha.press('Tab');
+    await expect(cha).toHaveValue('15');
   });
 
   // VEG-342 slice 2: the Review step's optional campaign picker pre-attaches the

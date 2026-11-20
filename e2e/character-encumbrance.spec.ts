@@ -16,7 +16,7 @@ test.describe('character sheet — encumbrance tiers', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Hefty Halfling',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 3 }],
         level: 3,
         abilityScores: { strength: 10, dexterity: 12, constitution: 14 },
         hitPoints: { max: 28, current: 28, temporary: 0 },
@@ -72,7 +72,7 @@ test.describe('character sheet — encumbrance tiers', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Weary Warden',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 3 }],
         level: 3,
         abilityScores: { strength: 10, dexterity: 12, constitution: 14 },
         hitPoints: { max: 28, current: 28, temporary: 0 },

@@ -57,8 +57,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Duplicate Fighter',
-        class: 'Fighter',
-        classId: homebrew.id,
+        classes: [{ classId: homebrew.id, name: 'Fighter', level: 5 }],
         level: 5,
         experiencePoints: 13900,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
@@ -72,7 +71,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
     const character = await res.json();
     // The soft ref survived the create DTO's whitelist and the response DTO's
     // @Expose list — neither is implied by the column existing (VEG-349).
-    expect(character.classId).toBe(homebrew.id);
+    expect(character.classes[0].classId).toBe(homebrew.id);
 
     // ── Reopen the sheet: the crux of VEG-524 ──────────────────────────────
     // The character now carries only its persisted state. Its class name
@@ -134,8 +133,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Orphaned Wizard',
-        class: 'Wizard',
-        classId: homebrew.id,
+        classes: [{ classId: homebrew.id, name: 'Wizard', level: 5 }],
         level: 5,
         experiencePoints: 14000,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
@@ -164,21 +162,24 @@ test.describe('character class id round-trip (VEG-524)', () => {
     // nothing at the database level cleaned it up, and the stale id is still there.
     const reload = await page.request.get(`${BACKEND}/api/characters/${character.id}`);
     expect(reload.ok(), `reload failed: ${reload.status()}`).toBeTruthy();
-    expect((await reload.json()).classId).toBe(homebrew.id);
+    expect((await reload.json()).classes[0].classId).toBe(homebrew.id);
 
     // The degradation itself. "Wizard" is unambiguous again now that the
-    // homebrew row is gone, so the stale id falls through to it: the SRD d6
-    // (average floor(6/2)+1 = 4, +2 CON = +6 HP) replaces the homebrew d12's
-    // +9, and the
+    // homebrew row is gone, so the stale id falls through to it: the
     // homebrew-only feature is no longer offered. A resolver that gave up on a
     // stale id would show the "class data unavailable" warning instead.
+    //
+    // The hit die does not follow. The create seeded a d12 pool from the
+    // homebrew class, and a stored pool outranks the class's die in the dialog,
+    // so the preview stays at d12 average 7, +2 CON = +9 HP. Deleting a catalog
+    // row never rewrites the dice a character already holds.
     await page.reload();
     await expect(page.getByTestId('field-class')).toContainText('Wizard');
     await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByTestId('hp-gain-preview')).toContainText('+6 HP');
     await expect(dialog.getByRole('checkbox', { name: /arcane surge/i })).toHaveCount(0);
     await expect(dialog.getByText(/class data is unavailable/i)).toHaveCount(0);
+    await expect(dialog.getByTestId('hp-gain-preview')).toContainText('+9 HP');
   });
 
   // VEG-528. The two halves this proves together, which no unit test can:
@@ -199,7 +200,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Lowercase Fighter',
-        class: 'fighter',
+        classes: [{ name: 'fighter', level: 8 }],
         level: 8,
         experiencePoints: 48000,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
@@ -219,10 +220,10 @@ test.describe('character class id round-trip (VEG-524)', () => {
       c => c.name === 'Fighter'
     );
     expect(srdFighter, 'SRD Fighter missing from the seeded catalog').toBeTruthy();
-    expect(character.classId).toBe(srdFighter!.id);
+    expect(character.classes[0].classId).toBe(srdFighter!.id);
 
     // The display string is untouched — only the resolution key was derived.
-    expect(character.class).toBe('fighter');
+    expect(character.classes[0].name).toBe('fighter');
 
     // And the id is load-bearing on the sheet: the SRD Fighter's d10 (average
     // floor(10/2)+1 = 6, +2 CON = +8 HP) and its level-9 grant. Pre-VEG-528 this
@@ -248,14 +249,15 @@ test.describe('character class id round-trip (VEG-524)', () => {
     const headers = await csrfHeaders(page);
 
     // Created against a name that is unique at this moment, but with the id
-    // stripped afterwards — standing in for a pre-VEG-524 row. With the class
-    // unresolvable and no pool on the sheet, nothing supplies a die at all,
-    // which is the trap the picker exists for.
+    // stripped afterwards — standing in for a pre-VEG-524 row. The create seeds
+    // a d12 pool from the SRD Barbarian it resolves, and the clearing PATCH
+    // below drops that pool too. With the class unresolvable and no pool on the
+    // sheet, nothing supplies a die at all, which is the trap the picker exists
+    // for.
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Ambiguous Barbarian',
-        class: 'Barbarian',
-        classId: null,
+        classes: [{ classId: null, name: 'Barbarian', level: 5 }],
         level: 5,
         experiencePoints: 14000,
         abilityScores: { strength: 16, dexterity: 12, constitution: 14, intelligence: 10 },
@@ -268,7 +270,7 @@ test.describe('character class id round-trip (VEG-524)', () => {
     expect(res.ok(), `character create failed: ${res.status()}`).toBeTruthy();
     const character = await res.json();
     // The create derived it, since "Barbarian" was still unique.
-    expect(character.classId).toBeTruthy();
+    expect(character.classes[0].classId).toBeTruthy();
 
     // Now author the collision and strip the derived id, reproducing exactly the
     // pre-VEG-524 population the backfill could not help: a null id plus a name
@@ -279,14 +281,16 @@ test.describe('character class id round-trip (VEG-524)', () => {
     });
     expect(created.status(), await created.text()).toBe(201);
 
+    // An empty `hitDice` beside `classes` carries no pool into the rebuild, and
+    // a class that resolves to no row produces none, so the column goes null.
     const cleared = await page.request.patch(`${BACKEND}/api/characters/${character.id}`, {
-      data: { classId: null },
+      data: { classes: [{ classId: null, name: 'Barbarian', level: 5 }], hitDice: [] },
       headers,
     });
     expect(cleared.ok(), `clear failed: ${cleared.status()}`).toBeTruthy();
     // Re-deriving is impossible now — the name matches two rows — so the null
     // stands. That is the refusal, observable on the column itself.
-    expect((await cleared.json()).classId).toBeNull();
+    expect((await cleared.json()).classes[0].classId).toBeNull();
 
     await page.goto(`/characters/${character.id}`);
     await page.getByTestId('level-up-section').getByRole('button', { name: 'Level Up' }).click();

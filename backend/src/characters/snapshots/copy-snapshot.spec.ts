@@ -3,13 +3,18 @@ import { buildCopyInput } from './copy-snapshot';
 // A stored sheet caught mid-fight, so every reset has something to undo.
 const midFight = (): Record<string, unknown> => ({
   name: 'Thorn Ironforge',
-  class: 'Fighter',
-  classId: 'cls-srd-fighter',
+  classes: [
+    { classId: 'cls-srd-fighter', name: 'Fighter', level: 3, subclass: null, subclassId: null },
+    { classId: 'cls-srd-paladin', name: 'Paladin', level: 2, subclass: null, subclassId: null },
+  ],
   backgroundId: 'bg-srd-soldier',
   level: 5,
   heroicInspiration: true,
   hitPoints: { max: 44, current: 9, temporary: 5 },
-  hitDice: { dieType: 'd10', total: 5, spent: 3 },
+  hitDice: [
+    { dieType: 'd10', total: 5, spent: 3 },
+    { dieType: 'd8', total: 1, spent: 1 },
+  ],
   deathSaves: { successes: 1, failures: 2 },
   spellSlots: [
     { level: 1, total: 4, used: 3 },
@@ -38,10 +43,13 @@ describe('buildCopyInput', () => {
     expect(buildCopyInput(midFight(), 5).hitPoints).toEqual({ max: 44, current: 44, temporary: 0 });
   });
 
-  it('restores spent hit dice and clears death saves (VEG-646)', () => {
+  it('restores spent hit dice in every pool and clears death saves', () => {
     const copy = buildCopyInput(midFight(), 5);
 
-    expect(copy.hitDice).toEqual({ dieType: 'd10', total: 5, spent: 0 });
+    expect(copy.hitDice).toEqual([
+      { dieType: 'd10', total: 5, spent: 0 },
+      { dieType: 'd8', total: 1, spent: 0 },
+    ]);
     expect(copy.deathSaves).toEqual({ successes: 0, failures: 0 });
   });
 
@@ -91,8 +99,7 @@ describe('buildCopyInput', () => {
     const copy = buildCopyInput(stored, 5);
 
     for (const key of [
-      'class',
-      'classId',
+      'classes',
       'backgroundId',
       'level',
       'heroicInspiration',

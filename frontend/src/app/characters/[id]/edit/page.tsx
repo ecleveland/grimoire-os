@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { apiFetch, ApiError } from '@/lib/api';
 import { invalidateApiPath, useApiQuery } from '@/lib/query';
 import { toast } from 'sonner';
-import type { Character } from '@/lib/types';
+import type { CharacterDetail } from '@/lib/types';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import CharacterEditorForm, {
   characterFormPayload,
@@ -24,10 +24,16 @@ export default function EditCharacterPage() {
   // values (the form seeds its state from initialValues only on mount).
   const [formKey, setFormKey] = useState(0);
 
-  const query = useApiQuery<Character>(`/characters/${id}`, {
+  const query = useApiQuery<CharacterDetail>(`/characters/${id}`, {
     errorToast: 'Failed to load character',
   });
   const character = query.data;
+  // A campaign DM can read the sheet but not write it, so send them back to it
+  // rather than show a form whose save the server refuses.
+  const readOnly = character?.isOwner === false;
+  useEffect(() => {
+    if (readOnly) router.replace(`/characters/${id}`);
+  }, [readOnly, router, id]);
 
   const handleSubmit = async (values: CharacterFormValues) => {
     if (!character) return;
@@ -83,7 +89,8 @@ export default function EditCharacterPage() {
     }
   };
 
-  if (query.isLoading) return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
+  if (query.isLoading || readOnly)
+    return <div className="text-gray-500 dark:text-gray-400">Loading...</div>;
   // Guard on `!character`, not `isError`: an initial-load failure leaves us with
   // no data (show Retry — without it the form would render defaults and one Save
   // would PATCH them over the real record, VEG-317). But react-query keeps the

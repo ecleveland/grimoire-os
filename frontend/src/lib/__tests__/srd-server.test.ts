@@ -8,6 +8,7 @@ describe('fetchSrdList', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -29,6 +30,20 @@ describe('fetchSrdList', () => {
     const [url, init] = vi.mocked(fetch).mock.calls[0];
     expect(url).toMatch(/\/srd\/classes$/);
     expect(init).toEqual(expect.objectContaining({ next: { revalidate: SRD_REVALIDATE_SECONDS } }));
+  });
+
+  it('reads INTERNAL_API_URL when the fetch runs, so a container sets it at runtime', async () => {
+    vi.mocked(fetch).mockResolvedValue(okResponse([]));
+
+    vi.stubEnv('INTERNAL_API_URL', 'http://backend:3001/api');
+    await fetchSrdList('/srd/races');
+    vi.stubEnv('INTERNAL_API_URL', 'http://other-backend:3001/api');
+    await fetchSrdList('/srd/races');
+
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+      'http://backend:3001/api/srd/races',
+      'http://other-backend:3001/api/srd/races',
+    ]);
   });
 
   it('does not send credentials (server fetches carry no caller identity)', async () => {

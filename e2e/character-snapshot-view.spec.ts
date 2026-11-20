@@ -15,7 +15,7 @@ test.describe('character snapshot view', () => {
     const res = await page.request.post(`${BACKEND}/api/characters`, {
       data: {
         name: 'Rook Ashfall',
-        class: 'Fighter',
+        classes: [{ name: 'Fighter', level: 1 }],
         level: 1,
         abilityScores: {
           strength: 16,
@@ -26,7 +26,7 @@ test.describe('character snapshot view', () => {
           charisma: 10,
         },
         hitPoints: { max: 12, current: 12, temporary: 0 },
-        hitDice: { dieType: 'd10', total: 1, spent: 0 },
+        hitDice: [{ dieType: 'd10', total: 1, spent: 0 }],
         currency: { cp: 0, sp: 0, ep: 0, gp: 0, pp: 0 },
       },
       headers,

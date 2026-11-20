@@ -5,12 +5,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import EditCharacterPage from '../page';
 import { ApiError } from '@/lib/api';
-import type { Character } from '@/lib/types';
+import type { Character, CharacterDetail } from '@/lib/types';
 import { makeCharacter as makeBaseCharacter } from '@/test-utils/character';
 
 const mockApiFetch = vi.fn();
 const mockPush = vi.fn();
 const mockBack = vi.fn();
+const mockReplace = vi.fn();
 const mockToastError = vi.fn();
 const mockToastSuccess = vi.fn();
 
@@ -22,7 +23,7 @@ vi.mock('@/lib/api', async importOriginal => {
 });
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'char-1' }),
-  useRouter: () => ({ push: mockPush, back: mockBack }),
+  useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace }),
 }));
 vi.mock('sonner', () => ({
   toast: {
@@ -47,12 +48,13 @@ function renderPage() {
   return render(<EditCharacterPage />, { wrapper });
 }
 
-function makeCharacter(over: Partial<Character> = {}): Character {
-  return makeBaseCharacter({
+function makeCharacter(over: Partial<CharacterDetail> = {}): CharacterDetail {
+  const base = makeBaseCharacter({
     id: 'char-1',
     userId: 'user-1',
     name: 'Thora Ironfist',
     race: 'Dwarf',
+    classes: [{ classId: null, name: 'Fighter', level: 7, subclass: 'Champion', subclassId: null }],
     class: 'Fighter',
     subclass: 'Champion',
     level: 7,
@@ -73,7 +75,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     speed: 25,
     initiative: 1,
     size: 'Medium',
-    hitDice: { dieType: 'd10', total: 7, spent: 2 },
+    hitDice: [{ dieType: 'd10', total: 7, spent: 2 }],
     proficiencies: [],
     languages: [],
     savingThrows: [],
@@ -89,6 +91,7 @@ function makeCharacter(over: Partial<Character> = {}): Character {
     updatedAt: '',
     ...over,
   });
+  return { ...base, isOwner: over.isOwner ?? true, ownerName: over.ownerName ?? 'Thora Player' };
 }
 
 // The editor also fetches SRD catalogs for its pickers; route those to empty
@@ -118,6 +121,7 @@ beforeEach(() => {
   mockApiFetch.mockReset();
   mockPush.mockReset();
   mockBack.mockReset();
+  mockReplace.mockReset();
   mockToastError.mockReset();
   mockToastSuccess.mockReset();
 });
@@ -141,6 +145,28 @@ describe('EditCharacterPage', () => {
     expect((screen.getByLabelText(/initiative/i) as HTMLInputElement).value).toBe('1');
     expect((screen.getByLabelText(/hit die$/i) as HTMLSelectElement).value).toBe('d10');
     expect((screen.getByLabelText(/hit dice spent/i) as HTMLInputElement).value).toBe('2');
+  });
+
+  it('sends a reader who does not own the character back to the sheet without a form', async () => {
+    routeLoad(makeCharacter({ isOwner: false }));
+    renderPage();
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/characters/char-1'));
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save changes/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it('renders the form for the owner and stays on the edit page', async () => {
+    routeLoad(makeCharacter({ isOwner: true }));
+    renderPage();
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Thora Ironfist')
+    );
+    expect(screen.getByRole('button', { name: /save changes/i })).toBeInTheDocument();
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 
   it('renders an error state instead of an editable form when the initial load fails', async () => {
@@ -199,13 +225,21 @@ describe('EditCharacterPage', () => {
     );
     expect(lastWriteBody()).toMatchObject({
       name: 'Renamed Hero',
-      subclass: 'Champion',
+      // The class goes out as its `classes` entry, at the character level.
+      classes: [
+        { classId: null, name: 'Fighter', level: 7, subclass: 'Champion', subclassId: null },
+      ],
+      level: 7,
       size: 'Medium',
       initiative: 4,
-      hitDice: { dieType: 'd10', total: 7, spent: 2 },
+      hitDice: [{ dieType: 'd10', total: 7, spent: 2 }],
       // The loaded version is sent so the backend can guard the write.
       expectedVersion: 3,
     });
+    // The API rejects a write that carries the read-only class projections.
+    expect(lastWriteBody()).not.toHaveProperty('class');
+    expect(lastWriteBody()).not.toHaveProperty('classId');
+    expect(lastWriteBody()).not.toHaveProperty('subclass');
     expect(mockPush).toHaveBeenCalledWith('/characters/char-1');
 
     // The save invalidates the shared `/characters/:id` cache (so the sheet

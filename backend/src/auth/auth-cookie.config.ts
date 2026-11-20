@@ -1,3 +1,4 @@
+import { resolveCookieSecure } from '../config/cookie.config';
 import type { CookieOptions } from 'express';
 
 export const AUTH_COOKIE_NAME = 'access_token';
@@ -14,7 +15,7 @@ export const REFRESH_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export function authCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: AUTH_COOKIE_MAX_AGE_MS,
@@ -24,7 +25,7 @@ export function authCookieOptions(): CookieOptions {
 export function clearAuthCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: '/',
   };
@@ -44,7 +45,7 @@ export const SESSION_PRESENT_COOKIE_VALUE = '1';
 export function sessionPresentCookieOptions(): CookieOptions {
   return {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: REFRESH_COOKIE_MAX_AGE_MS,
@@ -54,7 +55,7 @@ export function sessionPresentCookieOptions(): CookieOptions {
 export function clearSessionPresentCookieOptions(): CookieOptions {
   return {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: '/',
   };
@@ -68,7 +69,7 @@ export const REFRESH_COOKIE_PATH = '/api/auth';
 export function refreshCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: REFRESH_COOKIE_PATH,
     maxAge: REFRESH_COOKIE_MAX_AGE_MS,
@@ -78,7 +79,7 @@ export function refreshCookieOptions(): CookieOptions {
 export function clearRefreshCookieOptions(): CookieOptions {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: resolveCookieSecure(),
     sameSite: 'lax',
     path: REFRESH_COOKIE_PATH,
   };

@@ -12,6 +12,8 @@ import AddPartyDialog from '@/components/AddPartyDialog';
 export interface AddCombatantControlsProps {
   campaignId: string;
   existingNames: string[];
+  /** Character ids already linked to a combatant; the party picker greys them out. */
+  existingCharacterIds: string[];
   writePending: boolean;
   /** Resolves true when the combatant was added, which closes the form. */
   onAddManual: (input: ManualCombatantInput) => Promise<boolean>;
@@ -23,6 +25,7 @@ export interface AddCombatantControlsProps {
 export default function AddCombatantControls({
   campaignId,
   existingNames,
+  existingCharacterIds,
   writePending,
   onAddManual,
   onAddParty,
@@ -87,6 +90,7 @@ export default function AddCombatantControls({
           <AddPartyDialog
             characters={partyRoster}
             existingNames={existingNames}
+            existingCharacterIds={existingCharacterIds}
             onConfirm={async entries => {
               if (await onAddParty(entries)) setAddPartyOpen(false);
             }}

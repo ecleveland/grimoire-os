@@ -8,12 +8,14 @@ import {
   IsArray,
   ArrayMaxSize,
   ArrayUnique,
+  Equals,
   ValidateNested,
   ValidateIf,
   IsIn,
   IsUUID,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ABILITY_NAMES,
@@ -36,6 +38,7 @@ import {
 import type {
   AbilityScores,
   AttunedItem,
+  CharacterClass,
   CharacterFeat,
   CharacterResource,
   Currency,
@@ -60,6 +63,10 @@ import {
 import { IsStrictBoolean } from '../../common/validators/is-strict-boolean.decorator';
 import { IsLteSibling } from '../../common/validators/is-lte-sibling.decorator';
 import { IsNonBlankString } from '../../common/validators/non-blank-string.decorator';
+import {
+  ClassesSumToLevel,
+  IsUniqueClassList,
+} from '../../common/validators/classes-sum-to-level.decorator';
 import { ConcentrationDto } from '../../common/dto/concentration.dto';
 import { CurrencyDto } from '../../common/dto/currency.dto';
 
@@ -332,6 +339,63 @@ class HitDiceDto implements HitDice {
   spent!: number;
 }
 
+/**
+ * One class the character holds levels in. `classId` is a soft ref to the class
+ * row, not a FK, because homebrew rows are deletable; the service checks it
+ * against the owner's visible catalog and derives it from the name on every
+ * write. Typed `| null` because a free-typed class has no row, and the client
+ * sends null rather than '' for that.
+ */
+class CharacterClassDto implements CharacterClass {
+  @ApiPropertyOptional({ description: 'Resolution key for the class row', nullable: true })
+  @IsOptional()
+  @IsString()
+  classId!: string | null;
+
+  @ApiProperty({ example: 'Fighter' })
+  @IsNonBlankString()
+  name!: string;
+
+  @ApiProperty({ example: 3, minimum: 1, maximum: 20 })
+  @IsInt()
+  @Min(1)
+  @Max(20)
+  level!: number;
+
+  @ApiPropertyOptional({ example: 'Champion', nullable: true })
+  @IsOptional()
+  @IsString()
+  subclass!: string | null;
+
+  // Always null until the level-up subclass step writes it. Unlike `classId` a
+  // supplied id would be stored with no visibility check, so a non-null value
+  // is refused rather than dropped.
+  @ApiPropertyOptional({
+    description: 'Resolution key for the subclass row. Not written yet; send null.',
+    nullable: true,
+  })
+  @IsOptional()
+  @Equals(null, { message: 'subclassId is not written yet; send null' })
+  subclassId!: string | null;
+}
+
+// The four deprecated scalar class fields answer a write with a 400 that names
+// the field to use instead. Equals(undefined) passes an absent key and fails any
+// present value, null included, because the property carries no @IsOptional.
+// The Swagger block rides along so the create and update DTOs declare each
+// field once.
+export const readOnlyProjection = (field: string) =>
+  applyDecorators(
+    ApiPropertyOptional({
+      type: String,
+      deprecated: true,
+      description: 'Read-only. Write classes instead.',
+    }),
+    Equals(undefined, {
+      message: `${field} is a read-only projection of classes[0]; write classes instead`,
+    })
+  );
+
 class ResourceDto implements CharacterResource {
   @ApiProperty({ example: 'Ki Points' })
   // Non-blank, not just non-empty: a whitespace-only name would render an
@@ -390,14 +454,14 @@ class FeatureDto implements Feature {
   @IsString()
   source?: string;
 
-  // The character level this grant arrived at (VEG-454), which is what separates
-  // one occurrence of a recurring feature name from the next. Same bounds as the
+  // The class level this grant arrived at (VEG-454), which is what separates one
+  // occurrence of a recurring feature name from the next. Same bounds as the
   // character's own `level` two screens down, for the same reason: 5e caps at 20.
   // `implements Feature` does not require an optional member, so the key-set
   // assertion below and the spec are what catch this field going missing. Without
   // it forbidNonWhitelisted 400s every level-up write that carries one (the
   // VEG-349 deathSaves trap).
-  @ApiPropertyOptional({ example: 8, description: 'Character level the feature was gained at' })
+  @ApiPropertyOptional({ example: 8, description: 'Class level the feature was gained at' })
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -503,6 +567,7 @@ type _MirrorsMatchSharedKeys = [
   NoDrift<KeyDrift<InventoryItemDto, InventoryItem>>,
   NoDrift<KeyDrift<CurrencyDto, Currency>>,
   NoDrift<KeyDrift<HitDiceDto, HitDice>>,
+  NoDrift<KeyDrift<CharacterClassDto, CharacterClass>>,
   NoDrift<KeyDrift<ResourceDto, CharacterResource>>,
   NoDrift<KeyDrift<WeaponDto, Weapon>>,
   NoDrift<KeyDrift<FeatureDto, Feature>>,
@@ -521,10 +586,19 @@ export class CreateCharacterDto {
   @IsString()
   race?: string;
 
-  @ApiPropertyOptional({ example: 'Fighter' })
+  // Classes held, first taken first. The first entry grants the starting
+  // proficiencies and is projected onto the deprecated scalars on read. When
+  // both this and `level` are sent, the entry levels must add up to it; the
+  // service checks again against the stored value of whichever one is absent.
+  @ApiPropertyOptional({ type: [CharacterClassDto] })
   @IsOptional()
-  @IsString()
-  class?: string;
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CharacterClassDto)
+  @IsUniqueClassList()
+  @ClassesSumToLevel()
+  classes?: CharacterClassDto[];
 
   // Same boundary rationale as experiencePoints: level became client-writable
   // with the level-up assistant (VEG-411), and Prisma 500s on a non-integer or
@@ -537,26 +611,21 @@ export class CreateCharacterDto {
   @Max(20)
   level?: number;
 
-  // VEG-524: soft ref to the selected class row, so a loaded character resolves
-  // its class by id once a homebrew row reuses an SRD name (VEG-506 made that
-  // legal). Same contract as `backgroundId` below — not a UUID-validated FK,
-  // because homebrew rows are deletable and both loadClassData and the frontend
-  // resolver degrade safely on a stale/unknown id.
-  //
-  // Typed `| null` because that is what the client actually sends: a free-typed
-  // class has no catalog row, and characterFormPayload sends null (not '') to
-  // keep the column a clean soft ref. @IsOptional() skips validation for null
-  // and undefined alike, so this declares the existing wire contract rather than
-  // changing it.
-  @ApiPropertyOptional({ description: 'Resolution key for the selected class (VEG-524)' })
-  @IsOptional()
-  @IsString()
-  classId?: string | null;
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @readOnlyProjection('class')
+  class?: never;
 
-  @ApiPropertyOptional({ example: 'Champion' })
-  @IsOptional()
-  @IsString()
-  subclass?: string;
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @readOnlyProjection('classId')
+  classId?: never;
+
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @readOnlyProjection('subclass')
+  subclass?: never;
+
+  /** @deprecated Read-only projection of classes[0]. Write `classes`. */
+  @readOnlyProjection('subclassId')
+  subclassId?: never;
 
   @ApiPropertyOptional({ example: 'Soldier' })
   @IsOptional()
@@ -567,9 +636,9 @@ export class CreateCharacterDto {
   // resolve its background by id when a homebrew row reuses an SRD name (VEG-473).
   // Not a UUID-validated FK — homebrew rows are deletable, and the frontend
   // resolver degrades safely on a stale/unknown id.
-  // `| null` for the same reason as classId above — the client has always sent
-  // null here to clear a stale id, and the declared `string` was a lie the
-  // `as unknown as Prisma.*Input` cast in the service happened to hide.
+  // `| null` because the client has always sent null here to clear a stale id,
+  // and the declared `string` was a lie the `as unknown as Prisma.*Input` cast in
+  // the service happened to hide.
   @ApiPropertyOptional({ description: 'Resolution key for the selected background (VEG-476)' })
   @IsOptional()
   @IsString()
@@ -820,11 +889,14 @@ export class CreateCharacterDto {
   @IsStrictBoolean()
   heroicInspiration?: boolean;
 
-  @ApiPropertyOptional({ type: HitDiceDto })
+  // One pool per die type. Five covers every hit die there is.
+  @ApiPropertyOptional({ type: [HitDiceDto] })
   @IsOptional()
-  @ValidateNested()
+  @IsArray()
+  @ArrayMaxSize(5)
+  @ValidateNested({ each: true })
   @Type(() => HitDiceDto)
-  hitDice?: HitDiceDto;
+  hitDice?: HitDiceDto[];
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptionalStringArray()

@@ -20,7 +20,7 @@ test.describe('Party + monster pickers on the encounter create flow (VEG-358)', 
       data: {
         name: 'Thia',
         race: 'Elf',
-        class: 'Wizard',
+        classes: [{ name: 'Wizard', level: 5 }],
         level: 5,
         armorClass: 12,
         initiative: 2,
@@ -66,7 +66,9 @@ test.describe('Party + monster pickers on the encounter create flow (VEG-358)', 
     await expect(monsterDialog.getByLabel('Quantity')).toBeVisible();
     await monsterDialog.getByRole('button', { name: /add to encounter/i }).click();
     await expect(page.getByRole('dialog')).toBeHidden();
-    await expect(page.getByRole('button', { name: new RegExp(`remove ${monsterName}`, 'i') })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: new RegExp(`remove ${monsterName}`, 'i') })
+    ).toBeVisible();
 
     // Create the encounter in one POST and land on the tracker with everyone.
     await page.getByRole('button', { name: /create encounter/i }).click();
@@ -76,6 +78,8 @@ test.describe('Party + monster pickers on the encounter create flow (VEG-358)', 
     await expect(page.getByText('Bandit', { exact: true })).toBeVisible();
     await expect(page.getByText('Thia', { exact: true })).toBeVisible();
     // The monster joined as a stat-block-linked combatant (its name is a button).
-    await expect(page.getByRole('button', { name: monsterName, exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: monsterName, exact: true }).first()
+    ).toBeVisible();
   });
 });

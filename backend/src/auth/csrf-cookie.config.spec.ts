@@ -9,9 +9,17 @@ import {
 
 describe('csrf-cookie.config', () => {
   const originalNodeEnv = process.env.NODE_ENV;
+  const originalCookieSecure = process.env.COOKIE_SECURE;
+
+  beforeEach(() => {
+    // The Secure assertions below assume no COOKIE_SECURE override in the shell.
+    delete process.env.COOKIE_SECURE;
+  });
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
+    if (originalCookieSecure === undefined) delete process.env.COOKIE_SECURE;
+    else process.env.COOKIE_SECURE = originalCookieSecure;
   });
 
   it('exposes the canonical cookie + header names', () => {

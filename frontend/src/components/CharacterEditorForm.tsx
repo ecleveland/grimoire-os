@@ -23,6 +23,8 @@ import type {
 } from '@/lib/types';
 import { asHitDie, HIT_DIE_TYPES, SIZES, type HitDieType } from '@/lib/types';
 import {
+  firstClassName,
+  firstPool,
   hitDicePoolFor,
   MAX_ARMOR_CLASS,
   MAX_INITIATIVE_BONUS,
@@ -72,7 +74,8 @@ export interface CharacterFormValues {
    * Resolution key for the selected SRD/homebrew class (VEG-524). Same contract
    * as `backgroundId` below: VEG-506 let homebrew classes reuse an SRD name, so
    * the class's hit die and per-level features must resolve by id, not name.
-   * `''` when free-typed (no catalog row). Persisted to `Character.classId`.
+   * `''` when free-typed (no catalog row). Saved as the `classId` of the
+   * single `classes` entry the payload builds.
    */
   classId: string;
   subclass: string;
@@ -108,8 +111,11 @@ export interface CharacterFormValues {
    * persisted a pool nobody chose — and that stored die then outranked the
    * VEG-528 level-up picker, so the one place that asks which die a character
    * uses never appeared again. Same reasoning as `armorClass: ''` below.
+   *
+   * One pool per die. The Hit Die, Total and Spent controls edit the first pool
+   * and every later pool rides along unchanged.
    */
-  hitDice: HitDice | null;
+  hitDice: HitDice[] | null;
   // Proficiencies & training — editable via ProficienciesSection (slice 3) and
   // also written by the SRD autofill helpers (slice 2).
   savingThrows: string[];
@@ -222,14 +228,15 @@ export function characterToFormValues(c: Character): CharacterFormValues {
   return {
     name: c.name,
     race: c.race ?? '',
-    class: c.class ?? '',
-    subclass: c.subclass ?? '',
+    // The scalar class fields are the API's projection of `classes[0]`; the
+    // entry itself covers a payload that omits the projection.
+    class: c.class ?? firstClassName(c.classes) ?? '',
+    subclass: c.subclass ?? c.classes[0]?.subclass ?? '',
     level: c.level,
-    // Seed the persisted id (VEG-524) so the class resolves by id on load, even
-    // when its display name now collides with a homebrew class. Blank for
-    // characters saved before the column existed, or free-typed names — those
-    // fall back to the unambiguous-name resolver.
-    classId: c.classId ?? '',
+    // Seed the stored id (VEG-524) so the class resolves by id on load, even
+    // when its display name now collides with a homebrew class. Blank for a
+    // free-typed name, which falls back to the unambiguous-name resolver.
+    classId: c.classId ?? c.classes[0]?.classId ?? '',
     background: c.background ?? '',
     // Seed the persisted id (VEG-476) so the background resolves by id on load,
     // even when its display name now collides with a homebrew row (VEG-473).
@@ -283,9 +290,7 @@ type CharacterWriteFields = Pick<
   Character,
   | 'name'
   | 'race'
-  | 'class'
-  | 'classId'
-  | 'subclass'
+  | 'classes'
   | 'level'
   | 'background'
   | 'backgroundId'
@@ -327,12 +332,23 @@ export function characterFormPayload(v: CharacterFormValues): CharacterWriteFiel
   return {
     name: v.name,
     race: v.race,
-    class: v.class,
-    // `class` is the display string; `classId` (VEG-524) is the resolution key.
-    // A free-typed class has no catalog row, so send null rather than an empty
-    // string to keep the column a clean soft ref.
-    classId: v.classId === '' ? null : v.classId,
-    subclass: v.subclass,
+    // The form edits one class, sent as the single `classes` entry. Its level is
+    // the character level, because the server requires the class levels to add
+    // up to it. `name` is the display string and `classId` (VEG-524) the
+    // resolution key; a free-typed class has no catalog row, so it sends null
+    // rather than an empty string to keep the reference a clean soft ref. A
+    // blank class sends no entry at all.
+    classes: v.class.trim()
+      ? [
+          {
+            classId: v.classId === '' ? null : v.classId,
+            name: v.class,
+            level: v.level,
+            subclass: v.subclass.trim() ? v.subclass : null,
+            subclassId: null,
+          },
+        ]
+      : [],
     level: v.level,
     // `background` is the display string; `backgroundId` (VEG-476) is the
     // resolution key. A free-typed background has no catalog row, so send null
@@ -417,6 +433,14 @@ export function normalizeArmorProficiencies(raw: string[]): string[] {
   return [...new Set(out)];
 }
 
+/**
+ * The pools with the first one replaced by `pool`, or a one-pool list when
+ * there were none. Later pools are kept as they are.
+ */
+function withFirstPool(pools: HitDice[] | null, pool: HitDice): HitDice[] {
+  return [pool, ...(pools ?? []).slice(1)];
+}
+
 export function applyClassGrants(
   v: CharacterFormValues,
   c: SrdClass
@@ -433,14 +457,14 @@ export function applyClassGrants(
   // (VEG-530); the player choosing a die in the Hit Die control is the other. A
   // die the sheet cannot use records nothing and claims no grant, leaving
   // whatever was already there — which may be a pool the player owns, spent dice
-  // and all, so it is not ours to clear.
+  // and all, so it is not ours to clear. The class's die lands on the first
+  // pool, the one this form edits.
   const dieType = asHitDie(c.hitDie);
+  const first = firstPool(v.hitDice);
   const hitDice = dieType
-    ? v.hitDice
-      ? { ...v.hitDice, dieType }
-      : hitDicePoolFor(dieType, v.level)
+    ? withFirstPool(v.hitDice, first ? { ...first, dieType } : hitDicePoolFor(dieType, v.level))
     : v.hitDice;
-  if (dieType && dieType !== v.hitDice?.dieType) {
+  if (dieType && dieType !== first?.dieType) {
     added.push({ label: 'Hit die', values: [dieType] });
   }
 
@@ -761,9 +785,16 @@ export default function CharacterEditorForm({
   // +51 a level in a permanent HP maximum. A die already on the sheet is appended
   // so a legacy pool stays visible and editable rather than silently re-rendering
   // as a different die.
-  const storedDie = values.hitDice?.dieType;
+  const editedPool = firstPool(values.hitDice);
+  const storedDie = editedPool?.dieType;
   const hitDieOptions: readonly DieType[] =
     storedDie && !asHitDie(storedDie) ? [...HIT_DIE_TYPES, storedDie] : HIT_DIE_TYPES;
+  // Every save carries `classes`, and the server then rebuilds the pools from
+  // the class levels (VEG-671), keeping only the spent count. So for a class the
+  // catalog knows, the die and the total are not the player's to set here; a
+  // value typed in would be silently reverted on the next read. A free-typed
+  // class resolves to no row and no pool, so its controls stay live.
+  const poolsDerivedFromClass = !!asHitDie(selectedClass?.hitDie);
 
   const applyGrants = (
     source: string,
@@ -1038,16 +1069,21 @@ export default function CharacterEditorForm({
           <FormField
             as="select"
             label="Hit Die"
-            value={values.hitDice?.dieType ?? ''}
+            value={editedPool?.dieType ?? ''}
+            disabled={poolsDerivedFromClass}
+            helperText={poolsDerivedFromClass ? `Set from the class levels on save.` : undefined}
             onChange={e =>
               set(
                 'hitDice',
                 // Changing the die on an existing pool keeps its size and its
                 // spent count; recording one on a sheet that had none builds the
                 // whole pool, which is the point of this control (VEG-530).
-                values.hitDice
-                  ? { ...values.hitDice, dieType: e.target.value as DieType }
-                  : hitDicePoolFor(e.target.value as HitDieType, values.level)
+                withFirstPool(
+                  values.hitDice,
+                  editedPool
+                    ? { ...editedPool, dieType: e.target.value as DieType }
+                    : hitDicePoolFor(e.target.value as HitDieType, values.level)
+                )
               )
             }
           >
@@ -1055,7 +1091,7 @@ export default function CharacterEditorForm({
                 into one. The payload omits `hitDice` when it is null, so picking
                 this would silently fail to persist — and un-recording was never
                 possible here anyway. */}
-            {!values.hitDice && (
+            {!editedPool && (
               <option value="" disabled>
                 Not recorded
               </option>
@@ -1072,20 +1108,28 @@ export default function CharacterEditorForm({
             min={0}
             // Blank and inert until a die is recorded: a total without a die is
             // not a pool, and showing 0 would read as "no dice left".
-            value={values.hitDice?.total ?? ''}
-            disabled={!values.hitDice}
+            value={editedPool?.total ?? ''}
+            disabled={!editedPool || poolsDerivedFromClass}
             onChange={e =>
-              values.hitDice && set('hitDice', { ...values.hitDice, total: Number(e.target.value) })
+              editedPool &&
+              set(
+                'hitDice',
+                withFirstPool(values.hitDice, { ...editedPool, total: Number(e.target.value) })
+              )
             }
           />
           <FormField
             label="Hit Dice Spent"
             type="number"
             min={0}
-            value={values.hitDice?.spent ?? ''}
-            disabled={!values.hitDice}
+            value={editedPool?.spent ?? ''}
+            disabled={!editedPool}
             onChange={e =>
-              values.hitDice && set('hitDice', { ...values.hitDice, spent: Number(e.target.value) })
+              editedPool &&
+              set(
+                'hitDice',
+                withFirstPool(values.hitDice, { ...editedPool, spent: Number(e.target.value) })
+              )
             }
           />
         </div>

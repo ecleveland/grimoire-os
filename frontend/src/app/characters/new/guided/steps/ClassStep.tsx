@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/query';
 import { asHitDie, type SrdClass, type SrdSubclass } from '@/lib/types';
-import { hitDicePoolFor } from '@grimoire-os/shared';
+import { firstPool, hitDicePoolFor } from '@grimoire-os/shared';
 import { normalizeArmorProficiencies } from '@/components/CharacterEditorForm';
 import SrdCombobox from '@/components/SrdCombobox';
 import ToggleChips from '@/components/ToggleChips';
@@ -80,15 +80,18 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
         // The draft starts with no die and this is where one gets recorded
         // (VEG-530). A class whose `hitDie` is not a real hit die leaves the
         // draft's pool alone rather than folding in a value the sheet can't use.
+        // The class's die lands on the first pool, and a draft with none gets a
+        // single one-die pool.
         const dieType = asHitDie(selectedClass.hitDie);
+        const first = firstPool(value.hitDice);
         onChange({
           level: 1,
           savingThrows: [...selectedClass.savingThrows],
           armorTraining: normalizeArmorProficiencies(selectedClass.armorProficiencies),
           hitDice: dieType
-            ? value.hitDice
-              ? { ...value.hitDice, dieType }
-              : hitDicePoolFor(dieType, 1)
+            ? first
+              ? [{ ...first, dieType }, ...(value.hitDice ?? []).slice(1)]
+              : [hitDicePoolFor(dieType, 1)]
             : value.hitDice,
           spellcastingAbility: selectedClass.spellcasting?.ability ?? '',
           subclass: '',
@@ -163,7 +166,9 @@ export default function ClassStep({ value, onChange, onValidChange }: WizardStep
             className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md border border-gray-200 p-3 text-sm dark:border-gray-700"
           >
             <span className="text-gray-500 dark:text-gray-400">Hit die</span>
-            <span className="text-gray-900 dark:text-white">{value.hitDice?.dieType ?? '—'}</span>
+            <span className="text-gray-900 dark:text-white">
+              {firstPool(value.hitDice)?.dieType ?? '—'}
+            </span>
             <span className="text-gray-500 dark:text-gray-400">Saving throws</span>
             <span className="text-gray-900 dark:text-white">
               {value.savingThrows.join(', ') || '—'}

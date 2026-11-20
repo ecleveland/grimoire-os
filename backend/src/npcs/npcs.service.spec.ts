@@ -429,8 +429,16 @@ describe('NpcsService', () => {
     });
 
     it('persists forward + inverse rows in a single $transaction', async () => {
+      prisma.npc.findUnique
+        .mockResolvedValueOnce({ id: NPC_ID, campaignId: CAMPAIGN_ID })
+        .mockResolvedValueOnce({ id: TARGET_NPC_ID, campaignId: CAMPAIGN_ID });
+
       const result = await service.addRelation(NPC_ID, USER_ID, dto);
 
+      expect(prisma.npc.findUnique).toHaveBeenNthCalledWith(2, {
+        where: { id: TARGET_NPC_ID },
+        select: { id: true, campaignId: true },
+      });
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
       expect(prisma.npcRelation.create).toHaveBeenNthCalledWith(1, {
         data: { fromNpcId: NPC_ID, toNpcId: TARGET_NPC_ID, relation: 'parent' },
@@ -509,6 +517,30 @@ describe('NpcsService', () => {
           new ForbiddenException('Only the campaign owner can perform this action')
         );
       await expect(service.addRelation(NPC_ID, USER_ID_2, dto)).rejects.toThrow(ForbiddenException);
+      expect(prisma.npcRelation.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the target NPC is in another campaign, writing nothing [VEG-689]', async () => {
+      prisma.npc.findUnique
+        .mockResolvedValueOnce({ id: NPC_ID, campaignId: CAMPAIGN_ID })
+        .mockResolvedValueOnce({ id: TARGET_NPC_ID, campaignId: 'other-campaign' });
+
+      await expect(service.addRelation(NPC_ID, USER_ID, dto)).rejects.toThrow(
+        new NotFoundException(`Npc "${TARGET_NPC_ID}" not found`)
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.npcRelation.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the target NPC does not exist, writing nothing [VEG-689]', async () => {
+      prisma.npc.findUnique
+        .mockResolvedValueOnce({ id: NPC_ID, campaignId: CAMPAIGN_ID })
+        .mockResolvedValueOnce(null);
+
+      await expect(service.addRelation(NPC_ID, USER_ID, dto)).rejects.toThrow(
+        new NotFoundException(`Npc "${TARGET_NPC_ID}" not found`)
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(prisma.npcRelation.create).not.toHaveBeenCalled();
     });
 

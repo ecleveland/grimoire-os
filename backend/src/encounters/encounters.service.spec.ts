@@ -6,11 +6,13 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { EncountersService } from './encounters.service';
+import { CharactersService, ENCOUNTER_COMBAT_AUDIT_SOURCE } from '../characters/characters.service';
+import { InventoryResolverService } from '../characters/inventory/inventory-resolver.service';
 import { CampaignAuthService } from '../auth/campaign-auth.service';
 import { ContentAccessService } from '../srd/content-access.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { MockPrismaService, prismaMockProvider } from '../test/prisma-mock.factory';
-import { USER_ID, USER_ID_2, CAMPAIGN_ID } from '../test/fixtures';
+import { USER_ID, USER_ID_2, CAMPAIGN_ID, CHARACTER_ID } from '../test/fixtures';
 import { EncounterDto, EncounterListItemDto } from './dto/encounter-response.dto';
 import { MonsterLootService } from '../loot/monster-loot.service';
 import { SeededRng } from '../common/helpers/seeded-rng';
@@ -29,6 +31,7 @@ describe('EncountersService', () => {
   let monsterLoot: { loadRoller: jest.Mock };
 
   const ENCOUNTER_ID = 'enc-1111-2222-3333-444444444444';
+  const DM_USERNAME = 'dungeon-master';
   const MONSTER_ID = 'mon-1111-2222-3333-444444444444';
   const CATALOG_ITEM_ID = 'item-1111-2222-3333-444444444444';
   const HOMEBREW_ITEM_ID = 'item-9999-8888-7777-666666666666';
@@ -111,6 +114,9 @@ describe('EncountersService', () => {
         prismaMockProvider(),
         { provide: CampaignAuthService, useValue: campaignAuth },
         { provide: MonsterLootService, useValue: monsterLoot },
+        // The real service, so the write-back runs against the same Prisma mock.
+        CharactersService,
+        { provide: InventoryResolverService, useValue: {} },
       ],
     }).compile();
 
@@ -287,6 +293,74 @@ describe('EncountersService', () => {
       });
       expect(prisma.encounter.create).not.toHaveBeenCalled();
     });
+
+    describe('combatant characterId (VEG-693)', () => {
+      const OTHER_CHARACTER_ID = 'char-9999-8888-7777-666666666666';
+      const pcCombatant = (name: string, characterId: string) => ({
+        name,
+        initiative: 12,
+        hp: 44,
+        maxHp: 44,
+        ac: 18,
+        isNpc: false,
+        characterId,
+      });
+      const rosterQuery = (ids: string[]) => ({
+        where: { id: { in: ids }, campaignId: CAMPAIGN_ID },
+        select: { id: true },
+      });
+
+      beforeEach(() => {
+        campaignAuth.assertCampaignOwner.mockResolvedValue(mockCampaignOwned);
+      });
+
+      it('creates the encounter when every characterId is in the campaign', async () => {
+        prisma.character.findMany.mockResolvedValue([{ id: CHARACTER_ID }]);
+        prisma.encounter.create.mockResolvedValue(mockEncounter);
+
+        await service.create(USER_ID, {
+          campaignId: CAMPAIGN_ID,
+          name: 'Ambush',
+          combatants: [pcCombatant('Thorn', CHARACTER_ID), pcCombatant('Thorn copy', CHARACTER_ID)],
+        });
+
+        expect(prisma.character.findMany).toHaveBeenCalledWith(rosterQuery([CHARACTER_ID]));
+        expect(prisma.encounter.create).toHaveBeenCalled();
+      });
+
+      it('refuses a characterId from another campaign or an unknown one, creating nothing', async () => {
+        prisma.character.findMany.mockResolvedValue([{ id: CHARACTER_ID }]);
+
+        const err = await service
+          .create(USER_ID, {
+            campaignId: CAMPAIGN_ID,
+            name: 'Ambush',
+            combatants: [
+              pcCombatant('Thorn', CHARACTER_ID),
+              pcCombatant('Intruder', OTHER_CHARACTER_ID),
+            ],
+          })
+          .catch((e: unknown) => e);
+
+        expect(err).toBeInstanceOf(BadRequestException);
+        expect((err as BadRequestException).getResponse()).toMatchObject({
+          message: expect.arrayContaining([expect.stringContaining('"Intruder"')]),
+        });
+        expect(JSON.stringify((err as BadRequestException).getResponse())).not.toContain('"Thorn"');
+        expect(prisma.character.findMany).toHaveBeenCalledWith(
+          rosterQuery([CHARACTER_ID, OTHER_CHARACTER_ID])
+        );
+        expect(prisma.encounter.create).not.toHaveBeenCalled();
+      });
+
+      it('does not query characters when no combatant carries a characterId', async () => {
+        prisma.encounter.create.mockResolvedValue(mockEncounter);
+
+        await service.create(USER_ID, createDto);
+
+        expect(prisma.character.findMany).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('findAllForCampaign', () => {
@@ -393,13 +467,20 @@ describe('EncountersService', () => {
       const updated = { ...mockEncounter, name: 'Dragon Fight' };
       prisma.encounter.update.mockResolvedValue(updated);
 
-      const result = await service.update(ENCOUNTER_ID, USER_ID, { name: 'Dragon Fight' });
+      const result = await service.update(
+        ENCOUNTER_ID,
+        USER_ID,
+        { name: 'Dragon Fight' },
+        DM_USERNAME
+      );
 
       expect(prisma.encounter.findUnique).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
         select: {
           id: true,
+          campaignId: true,
           combatants: true,
+          version: true,
           campaign: { select: { id: true, ownerId: true, players: { select: { userId: true } } } },
         },
       });
@@ -423,9 +504,14 @@ describe('EncountersService', () => {
       const updated = { ...mockEncounter, combatants: newCombatants };
       prisma.encounter.update.mockResolvedValue(updated);
 
-      const result = await service.update(ENCOUNTER_ID, USER_ID, {
-        combatants: newCombatants,
-      });
+      const result = await service.update(
+        ENCOUNTER_ID,
+        USER_ID,
+        {
+          combatants: newCombatants,
+        },
+        DM_USERNAME
+      );
 
       expect(prisma.encounter.update).toHaveBeenCalledWith({
         where: { id: ENCOUNTER_ID },
@@ -454,9 +540,14 @@ describe('EncountersService', () => {
       const updated = { ...mockEncounter, combatants: newCombatants };
       prisma.encounter.update.mockResolvedValue(updated);
 
-      const result = await service.update(ENCOUNTER_ID, USER_ID, {
-        combatants: newCombatants,
-      });
+      const result = await service.update(
+        ENCOUNTER_ID,
+        USER_ID,
+        {
+          combatants: newCombatants,
+        },
+        DM_USERNAME
+      );
 
       expect(prisma.monster.findMany).toHaveBeenCalledWith({
         where: {
@@ -484,7 +575,7 @@ describe('EncountersService', () => {
       ];
       prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
 
-      await service.update(ENCOUNTER_ID, USER_ID, { combatants });
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants }, DM_USERNAME);
 
       // The dangling id was already present, so no validation query runs and
       // the save succeeds.
@@ -501,7 +592,7 @@ describe('EncountersService', () => {
       const combatants = [lootCombatant(lootEntry(CATALOG_ITEM_ID))];
       prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
 
-      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never, DM_USERNAME);
 
       expect(prisma.item.findMany).toHaveBeenCalledWith(catalogItemQuery([CATALOG_ITEM_ID]));
       expect(prisma.encounter.update).toHaveBeenCalledWith({
@@ -519,7 +610,12 @@ describe('EncountersService', () => {
       });
       prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
 
-      await service.update(ENCOUNTER_ID, USER_ID, { name: 'Renamed', combatants } as never);
+      await service.update(
+        ENCOUNTER_ID,
+        USER_ID,
+        { name: 'Renamed', combatants } as never,
+        DM_USERNAME
+      );
 
       expect(prisma.item.findMany).not.toHaveBeenCalled();
       expect(prisma.encounter.update).toHaveBeenCalled();
@@ -534,14 +630,19 @@ describe('EncountersService', () => {
       prisma.item.findMany.mockResolvedValue([]);
 
       await expect(
-        service.update(ENCOUNTER_ID, USER_ID, {
-          combatants: [
-            lootCombatant(
-              lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol'),
-              lootEntry(NEW_HOMEBREW_ITEM_ID, 'Secret Blade')
-            ),
-          ],
-        } as never)
+        service.update(
+          ENCOUNTER_ID,
+          USER_ID,
+          {
+            combatants: [
+              lootCombatant(
+                lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol'),
+                lootEntry(NEW_HOMEBREW_ITEM_ID, 'Secret Blade')
+              ),
+            ],
+          } as never,
+          DM_USERNAME
+        )
       ).rejects.toMatchObject({
         response: expect.objectContaining({
           message: [
@@ -562,12 +663,17 @@ describe('EncountersService', () => {
       prisma.item.findMany.mockResolvedValue([{ id: CATALOG_ITEM_ID }]);
 
       await expect(
-        service.update(ENCOUNTER_ID, USER_ID, {
-          combatants: [
-            lootCombatant(lootEntry(CATALOG_ITEM_ID)),
-            { ...lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol')), name: 'Bandit' },
-          ],
-        } as never)
+        service.update(
+          ENCOUNTER_ID,
+          USER_ID,
+          {
+            combatants: [
+              lootCombatant(lootEntry(CATALOG_ITEM_ID)),
+              { ...lootCombatant(lootEntry(HOMEBREW_ITEM_ID, 'Cursed Idol')), name: 'Bandit' },
+            ],
+          } as never,
+          DM_USERNAME
+        )
       ).rejects.toMatchObject({
         response: expect.objectContaining({
           message: [
@@ -594,7 +700,7 @@ describe('EncountersService', () => {
       });
       prisma.encounter.update.mockResolvedValue({ ...mockEncounter, combatants });
 
-      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never);
+      await service.update(ENCOUNTER_ID, USER_ID, { combatants } as never, DM_USERNAME);
 
       expect(prisma.item.findMany).not.toHaveBeenCalled();
       expect(prisma.encounter.update).toHaveBeenCalled();
@@ -608,9 +714,14 @@ describe('EncountersService', () => {
       prisma.monster.findMany.mockResolvedValue([]); // reference not found
 
       await expect(
-        service.update(ENCOUNTER_ID, USER_ID, {
-          combatants: [{ name: 'X', monsterId: 'nope' }],
-        })
+        service.update(
+          ENCOUNTER_ID,
+          USER_ID,
+          {
+            combatants: [{ name: 'X', monsterId: 'nope' }],
+          },
+          DM_USERNAME
+        )
       ).rejects.toThrow(BadRequestException);
       expect(prisma.encounter.update).not.toHaveBeenCalled();
     });
@@ -618,9 +729,9 @@ describe('EncountersService', () => {
     it('throws NotFoundException when encounter does not exist', async () => {
       prisma.encounter.findUnique.mockResolvedValue(null);
 
-      await expect(service.update(ENCOUNTER_ID, USER_ID, { name: 'Renamed' })).rejects.toThrow(
-        NotFoundException
-      );
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID, { name: 'Renamed' }, DM_USERNAME)
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws ForbiddenException when non-DM tries to update', async () => {
@@ -632,9 +743,9 @@ describe('EncountersService', () => {
         throw new ForbiddenException('Only the campaign owner can perform this action');
       });
 
-      await expect(service.update(ENCOUNTER_ID, USER_ID_2, { name: 'Renamed' })).rejects.toThrow(
-        ForbiddenException
-      );
+      await expect(
+        service.update(ENCOUNTER_ID, USER_ID_2, { name: 'Renamed' }, DM_USERNAME)
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -647,14 +758,19 @@ describe('EncountersService', () => {
 
     it('guards the write on expectedVersion, increments version, and returns the fresh row', async () => {
       prisma.encounter.findUnique
-        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, version: 3, campaign: campaignAuthShape }) // auth read
         .mockResolvedValueOnce({ ...mockEncounter, currentTurn: 1, version: 4 }); // re-fetch
       prisma.encounter.updateMany.mockResolvedValue({ count: 1 });
 
-      const result = await service.update(ENCOUNTER_ID, USER_ID, {
-        currentTurn: 1,
-        expectedVersion: 3,
-      });
+      const result = await service.update(
+        ENCOUNTER_ID,
+        USER_ID,
+        {
+          currentTurn: 1,
+          expectedVersion: 3,
+        },
+        DM_USERNAME
+      );
 
       expect(campaignAuth.assertOwnerOnCampaign).toHaveBeenCalledWith(campaignAuthShape, USER_ID);
       expect(prisma.encounter.updateMany).toHaveBeenCalledWith({
@@ -668,12 +784,12 @@ describe('EncountersService', () => {
 
     it('throws 409 ConflictException carrying currentVersion on a stale write', async () => {
       prisma.encounter.findUnique
-        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, version: 3, campaign: campaignAuthShape }) // auth read
         .mockResolvedValueOnce({ ...mockEncounter, version: 7 }); // current-version probe
       prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
 
       const err = await service
-        .update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 })
+        .update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 }, DM_USERNAME)
         .catch((e: unknown) => e);
 
       expect(err).toBeInstanceOf(ConflictException);
@@ -682,13 +798,319 @@ describe('EncountersService', () => {
 
     it('throws NotFoundException when the row vanished mid-update', async () => {
       prisma.encounter.findUnique
-        .mockResolvedValueOnce({ id: ENCOUNTER_ID, campaign: campaignAuthShape }) // auth read
+        .mockResolvedValueOnce({ id: ENCOUNTER_ID, version: 3, campaign: campaignAuthShape }) // auth read
         .mockResolvedValueOnce(null); // probe: gone
       prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
 
       await expect(
-        service.update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 })
+        service.update(ENCOUNTER_ID, USER_ID, { currentTurn: 1, expectedVersion: 3 }, DM_USERNAME)
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('returns 409 before checking references when the stored version is already newer (VEG-693)', async () => {
+      // A player left the campaign: cleanup removed their combatant and bumped
+      // the version. The DM's stale tracker resends that characterId, which is
+      // neither stored on the encounter nor in the campaign any more.
+      prisma.encounter.findUnique.mockResolvedValue({
+        id: ENCOUNTER_ID,
+        campaignId: CAMPAIGN_ID,
+        version: 4,
+        combatants: [],
+        campaign: campaignAuthShape,
+      });
+      prisma.character.findMany.mockResolvedValue([]);
+
+      const err = await service
+        .update(
+          ENCOUNTER_ID,
+          USER_ID,
+          {
+            combatants: [
+              {
+                name: 'Departed',
+                initiative: 10,
+                hp: 20,
+                maxHp: 20,
+                ac: 14,
+                isNpc: false,
+                characterId: CHARACTER_ID,
+              },
+            ],
+            expectedVersion: 3,
+          },
+          DM_USERNAME
+        )
+        .catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({
+        message: 'Encounter was modified by another request; re-fetch and retry.',
+        currentVersion: 4,
+      });
+      expect(campaignAuth.assertOwnerOnCampaign).toHaveBeenCalledWith(campaignAuthShape, USER_ID);
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update writes combat HP back to linked characters (VEG-693)', () => {
+    const OTHER_CHARACTER_ID = 'char-9999-8888-7777-666666666666';
+    const campaignAuthShape = {
+      id: CAMPAIGN_ID,
+      ownerId: USER_ID,
+      players: [{ userId: USER_ID }, { userId: USER_ID_2 }],
+    };
+    const goblin = { name: 'Goblin', initiative: 15, hp: 7, maxHp: 7, ac: 15, isNpc: true };
+    const pc = (over: Record<string, unknown> = {}) => ({
+      name: 'Thorn',
+      initiative: 12,
+      hp: 44,
+      maxHp: 44,
+      ac: 18,
+      isNpc: false,
+      characterId: CHARACTER_ID,
+      ...over,
+    });
+    const stored = (combatants: unknown[]) => ({
+      id: ENCOUNTER_ID,
+      campaignId: CAMPAIGN_ID,
+      combatants,
+      version: 3,
+      campaign: campaignAuthShape,
+    });
+    const save = (combatants: unknown[], extra: Record<string, unknown> = {}) =>
+      service.update(ENCOUNTER_ID, USER_ID, { combatants, ...extra } as never, DM_USERNAME);
+    const characterWrite = () => prisma.character.updateMany.mock.calls[0][0];
+
+    beforeEach(() => {
+      prisma.encounter.update.mockResolvedValue(mockEncounter);
+      prisma.character.findFirst.mockResolvedValue({
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        deathSaves: null,
+        version: 1,
+      });
+      prisma.character.updateMany.mockResolvedValue({ count: 1 });
+    });
+
+    it('writes a changed hp to the character after the encounter, in one transaction, with an audit row', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([goblin, pc()]));
+
+      await save([goblin, pc({ hp: 30, maxHp: 50 })]);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.character.findFirst).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID },
+        select: { hitPoints: true, deathSaves: true, version: true },
+      });
+      expect(prisma.character.updateMany).toHaveBeenCalledWith({
+        where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID, version: 1 },
+        data: {
+          hitPoints: { max: 44, current: 30, temporary: 0 },
+          version: { increment: 1 },
+        },
+      });
+      expect(prisma.encounter.update.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.character.updateMany.mock.invocationCallOrder[0]
+      );
+      expect(prisma.auditLog.create).toHaveBeenCalledWith({
+        data: {
+          userId: USER_ID,
+          username: DM_USERNAME,
+          action: 'update',
+          entity: 'Character',
+          entityId: CHARACTER_ID,
+          metadata: {
+            source: ENCOUNTER_COMBAT_AUDIT_SOURCE,
+            encounterId: ENCOUNTER_ID,
+            before: { current: 44 },
+            after: { current: 30 },
+          },
+        },
+      });
+      // A stored characterId is grandfathered, so no roster query runs.
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+    });
+
+    it('does not touch any character when an unlinked combatant changes hp', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([goblin, pc()]));
+
+      await save([{ ...goblin, hp: 2 }, pc()]);
+
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('does not read or write characters on a PATCH without combatants', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc()]));
+
+      await service.update(ENCOUNTER_ID, USER_ID, { currentTurn: 1 }, DM_USERNAME);
+
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('does not write a resend of unchanged combatants, such as a turn advance', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(
+        stored([pc({ tempHp: 0, deathSaves: { successes: 0, failures: 0 } })])
+      );
+
+      await save([pc()], { currentTurn: 1 });
+
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not write a newly added linked combatant that has no stored counterpart', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([goblin]));
+      prisma.character.findMany.mockResolvedValue([{ id: CHARACTER_ID }]);
+
+      await save([goblin, pc({ hp: 10 })]);
+
+      expect(prisma.character.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [CHARACTER_ID] }, campaignId: CAMPAIGN_ID },
+        select: { id: true },
+      });
+      expect(prisma.encounter.update).toHaveBeenCalled();
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('writes only temporary HP when only tempHp changed', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc()]));
+
+      await save([pc({ tempHp: 6 })]);
+
+      expect(characterWrite().data).toEqual({
+        hitPoints: { max: 44, current: 44, temporary: 6 },
+        version: { increment: 1 },
+      });
+    });
+
+    it('reads an absent tempHp as 0 and writes it when the stored combatant had some', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc({ tempHp: 5 })]));
+      prisma.character.findFirst.mockResolvedValue({
+        hitPoints: { max: 44, current: 44, temporary: 5 },
+        deathSaves: null,
+      });
+
+      await save([pc()]);
+
+      expect(characterWrite().data).toEqual({
+        hitPoints: { max: 44, current: 44, temporary: 0 },
+        version: { increment: 1 },
+      });
+    });
+
+    it('writes only death saves when only deathSaves changed', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc({ hp: 0 })]));
+      prisma.character.findFirst.mockResolvedValue({
+        hitPoints: { max: 44, current: 0, temporary: 0 },
+        deathSaves: null,
+      });
+
+      await save([pc({ hp: 0, deathSaves: { successes: 1, failures: 0 } })]);
+
+      expect(characterWrite().data).toEqual({
+        deathSaves: { successes: 1, failures: 0 },
+        version: { increment: 1 },
+      });
+    });
+
+    it('reads absent deathSaves as 0/0 and clears the sheet when the stored combatant had some', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(
+        stored([pc({ hp: 0, deathSaves: { successes: 2, failures: 1 } })])
+      );
+      prisma.character.findFirst.mockResolvedValue({
+        hitPoints: { max: 44, current: 0, temporary: 0 },
+        deathSaves: { successes: 2, failures: 1 },
+      });
+
+      await save([pc({ hp: 0 })]);
+
+      expect(characterWrite().data).toEqual({
+        deathSaves: { successes: 0, failures: 0 },
+        version: { increment: 1 },
+      });
+    });
+
+    it('skips a characterId that appears on more than one incoming combatant', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc()]));
+
+      await save([pc({ hp: 10 }), pc({ name: 'Thorn twin', hp: 20 })]);
+
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('skips a characterId that appears on more than one stored combatant', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc(), pc({ name: 'Thorn twin' })]));
+
+      await save([pc({ hp: 10 })]);
+
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('builds hitPoints from the combatant when the character has none', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc({ maxHp: 20, hp: 20 })]));
+      prisma.character.findFirst.mockResolvedValue({ hitPoints: null, deathSaves: null });
+
+      await save([pc({ maxHp: 20, hp: 12, tempHp: 3 })]);
+
+      expect(characterWrite().data.hitPoints).toEqual({ max: 20, current: 12, temporary: 3 });
+    });
+
+    it('refuses a new combatant whose characterId is in another campaign, writing nothing', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc()]));
+      prisma.character.findMany.mockResolvedValue([]);
+
+      const err = await save([
+        pc({ hp: 10 }),
+        pc({ name: 'Intruder', characterId: OTHER_CHARACTER_ID }),
+      ]).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(BadRequestException);
+      expect(prisma.character.findMany).toHaveBeenCalledWith({
+        where: { id: { in: [OTHER_CHARACTER_ID] }, campaignId: CAMPAIGN_ID },
+        select: { id: true },
+      });
+      expect(prisma.encounter.update).not.toHaveBeenCalled();
+      expect(prisma.encounter.updateMany).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('saves an encounter whose grandfathered characterId has left the campaign, without an audit row', async () => {
+      prisma.encounter.findUnique.mockResolvedValue(stored([pc()]));
+      prisma.character.findFirst.mockResolvedValue(null);
+
+      await expect(save([pc({ hp: 10 })])).resolves.toBeDefined();
+
+      expect(prisma.character.findMany).not.toHaveBeenCalled();
+      expect(prisma.encounter.update).toHaveBeenCalled();
+      expect(prisma.character.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: CHARACTER_ID, campaignId: CAMPAIGN_ID } })
+      );
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    });
+
+    it('writes no character when the encounter version guard returns 409', async () => {
+      prisma.encounter.findUnique
+        .mockResolvedValueOnce(stored([pc()])) // auth read
+        .mockResolvedValueOnce({ version: 7 }); // current-version probe
+      prisma.encounter.updateMany.mockResolvedValue({ count: 0 });
+
+      const err = await save([pc({ hp: 10 })], { expectedVersion: 3 }).catch((e: unknown) => e);
+
+      expect(err).toBeInstanceOf(ConflictException);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.character.findFirst).not.toHaveBeenCalled();
+      expect(prisma.character.updateMany).not.toHaveBeenCalled();
+      expect(prisma.auditLog.create).not.toHaveBeenCalled();
     });
   });
 
