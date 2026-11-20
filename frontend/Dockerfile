@@ -1,10 +1,10 @@
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS shared-build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS shared-build
 WORKDIR /app/shared
 COPY shared/package.json shared/package-lock.json shared/tsconfig.json ./
 COPY shared/src ./src
 RUN npm ci && npm run build
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS deps
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY --from=shared-build /app/shared ./shared
@@ -14,7 +14,7 @@ WORKDIR /app/frontend
 # dist is already built in the shared-build stage.
 RUN npm ci --ignore-scripts
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS build
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS build
 WORKDIR /app
 COPY --from=deps /app/shared ./shared
 COPY --from=deps /app/frontend/node_modules ./frontend/node_modules
@@ -23,7 +23,7 @@ WORKDIR /app/frontend
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
-FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS production
+FROM node:24-alpine@sha256:8a32c8cf649a49915a66e81e7a609223c708d0adabf288ee3f4077d765542f85 AS production
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
