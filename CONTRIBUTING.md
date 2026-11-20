@@ -30,6 +30,8 @@ Set at minimum:
 | JWT_EXPIRES_IN | No | 24h |
 | FRONTEND_URL | No | http://localhost:3000 |
 | NEXT_PUBLIC_API_URL | No | http://localhost:3001/api |
+| LOG_LEVEL | No | `log`. One of `error`, `warn`, `log`, `debug`, `verbose` |
+| LOG_FORMAT | No | `text`. `json` prints one JSON object per line |
 
 3. Start everything with hot reload:
 

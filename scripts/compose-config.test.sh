@@ -62,8 +62,18 @@ host_ips() {
 service_env() {
   node -e '
     const config = JSON.parse(require("fs").readFileSync(0, "utf8"));
-    console.log(config.services[process.argv[1]].environment?.[process.argv[2]] ?? "");
+    console.log(config.services[process.argv[1]]?.environment?.[process.argv[2]] ?? "");
   ' "$1" "$2"
+}
+
+# Prints one field of the rendered config by dotted path, with an array joined
+# by spaces and a missing field as an empty line.
+config_field() {
+  node -e '
+    const config = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    const value = process.argv[1].split(".").reduce((node, key) => node?.[key], config);
+    console.log(Array.isArray(value) ? value.join(" ") : (value ?? ""));
+  ' "$1"
 }
 
 MINIMAL="$TMP/minimal.env"
@@ -181,6 +191,66 @@ if dev_rendered=$(render "$MINIMAL" -f "$ROOT_DIR/docker-compose.dev.yml" 2>&1);
   fi
 else
   fail "docker-compose.dev.yml publishes 5432 on postgres" "$dev_rendered"
+fi
+
+# 8. Migrations run once in their own service, and the backend starts only
+# after that service exits 0. The migrate service publishes no port, which
+# check 2 covers.
+migrate_command=$(config_field services.migrate.command <<<"$rendered")
+if [ "$migrate_command" = "./node_modules/.bin/prisma migrate deploy" ]; then
+  pass "migrate service runs the local prisma migrate deploy"
+else
+  fail "migrate service runs the local prisma migrate deploy" "got: ${migrate_command:-none}"
+fi
+
+migrate_restart=$(config_field services.migrate.restart <<<"$rendered")
+if [ "$migrate_restart" = "no" ]; then
+  pass "migrate service never restarts"
+else
+  fail "migrate service never restarts" "got: ${migrate_restart:-unset}"
+fi
+
+migrate_database_url=$(service_env migrate DATABASE_URL <<<"$rendered")
+if [ -n "$migrate_database_url" ] && [ "$migrate_database_url" = "$database_url" ]; then
+  pass "migrate DATABASE_URL equals the backend's"
+else
+  fail "migrate DATABASE_URL equals the backend's" "got: ${migrate_database_url:-empty}"
+fi
+
+backend_waits=$(config_field services.backend.depends_on.migrate.condition <<<"$rendered")
+if [ "$backend_waits" = "service_completed_successfully" ]; then
+  pass "backend waits for migrate to complete successfully"
+else
+  fail "backend waits for migrate to complete successfully" "got: ${backend_waits:-none}"
+fi
+
+# One Dockerfile builds two images. migrate builds the target that keeps the
+# Prisma CLI, and the backend builds the default last stage, which leaves it
+# out. The image names come from the project name, which this render leaves
+# for compose to derive, so an empty interpolation would show up as a name
+# starting with a dash.
+migrate_target=$(config_field services.migrate.build.target <<<"$rendered")
+if [ "$migrate_target" = "migrate" ]; then
+  pass "migrate builds the migrate target"
+else
+  fail "migrate builds the migrate target" "got: ${migrate_target:-none}"
+fi
+
+backend_target=$(config_field services.backend.build.target <<<"$rendered")
+backend_dockerfile=$(config_field services.backend.build.dockerfile <<<"$rendered")
+if [ -n "$backend_dockerfile" ] && [ "$backend_target" != "migrate" ]; then
+  pass "backend builds the default target, not migrate"
+else
+  fail "backend builds the default target, not migrate" "dockerfile: ${backend_dockerfile:-none}, target: ${backend_target:-none}"
+fi
+
+backend_image=$(config_field services.backend.image <<<"$rendered")
+migrate_image=$(config_field services.migrate.image <<<"$rendered")
+if [[ "$backend_image" =~ ^[a-z0-9].*-backend$ ]] && [[ "$migrate_image" =~ ^[a-z0-9].*-migrate$ ]]; then
+  pass "backend and migrate images carry the project name"
+else
+  fail "backend and migrate images carry the project name" \
+    "backend image: ${backend_image:-none}, migrate image: ${migrate_image:-none}"
 fi
 
 echo "compose-config.test.sh: $PASSES passed, $FAILS failed"

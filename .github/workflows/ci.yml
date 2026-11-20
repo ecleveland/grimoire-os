@@ -224,6 +224,12 @@ jobs:
       POSTGRES_PASSWORD: ci-docker-pw
       PUBLIC_URL: http://localhost:3000
       COMPOSE_PROJECT_NAME: ci-smoke
+      # The backend runtime image size in MB (10^6 bytes) that the size step
+      # prints on the GitHub runner. The step fails above this plus 10 percent.
+      # Local Docker Desktop reports a larger number for the same image, so do
+      # not set this from a local measurement. To update it, copy the printed
+      # value from a passing run of this job.
+      BACKEND_IMAGE_BASELINE_MB: 101
     steps:
       - uses: actions/checkout@v7
       # Every push to main runs the whole job. A pull request runs it only when
@@ -235,6 +241,9 @@ jobs:
       # they are the only end-to-end check of the Secure flag. The middleware,
       # the API base and the trust proxy setup are listed because every probe
       # below reaches the backend through the frontend container's /api proxy.
+      # The backend lockfile sets what the image installs, the migrate service
+      # applies backend/prisma, and logging.config shapes the request lines the
+      # log step reads.
       - name: Decide whether to run
         id: changed
         env:
@@ -245,7 +254,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|backend/package-lock\.json|backend/prisma/.*|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|logging\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -259,12 +268,47 @@ jobs:
       - name: Build images
         if: steps.changed.outputs.run == 'true'
         run: docker compose build
-      # --wait exits non-zero when any service misses its healthcheck. The
-      # timeout covers the backend's 60 s start_period plus five 10 s retries,
-      # then the frontend's 30 s start_period plus five retries.
+      # Only the runtime image is gated. The migrate image carries the Prisma
+      # CLI, and its size is printed for reference.
+      - name: Backend image stays within 10 percent of its recorded size
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          migrate_bytes=$(docker image inspect "${COMPOSE_PROJECT_NAME}-migrate" --format '{{.Size}}')
+          echo "migrate image: $migrate_bytes bytes, $((migrate_bytes / 1000000)) MB (not gated)"
+          bytes=$(docker image inspect "${COMPOSE_PROJECT_NAME}-backend" --format '{{.Size}}')
+          mb=$((bytes / 1000000))
+          limit=$((BACKEND_IMAGE_BASELINE_MB * 110 / 100))
+          echo "backend image: $bytes bytes, $mb MB (baseline $BACKEND_IMAGE_BASELINE_MB MB, limit $limit MB)"
+          if [ "$mb" -gt "$limit" ]; then
+            echo "::error::The backend image is $mb MB, over the $limit MB limit. Find what grew, or raise BACKEND_IMAGE_BASELINE_MB if the growth is intended."
+            exit 1
+          fi
+      # --wait exits non-zero when any service misses its healthcheck or the
+      # migrate service exits non-zero. The timeout covers the migrations, the
+      # backend's 60 s start_period plus five 10 s retries, then the frontend's
+      # 30 s start_period plus five retries.
       - name: Boot the stack and wait for every service to report healthy
         if: steps.changed.outputs.run == 'true'
         run: docker compose up -d --wait --wait-timeout 240
+      # The backend depends on migrate with service_completed_successfully, so
+      # migrate must have exited 0 before the backend container started. Docker
+      # trims trailing zeros from the fractional seconds, so the timestamps are
+      # compared as dates and not as strings.
+      - name: Migrations ran once and finished before the backend started
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          docker compose ps -a migrate backend
+          migrate=$(docker compose ps -a -q migrate)
+          backend=$(docker compose ps -a -q backend)
+          state=$(docker inspect "$migrate" --format '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}')
+          echo "migrate status, exit code, restarts: $state"
+          [ "$state" = "exited 0 0" ]
+          finished=$(docker inspect "$migrate" --format '{{.State.FinishedAt}}')
+          started=$(docker inspect "$backend" --format '{{.State.StartedAt}}')
+          echo "migrate finished $finished, backend started $started"
+          node -e 'const [finished, started] = process.argv.slice(1).map(Date.parse); process.exit(finished < started ? 0 : 1)' "$finished" "$started"
+          # The database is fresh, so Prisma applies every migration.
+          docker compose logs --no-color migrate | grep 'All migrations have been successfully applied.'
       - name: Probe the running stack
         if: steps.changed.outputs.run == 'true'
         run: |
@@ -304,6 +348,20 @@ jobs:
           docker compose logs backend | grep 'Auth cookies carry the Secure flag (COOKIE_SECURE unset, NODE_ENV=production)'
           result=$(bash "$RUNNER_TEMP/cookie-flags.sh" | tee /dev/stderr | tail -1)
           [ "$result" = "set-cookie=4 secure=4" ]
+      # The backend logs one line per request, and none for the healthcheck,
+      # which has polled /api/health every 10 s since the boot. The startup route
+      # table names /api/health too, so the check matches a request line, the
+      # method then the path then the status. It runs before the COOKIE_SECURE
+      # step, because recreating the backend empties its log.
+      - name: Backend logs request lines and none for the healthcheck
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          logs=$(docker compose logs --no-color backend)
+          grep -E 'POST /api/auth/login 200 [0-9]+ms' <<<"$logs"
+          if grep -E '(GET|HEAD) /api/health [0-9]{3} ' <<<"$logs"; then
+            echo "::error::The backend logged a request line for /api/health."
+            exit 1
+          fi
       # Login allows 5 requests a minute per client key (LOGIN_LIMIT in
       # auth.controller.ts, and compose passes no THROTTLE_AUTH_LIMIT). The
       # key is the client address from X-Forwarded-For, so one forwarded
