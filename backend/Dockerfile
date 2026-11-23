@@ -89,6 +89,10 @@ WORKDIR /app/backend
 COPY --from=prod-deps --chown=nestjs:nestjs /app/backend/node_modules ./node_modules
 COPY --from=build --chown=nestjs:nestjs /app/backend/dist ./dist
 COPY --from=build --chown=nestjs:nestjs /app/backend/package.json ./
+# The compose seed service runs dist/seed/run-seed.js from this image. Its
+# loader reads the extracted SRD JSON from ../../../docs/extracted-srd-json
+# relative to dist/seed, which is /app/docs/extracted-srd-json here.
+COPY --chown=nestjs:nestjs docs/extracted-srd-json /app/docs/extracted-srd-json
 USER nestjs
 EXPOSE 3001
 # This image cannot migrate the database. The migrate target does that, and

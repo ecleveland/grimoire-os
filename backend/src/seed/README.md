@@ -8,6 +8,19 @@ and the NPC-generator reference data — plus a dev-only `admin` user.
 cd backend && npm run seed   # ts-node src/seed/run-seed.ts → SeedService.seed()
 ```
 
+The backend's server image runs the compiled entry instead:
+
+```bash
+node dist/seed/run-seed.js
+```
+
+The compose `seed` service runs it after `migrate` and before the backend. The
+image keeps the extracted JSON at `/app/docs/extracted-srd-json`, which is where
+`srd-json.loader.ts` looks from `dist/seed`. The image sets
+`NODE_ENV=production`, so the seed skips the dev admin there. `SeedModule`
+loads no app-wide configuration, so the seed needs `DATABASE_URL` and no
+`JWT_SECRET`. A failed seed logs `Seed failed` with the error and exits 1.
+
 Data comes from two places: the PDF-extracted JSON under
 `docs/extracted-srd-json/` (loaded + validated by `srd-json.loader.ts`) and the
 hand-authored TypeScript under `src/seed/data/`. Classes draw on both. The class
