@@ -46,6 +46,9 @@ services:
     # The backend's server image, which carries the compiled seed and the SRD
     # JSON. It sets NODE_ENV=production, so the seed skips the dev admin user.
     image: ${COMPOSE_PROJECT_NAME}-backend
+    # The backend service builds this image. No registry has it, so a pull
+    # would fail and stop `docker compose pull` before it reaches postgres.
+    pull_policy: never
     command: ['node', 'dist/seed/run-seed.js']
     environment:
       # The same address the backend uses, built the same way.

@@ -271,6 +271,15 @@ else
   fail "seed service never restarts" "got: ${seed_restart:-unset}"
 fi
 
+# The seed has no build of its own, so without this `docker compose pull`
+# asks a registry for the locally built backend image and fails.
+seed_pull_policy=$(config_field services.seed.pull_policy <<<"$rendered")
+if [ "$seed_pull_policy" = "never" ]; then
+  pass "seed service never pulls the locally built image"
+else
+  fail "seed service never pulls the locally built image" "got: ${seed_pull_policy:-unset}"
+fi
+
 seed_database_url=$(service_env seed DATABASE_URL <<<"$rendered")
 if [ -n "$seed_database_url" ] && [ "$seed_database_url" = "$database_url" ]; then
   pass "seed DATABASE_URL equals the backend's"
