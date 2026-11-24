@@ -243,7 +243,10 @@ jobs:
       # below reaches the backend through the frontend container's /api proxy.
       # The backend lockfile sets what the image installs, the migrate service
       # applies backend/prisma, and logging.config shapes the request lines the
-      # log step reads.
+      # log step reads. The seed service runs the compiled backend/src/seed
+      # against docs/extracted-srd-json, and .dockerignore decides whether that
+      # JSON reaches the image, so a change to any of them can leave the stack
+      # with an empty SRD while the unit suites pass.
       - name: Decide whether to run
         id: changed
         env:
@@ -254,7 +257,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|backend/package-lock\.json|backend/prisma/.*|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|logging\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|backend/package-lock\.json|backend/prisma/.*|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|logging\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|backend/src/seed/.*|docs/extracted-srd-json/.*|\.dockerignore|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -284,12 +287,14 @@ jobs:
             exit 1
           fi
       # --wait exits non-zero when any service misses its healthcheck or the
-      # migrate service exits non-zero. The timeout covers the migrations, the
-      # backend's 60 s start_period plus five 10 s retries, then the frontend's
-      # 30 s start_period plus five retries.
+      # migrate or seed service exits non-zero. The timeout covers the
+      # migrations, the first seed, the backend's 60 s start_period plus five
+      # 10 s retries, then the frontend's 30 s start_period plus five retries.
+      # The first seed takes about 3 s on a laptop, and the extra 60 s leaves
+      # room for a slow runner.
       - name: Boot the stack and wait for every service to report healthy
         if: steps.changed.outputs.run == 'true'
-        run: docker compose up -d --wait --wait-timeout 240
+        run: docker compose up -d --wait --wait-timeout 300
       # The backend depends on migrate with service_completed_successfully, so
       # migrate must have exited 0 before the backend container started. Docker
       # trims trailing zeros from the fractional seconds, so the timestamps are
@@ -309,6 +314,31 @@ jobs:
           node -e 'const [finished, started] = process.argv.slice(1).map(Date.parse); process.exit(finished < started ? 0 : 1)' "$finished" "$started"
           # The database is fresh, so Prisma applies every migration.
           docker compose logs --no-color migrate | grep 'All migrations have been successfully applied.'
+      # The seed depends on migrate and the backend depends on the seed, both
+      # with service_completed_successfully, so the seed starts after migrate
+      # exits 0 and exits 0 itself before the backend starts. This step runs
+      # before the seed re-run step, so ps finds exactly one seed container.
+      - name: The seed ran once, after migrate and before the backend
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          docker compose ps -a seed
+          migrate=$(docker compose ps -a -q migrate)
+          seed=$(docker compose ps -a -q seed)
+          backend=$(docker compose ps -a -q backend)
+          state=$(docker inspect "$seed" --format '{{.State.Status}} {{.State.ExitCode}} {{.RestartCount}}')
+          echo "seed status, exit code, restarts: $state"
+          [ "$state" = "exited 0 0" ]
+          migrate_finished=$(docker inspect "$migrate" --format '{{.State.FinishedAt}}')
+          seed_started=$(docker inspect "$seed" --format '{{.State.StartedAt}}')
+          seed_finished=$(docker inspect "$seed" --format '{{.State.FinishedAt}}')
+          backend_started=$(docker inspect "$backend" --format '{{.State.StartedAt}}')
+          echo "migrate finished $migrate_finished, seed started $seed_started, seed finished $seed_finished, backend started $backend_started"
+          node -e '
+            const [migrateFinished, seedStarted, seedFinished, backendStarted] = process.argv.slice(1).map(Date.parse);
+            console.log(`first seed took ${((seedFinished - seedStarted) / 1000).toFixed(1)} s`);
+            process.exit(migrateFinished < seedStarted && seedFinished < backendStarted ? 0 : 1);
+          ' "$migrate_finished" "$seed_started" "$seed_finished" "$backend_started"
+          docker compose logs --no-color seed | grep 'SRD seed complete.'
       - name: Probe the running stack
         if: steps.changed.outputs.run == 'true'
         run: |
@@ -322,6 +352,31 @@ jobs:
           echo "$body" | grep -q '"status":"ok"'
           # / redirects to /login through the middleware; probe /login directly.
           curl -fsS -o /dev/null http://127.0.0.1:3000/login
+      # The seed filled the SRD tables. Spells come from the extracted JSON, so
+      # an image without docs/extracted-srd-json fails here, and classes come
+      # from the hand-authored data. The server image sets NODE_ENV=production,
+      # so the seed never creates the dev admin. The admin login sends its own
+      # X-Forwarded-For, so it lands in a rate-limit bucket that the rate
+      # limiter step below never uses.
+      - name: The seed loaded the SRD and created no dev admin
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          spells=$(curl -fsS http://127.0.0.1:3000/api/srd/spells | node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).total)')
+          monsters=$(curl -fsS http://127.0.0.1:3000/api/srd/monsters | node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).total)')
+          classes=$(curl -fsS http://127.0.0.1:3000/api/srd/classes | node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).length)')
+          echo "spells=$spells monsters=$monsters classes=$classes"
+          [ "$spells" -gt 0 ]
+          [ "$monsters" -gt 0 ]
+          [ "$classes" -gt 0 ]
+          admins=$(docker compose exec -T postgres psql -U grimoire -d grimoire_os -At -c "SELECT count(*) FROM users WHERE username = 'admin'")
+          echo "admin users: $admins"
+          [ "$admins" = "0" ]
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+            -H 'X-Forwarded-For: 203.0.113.20' \
+            -d '{"username":"admin","password":"admin"}' \
+            http://127.0.0.1:3000/api/auth/login)
+          echo "admin/admin login -> $code"
+          [ "$code" = "401" ]
       # The image sets NODE_ENV=production and this job leaves COOKIE_SECURE
       # unset, so every login cookie must carry Secure. cookie-flags.sh prints the
       # Set-Cookie lines a fresh login returns and how many of them are Secure.
@@ -371,7 +426,8 @@ jobs:
       # share one key and the last one would also get 429. The cookie step's
       # login sends no X-Forwarded-For, so Next fills in the address its
       # connection came from, and that login leaves both buckets here
-      # untouched. The next step recreates the backend, which empties the
+      # untouched. The admin probe in the seed step sends 203.0.113.20, a third
+      # key. The COOKIE_SECURE step recreates the backend, which empties the
       # in-memory throttler storage.
       - name: Rate limiter keys on the client address through the proxy
         if: steps.changed.outputs.run == 'true'
@@ -393,6 +449,36 @@ jobs:
           [ "${codes[0]}" = "200" ]
           [ "${codes[5]}" = "429" ]
           [ "$other" = "200" ]
+      # The seed is safe to re-run on a seeded database, the way an operator
+      # runs it by hand. run starts migrate again, which finds nothing pending,
+      # and leaves the running backend alone. --rm removes the container, so
+      # the step times the run itself. Row counts must not change.
+      - name: A second seed leaves the row counts unchanged
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          counts() {
+            docker compose exec -T postgres psql -U grimoire -d grimoire_os -At -c "
+              SELECT 'spells', count(*) FROM spells
+              UNION ALL SELECT 'monsters', count(*) FROM monsters
+              UNION ALL SELECT 'items', count(*) FROM items
+              UNION ALL SELECT 'srd_classes', count(*) FROM srd_classes
+              UNION ALL SELECT 'class_features', count(*) FROM class_features
+              UNION ALL SELECT 'subclasses', count(*) FROM subclasses
+              UNION ALL SELECT 'subclass_features', count(*) FROM subclass_features"
+          }
+          backend=$(docker compose ps -q backend)
+          backend_before=$(docker inspect "$backend" --format '{{.State.StartedAt}} {{.RestartCount}}')
+          before=$(counts)
+          start=$(date +%s%N)
+          docker compose run --rm -T seed
+          end=$(date +%s%N)
+          echo "second seed took $(( (end - start) / 1000000 )) ms, migrate re-run included"
+          after=$(counts)
+          paste -d ' ' <(echo "$before") <(echo "$after")
+          [ "$before" = "$after" ]
+          backend_after=$(docker inspect "$backend" --format '{{.State.StartedAt}} {{.RestartCount}}')
+          echo "backend started and restarts, before: $backend_before, after: $backend_after"
+          [ "$backend_before" = "$backend_after" ]
       # Recreate only the backend with the override. The image is reused, and
       # the user registered above survives in the database.
       - name: COOKIE_SECURE=false drops Secure from login cookies

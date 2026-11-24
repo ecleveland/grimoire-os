@@ -253,5 +253,76 @@ else
     "backend image: ${backend_image:-none}, migrate image: ${migrate_image:-none}"
 fi
 
+# 9. The SRD seed runs once in its own service, after migrate and before the
+# backend. It runs the backend's server image, which sets NODE_ENV=production,
+# so the seed never creates the dev admin. The migrate image has no NODE_ENV.
+# It needs only the database, so it gets no JWT_SECRET.
+seed_command=$(config_field services.seed.command <<<"$rendered")
+if [ "$seed_command" = "node dist/seed/run-seed.js" ]; then
+  pass "seed service runs the compiled seed"
+else
+  fail "seed service runs the compiled seed" "got: ${seed_command:-none}"
+fi
+
+seed_restart=$(config_field services.seed.restart <<<"$rendered")
+if [ "$seed_restart" = "no" ]; then
+  pass "seed service never restarts"
+else
+  fail "seed service never restarts" "got: ${seed_restart:-unset}"
+fi
+
+# The seed has no build of its own, so without this `docker compose pull`
+# asks a registry for the locally built backend image and fails.
+seed_pull_policy=$(config_field services.seed.pull_policy <<<"$rendered")
+if [ "$seed_pull_policy" = "never" ]; then
+  pass "seed service never pulls the locally built image"
+else
+  fail "seed service never pulls the locally built image" "got: ${seed_pull_policy:-unset}"
+fi
+
+seed_database_url=$(service_env seed DATABASE_URL <<<"$rendered")
+if [ -n "$seed_database_url" ] && [ "$seed_database_url" = "$database_url" ]; then
+  pass "seed DATABASE_URL equals the backend's"
+else
+  fail "seed DATABASE_URL equals the backend's" "got: ${seed_database_url:-empty}"
+fi
+
+seed_node_env=$(service_env seed NODE_ENV <<<"$rendered")
+if [ "$seed_node_env" = "production" ]; then
+  pass "seed NODE_ENV is production"
+else
+  fail "seed NODE_ENV is production" "got: ${seed_node_env:-empty}"
+fi
+
+seed_jwt_secret=$(service_env seed JWT_SECRET <<<"$rendered")
+if [ -n "$(config_field services.seed <<<"$rendered")" ] && [ -z "$seed_jwt_secret" ]; then
+  pass "seed gets no JWT_SECRET"
+else
+  fail "seed gets no JWT_SECRET" "service missing or JWT_SECRET set"
+fi
+
+seed_waits=$(config_field services.seed.depends_on.migrate.condition <<<"$rendered")
+if [ "$seed_waits" = "service_completed_successfully" ]; then
+  pass "seed waits for migrate to complete successfully"
+else
+  fail "seed waits for migrate to complete successfully" "got: ${seed_waits:-none}"
+fi
+
+backend_waits_seed=$(config_field services.backend.depends_on.seed.condition <<<"$rendered")
+if [ "$backend_waits_seed" = "service_completed_successfully" ]; then
+  pass "backend waits for seed to complete successfully"
+else
+  fail "backend waits for seed to complete successfully" "got: ${backend_waits_seed:-none}"
+fi
+
+seed_image=$(config_field services.seed.image <<<"$rendered")
+seed_target=$(config_field services.seed.build.target <<<"$rendered")
+if [ -n "$seed_image" ] && [ "$seed_image" = "$backend_image" ] && [ "$seed_target" != "migrate" ]; then
+  pass "seed runs the backend image, not the migrate target"
+else
+  fail "seed runs the backend image, not the migrate target" \
+    "seed image: ${seed_image:-none}, backend image: ${backend_image:-none}, seed target: ${seed_target:-none}"
+fi
+
 echo "compose-config.test.sh: $PASSES passed, $FAILS failed"
 [ "$FAILS" -eq 0 ]

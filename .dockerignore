@@ -18,8 +18,10 @@ _working
 .vscode
 .idea
 
-# Docs/random
+# Docs/random. The backend image keeps the extracted SRD JSON, which the seed
+# loads.
 docs
+!docs/extracted-srd-json
 resources
 *.md
 !README.md

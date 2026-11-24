@@ -38,6 +38,30 @@ services:
         condition: service_healthy
     restart: 'no'
 
+  # Loads the SRD reference data once and exits. It starts after migrate exits 0,
+  # and the backend starts only after it exits 0, so a failed seed stops the
+  # stack with the error in `docker compose logs seed`, and nothing restarts in
+  # a loop. The seed updates SRD rows in place, so it runs on every up.
+  seed:
+    # The backend's server image, which carries the compiled seed and the SRD
+    # JSON. It sets NODE_ENV=production, so the seed skips the dev admin user.
+    image: ${COMPOSE_PROJECT_NAME}-backend
+    # The backend service builds this image. No registry has it, so a pull
+    # would fail and stop `docker compose pull` before it reaches postgres.
+    pull_policy: never
+    command: ['node', 'dist/seed/run-seed.js']
+    environment:
+      # The same address the backend uses, built the same way.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-grimoire}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-grimoire_os}
+      # The image sets this too. Repeated here so an image built without it
+      # still never creates the admin/admin user. No JWT_SECRET, because the
+      # seed reads only the database settings.
+      - NODE_ENV=production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: 'no'
+
   backend:
     build:
       context: .
@@ -73,8 +97,11 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      seed:
+        condition: service_completed_successfully
     # The alpine image has node but no curl, so the probe uses node's fetch.
-    # start_period covers the server's boot. Migrations finish before it starts.
+    # start_period covers the server's boot. Migrations and the seed finish
+    # before it starts.
     healthcheck:
       test:
         [
