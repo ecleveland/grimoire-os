@@ -35,6 +35,8 @@ JWT_SECRET=your-secret POSTGRES_PASSWORD=your-db-password docker compose up --bu
 
 These addresses work on the host itself. Port 3000 listens on 127.0.0.1 by default, so reaching the app from another machine needs a reverse proxy on the same host or `FRONTEND_BIND=0.0.0.0`.
 
+[docs/self-hosting.md](docs/self-hosting.md) walks through a server install behind HTTPS, the first admin account, backups, restores and upgrades.
+
 The stack publishes only port 3000. The browser calls `/api` on that port, and the frontend container proxies those calls to the backend on the compose network. Postgres and the backend publish no host ports. Put the three required values in `.env` to run the stack on another host, and set `PUBLIC_URL` to the address users open:
 
 ```bash

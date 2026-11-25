@@ -246,7 +246,9 @@ jobs:
       # log step reads. The seed service runs the compiled backend/src/seed
       # against docs/extracted-srd-json, and .dockerignore decides whether that
       # JSON reaches the image, so a change to any of them can leave the stack
-      # with an empty SRD while the unit suites pass.
+      # with an empty SRD while the unit suites pass. The backup and restore
+      # scripts and their test are listed because the last step runs the
+      # scripts against the stack and the validate step runs the test.
       - name: Decide whether to run
         id: changed
         env:
@@ -257,7 +259,7 @@ jobs:
             exit 0
           fi
           files=$(gh pr diff "${{ github.event.pull_request.number }}" --name-only)
-          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|backend/package-lock\.json|backend/prisma/.*|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|logging\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|backend/src/seed/.*|docs/extracted-srd-json/.*|\.dockerignore|\.github/workflows/ci\.yml)$'; then
+          if echo "$files" | grep -qE '^(backend/Dockerfile|frontend/Dockerfile|docker-compose\.yml|docker-compose\.dev\.yml|scripts/compose-config\.test\.sh|scripts/(backup|restore)\.sh|scripts/backup-restore\.test\.sh|(backend|frontend)/tsconfig[^/]*\.json|(backend|frontend)/package\.json|backend/package-lock\.json|backend/prisma/.*|frontend/next\.config\.ts|frontend/src/middleware\.ts|frontend/src/lib/api-base\.ts|backend/prisma\.config\.ts|backend/src/config/(cookie\.config|trust-proxy\.config|logging\.config|configuration)\.ts|backend/src/auth/(auth|csrf)-cookie\.config\.ts|backend/src/auth/auth\.controller\.ts|backend/src/auth/dto/[^/]+\.ts|backend/src/bootstrap-config\.ts|backend/src/main\.ts|backend/src/seed/.*|docs/extracted-srd-json/.*|\.dockerignore|\.github/workflows/ci\.yml)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -268,6 +270,7 @@ jobs:
         run: |
           docker compose config -q
           bash scripts/compose-config.test.sh
+          bash scripts/backup-restore.test.sh
       - name: Build images
         if: steps.changed.outputs.run == 'true'
         run: docker compose build
@@ -427,8 +430,9 @@ jobs:
       # login sends no X-Forwarded-For, so Next fills in the address its
       # connection came from, and that login leaves both buckets here
       # untouched. The admin probe in the seed step sends 203.0.113.20, a third
-      # key. The COOKIE_SECURE step recreates the backend, which empties the
-      # in-memory throttler storage.
+      # key, and the backup step sends 203.0.113.30, a fourth. The COOKIE_SECURE
+      # step recreates the backend, which empties the in-memory throttler
+      # storage.
       - name: Rate limiter keys on the client address through the proxy
         if: steps.changed.outputs.run == 'true'
         run: |
@@ -488,6 +492,47 @@ jobs:
           docker compose logs backend | grep 'Auth cookies are sent without the Secure flag (COOKIE_SECURE=false)'
           result=$(bash "$RUNNER_TEMP/cookie-flags.sh" | tee /dev/stderr | tail -1)
           [ "$result" = "set-cookie=4 secure=0" ]
+      # A backup survives a wiped volume. The step registers a user, creates a
+      # campaign, dumps the database with backup.sh, deletes the volume with
+      # down -v, restores the dump with restore.sh, then signs in again and
+      # reads the campaign back. Each call sends the cookies it needs by hand,
+      # from the Set-Cookie lines of the last register or login, so the Secure
+      # flag that the restored backend sets again, without COOKIE_SECURE, does
+      # not stop curl over plain HTTP. The step runs last because the restore
+      # recreates every container.
+      - name: A backup restores into a wiped volume
+        if: steps.changed.outputs.run == 'true'
+        run: |
+          api=http://127.0.0.1:3000/api
+          creds='{"username":"ci-backup","password":"CiBackup-Pass1!"}'
+          campaign='CI backup round trip'
+          # Registers or logs in, and saves the response headers.
+          auth() {
+            curl -fsS -D - -o /dev/null -X POST -H 'Content-Type: application/json' \
+              -H 'X-Forwarded-For: 203.0.113.30' -d "$creds" "$api/auth/$1" | tr -d '\r' > "$RUNNER_TEMP/auth-headers"
+          }
+          # Prints the value of one cookie from the saved headers.
+          cookie() {
+            grep -i "^set-cookie: $1=" "$RUNNER_TEMP/auth-headers" | sed 's/^[^=]*=//; s/;.*//'
+          }
+          auth register
+          csrf=$(cookie csrf_token)
+          curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' \
+            -H "Cookie: access_token=$(cookie access_token); csrf_token=$csrf" -H "X-CSRF-Token: $csrf" \
+            -d "{\"name\":\"$campaign\"}" "$api/campaigns"
+          bash scripts/backup.sh "$RUNNER_TEMP/backups"
+          dump=$(ls "$RUNNER_TEMP"/backups/grimoire-os-*.dump)
+          docker compose down -v
+          if docker volume ls -q | grep -qx "${COMPOSE_PROJECT_NAME}_postgres_data"; then
+            echo "::error::down -v left the postgres_data volume in place."
+            exit 1
+          fi
+          bash scripts/restore.sh "$dump" --yes
+          auth login
+          names=$(curl -fsS -H "Cookie: access_token=$(cookie access_token)" "$api/campaigns" |
+            node -e 'for (const c of JSON.parse(require("fs").readFileSync(0, "utf8")).data) console.log(c.name)')
+          echo "campaigns after the restore: $names"
+          grep -qxF "$campaign" <<<"$names"
       - name: Show service logs
         if: failure() && steps.changed.outputs.run == 'true'
         run: |
