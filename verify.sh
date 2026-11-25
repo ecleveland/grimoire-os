@@ -21,6 +21,9 @@ cd "$ROOT_DIR" && bash e2e/stack-env.test.sh
 echo "==> Testing compose interpolation (scripts/compose-config.test.sh)"
 cd "$ROOT_DIR" && bash scripts/compose-config.test.sh
 
+echo "==> Testing backup and restore scripts (scripts/backup-restore.test.sh)"
+cd "$ROOT_DIR" && bash scripts/backup-restore.test.sh
+
 echo "==> Building @grimoire-os/shared"
 cd "$ROOT_DIR/shared" && npm run build
 

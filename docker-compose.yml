@@ -92,6 +92,12 @@ services:
       # Unset means log level and text lines. See .env.example.
       - LOG_LEVEL=${LOG_LEVEL:-}
       - LOG_FORMAT=${LOG_FORMAT:-}
+      # The in-memory response cache. These defaults match the backend's own.
+      # Never use the empty ${VAR:-} form here, because the backend parses
+      # these with parseInt and falls back only when they are unset, so an
+      # empty value would parse to NaN.
+      - CACHE_TTL_MS=${CACHE_TTL_MS:-86400000}
+      - CACHE_LRU_SIZE=${CACHE_LRU_SIZE:-1000}
     depends_on:
       postgres:
         condition: service_healthy

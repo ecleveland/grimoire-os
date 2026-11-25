@@ -324,5 +324,34 @@ else
     "seed image: ${seed_image:-none}, backend image: ${backend_image:-none}, seed target: ${seed_target:-none}"
 fi
 
+# 10. The cache settings reach the backend with numeric defaults. The backend
+# parses them with parseInt and falls back only when a variable is unset, so
+# an empty value would parse to NaN.
+cache_ttl=$(service_env backend CACHE_TTL_MS <<<"$rendered")
+cache_lru=$(service_env backend CACHE_LRU_SIZE <<<"$rendered")
+if [ "$cache_ttl" = "86400000" ] && [ "$cache_lru" = "1000" ]; then
+  pass "backend cache settings default to 86400000 ms and 1000 entries"
+else
+  fail "backend cache settings default to 86400000 ms and 1000 entries" \
+    "CACHE_TTL_MS: ${cache_ttl:-empty}, CACHE_LRU_SIZE: ${cache_lru:-empty}"
+fi
+
+CACHE_SET="$TMP/cache-set.env"
+cat "$MINIMAL" > "$CACHE_SET"
+echo 'CACHE_TTL_MS=3600000' >> "$CACHE_SET"
+echo 'CACHE_LRU_SIZE=250' >> "$CACHE_SET"
+if cache_rendered=$(render "$CACHE_SET" 2>&1); then
+  set_ttl=$(service_env backend CACHE_TTL_MS <<<"$cache_rendered")
+  set_lru=$(service_env backend CACHE_LRU_SIZE <<<"$cache_rendered")
+  if [ "$set_ttl" = "3600000" ] && [ "$set_lru" = "250" ]; then
+    pass "cache settings in the env file reach the backend"
+  else
+    fail "cache settings in the env file reach the backend" \
+      "CACHE_TTL_MS: ${set_ttl:-empty}, CACHE_LRU_SIZE: ${set_lru:-empty}"
+  fi
+else
+  fail "cache settings in the env file reach the backend" "$cache_rendered"
+fi
+
 echo "compose-config.test.sh: $PASSES passed, $FAILS failed"
 [ "$FAILS" -eq 0 ]
