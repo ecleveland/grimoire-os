@@ -95,6 +95,12 @@ for name in "$user" "$db"; do
   fi
 done
 scratch="${db}_restore"
+# psql_admin connects to the postgres database, and Postgres refuses to drop
+# the database a session is using.
+if [ "$db" = "postgres" ]; then
+  echo "restore.sh: cannot restore into the maintenance database postgres, because the swap connects to it. Nothing was changed." >&2
+  exit 1
+fi
 
 if ! docker compose exec -T postgres pg_restore --list < "$dump" > /dev/null; then
   echo "restore.sh: pg_restore cannot read $dump. Nothing was changed." >&2
@@ -133,7 +139,10 @@ fi
 
 echo "Replacing $db with $scratch"
 # FORCE closes any session still connected to the live database.
-psql_admin "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)"
+if ! psql_admin "DROP DATABASE IF EXISTS \"$db\" WITH (FORCE)"; then
+  psql_admin "DROP DATABASE IF EXISTS \"$scratch\"" || true
+  give_up "Dropping the live database $db failed."
+fi
 if ! psql_admin "ALTER DATABASE \"$scratch\" RENAME TO \"$db\""; then
   echo "restore.sh: $db was dropped but the rename failed. The restored data is in $scratch. Rename it by hand, then run docker compose up -d." >&2
   exit 1

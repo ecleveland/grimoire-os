@@ -46,8 +46,11 @@ case "$args" in
     ;;
   *"printenv POSTGRES_USER POSTGRES_DB"*)
     echo grimoire
-    echo grimoire_os
+    echo "${FAKE_DB:-grimoire_os}"
     exit 0
+    ;;
+  *"DROP DATABASE IF EXISTS \"${FAKE_DB:-grimoire_os}\" WITH (FORCE)"*)
+    exit "${FAKE_LIVE_DROP_EXIT:-0}"
     ;;
   *pg_dump*)
     printf '%s' "${FAKE_DUMP_OUTPUT-PGDMP fake dump}"
@@ -86,6 +89,7 @@ RESTORE="$ROOT_DIR/scripts/restore.sh"
 reset_fake() {
   : > "$LOG"
   unset FAKE_PG_RUNNING FAKE_DUMP_OUTPUT FAKE_DUMP_EXIT FAKE_LIST_EXIT FAKE_RESTORE_EXIT
+  unset FAKE_DB FAKE_LIVE_DROP_EXIT
 }
 
 # Runs a script with stdin from /dev/null, so no case has a terminal. Sets
@@ -303,6 +307,42 @@ if [ "$rc" -eq 0 ] && [ -n "$start_pg" ] && [ -n "$first_exec" ] && [ "$start_pg
   pass "restore: a stopped postgres is started before the first exec"
 else
   fail "restore: a stopped postgres is started before the first exec" "exit $rc, calls: $(cat "$LOG")"
+fi
+
+# 14. The maintenance database cannot be the target, because the script
+# connects to it to drop and rename the live one. The refusal comes before
+# anything stops or changes.
+reset_fake
+export FAKE_DB=postgres
+run "$RESTORE" "$DUMP" --yes
+calls=$(cat "$LOG")
+if [ "$rc" -ne 0 ] &&
+  grep -qF "restore.sh: cannot restore into the maintenance database postgres" <<<"$out" &&
+  ! grep -qF 'stop backend' <<<"$calls" && ! grep -qF 'CREATE DATABASE' <<<"$calls" &&
+  ! grep -qF 'DROP DATABASE' <<<"$calls" && ! grep -qF 'pg_restore' <<<"$calls"; then
+  pass "restore: POSTGRES_DB=postgres refuses before anything changes"
+else
+  fail "restore: POSTGRES_DB=postgres refuses before anything changes" "exit $rc, calls: $calls, output: $out"
+fi
+
+# 15. A failing drop of the live database leaves it unchanged, so the script
+# drops the scratch database, never renames, and starts the stack again.
+reset_fake
+export FAKE_LIVE_DROP_EXIT=1
+run "$RESTORE" "$DUMP" --yes
+calls=$(cat "$LOG")
+live_drop=$(call_line "$LIVE_DROP")
+scratch_cleanup=$(last_call_line 'DROP DATABASE IF EXISTS "grimoire_os_restore"')
+up_after=$(last_call_line 'compose up -d --wait')
+if [ "$rc" -ne 0 ] &&
+  grep -qF "restore.sh: Dropping the live database grimoire_os failed." <<<"$out" &&
+  grep -qF 'not changed' <<<"$out" &&
+  ! grep -qF 'RENAME TO' <<<"$calls" &&
+  [ -n "$live_drop" ] && [ -n "$scratch_cleanup" ] && [ -n "$up_after" ] &&
+  [ "$scratch_cleanup" -gt "$live_drop" ] && [ "$up_after" -gt "$scratch_cleanup" ]; then
+  pass "restore: a failing live drop drops the scratch database, never renames and starts the stack again"
+else
+  fail "restore: a failing live drop drops the scratch database, never renames and starts the stack again" "exit $rc, calls: $calls, output: $out"
 fi
 
 echo "backup-restore.test.sh: $PASSES passed, $FAILS failed"

@@ -137,7 +137,7 @@ It then:
 4. Only when that restore succeeds, drops the live database, closing any session still connected to it, and renames the scratch database into its place.
 5. Runs `docker compose up -d --wait`, which applies any migration newer than the dump, runs the seed and starts the backend. It waits up to 300 seconds for every service to report healthy, the same limit CI uses for a first boot.
 
-A truncated or corrupt dump fails at step 3. The script then drops the scratch database, starts the stack again and says the live data was not changed. If the rename in step 4 fails, the restored data is in `grimoire_os_restore`, and the script says so.
+A truncated or corrupt dump fails at step 3. The script then drops the scratch database, starts the stack again and says the live data was not changed. A failed drop of the live database in step 4 is handled the same way. If the rename in step 4 fails, the restored data is in `grimoire_os_restore`, and the script says so.
 
 Restore works on an empty volume too. After `docker compose down -v`, `scripts/restore.sh` creates the volume, restores into it and starts the stack.
 
